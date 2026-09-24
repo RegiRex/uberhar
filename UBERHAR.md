@@ -8,7 +8,9 @@ Baseline: Azahar 2126.1.2, commit
 
 Experimental dynamic TEV fallback implemented. Local tests passed 49,152 exact
 RGBA8 comparisons against specialized GLSL across 192 six-stage programs, using
-Mesa llvmpipe with synthetic texture colors. Android packaging verification is
+Mesa llvmpipe with synthetic byte and fractional texture colors. All 64 tested
+Vulkan fragment modules passed GLSL compilation and SPIR-V validation in CI.
+Android packaging verification is
 in progress. No on-device performance or correctness result exists yet.
 The baseline workflow builds unmodified upstream code. Its APK retains Azahar's
 application ID and is not intended to replace your installed Azahar. Do not

@@ -1,3 +1,16 @@
+# Uberhar development branch
+
+Uberhar is an unofficial experimental Azahar fork for Android ARM64, based on
+Azahar 2126.1.2. See [UBERHAR.md](UBERHAR.md) for current status, the limited
+Vulkan TEV fallback, known limitations, and testing instructions. A full
+ubershader renderer and screen-synchronization changes are not implemented yet.
+
+The upstream project information and download links below describe Azahar.
+Uberhar builds are produced by this repository's **Uberhar ARM64 experimental
+alpha** workflow.
+
+---
+
 ![Azahar Emulator](https://azahar-emu.org/resources/images/logo/azahar-name-and-logo.svg)
 
 ![Current Release](https://img.shields.io/github/v/release/azahar-emu/azahar?label=Current%20Release)

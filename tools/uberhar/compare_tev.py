@@ -60,6 +60,12 @@ void main() {
 samples = 256
 rng = random.Random(0x55424552)
 values = [rng.randrange(256) / 255.0 for _ in range(samples * 14 * 4)]
+# Filtered texture samples are not restricted to byte values. Exercise those
+# too, while retaining byte-quantized primary/lighting/constant colors.
+for sample in range(samples // 2, samples):
+    for texture in range(3, 7):
+        start = sample * 56 + texture * 4
+        values[start:start + 4] = [rng.random() for _ in range(4)]
 for sample, value in enumerate([0.0, 1.0, 127 / 255.0, 128 / 255.0]):
     values[sample * 56:(sample + 1) * 56] = [value] * 56
 inputs = ctx.buffer(struct.pack(f"<{len(values)}f", *values))
