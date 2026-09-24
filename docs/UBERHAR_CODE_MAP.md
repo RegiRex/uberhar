@@ -20,10 +20,10 @@ rg -n AstraEH src CMakeModules tools/uberhar .github/workflows README.md UBERHAR
 
 | Files | AstraEH work |
 | --- | --- |
-| `src/video_core/shader/generator/glsl_fs_shader_gen.{h,cpp}` | Optional dynamic six-stage TEV generation, support gate, register decoding, shared operation formulas, rounding/scales and delayed buffer writes. Other fragment behavior remains specialized. |
+| `src/video_core/shader/generator/glsl_fs_shader_gen.{h,cpp}` | Optional dynamic six-stage TEV generation, support gate, register decoding, shared operation formulas, rounding/scales and delayed buffer writes. 0.0.6 replaces six expanded copies with a loop carrying DontUnroll, lazily reuses per-fragment TEV texture samples and skips unused operands. Other fragment behavior remains specialized. |
 | `src/video_core/renderer_vulkan/vk_pipeline_cache.{h,cpp}` | Mode capture, push-constant layout, bounded family/pipeline caches, dedicated serial fallback compilation with one-pipeline warm-up admission, first-ready selection on the scheduler, per-draw register snapshots, title-switch cleanup and periodic wait/build diagnostics. |
 | `src/common/async_handle.h` | Shared completion signal, acquire/release publication and event-driven wait for either compatible pipeline; moved the existing single-handle primitive here. |
-| `src/video_core/renderer_vulkan/vk_graphics_pipeline.{h,cpp}` | Background-only hybrid creation, optional reduced-optimization fallback builds, queue/dependency/driver timing, build phase and aggregate statistics. |
+| `src/video_core/renderer_vulkan/vk_graphics_pipeline.{h,cpp}` | Background-only hybrid creation, queue/dependency/driver timing, build phase and aggregate statistics. 0.0.6 restores normal driver optimization and records per-pipeline fallback use/driver duration for utility reports in PipelineCache. |
 | `src/video_core/renderer_vulkan/vk_shader_disk_cache.cpp` | Connect both new and disk-loaded specializations to the same completion signal and diagnostics. |
 
 ## Settings and Android application
@@ -56,8 +56,9 @@ All files in `tools/uberhar/` are new AstraEH work.
 | --- | --- |
 | `tools/uberhar/test_async_completion.cpp` | Production completion tests covering both winners, already-completed handles, delayed completion, unrelated notifications, 1,000 publication races and standalone waits. |
 | `tools/uberhar/build_probe.sh` | Compile the production generator as a small host executable. |
-| `tools/uberhar/shader_probe.cpp` | Reproducible TEV cases, directed edge cases, AddSigned exclusion and 64 full fragment modules. |
-| `tools/uberhar/compare_tev.py` | Compare generated specialized/interpreted combiner math on Mesa; synthetic sampling inputs do not test real texture derivatives or device drivers. |
+| `tools/uberhar/shader_probe.cpp` | 224 reproducible TEV cases, directed edge/texture-reuse/unused-operand cases, AddSigned exclusion and 64 full fragment modules. |
+| `tools/uberhar/compare_tev.py` | Compare generated specialized/interpreted combiner math on Mesa and independently verify texture fetch counts; synthetic sampling inputs do not test real texture derivatives or device drivers. |
+| `tools/uberhar/validate_shaders.py` | Compile and validate all 64 full modules with frontend optimization off/on; verify the TEV loop's DontUnroll hint reaches SPIR-V. |
 | `tools/uberhar/check_android_keys.py` | Catch missing default-INI keys that would abort Android startup. |
 | `tools/uberhar/validate_apk.py` | Find AGP's actual APK, reject ambiguity, verify ARM64 ELF headers, native dependencies and ZIP integrity, and emit a versioned APK and checksum. |
 | `tools/uberhar/validate_manifest.py` | Reject known install blockers and identity/authority/permission conflicts in the final decoded manifest. |
@@ -77,7 +78,9 @@ development branch. Their contents are upstream code, not AstraEH implementation
 
 `README.md` has an AstraEH branch overview above the upstream README.
 `UBERHAR.md` describes scope, limits and device testing. `docs/releases/` holds
-versioned pre-release notes. `docs/UBERHAR_LOG_ANALYSIS_2026-09-24.md` records
+versioned pre-release notes. `docs/UBERHAR_LOG_ANALYSIS_0.0.5.md` records the complete
+0.0.5 cold/warm analysis, preprocessing limits and the compact-shader response.
+`docs/UBERHAR_LOG_ANALYSIS_2026-09-24.md` records
 the device evidence and new counter definitions without uploading raw logs. This map and
 `docs/UBERHAR_DISPLAY_SYNC.md` are AstraEH documents. The display document is a
 follow-up investigation plan; alpha 1 contains no screen synchronization or

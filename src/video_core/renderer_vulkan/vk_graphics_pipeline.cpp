@@ -313,11 +313,9 @@ bool GraphicsPipeline::Build(bool fail_on_compile_required) {
                                                      info.state.attachments.depth, false),
     };
 
-    // AstraEH: Temporary TEV fallbacks favor creation latency. Specialized pipelines
-    // retain normal optimization and replace the fallback as soon as they are ready.
-    if (build_options.fast_compile) {
-        pipeline_info.flags |= vk::PipelineCreateFlagBits::eDisableOptimization;
-    }
+    // AstraEH: Restore normal driver optimization for the compact fallback. The
+    // 0.0.5 reduced-optimization experiment still spent seconds in driver builds
+    // and disabled GPU optimizations. Loop structure now controls shader size.
     if (fail_on_compile_required) {
         pipeline_info.flags |= vk::PipelineCreateFlagBits::eFailOnPipelineCompileRequiredEXT;
     }
@@ -351,12 +349,13 @@ bool GraphicsPipeline::Build(bool fail_on_compile_required) {
             LOG_INFO(Render_Vulkan,
                      "Uberhar pipeline build: path={} key={:016X} queue_ms={:.3f} "
                      "vs_wait_ms={:.3f} fs_wait_ms={:.3f} gs_wait_ms={:.3f} driver_ms={:.3f}",
-                     build_options.fast_compile ? "fallback_fast" : "specialized", Key(),
+                     build_options.is_fallback ? "fallback_compact" : "specialized", Key(),
                      queue_ns / 1000000.0, shader_wait_ns[0] / 1000000.0,
                      shader_wait_ns[1] / 1000000.0, shader_wait_ns[2] / 1000000.0,
                      driver_ns / 1000000.0);
         }
     }
+    driver_build_ns.store(driver_ns, std::memory_order::relaxed);
     build_phase.store(3, std::memory_order::relaxed);
     MarkDone();
     return true;

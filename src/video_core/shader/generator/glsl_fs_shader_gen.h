@@ -71,7 +71,7 @@ private:
 
     /// AstraEH: Vulkan experiment: interpret TEV registers supplied in push constants.
     void DefineDynamicTev();
-    void WriteDynamicTevStage(u32 index);
+    void WriteDynamicTevLoop();
 
     void AppendProcTexShiftOffset(std::string_view v, Pica::TexturingRegs::ProcTexShift mode,
                                   Pica::TexturingRegs::ProcTexClamp clamp_mode);

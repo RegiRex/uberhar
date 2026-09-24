@@ -186,9 +186,14 @@ vec4 secondary_fragment_color = vec4(0.0);
            "float alpha_results_2 = 0.0;\n"
            "float alpha_results_3 = 0.0;\n";
 
-    // Write shader source to emulate PICA TEV stages
-    for (u32 index = 0; index < config.texture.tev_stages.size(); index++) {
-        WriteTevStage(index);
+    // AstraEH: Share one interpreter body across all six stages to reduce the
+    // compiler input. Thor logs show driver creation dominates fallback latency.
+    if (dynamic_tev) {
+        WriteDynamicTevLoop();
+    } else {
+        for (u32 index = 0; index < config.texture.tev_stages.size(); index++) {
+            WriteTevStage(index);
+        }
     }
 
     // Append the alpha test condition
@@ -464,11 +469,6 @@ void FragmentModule::WriteAlphaTestCondition(FramebufferRegs::CompareFunc func) 
 }
 
 void FragmentModule::WriteTevStage(u32 index) {
-    // AstraEH: Both paths share surrounding lighting, fog and framebuffer code.
-    if (dynamic_tev) {
-        WriteDynamicTevStage(index);
-        return;
-    }
     const TexturingRegs::TevStageConfig stage = config.texture.tev_stages[index];
     if (!IsPassThroughTevStage(stage)) {
         out += "color_results_1 = ";
@@ -524,16 +524,30 @@ layout(push_constant) uniform UberTev {
     uint buffer_mask;
 } uber_tev;
 
+// AstraEH: These are private to one fragment invocation. TEV stages share the
+// same texture coordinates and samplers, so fetch each referenced unit once.
+// Lazy reads avoid sampling unused units; control depends only on draw state.
+uint uber_sampled = 0u;
+vec4 uber_texel0, uber_texel1, uber_texel2, uber_texel3;
+
 vec4 uber_source(uint source, vec4 primary, vec4 lit, vec4 secondary,
                  vec4 buffer_value, vec4 previous, vec4 constant_value) {
     switch (source) {
     case 0u: return primary;
     case 1u: return lit;
     case 2u: return secondary;
-    case 3u: return sampleTexUnit0();
-    case 4u: return sampleTexUnit1();
-    case 5u: return sampleTexUnit2();
-    case 6u: return sampleTexUnit3();
+    case 3u:
+        if ((uber_sampled & 1u) == 0u) { uber_texel0 = sampleTexUnit0(); uber_sampled |= 1u; }
+        return uber_texel0;
+    case 4u:
+        if ((uber_sampled & 2u) == 0u) { uber_texel1 = sampleTexUnit1(); uber_sampled |= 2u; }
+        return uber_texel1;
+    case 5u:
+        if ((uber_sampled & 4u) == 0u) { uber_texel2 = sampleTexUnit2(); uber_sampled |= 4u; }
+        return uber_texel2;
+    case 6u:
+        if ((uber_sampled & 8u) == 0u) { uber_texel3 = sampleTexUnit3(); uber_sampled |= 8u; }
+        return uber_texel3;
     case 13u: return buffer_value;
     case 14u: return constant_value;
     case 15u: return previous;
@@ -574,10 +588,12 @@ float uber_alpha_modifier(vec4 value, uint modifier) {
 }
 
 // AstraEH: Decode packed TEV instructions while preserving upstream rounding/scale order.
-void FragmentModule::WriteDynamicTevStage(u32 index) {
+// DontUnroll is a core SPIR-V loop hint, not a new Vulkan device extension requirement.
+void FragmentModule::WriteDynamicTevLoop() {
     using Operation = TexturingRegs::TevStageConfig::Operation;
-    out += fmt::format("{{\nuvec4 instruction = uber_tev.stages[{}];\n", index);
     out += R"(
+[[dont_unroll]] for (uint tev_index = 0u; tev_index < 6u; ++tev_index) {
+uvec4 instruction = uber_tev.stages[tev_index];
 uint color_op = instruction.z & 15u;
 uint alpha_op = (instruction.z >> 16u) & 15u;
 uint color_scale = instruction.w & 3u;
@@ -592,16 +608,24 @@ bool passthrough = color_op == 0u && alpha_op == 0u &&
 if (!passthrough) {
 )";
     for (u32 input = 0; input < 3; ++input) {
+        // AstraEH: Replace consumes one operand; only Lerp, MultiplyThenAdd and
+        // AddThenMultiply consume the third. Do not sample discarded operands.
+        if (input == 1) {
+            out += "if (color_op != 0u) {\n";
+        } else if (input == 2) {
+            out += "if (color_op == 4u || color_op == 8u || color_op == 9u) {\n";
+        }
         out += fmt::format("{{ uint source = (instruction.x >> {}u) & 15u;\n", input * 4);
         // AstraEH: Stage 0 redirects Previous to source 3 exactly once, not recursively.
-        if (index == 0) {
-            out += "if (source == 15u) source = (instruction.x >> 8u) & 15u;\n";
-        }
+        out += "if (tev_index == 0u && source == 15u) source = (instruction.x >> 8u) & 15u;\n";
         out += fmt::format(
             "color_results_{} = uber_color_modifier(uber_source(source, rounded_primary_color, "
             "primary_fragment_color, secondary_fragment_color, combiner_buffer, combiner_output, "
-            "const_color[{}]), (instruction.y >> {}u) & 15u); }}\n",
-            input + 1, index, input * 4);
+            "const_color[tev_index]), (instruction.y >> {}u) & 15u); }}\n",
+            input + 1, input * 4);
+        if (input != 0) {
+            out += "}\n";
+        }
     }
     // AstraEH: Reuse upstream operation emitters so formulas are not maintained twice.
     out += "vec3 color_output;\nswitch (color_op) {\n";
@@ -615,15 +639,21 @@ if (!passthrough) {
            "float alpha_output;\n"
            "if (color_op == 7u) { alpha_output = color_output.r; } else {\n";
     for (u32 input = 0; input < 3; ++input) {
-        out += fmt::format("{{ uint source = (instruction.x >> {}u) & 15u;\n", 16 + input * 4);
-        if (index == 0) {
-            out += "if (source == 15u) source = (instruction.x >> 24u) & 15u;\n";
+        if (input == 1) {
+            out += "if (alpha_op != 0u) {\n";
+        } else if (input == 2) {
+            out += "if (alpha_op == 4u || alpha_op == 8u || alpha_op == 9u) {\n";
         }
+        out += fmt::format("{{ uint source = (instruction.x >> {}u) & 15u;\n", 16 + input * 4);
+        out += "if (tev_index == 0u && source == 15u) source = (instruction.x >> 24u) & 15u;\n";
         out += fmt::format(
             "alpha_results_{} = uber_alpha_modifier(uber_source(source, rounded_primary_color, "
             "primary_fragment_color, secondary_fragment_color, combiner_buffer, combiner_output, "
-            "const_color[{}]), (instruction.y >> {}u) & 7u); }}\n",
-            input + 1, index, 12 + input * 4);
+            "const_color[tev_index]), (instruction.y >> {}u) & 7u); }}\n",
+            input + 1, 12 + input * 4);
+        if (input != 0) {
+            out += "}\n";
+        }
     }
     out += "switch (alpha_op) {\n";
     for (u32 operation : {0U, 1U, 2U, 3U, 4U, 5U, 8U, 9U}) {
@@ -642,14 +672,15 @@ combiner_output = vec4(clamp(color_output * color_multiplier, vec3(0.0), vec3(1.
 combiner_buffer = next_combiner_buffer;
 )";
     // AstraEH: Buffer writes take effect one stage later; only stages 0-3 have write masks.
-    if (index < 4) {
-        out += fmt::format("if ((uber_tev.buffer_mask & {}u) != 0u) "
-                           "next_combiner_buffer.rgb = combiner_output.rgb;\n"
-                           "if ((uber_tev.buffer_mask & {}u) != 0u) "
-                           "next_combiner_buffer.a = combiner_output.a;\n",
-                           1U << index, 1U << (index + 4));
-    }
-    out += "}\n";
+    out += R"(
+if (tev_index < 4u) {
+    if ((uber_tev.buffer_mask & (1u << tev_index)) != 0u)
+        next_combiner_buffer.rgb = combiner_output.rgb;
+    if ((uber_tev.buffer_mask & (1u << (tev_index + 4u))) != 0u)
+        next_combiner_buffer.a = combiner_output.a;
+}
+}
+)";
 }
 
 void FragmentModule::WriteLighting() {
@@ -1379,6 +1410,11 @@ float ProcTexNoiseCoef(vec2 x) {
 }
 
 void FragmentModule::DefineExtensions() {
+    // AstraEH: glslang lowers this language hint to core SPIR-V DontUnroll.
+    // It does not require Android to expose an OpenGL or Vulkan extension.
+    if (dynamic_tev) {
+        out += "#extension GL_EXT_control_flow_attributes : require\n";
+    }
     if (profile.has_separable_shaders) {
         out += "#extension GL_ARB_separate_shader_objects : enable\n";
     }

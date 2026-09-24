@@ -21,7 +21,12 @@ Version **0.0.4** adds a current/previous log picker, named file downloads and
 sharing; its renderer is unchanged from 0.0.3. This remains a limited Vulkan TEV
 experiment. The 0.0.3 cold-run log confirmed substantial remaining waits;
 **0.0.5** adds first-ready pipeline selection and more precise build diagnostics.
-Device performance remains to be tested.
+Its device log still shows substantial driver compilation stalls. **0.0.6**
+rewrites the fallback as a compact loop, reuses texture samples, restores normal
+driver optimization and measures fallback usefulness. Publication is pending
+the build gates; see the [0.0.6 notes](docs/releases/0.0.6.md) and
+[Actions](https://github.com/RegiRex/uberhar/actions/workflows/uberhar-alpha.yml).
+No Thor performance gain is claimed before the next device test.
 
 See the [AstraEH code map](docs/UBERHAR_CODE_MAP.md) to locate the fork's changes.
 

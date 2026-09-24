@@ -35,11 +35,9 @@ jobs:
       - name: Compile production generator and emit cases
         run: bash tools/uberhar/build_probe.sh
       - name: Validate Vulkan fragment modules
-        run: |
-          for shader in build/uberhar-probe/cases/dynamic-*.frag; do
-            glslangValidator -V --target-env vulkan1.1 "$shader" -o "$shader.spv"
-            spirv-val --target-env vulkan1.1 "$shader.spv"
-          done
+        # AstraEH: Both user-selectable frontend optimizer modes must preserve
+        # valid Vulkan modules and the compact TEV loop's no-unroll hint.
+        run: python3 tools/uberhar/validate_shaders.py build/uberhar-probe/cases
       - name: Compare TEV results with specialized generator
         env:
           LIBGL_ALWAYS_SOFTWARE: '1'

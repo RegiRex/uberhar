@@ -24,7 +24,9 @@ def tev_body(source):
     # AstraEH: Extract the actual combiner code, ending before the alpha-test statement.
     start = source.index("vec4 combiner_buffer =")
     end = source.index("if (false) discard;", start)
-    return source[start:end] + "return combiner_output;\n"
+    # AstraEH: Desktop GL does not expose this Vulkan frontend hint. Strip only
+    # the hint here; the Vulkan gate verifies DontUnroll survives into SPIR-V.
+    return source[start:end].replace("[[dont_unroll]] ", "") + "return combiner_output;\n"
 
 
 # AstraEH: Replace only the Vulkan uniform transport; preserve generated interpreter formulas.
@@ -41,10 +43,12 @@ layout(std430, binding=2) writeonly buffer Outputs { uvec4 outputs[]; };
 vec4 rounded_primary_color, primary_fragment_color, secondary_fragment_color;
 vec4 const_color[6];
 vec4 tev_combiner_buffer_color;
-vec4 sampleTexUnit0() { return inputs[gl_GlobalInvocationID.x * 14u + 3u]; }
-vec4 sampleTexUnit1() { return inputs[gl_GlobalInvocationID.x * 14u + 4u]; }
-vec4 sampleTexUnit2() { return inputs[gl_GlobalInvocationID.x * 14u + 5u]; }
-vec4 sampleTexUnit3() { return inputs[gl_GlobalInvocationID.x * 14u + 6u]; }
+// AstraEH: Count interpreter fetches separately from the specialized reference.
+uvec4 fetch_counts = uvec4(0u);
+vec4 sampleTexUnit0() { ++fetch_counts.x; return inputs[gl_GlobalInvocationID.x * 14u + 3u]; }
+vec4 sampleTexUnit1() { ++fetch_counts.y; return inputs[gl_GlobalInvocationID.x * 14u + 4u]; }
+vec4 sampleTexUnit2() { ++fetch_counts.z; return inputs[gl_GlobalInvocationID.x * 14u + 5u]; }
+vec4 sampleTexUnit3() { ++fetch_counts.w; return inputs[gl_GlobalInvocationID.x * 14u + 6u]; }
 """
 main = """
 void main() {
@@ -55,10 +59,38 @@ void main() {
     secondary_fragment_color = inputs[base + 2u];
     for (uint i = 0u; i < 6u; ++i) const_color[i] = inputs[base + 7u + i];
     tev_combiner_buffer_color = inputs[base + 13u];
-    outputs[id * 2u] = uvec4(round(specialized() * 255.0));
-    outputs[id * 2u + 1u] = uvec4(round(interpreted() * 255.0));
+    outputs[id * 3u] = uvec4(round(specialized() * 255.0));
+    fetch_counts = uvec4(0u);
+    outputs[id * 3u + 1u] = uvec4(round(interpreted() * 255.0));
+    outputs[id * 3u + 2u] = fetch_counts;
 }
 """
+
+
+def expected_fetches(constants):
+    """AstraEH: Independently enumerate live texture operands, ignoring dead ones."""
+    used = set()
+    for stage, (sources, modifiers, ops, scales) in enumerate(
+        struct.iter_unpack("<4I", constants[:96])
+    ):
+        color_op, alpha_op = ops & 15, (ops >> 16) & 15
+        if (color_op == alpha_op == 0 and sources & 0x000f000f == 0x000f000f
+                and modifiers & 0x0000700f == 0
+                and scales & 3 in (0, 3) and (scales >> 16) & 3 in (0, 3)):
+            continue
+        for channel, operation in ((0, color_op), (16, alpha_op)):
+            if channel == 16 and color_op == 7:
+                continue
+            count = 1 if operation == 0 else 3 if operation in (4, 8, 9) else 2
+            for operand in range(count):
+                source = (sources >> (channel + 4 * operand)) & 15
+                if stage == 0 and source == 15:
+                    source = (sources >> (channel + 8)) & 15
+                if 3 <= source <= 6:
+                    used.add(source - 3)
+    return tuple(int(unit in used) for unit in range(4))
+
+
 samples = 256
 rng = random.Random(0x55424552)
 values = [rng.randrange(256) / 255.0 for _ in range(samples * 14 * 4)]
@@ -74,7 +106,7 @@ inputs = ctx.buffer(struct.pack(f"<{len(values)}f", *values))
 inputs.bind_to_storage_buffer(0)
 instructions = ctx.buffer(reserve=112)
 instructions.bind_to_storage_buffer(1)
-outputs = ctx.buffer(reserve=samples * 2 * 4 * 4)
+outputs = ctx.buffer(reserve=samples * 3 * 4 * 4)
 outputs.bind_to_storage_buffer(2)
 count = 0
 mismatches = 0
@@ -88,12 +120,18 @@ for file in sorted(cases.glob("*.bin"), key=lambda p: int(p.stem)):
         + "vec4 interpreted() {\n" + tev_body(dynamic) + "}\n" + main
     )
     shader = ctx.compute_shader(source)
-    instructions.write(file.read_bytes() + bytes(12))
+    constants = file.read_bytes()
+    instructions.write(constants + bytes(12))
+    fetches = expected_fetches(constants)
     shader.run(group_x=samples // 64)
     ctx.memory_barrier()
     result = list(struct.iter_unpack("<4I", outputs.read()))
     for sample in range(samples):
-        expected, actual = result[sample * 2:sample * 2 + 2]
+        expected, actual, sampled = result[sample * 3:sample * 3 + 3]
+        if sampled != fetches:
+            raise AssertionError(
+                f"case {file.stem} sample {sample}: texture fetch counts {sampled}, expected {fetches}"
+            )
         if expected != actual:
             mismatches += 1
             delta = max(abs(a - b) for a, b in zip(expected, actual))
@@ -110,3 +148,4 @@ for file in sorted(cases.glob("*.bin"), key=lambda p: int(p.stem)):
 if mismatches:
     raise AssertionError(f"{mismatches}/{count} mismatches; maximum channel delta {maximum_delta}")
 print(f"PASS: {count} exact RGBA8 comparisons across {count // samples} six-stage programs")
+print(f"PASS: {count} texture-use checks; exactly one fetch per referenced TEV texture unit")

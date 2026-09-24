@@ -55,7 +55,7 @@ int main(int argc, char** argv) {
     }
     // AstraEH: Deterministic random programs make combiner regressions
     // reproducible.
-    for (u32 test = 0; test < 192; ++test) {
+    for (u32 test = 0; test < 224; ++test) {
         auto config = base;
         config.texture.combiner_buffer_input.Assign(test < 16 ? test : random() & 255);
         for (auto& stage : config.texture.tev_stages) {
@@ -76,6 +76,18 @@ int main(int argc, char** argv) {
             config.texture.tev_stages[0] = {0x000f000f, 0, 0, test & 1 ? 0x00030003U : 0U};
             config.texture.tev_stages[1].ops_raw = 7;
             config.texture.tev_stages[1].scales_raw = (test % 4) << 16;
+        }
+        // AstraEH: Repeated references must sample each unit only once per
+        // fragment; texture operands discarded by Replace must not be fetched.
+        if (test >= 192) {
+            for (auto& stage : config.texture.tev_stages) {
+                if (test < 208) {
+                    const u32 source = 3 + test % 4;
+                    stage = {source * 0x01110111U, 0, 0x00040004, 0};
+                } else {
+                    stage = {(3U << 4) | (4U << 8) | (5U << 20) | (6U << 24), 0, 0, 0};
+                }
+            }
         }
         if (!Generator::GLSL::SupportsDynamicTev(config, user)) {
             throw std::runtime_error("Generated case unexpectedly unsupported");
@@ -118,5 +130,5 @@ int main(int argc, char** argv) {
             << "#version 450\n"
             << Generator::GLSL::FragmentModule{config, user, profile, true}.Generate();
     }
-    fmt::print("Emitted 192 TEV cases and 64 dynamic fragment families\n");
+    fmt::print("Emitted 224 TEV cases and 64 dynamic fragment families\n");
 }

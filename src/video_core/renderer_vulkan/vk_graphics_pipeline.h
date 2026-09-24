@@ -298,7 +298,8 @@ struct PipelineBuildStats {
 struct PipelineBuildOptions {
     Common::AsyncCompletion* completion{};
     PipelineBuildStats* stats{};
-    bool fast_compile{};
+    // AstraEH: Diagnostic label only; both paths use normal driver optimization.
+    bool is_fallback{};
 };
 
 class GraphicsPipeline : public Common::AsyncHandle {
@@ -321,6 +322,18 @@ public:
     }
     [[nodiscard]] u64 Key() const noexcept;
 
+    // AstraEH: Track whether speculative compilation ever served a draw. Atomics
+    // permit progress snapshots while the command/compiler workers are active.
+    void RecordFallbackUse() noexcept {
+        fallback_uses.fetch_add(1, std::memory_order::relaxed);
+    }
+    [[nodiscard]] u64 FallbackUses() const noexcept {
+        return fallback_uses.load(std::memory_order::relaxed);
+    }
+    [[nodiscard]] u64 DriverBuildNs() const noexcept {
+        return driver_build_ns.load(std::memory_order::relaxed);
+    }
+
     [[nodiscard]] vk::Pipeline Handle() const noexcept {
         return *pipeline;
     }
@@ -340,6 +353,8 @@ private:
     // AstraEH: Phase 0=queued/not started, 1=shader dependencies, 2=driver, 3=complete.
     const PipelineBuildOptions build_options;
     std::atomic<u32> build_phase{};
+    std::atomic<u64> fallback_uses{};
+    std::atomic<u64> driver_build_ns{};
     std::chrono::steady_clock::time_point queued_at{};
 };
 

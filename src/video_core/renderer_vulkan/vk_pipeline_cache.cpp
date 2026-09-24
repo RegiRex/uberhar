@@ -101,7 +101,7 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
     // AstraEH: Record effective settings so a device log identifies the tested path.
     LOG_INFO(Render_Vulkan,
              "Uberhar: hybrid_tev={} force_tev={} async_shaders={} spirv_generator={} "
-             "diagnostics=2 first_ready=true fast_fallback=true",
+             "diagnostics=3 first_ready=true compact_tev=true fast_fallback=false",
              hybrid_tev, force_tev, Settings::values.async_shader_compilation.GetValue(),
              Settings::values.spirv_shader_gen.GetValue());
     // AstraEH: Allocate the isolated compiler only when the experiment is enabled.
@@ -607,6 +607,9 @@ bool PipelineCache::BindPipeline(PipelineInfo& info, bool wait_built) {
         }
         if (selected_fallback) {
             fallback_draws.fetch_add(1, std::memory_order::relaxed);
+            // AstraEH: Distinguish reusable fallback pipelines from expensive
+            // speculative builds that never contribute to rendering.
+            selected->RecordFallbackUse();
         }
         // AstraEH: Track the actual scheduler-selected handle, not the originally requested
         // handle. Otherwise a fallback win could leave the next specialized draw misbound.
@@ -783,10 +786,17 @@ GraphicsPipeline* PipelineCache::GetTevFallback(const PipelineInfo& info) {
     tev_worker->QueueWork([this, shader_ptr, pipeline_ptr, family_hash, queued,
                            config = *tev_family_config, user = tev_user] {
         const auto start = std::chrono::steady_clock::now();
+        // AstraEH: Size diagnostics let device logs confirm the compact module
+        // reached the driver. Zero means this family reused an existing module.
+        std::size_t glsl_bytes = 0;
+        std::size_t spirv_bytes = 0;
         if (!shader_ptr->IsDone()) {
             GLSL::FragmentModule module{config, user, profile, true};
-            shader_ptr->module = Compile(module.Generate(), vk::ShaderStageFlagBits::eFragment,
-                                         instance.GetDevice());
+            const auto source = module.Generate();
+            const auto code = CompileGLSL(source, vk::ShaderStageFlagBits::eFragment);
+            glsl_bytes = source.size();
+            spirv_bytes = code.size() * sizeof(u32);
+            shader_ptr->module = CompileSPV(code, instance.GetDevice());
             shader_ptr->MarkDone();
         }
         const auto shader_done = std::chrono::steady_clock::now();
@@ -808,9 +818,9 @@ GraphicsPipeline* PipelineCache::GetTevFallback(const PipelineInfo& info) {
         if (builds <= 20) {
             LOG_INFO(Render_Vulkan,
                      "Uberhar fallback build: family={:016X} key={:016X} queue_ms={:.3f} "
-                     "shader_ms={:.3f} pipeline_ms={:.3f}",
+                     "shader_ms={:.3f} pipeline_ms={:.3f} glsl_bytes={} spirv_bytes={}",
                      family_hash, pipeline_ptr->Key(), job_queue_ns / 1000000.0,
-                     shader_ns / 1000000.0, driver_ns / 1000000.0);
+                     shader_ns / 1000000.0, driver_ns / 1000000.0, glsl_bytes, spirv_bytes);
         }
     });
     return pipeline_ptr;
@@ -863,7 +873,27 @@ void PipelineCache::ReportUberharStats(const char* kind) {
     };
     if (hybrid_tev) {
         report_builds("specialized", specialized_build_stats);
-        report_builds("fallback_fast", fallback_build_stats);
+        report_builds("fallback_compact", fallback_build_stats);
+        // AstraEH: Unused means not selected by the scheduler as of this snapshot,
+        // not permanently useless. Only completed builds contribute driver time.
+        u64 used = 0;
+        u64 unused = 0;
+        u64 unused_driver_ns = 0;
+        for (const auto& [key, pipeline] : tev_pipelines) {
+            if (!pipeline->IsDone()) {
+                continue;
+            }
+            if (pipeline->FallbackUses() != 0) {
+                ++used;
+            } else {
+                ++unused;
+                unused_driver_ns += pipeline->DriverBuildNs();
+            }
+        }
+        LOG_INFO(Render_Vulkan,
+                 "Uberhar fallback utility {}: used_pipelines={} unused_pipelines={} "
+                 "unused_driver_ms={:.3f}",
+                 kind, used, unused, unused_driver_ns / 1000000.0);
     }
 }
 
