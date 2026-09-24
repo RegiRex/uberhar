@@ -11,6 +11,7 @@ add_library(citra_common STATIC EXCLUDE_FROM_ALL
     archives.h
     assert.h
     atomic_ops.h
+    async_handle.h # AstraEH: Event-driven completion for hybrid pipeline selection.
     detached_tasks.cpp
     detached_tasks.h
     bit_field.h

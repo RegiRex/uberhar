@@ -75,13 +75,14 @@ Shader::~Shader() {
 GraphicsPipeline::GraphicsPipeline(const Instance& instance_, RenderManager& renderpass_cache_,
                                    const PipelineInfo& info_, vk::PipelineCache pipeline_cache_,
                                    vk::PipelineLayout layout_, std::array<Shader*, 3> stages_,
-                                   Common::ThreadWorker* worker_)
-    : instance{instance_}, renderpass_cache{renderpass_cache_}, worker{worker_},
-      pipeline_layout{layout_}, pipeline_cache{pipeline_cache_}, info{info_}, stages{stages_} {}
+                                   Common::ThreadWorker* worker_, PipelineBuildOptions options)
+    : Common::AsyncHandle{false, options.completion}, instance{instance_},
+      renderpass_cache{renderpass_cache_}, worker{worker_}, pipeline_layout{layout_},
+      pipeline_cache{pipeline_cache_}, info{info_}, stages{stages_}, build_options{options} {}
 
 GraphicsPipeline::~GraphicsPipeline() = default;
 
-bool GraphicsPipeline::TryBuild(bool wait_built) {
+bool GraphicsPipeline::TryBuild(bool wait_built, bool background_only) {
     // The pipeline is currently being compiled. We can either wait for it
     // or skip the draw.
     if (is_pending) {
@@ -96,18 +97,47 @@ bool GraphicsPipeline::TryBuild(bool wait_built) {
     }
 
     // Ask the driver if it can give us the pipeline quickly.
-    if (!shaders_pending && instance.IsPipelineCreationCacheControlSupported() && Build(true)) {
+    if (!background_only && !shaders_pending &&
+        instance.IsPipelineCreationCacheControlSupported() && Build(true)) {
         return true;
     }
 
     // Fallback to (a)synchronous compilation
+    // AstraEH: Publish queue time before the worker can read it.
+    queued_at = std::chrono::steady_clock::now();
+    build_phase.store(0, std::memory_order::relaxed);
     worker->QueueWork([this] { Build(); });
     is_pending = true;
     return wait_built;
 }
 
+// AstraEH: Shader pointers are immutable; readiness is published by their atomic flags.
+u32 GraphicsPipeline::PendingShaderMask() const noexcept {
+    u32 mask = 0;
+    for (u32 i = 0; i < stages.size(); ++i) {
+        if (stages[i] && !stages[i]->IsDone()) {
+            mask |= 1U << i;
+        }
+    }
+    return mask;
+}
+
+u64 GraphicsPipeline::Key() const noexcept {
+    return info.state.OptimizedHash(instance);
+}
+
 bool GraphicsPipeline::Build(bool fail_on_compile_required) {
     MICROPROFILE_SCOPE(Vulkan_Pipeline);
+    // AstraEH: Timers run once per build, not once per draw. Shader waits are distinct
+    // from vkCreateGraphicsPipelines wall time, which may include internal driver locks.
+    const auto build_start = std::chrono::steady_clock::now();
+    const auto nanoseconds = [](auto duration) -> u64 {
+        return std::chrono::duration_cast<std::chrono::nanoseconds>(duration).count();
+    };
+    const u64 queue_ns = queued_at == std::chrono::steady_clock::time_point{}
+                             ? 0
+                             : nanoseconds(build_start - queued_at);
+    std::array<u64, 3> shader_wait_ns{};
 
     const u32 stride_alignment = instance.GetMinVertexStrideAlignment();
     std::array<vk::VertexInputBindingDescription, MAX_VERTEX_BINDINGS> bindings;
@@ -247,6 +277,7 @@ bool GraphicsPipeline::Build(bool fail_on_compile_required) {
     };
 
     u32 shader_count = 0;
+    build_phase.store(1, std::memory_order::relaxed);
     std::array<vk::PipelineShaderStageCreateInfo, MAX_SHADER_STAGES> shader_stages;
     for (std::size_t i = 0; i < stages.size(); i++) {
         Shader* shader = stages[i];
@@ -254,7 +285,11 @@ bool GraphicsPipeline::Build(bool fail_on_compile_required) {
             continue;
         }
 
-        shader->WaitDone();
+        if (!shader->IsDone()) {
+            const auto wait_start = std::chrono::steady_clock::now();
+            shader->WaitDone();
+            shader_wait_ns[i] = nanoseconds(std::chrono::steady_clock::now() - wait_start);
+        }
         shader_stages[shader_count++] = vk::PipelineShaderStageCreateInfo{
             .stage = MakeShaderStage(i),
             .module = shader->Handle(),
@@ -278,11 +313,19 @@ bool GraphicsPipeline::Build(bool fail_on_compile_required) {
                                                      info.state.attachments.depth, false),
     };
 
+    // AstraEH: Temporary TEV fallbacks favor creation latency. Specialized pipelines
+    // retain normal optimization and replace the fallback as soon as they are ready.
+    if (build_options.fast_compile) {
+        pipeline_info.flags |= vk::PipelineCreateFlagBits::eDisableOptimization;
+    }
     if (fail_on_compile_required) {
         pipeline_info.flags |= vk::PipelineCreateFlagBits::eFailOnPipelineCompileRequiredEXT;
     }
 
+    build_phase.store(2, std::memory_order::relaxed);
+    const auto driver_start = std::chrono::steady_clock::now();
     auto result = instance.GetDevice().createGraphicsPipelineUnique(pipeline_cache, pipeline_info);
+    const u64 driver_ns = nanoseconds(std::chrono::steady_clock::now() - driver_start);
     if (result.result == vk::Result::eSuccess) {
         pipeline = std::move(result.value);
     } else if (result.result == vk::Result::eErrorPipelineCompileRequiredEXT) {
@@ -291,6 +334,30 @@ bool GraphicsPipeline::Build(bool fail_on_compile_required) {
         UNREACHABLE_MSG("Graphics pipeline creation failed!");
     }
 
+    if (auto* stats = build_options.stats) {
+        stats->builds.fetch_add(1, std::memory_order::relaxed);
+        stats->queue_ns.fetch_add(queue_ns, std::memory_order::relaxed);
+        for (u32 i = 0; i < stages.size(); ++i) {
+            stats->shader_wait_ns[i].fetch_add(shader_wait_ns[i], std::memory_order::relaxed);
+        }
+        stats->driver_ns.fetch_add(driver_ns, std::memory_order::relaxed);
+        auto maximum = stats->driver_max_ns.load(std::memory_order::relaxed);
+        while (maximum < driver_ns && !stats->driver_max_ns.compare_exchange_weak(
+                                          maximum, driver_ns, std::memory_order::relaxed)) {
+        }
+        const auto total_ns = nanoseconds(std::chrono::steady_clock::now() - build_start);
+        if (total_ns + queue_ns >= 50000000 &&
+            stats->slow_builds.fetch_add(1, std::memory_order::relaxed) < 20) {
+            LOG_INFO(Render_Vulkan,
+                     "Uberhar pipeline build: path={} key={:016X} queue_ms={:.3f} "
+                     "vs_wait_ms={:.3f} fs_wait_ms={:.3f} gs_wait_ms={:.3f} driver_ms={:.3f}",
+                     build_options.fast_compile ? "fallback_fast" : "specialized", Key(),
+                     queue_ns / 1000000.0, shader_wait_ns[0] / 1000000.0,
+                     shader_wait_ns[1] / 1000000.0, shader_wait_ns[2] / 1000000.0,
+                     driver_ns / 1000000.0);
+        }
+    }
+    build_phase.store(3, std::memory_order::relaxed);
     MarkDone();
     return true;
 }

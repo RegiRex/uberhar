@@ -4,6 +4,9 @@
 
 #pragma once
 
+#include <chrono> // AstraEH: Pipeline queue and driver timings.
+
+#include "common/async_handle.h" // AstraEH: Shared completion signal for first-ready selection.
 #include "common/hash.h"
 #include "common/thread_worker.h"
 #include "video_core/pica/regs_pipeline.h"
@@ -13,37 +16,6 @@
 
 #define LAYOUT_HASH static_cast<u64>(sizeof(T)), static_cast<u64>(alignof(T))
 #define FIELD_HASH(x) static_cast<u64>(offsetof(T, x)), static_cast<u64>(sizeof(x))
-
-namespace Common {
-
-struct AsyncHandle {
-public:
-    AsyncHandle(bool is_done_ = false) : is_done{is_done_} {}
-
-    [[nodiscard]] bool IsDone() noexcept {
-        // AstraEH: Publish the shader/pipeline handle along with completion. The render
-        // thread can read it without taking mutex after observing this flag.
-        return is_done.load(std::memory_order::acquire);
-    }
-
-    void WaitDone() noexcept {
-        std::unique_lock lock{mutex};
-        condvar.wait(lock, [this] { return is_done.load(std::memory_order::relaxed); });
-    }
-
-    void MarkDone(bool done = true) noexcept {
-        std::scoped_lock lock{mutex};
-        is_done = done;
-        condvar.notify_all();
-    }
-
-private:
-    std::condition_variable condvar;
-    std::mutex mutex;
-    std::atomic_bool is_done{false};
-};
-
-} // namespace Common
 
 namespace Vulkan {
 
@@ -312,17 +284,42 @@ struct Shader : public Common::AsyncHandle {
     std::string program;
 };
 
+// AstraEH: Atomics allow bounded progress reports while compiler workers remain active.
+// Durations are wall time; parallel work overlaps and must not be summed as gameplay stalls.
+struct PipelineBuildStats {
+    std::atomic<u64> builds{};
+    std::atomic<u64> queue_ns{};
+    std::array<std::atomic<u64>, 3> shader_wait_ns{};
+    std::atomic<u64> driver_ns{};
+    std::atomic<u64> driver_max_ns{};
+    std::atomic<u64> slow_builds{};
+};
+
+struct PipelineBuildOptions {
+    Common::AsyncCompletion* completion{};
+    PipelineBuildStats* stats{};
+    bool fast_compile{};
+};
+
 class GraphicsPipeline : public Common::AsyncHandle {
 public:
     explicit GraphicsPipeline(const Instance& instance, RenderManager& renderpass_cache,
                               const PipelineInfo& info, vk::PipelineCache pipeline_cache,
                               vk::PipelineLayout layout, std::array<Shader*, 3> stages,
-                              Common::ThreadWorker* worker);
+                              Common::ThreadWorker* worker, PipelineBuildOptions options = {});
     ~GraphicsPipeline();
 
-    bool TryBuild(bool wait_built);
+    // AstraEH: Hybrid draws must not enter driver cache probes on the rendering thread.
+    bool TryBuild(bool wait_built, bool background_only = false);
 
     bool Build(bool fail_on_compile_required = false);
+
+    // AstraEH: Nonblocking snapshots used to identify the dependency at a slow wait's start.
+    [[nodiscard]] u32 PendingShaderMask() const noexcept;
+    [[nodiscard]] u32 BuildPhase() const noexcept {
+        return build_phase.load(std::memory_order::relaxed);
+    }
+    [[nodiscard]] u64 Key() const noexcept;
 
     [[nodiscard]] vk::Pipeline Handle() const noexcept {
         return *pipeline;
@@ -340,6 +337,10 @@ private:
     PipelineInfo info;
     std::array<Shader*, 3> stages;
     bool is_pending{};
+    // AstraEH: Phase 0=queued/not started, 1=shader dependencies, 2=driver, 3=complete.
+    const PipelineBuildOptions build_options;
+    std::atomic<u32> build_phase{};
+    std::chrono::steady_clock::time_point queued_at{};
 };
 
 } // namespace Vulkan

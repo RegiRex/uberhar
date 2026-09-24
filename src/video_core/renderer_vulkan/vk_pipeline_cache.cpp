@@ -100,8 +100,9 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
       force_tev{hybrid_tev && Settings::values.uberhar_force_tev.GetValue()} {
     // AstraEH: Record effective settings so a device log identifies the tested path.
     LOG_INFO(Render_Vulkan,
-             "Uberhar: hybrid_tev={} force_tev={} async_shaders={} spirv_generator={}", hybrid_tev,
-             force_tev, Settings::values.async_shader_compilation.GetValue(),
+             "Uberhar: hybrid_tev={} force_tev={} async_shaders={} spirv_generator={} "
+             "diagnostics=2 first_ready=true fast_fallback=true",
+             hybrid_tev, force_tev, Settings::values.async_shader_compilation.GetValue(),
              Settings::values.spirv_shader_gen.GetValue());
     // AstraEH: Allocate the isolated compiler only when the experiment is enabled.
     if (hybrid_tev) {
@@ -409,43 +410,52 @@ bool PipelineCache::BindPipeline(PipelineInfo& info, bool wait_built) {
     const bool pending = !pipeline->IsDone();
     specialized_pending += pending;
     bool using_fallback = false;
+    GraphicsPipeline* alternative = nullptr;
+    bool alternative_was_pending = false;
     if (hybrid_tev) {
-        // AstraEH: Always queue the specialized pipeline. Unlike the upstream async
-        // policy, a hybrid miss must never silently omit a draw.
-        if (pending) {
-            pipeline->TryBuild(true);
-        }
-        if (force_tev || !pipeline->IsDone()) {
-            if (auto* fallback = GetTevFallback(info)) {
-                // AstraEH: GetTevFallback queues the entire build on its own worker.
-                // Do not probe the driver cache here: even a cache-only probe can wait
-                // on driver locks held by another compile on the rendering thread.
-                // AstraEH: A general shader can take longer to compile than the
-                // specialization. Warm new families in the background; only
-                // the explicit validation mode waits for an unready fallback.
-                if (force_tev || fallback->IsDone()) {
-                    pipeline = fallback;
-                    using_fallback = true;
-                    ++fallback_draws;
-                } else {
-                    ++fallback_warming;
-                }
+        // AstraEH: Admit a bounded fallback before queuing specialization. The scheduler
+        // can use either completed result; neither path is allowed to omit this draw.
+        if (force_tev || pending) {
+            alternative = GetTevFallback(info);
+            if (alternative) {
+                alternative_was_pending = !alternative->IsDone();
+                fallback_warming += alternative_was_pending;
             } else {
                 ++fallback_unavailable;
             }
+        }
+        if (pending) {
+            // AstraEH: Even cache-only driver calls can block on compiler locks. In hybrid
+            // mode all pipeline creation belongs on workers, including these probes.
+            pipeline->TryBuild(true, true);
+        }
+        if (force_tev && alternative) {
+            pipeline = alternative;
+            alternative = nullptr;
+            using_fallback = true;
         }
     } else if (pending && !pipeline->TryBuild(wait_built)) {
         ++skipped_draws;
         return false;
     }
 
+    // AstraEH: Bounded progress snapshots survive a copied/truncated log without requiring
+    // an orderly shutdown. Check the clock once per 4096 draws to keep steady-state cost low.
+    if (hybrid_tev && (draw_requests & 4095) == 0) {
+        const auto now = std::chrono::steady_clock::now();
+        if (now >= next_progress) {
+            ReportUberharStats("progress");
+            next_progress = now + std::chrono::seconds{5};
+        }
+    }
+
     const bool is_dirty = scheduler.IsStateDirty(StateFlags::Pipeline);
-    const bool pipeline_dirty = (current_pipeline != pipeline) || is_dirty;
     // AstraEH: Copy TEV registers into the queued command; later draws may change them.
-    scheduler.Record([this, is_dirty, pipeline_dirty, pipeline, using_fallback,
-                      constants = tev_constants, current_dynamic = current_info.dynamic_info,
-                      dynamic = info.dynamic_info, descriptor_sets = bound_descriptor_sets,
-                      offsets = offsets, current_rasterization = current_info.state.rasterization,
+    scheduler.Record([this, is_dirty, pipeline, using_fallback, alternative,
+                      alternative_was_pending, constants = tev_constants,
+                      current_dynamic = current_info.dynamic_info, dynamic = info.dynamic_info,
+                      descriptor_sets = bound_descriptor_sets, offsets = offsets,
+                      current_rasterization = current_info.state.rasterization,
                       current_depth_stencil = current_info.state.depth_stencil,
                       rasterization = info.state.rasterization,
                       depth_stencil = info.state.depth_stencil](vk::CommandBuffer cmdbuf) {
@@ -543,47 +553,78 @@ bool PipelineCache::BindPipeline(PipelineInfo& info, bool wait_built) {
             }
         }
 
-        if (pipeline_dirty) {
+        // AstraEH: Choose on the command worker, where readiness actually matters.
+        // Rechecking here also recovers fallbacks completed after the draw was enqueued.
+        auto* selected = pipeline;
+        bool selected_fallback = using_fallback;
+        const bool must_wait = !pipeline->IsDone() && (!alternative || !alternative->IsDone());
+        const auto wait_start =
+            must_wait ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+        const u32 pending_stages = must_wait ? pipeline->PendingShaderMask() : 0;
+        const u32 initial_phase = must_wait ? pipeline->BuildPhase() : 3;
+        const u32 alternative_phase = must_wait && alternative ? alternative->BuildPhase() : 3;
+        const u32 alternative_stages =
+            must_wait && alternative ? alternative->PendingShaderMask() : 0;
+        if (alternative) {
+            if (must_wait) {
+                first_ready_waits.fetch_add(1, std::memory_order::relaxed);
+                pipeline_completion.WaitAny(*pipeline, *alternative);
+            }
             if (!pipeline->IsDone()) {
-                // AstraEH: Measure blocking on this worker, not command-enqueue overhead.
-                const auto start = std::chrono::steady_clock::now();
-                pipeline->WaitDone();
-                const auto elapsed = std::chrono::steady_clock::now() - start;
-                const u64 elapsed_ns =
-                    std::chrono::duration_cast<std::chrono::nanoseconds>(elapsed).count();
-                pipeline_waits.fetch_add(1, std::memory_order::relaxed);
-                pipeline_wait_ns.fetch_add(elapsed_ns, std::memory_order::relaxed);
-                // AstraEH: Separate forced-interpreter waits from specialized waits, and
-                // keep a maximum so a few long pauses cannot hide in a session total.
-                pipeline_wait_max_ns.store(
-                    std::max(pipeline_wait_max_ns.load(std::memory_order::relaxed), elapsed_ns),
-                    std::memory_order::relaxed);
-                if (using_fallback) {
-                    fallback_wait_ns.fetch_add(elapsed_ns, std::memory_order::relaxed);
-                }
-                // AstraEH: Log the first 20 waits over 50 ms during play, rather than
-                // only at shutdown. Bounded reports avoid flooding a cold-run log.
-                if (elapsed_ns >= 50000000 &&
-                    slow_pipeline_waits.fetch_add(1, std::memory_order::relaxed) < 20) {
-                    LOG_INFO(Render_Vulkan, "Uberhar slow pipeline wait: path={} wait_ms={:.3f}",
-                             using_fallback ? "forced_fallback" : "specialized",
-                             elapsed_ns / 1000000.0);
+                selected = alternative;
+                selected_fallback = true;
+                if (alternative_was_pending) {
+                    late_fallback_draws.fetch_add(1, std::memory_order::relaxed);
                 }
             }
-            cmdbuf.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline->Handle());
+        } else if (must_wait) {
+            pipeline->WaitDone();
+        }
+        if (must_wait) {
+            const u64 elapsed_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                       std::chrono::steady_clock::now() - wait_start)
+                                       .count();
+            pipeline_waits.fetch_add(1, std::memory_order::relaxed);
+            pipeline_wait_ns.fetch_add(elapsed_ns, std::memory_order::relaxed);
+            pipeline_wait_max_ns.store(
+                std::max(pipeline_wait_max_ns.load(std::memory_order::relaxed), elapsed_ns),
+                std::memory_order::relaxed);
+            if (using_fallback) {
+                fallback_wait_ns.fetch_add(elapsed_ns, std::memory_order::relaxed);
+            }
+            if (elapsed_ns >= 50000000 &&
+                slow_pipeline_waits.fetch_add(1, std::memory_order::relaxed) < 20) {
+                LOG_INFO(Render_Vulkan,
+                         "Uberhar slow pipeline wait: path={} wait_ms={:.3f} wait_key={:016X} "
+                         "chosen_key={:016X} pending_stages={} phase={} alternative={} "
+                         "alternative_phase={} alternative_stages={}",
+                         selected_fallback ? (using_fallback ? "forced_fallback" : "fallback")
+                                           : "specialized",
+                         elapsed_ns / 1000000.0, pipeline->Key(), selected->Key(), pending_stages,
+                         initial_phase, alternative != nullptr, alternative_phase,
+                         alternative_stages);
+            }
+        }
+        if (selected_fallback) {
+            fallback_draws.fetch_add(1, std::memory_order::relaxed);
+        }
+        // AstraEH: Track the actual scheduler-selected handle, not the originally requested
+        // handle. Otherwise a fallback win could leave the next specialized draw misbound.
+        if (is_dirty || bound_pipeline != selected) {
+            cmdbuf.bindPipeline(vk::PipelineBindPoint::eGraphics, selected->Handle());
+            bound_pipeline = selected;
         }
 
         cmdbuf.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *pipeline_layout, 0,
                                   descriptor_sets, offsets);
         // AstraEH: Upload all six stages for every interpreted draw, even on pipeline reuse.
-        if (using_fallback) {
+        if (selected_fallback) {
             cmdbuf.pushConstants(*pipeline_layout, vk::ShaderStageFlagBits::eFragment, 0,
                                  sizeof(constants), &constants);
         }
     });
 
     current_info = info;
-    current_pipeline = pipeline;
     scheduler.MarkStateNonDirty(StateFlags::Pipeline | StateFlags::DescriptorSets);
 
     return true;
@@ -706,7 +747,7 @@ GraphicsPipeline* PipelineCache::GetTevFallback(const PipelineInfo& info) {
         return nullptr;
     }
     // AstraEH: Do not accumulate speculative work while a fallback is compiling.
-    // Later misses can retry; the required specialized draw is already queued.
+    // Later misses can retry; BindPipeline also queues the required specialization.
     if (!force_tev && warming_tev_pipeline && !warming_tev_pipeline->IsDone()) {
         ++fallback_deferred;
         return nullptr;
@@ -727,9 +768,10 @@ GraphicsPipeline* PipelineCache::GetTevFallback(const PipelineInfo& info) {
     if (!instance.UseGeometryShaders() || instance.IsFragmentShaderBarycentricSupported()) {
         shaders[ProgramType::GS] = nullptr;
     }
-    auto pipeline = std::make_unique<GraphicsPipeline>(instance, renderpass_cache, fallback_info,
-                                                       *driver_pipeline_cache, *pipeline_layout,
-                                                       shaders, tev_worker.get());
+    auto pipeline = std::make_unique<GraphicsPipeline>(
+        instance, renderpass_cache, fallback_info, *driver_pipeline_cache, *pipeline_layout,
+        shaders, tev_worker.get(),
+        PipelineBuildOptions{&pipeline_completion, &fallback_build_stats, true});
     auto* pipeline_ptr = pipeline.get();
     tev_pipelines.emplace(hash, std::move(pipeline));
     warming_tev_pipeline = pipeline_ptr;
@@ -737,8 +779,9 @@ GraphicsPipeline* PipelineCache::GetTevFallback(const PipelineInfo& info) {
     // AstraEH: One serial job compiles the fragment module before building its pipeline.
     // This cannot fill specialized pipeline workers with waits for large fallback shaders.
     // Owned config copies and map-stable pointers stay alive until ClearTevFallbacks drains.
-    tev_worker->QueueWork([this, shader_ptr, pipeline_ptr, family_hash, config = *tev_family_config,
-                           user = tev_user] {
+    const auto queued = std::chrono::steady_clock::now();
+    tev_worker->QueueWork([this, shader_ptr, pipeline_ptr, family_hash, queued,
+                           config = *tev_family_config, user = tev_user] {
         const auto start = std::chrono::steady_clock::now();
         if (!shader_ptr->IsDone()) {
             GLSL::FragmentModule module{config, user, profile, true};
@@ -754,15 +797,20 @@ GraphicsPipeline* PipelineCache::GetTevFallback(const PipelineInfo& info) {
         const u64 driver_ns =
             std::chrono::duration_cast<std::chrono::nanoseconds>(pipeline_done - shader_done)
                 .count();
-        ++fallback_compile_jobs;
-        fallback_shader_ns += shader_ns;
-        fallback_driver_ns += driver_ns;
+        const u64 job_queue_ns =
+            std::chrono::duration_cast<std::chrono::nanoseconds>(start - queued).count();
+        const auto builds = fallback_compile_jobs.fetch_add(1, std::memory_order::relaxed) + 1;
+        fallback_job_queue_ns.fetch_add(job_queue_ns, std::memory_order::relaxed);
+        fallback_shader_ns.fetch_add(shader_ns, std::memory_order::relaxed);
+        fallback_driver_ns.fetch_add(driver_ns, std::memory_order::relaxed);
         // AstraEH: Build includes waiting for VS/GS dependencies; this is wall time,
         // not pure driver CPU time. Report only the first 20 builds to bound output.
-        if (fallback_compile_jobs <= 20) {
+        if (builds <= 20) {
             LOG_INFO(Render_Vulkan,
-                     "Uberhar fallback build: family={:016X} shader_ms={:.3f} pipeline_ms={:.3f}",
-                     family_hash, shader_ns / 1000000.0, driver_ns / 1000000.0);
+                     "Uberhar fallback build: family={:016X} key={:016X} queue_ms={:.3f} "
+                     "shader_ms={:.3f} pipeline_ms={:.3f}",
+                     family_hash, pipeline_ptr->Key(), job_queue_ns / 1000000.0,
+                     shader_ns / 1000000.0, driver_ns / 1000000.0);
         }
     });
     return pipeline_ptr;
@@ -777,25 +825,46 @@ void PipelineCache::ClearTevFallbacks() {
     warming_tev_pipeline = nullptr;
     tev_pipelines.clear();
     tev_shaders.clear();
-    current_pipeline = nullptr;
+    bound_pipeline = nullptr;
     tev_family_config.reset();
 }
 
 // AstraEH: These are draw observations and CPU wait durations, not GPU timings or frame counts.
-void PipelineCache::ReportUberharStats() {
+void PipelineCache::ReportUberharStats(const char* kind) {
     LOG_INFO(
         Render_Vulkan,
-        "Uberhar totals: draws={} specialized_pending={} fallback_draws={} "
+        "Uberhar {}: draws={} specialized_pending={} fallback_draws={} "
         "fallback_warming={} fallback_unavailable={} skipped={} families={} fallback_pipelines={} "
         "scheduler_pipeline_waits={} scheduler_pipeline_wait_ms={:.3f} "
         "scheduler_max_wait_ms={:.3f} forced_fallback_wait_ms={:.3f} slow_waits={} "
         "fallback_deferred={} fallback_builds={} fallback_shader_ms={:.3f} "
-        "fallback_pipeline_ms={:.3f}",
-        draw_requests, specialized_pending, fallback_draws, fallback_warming, fallback_unavailable,
-        skipped_draws, tev_shaders.size(), tev_pipelines.size(), pipeline_waits.load(),
-        pipeline_wait_ns.load() / 1000000.0, pipeline_wait_max_ns.load() / 1000000.0,
-        fallback_wait_ns.load() / 1000000.0, slow_pipeline_waits.load(), fallback_deferred,
-        fallback_compile_jobs, fallback_shader_ns / 1000000.0, fallback_driver_ns / 1000000.0);
+        "fallback_pipeline_ms={:.3f} first_ready_waits={} late_fallback_draws={} "
+        "fallback_job_queue_ms={:.3f}",
+        kind, draw_requests, specialized_pending, fallback_draws.load(), fallback_warming,
+        fallback_unavailable, skipped_draws, tev_shaders.size(), tev_pipelines.size(),
+        pipeline_waits.load(), pipeline_wait_ns.load() / 1000000.0,
+        pipeline_wait_max_ns.load() / 1000000.0, fallback_wait_ns.load() / 1000000.0,
+        slow_pipeline_waits.load(), fallback_deferred, fallback_compile_jobs.load(),
+        fallback_shader_ns.load() / 1000000.0, fallback_driver_ns.load() / 1000000.0,
+        first_ready_waits.load(), late_fallback_draws.load(),
+        fallback_job_queue_ns.load() / 1000000.0);
+    // AstraEH: These overlapping worker totals identify the bottleneck; they are not
+    // additional scheduler stall time. Progress reads may straddle a build completion.
+    const auto report_builds = [kind](const char* path, const PipelineBuildStats& stats) {
+        LOG_INFO(Render_Vulkan,
+                 "Uberhar build {}: path={} builds={} queue_ms={:.3f} vs_wait_ms={:.3f} "
+                 "fs_wait_ms={:.3f} gs_wait_ms={:.3f} driver_ms={:.3f} driver_max_ms={:.3f} "
+                 "slow_builds={}",
+                 kind, path, stats.builds.load(), stats.queue_ns.load() / 1000000.0,
+                 stats.shader_wait_ns[0].load() / 1000000.0,
+                 stats.shader_wait_ns[1].load() / 1000000.0,
+                 stats.shader_wait_ns[2].load() / 1000000.0, stats.driver_ns.load() / 1000000.0,
+                 stats.driver_max_ns.load() / 1000000.0, stats.slow_builds.load());
+    };
+    if (hybrid_tev) {
+        report_builds("specialized", specialized_build_stats);
+        report_builds("fallback_fast", fallback_build_stats);
+    }
 }
 
 bool PipelineCache::IsCacheValid(std::span<const u8> data) const {

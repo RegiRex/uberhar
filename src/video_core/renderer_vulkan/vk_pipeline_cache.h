@@ -141,7 +141,12 @@ private:
     // AstraEH: Fallback cache lifecycle and diagnostics; see the implementation for support caps.
     GraphicsPipeline* GetTevFallback(const PipelineInfo& info);
     void ClearTevFallbacks();
-    void ReportUberharStats();
+    void ReportUberharStats(const char* kind = "totals");
+    PipelineBuildOptions SpecializedBuildOptions() {
+        return hybrid_tev
+                   ? PipelineBuildOptions{&pipeline_completion, &specialized_build_stats, false}
+                   : PipelineBuildOptions{};
+    }
 
 private:
     const Instance& instance;
@@ -159,7 +164,12 @@ private:
     // Created only in hybrid mode; shader and driver compilation run as one serial job.
     std::unique_ptr<Common::ThreadWorker> tev_worker;
     PipelineInfo current_info{};
-    GraphicsPipeline* current_pipeline{};
+    // AstraEH: Only the scheduler accesses the actual bound pipeline. A queued draw may
+    // choose a different winner from the render thread's original specialization.
+    GraphicsPipeline* bound_pipeline{};
+    Common::AsyncCompletion pipeline_completion;
+    PipelineBuildStats specialized_build_stats;
+    PipelineBuildStats fallback_build_stats;
     std::array<DescriptorHeap, NumDescriptorHeaps> descriptor_heaps;
     std::array<vk::DescriptorSet, NumRasterizerSets> bound_descriptor_sets{};
     std::array<u32, NumDynamicOffsets> offsets{};
@@ -191,7 +201,7 @@ private:
     // AstraEH: Draw counters belong to the render thread; wait counters belong to the scheduler.
     u64 draw_requests{};
     u64 specialized_pending{};
-    u64 fallback_draws{};
+    std::atomic<u64> fallback_draws{};
     u64 fallback_warming{};
     u64 fallback_unavailable{};
     u64 fallback_deferred{};
@@ -202,10 +212,16 @@ private:
     std::atomic<u64> pipeline_wait_max_ns{};
     std::atomic<u64> fallback_wait_ns{};
     std::atomic<u64> slow_pipeline_waits{};
-    // AstraEH: Only the serial fallback worker writes these; reporting follows its drain.
-    u64 fallback_compile_jobs{};
-    u64 fallback_shader_ns{};
-    u64 fallback_driver_ns{};
+    // AstraEH: Compiler totals are atomic so progress logging never races with a build.
+    std::atomic<u64> fallback_compile_jobs{};
+    std::atomic<u64> fallback_shader_ns{};
+    std::atomic<u64> fallback_driver_ns{};
+    std::atomic<u64> fallback_job_queue_ns{};
+    // AstraEH: Count decisions on the scheduler, including fallbacks that became ready late.
+    std::atomic<u64> first_ready_waits{};
+    std::atomic<u64> late_fallback_draws{};
+    std::chrono::steady_clock::time_point next_progress =
+        std::chrono::steady_clock::now() + std::chrono::seconds{5};
 
     u64 current_program_id{0};
     std::vector<std::shared_ptr<ShaderDiskCache>> disk_caches;

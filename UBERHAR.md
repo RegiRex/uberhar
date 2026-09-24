@@ -7,6 +7,16 @@ Baseline: Azahar 2126.1.2, commit
 
 ## Current status
 
+<!-- AstraEH: Device-log-driven scheduling correction; release evidence is added after CI. -->
+**0.0.5 is being prepared.** The verified 0.0.3 cold run recorded 121 scheduler
+waits totaling 18.22 seconds, a 1.084-second maximum and only 78 selected fallback
+draws. This update lets an unfinished draw use whichever compatible pipeline
+finishes first, removes on-demand hybrid driver probes from the render thread,
+and requests faster compilation for temporary fallbacks. New progress/build
+logs separate queue, shader-dependency and driver time. See the
+[log analysis](docs/UBERHAR_LOG_ANALYSIS_2026-09-24.md) and
+[0.0.5 test instructions](docs/releases/0.0.5.md). Thor performance is unverified.
+
 <!-- AstraEH: 0.0.4 changes log collection without changing the 0.0.3 renderer. -->
 **0.0.4 is published as a pre-release** with **Options → Save or Share Log**. Choose the
 current or previous session, choose word initials or the first three characters
@@ -30,8 +40,8 @@ Awakening with long shader-related pauses. Effective settings and a device log
 were subsequently supplied in a 0.0.2 log: hybrid and forced TEV were both enabled.
 The first completed run recorded 63 pipeline waits totaling 29.100457 seconds.
 The exact duration of individual pauses is unavailable in that build. A 0.0.3
-normal-hybrid cold/warm retest is pending; the log does not establish whether
-the scheduling correction improves device performance.
+normal-hybrid cold/warm retest was subsequently supplied; its findings and
+measurement limits are recorded in the log analysis linked above.
 
 <!-- AstraEH: 0.0.3 scheduling correction motivated by the first gameplay report. -->
 **0.0.3 is published as a pre-release.** Fallback shaders and pipelines now compile as one
@@ -99,8 +109,10 @@ push constants. It preserves the specialized generator's stage-0 source rule,
 Lighting, texture sampling modes, fog, alpha/depth tests, vertex/geometry shaders
 and pipeline state are still specialized. New fallback families/pipelines warm
 on a dedicated worker, with one unfinished pipeline admitted in normal hybrid
-mode; normal hybrid mode uses a ready fallback or waits for the
-specialized pipeline. It never waits specifically for an unready fallback.
+mode. Version 0.0.5 selects on the command worker and waits for either compatible
+candidate if necessary. A ready specialization always takes priority in normal
+mode; a missing/unsupported fallback still waits for specialization. Temporary
+fallbacks request reduced driver optimization to favor compilation latency.
 First-use stalls therefore remain. There is no vertex interpreter or startup
 prewarming yet. Shadow
 rendering/sampling, custom normal maps and AddSigned combiner operations use the
@@ -181,7 +193,7 @@ presentation queues and a measurement plan for the next phase.
 ## Build workflow
 
 `UBERHAR_VERSION` contains the owner's **release.beta.alpha** version, currently
-`0.0.4`. The unnumbered failed first attempt counts as `0.0.1`. Future alpha
+`0.0.5`. The unnumbered failed first attempt counts as `0.0.1`. Future alpha
 iterations increment the third number. Beta and release milestones use the second
 and first numbers. Gradle's independent numeric `versionCode` still increases
 with build time so Android can order updates correctly.

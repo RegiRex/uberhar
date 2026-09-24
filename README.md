@@ -19,7 +19,9 @@ See [UBERHAR.md](UBERHAR.md) for status and testing instructions.
 **[Download Uberhar 0.0.4 ARM64](https://github.com/RegiRex/uberhar/releases/download/0.0.4/uberhar-0.0.4-arm64.apk)**.
 Version **0.0.4** adds a current/previous log picker, named file downloads and
 sharing; its renderer is unchanged from 0.0.3. This remains a limited Vulkan TEV
-experiment; a controlled normal-hybrid performance comparison is still pending.
+experiment. The 0.0.3 cold-run log confirmed substantial remaining waits;
+**0.0.5** adds first-ready pipeline selection and more precise build diagnostics.
+Device performance remains to be tested.
 
 See the [AstraEH code map](docs/UBERHAR_CODE_MAP.md) to locate the fork's changes.
 

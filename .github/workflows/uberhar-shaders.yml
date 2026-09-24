@@ -17,6 +17,13 @@ jobs:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
+      # AstraEH: Test production first-ready completion before any renderer release.
+      - name: Test asynchronous pipeline completion
+        run: |
+          mkdir -p build/uberhar-tests
+          c++ -std=c++20 -O2 -pthread -I src tools/uberhar/test_async_completion.cpp \
+            -o build/uberhar-tests/test-async-completion
+          timeout 30s build/uberhar-tests/test-async-completion
       - name: Get generator dependencies
         run: git submodule update --init --depth 1 externals/fmt externals/xxHash externals/boost externals/nihstro
       - name: Install validation tools
