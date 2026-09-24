@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# AstraEH: Compile the real generator into a small host-side test executable.
+# Header-only dependencies avoid building the emulator; errors still fail the probe.
 set -euo pipefail
 mkdir -p build/uberhar-probe
 python3 tools/uberhar/check_android_keys.py

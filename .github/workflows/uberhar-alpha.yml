@@ -1,3 +1,4 @@
+# AstraEH: Build, verify and publish the isolated ARM64 experimental app.
 name: Uberhar ARM64 experimental alpha
 
 on:
@@ -46,6 +47,18 @@ jobs:
           path: ~/.android/debug.keystore
           key: uberhar-development-signing-v1
 
+      # AstraEH: Use an explicit key path; AGP's implicit debug-key location was not cached.
+      # This development key is not a durable release-signing setup; see UBERHAR.md.
+      - name: Prepare development signing key
+        run: |
+          mkdir -p "$HOME/.android"
+          if [ ! -f "$HOME/.android/debug.keystore" ]; then
+            "$JAVA_HOME_17_X64/bin/keytool" -genkeypair -noprompt \
+              -keystore "$HOME/.android/debug.keystore" -storepass android \
+              -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 \
+              -validity 10000 -dname "CN=Uberhar Development,O=Uberhar,C=US"
+          fi
+
       - name: Install build tools
         run: |
           sudo apt-get update
@@ -61,17 +74,23 @@ jobs:
           export JAVA_HOME="$JAVA_HOME_17_X64"
           export PATH="$JAVA_HOME/bin:$PATH"
           export NDK_CCACHE="$(command -v ccache)"
+          # AstraEH: Make release-flavor signing use the exact key restored/generated above.
+          export ANDROID_KEYSTORE_FILE="$HOME/.android/debug.keystore"
+          export ANDROID_KEYSTORE_PASS=android
+          export ANDROID_KEY_ALIAS=androiddebugkey
           bash ./gradlew --no-daemon --max-workers=2 \
             -PuberharArm64Only=true \
             -Pandroid.injected.build.abi=arm64-v8a \
             assembleUberharRelease 2>&1 | tee "$GITHUB_WORKSPACE/uberhar-build.log"
 
+      # AstraEH: Publish only an intact ARM64 app with the separate ID, label and valid signature.
       - name: Validate package and record provenance
         run: |
           python3 tools/uberhar/validate_apk.py src/android/app/build artifacts
           APK="$(find artifacts -name '*.apk' -print -quit)"
           "$ANDROID_SDK_ROOT/build-tools/35.0.0/aapt" dump badging "$APK" > artifacts/package.txt
           grep "package: name='org.uberhar.uberhar_emu'" artifacts/package.txt
+          grep -F "application-label:'Uberhar Alpha'" artifacts/package.txt
           "$ANDROID_SDK_ROOT/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK" > artifacts/signature.txt
           git rev-parse HEAD > artifacts/uberhar-commit.txt
           git submodule status --recursive > artifacts/submodules.txt

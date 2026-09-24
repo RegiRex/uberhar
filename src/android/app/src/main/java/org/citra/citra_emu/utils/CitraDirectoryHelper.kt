@@ -45,6 +45,8 @@ class CitraDirectoryHelper(
                     path,
                     takeFlags
                 )
+                // AstraEH: Isolate experimental saves/config/cache from a populated Azahar folder.
+                // An existing Uberhar marker permits reusing this app's own directory.
                 if (BuildConfig.FLAVOR == "uberhar" && path != previous) {
                     val directory = DocumentFile.fromTreeUri(fragmentActivity, path)
                     val marker = directory?.findFile("uberhar-data.txt")

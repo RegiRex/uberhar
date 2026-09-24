@@ -144,6 +144,7 @@ void Config::ReadValues() {
     ReadSetting("Renderer", Settings::values.graphics_api);
     ReadSetting("Renderer", Settings::values.async_presentation);
     ReadSetting("Renderer", Settings::values.async_shader_compilation);
+    // AstraEH: Load the same opt-in flags exposed in Android's Graphics settings.
     ReadSetting("Renderer", Settings::values.uberhar_hybrid_tev);
     ReadSetting("Renderer", Settings::values.uberhar_force_tev);
     ReadSetting("Renderer", Settings::values.spirv_shader_gen);

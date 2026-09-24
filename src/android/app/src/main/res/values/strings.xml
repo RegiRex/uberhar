@@ -269,6 +269,7 @@
     <string name="disable_spirv_optimizer">Disable SPIR-V Optimizer</string>
     <string name="disable_spirv_optimizer_description">Disables the SPIR-V optimization pass, reducing stuttering considerably while barely affecting performance.</string>
     <string name="async_shaders">Enable Asynchronous Shader Compilation</string>
+    <!-- AstraEH: Uberhar controls and data-isolation messages; both rendering options are opt-in. -->
     <string name="uberhar_hybrid_tev">Uberhar hybrid TEV (experimental)</string>
     <string name="uberhar_separate_folder_title">Use an empty folder for Uberhar</string>
     <string name="uberhar_separate_folder_description">Create an empty folder for Uberhar data, or select a folder already initialized by Uberhar. This keeps your Azahar saves, settings, and shader caches separate. Copy any saves you want to test after setup.</string>

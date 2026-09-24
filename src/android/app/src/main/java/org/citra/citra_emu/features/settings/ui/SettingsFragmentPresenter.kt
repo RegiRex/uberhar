@@ -285,6 +285,7 @@ class SettingsFragmentPresenter(private val fragmentView: SettingsFragmentView) 
                     R.string.check_for_updates_description,
                     BooleanSetting.CHECK_FOR_UPDATES.key,
                     BooleanSetting.CHECK_FOR_UPDATES.defaultValue,
+                    // AstraEH: Upstream Azahar updates cannot update the separate Uberhar app.
                     isEnabled = !BuildConfig.DEBUG && BuildConfig.FLAVOR != "uberhar"
                 )
             )
@@ -298,6 +299,7 @@ class SettingsFragmentPresenter(private val fragmentView: SettingsFragmentView) 
                         R.array.updateCheckChannelsValues,
                         IntSetting.UPDATE_CHECK_CHANNEL.key,
                         IntSetting.UPDATE_CHECK_CHANNEL.defaultValue,
+                        // AstraEH: Also disable the upstream update channel for Uberhar.
                         isEnabled = (!BuildConfig.DEBUG && BuildConfig.FLAVOR != "uberhar" &&
                             BooleanSetting.CHECK_FOR_UPDATES.boolean)
                     )
@@ -986,6 +988,7 @@ class SettingsFragmentPresenter(private val fragmentView: SettingsFragmentView) 
                     BooleanSetting.ASYNC_SHADERS.defaultValue
                 )
             )
+            // AstraEH: Renderer options are read at game startup; descriptions require a restart.
             add(
                 SwitchSetting(
                     BooleanSetting.UBERHAR_HYBRID_TEV,
@@ -995,6 +998,7 @@ class SettingsFragmentPresenter(private val fragmentView: SettingsFragmentView) 
                     BooleanSetting.UBERHAR_HYBRID_TEV.defaultValue
                 )
             )
+            // AstraEH: Force mode is a correctness diagnostic, not a performance preset.
             add(
                 SwitchSetting(
                     BooleanSetting.UBERHAR_FORCE_TEV,

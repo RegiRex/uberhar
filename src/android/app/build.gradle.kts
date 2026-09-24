@@ -21,6 +21,7 @@ plugins {
  * next 680 years.
  */
 val autoVersion = (((System.currentTimeMillis() / 1000) - 1451606400) / 10).toInt()
+// AstraEH: Constrain both compilation and bundled JNI libraries for the Thor alpha.
 val abiFilter = if (providers.gradleProperty("uberharArm64Only").orNull == "true") {
     listOf("arm64-v8a")
 } else {
@@ -186,6 +187,7 @@ android {
             versionNameSuffix = "-googleplay"
             applicationId = "io.github.lime3ds.android"
         }
+        // AstraEH: A distinct application ID allows installation alongside Azahar.
         register("uberhar") {
             dimension = "version"
             applicationId = "org.uberhar.uberhar_emu"

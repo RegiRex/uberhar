@@ -1,3 +1,4 @@
+<!-- AstraEH: Uberhar branch overview; the upstream README begins after the separator. -->
 # Uberhar development branch
 
 Uberhar is an unofficial experimental Azahar fork for Android ARM64, based on
@@ -8,6 +9,8 @@ ubershader renderer and screen-synchronization changes are not implemented yet.
 The upstream project information and download links below describe Azahar.
 Uberhar builds are produced by this repository's **Uberhar ARM64 experimental
 alpha** workflow.
+
+See the [AstraEH code map](docs/UBERHAR_CODE_MAP.md) to locate the fork's changes.
 
 ---
 

@@ -1,8 +1,9 @@
 // Copyright 2026 Uberhar contributors
 // Licensed under GPLv2 or any later version; see license.txt.
 
-// Standalone generator probe. It links the production generator and replaces
-// only its logging sink, so errors abort rather than disappearing into a log.
+// AstraEH: Standalone generator probe. It links the production generator and
+// replaces only its logging sink, so errors abort rather than disappearing into
+// a log.
 #include <filesystem>
 #include <fstream>
 #include <random>
@@ -43,6 +44,8 @@ int main(int argc, char** argv) {
     constexpr std::array<u32, 10> modifiers{0, 1, 2, 3, 4, 5, 8, 9, 12, 13};
     constexpr std::array<u32, 9> color_ops{0, 1, 2, 4, 5, 6, 7, 8, 9};
     constexpr std::array<u32, 7> alpha_ops{0, 1, 2, 4, 5, 8, 9};
+    // AstraEH: Guard the known rounding mismatch so future changes cannot enable
+    // it unnoticed.
     for (bool alpha : {false, true}) {
         auto unsupported = base;
         unsupported.texture.tev_stages[0].ops_raw = alpha ? 3U << 16 : 3U;
@@ -50,6 +53,8 @@ int main(int argc, char** argv) {
             throw std::runtime_error("AddSigned must stay on the specialized path");
         }
     }
+    // AstraEH: Deterministic random programs make combiner regressions
+    // reproducible.
     for (u32 test = 0; test < 192; ++test) {
         auto config = base;
         config.texture.combiner_buffer_input.Assign(test < 16 ? test : random() & 255);
@@ -65,7 +70,7 @@ int main(int argc, char** argv) {
                             (alpha_ops[random() % alpha_ops.size()] << 16);
             stage.scales_raw = random() % 4 | ((random() % 4) << 16);
         }
-        // Directed coverage: stage-0 Previous redirection and passthrough,
+        // AstraEH: Directed coverage: stage-0 Previous redirection and passthrough,
         // scale=3 meaning 1, DOT3_RGBA alpha, and all buffer-mask combinations.
         if (test < 16) {
             config.texture.tev_stages[0] = {0x000f000f, 0, 0, test & 1 ? 0x00030003U : 0U};
@@ -79,12 +84,15 @@ int main(int argc, char** argv) {
         std::ofstream(prefix.string() + ".frag")
             << "#version 450\n"
             << Generator::GLSL::FragmentModule{config, user, profile}.Generate();
+        // AstraEH: Serialize the same 100-byte layout that Vulkan receives as push
+        // constants.
         std::ofstream constants(prefix.string() + ".bin", std::ios::binary);
         constants.write(reinterpret_cast<const char*>(config.texture.tev_stages.data()), 96);
         const u32 mask = config.texture.combiner_buffer_input;
         constants.write(reinterpret_cast<const char*>(&mask), 4);
     }
-    // Full fragment modules exercise Vulkan bindings and code outside TEV too.
+    // AstraEH: Full fragment modules exercise Vulkan bindings and code outside
+    // TEV too.
     for (u32 test = 0; test < 64; ++test) {
         auto config = base;
         constexpr std::array types{Pica::TexturingRegs::TextureConfig::Texture2D,

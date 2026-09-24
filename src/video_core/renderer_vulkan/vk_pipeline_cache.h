@@ -5,7 +5,7 @@
 #pragma once
 
 #include <bitset>
-#include <unordered_map>
+#include <unordered_map> // AstraEH: Separate in-memory caches for experimental TEV fallbacks.
 
 #include "video_core/rasterizer_interface.h"
 #include "video_core/renderer_vulkan/vk_graphics_pipeline.h"
@@ -138,6 +138,7 @@ private:
     /// Returns the transferable shader dir
     std::string GetTransferableDir() const;
 
+    // AstraEH: Fallback cache lifecycle and diagnostics; see the implementation for support caps.
     GraphicsPipeline* GetTevFallback(const PipelineInfo& info);
     void ClearTevFallbacks();
     void ReportUberharStats();
@@ -165,7 +166,7 @@ private:
 
     Shader trivial_vertex_shader;
 
-    // Separate maps keep experimental shaders out of the transferable cache.
+    // AstraEH: Separate maps keep experimental shaders out of the transferable cache.
     // Limit growth; after the limit we wait for the accurate specialized path.
     struct TevPushConstants {
         std::array<Pica::Shader::TevStageConfigRaw, 6> stages;
@@ -181,9 +182,11 @@ private:
     std::unordered_map<u64, std::unique_ptr<GraphicsPipeline>> tev_pipelines;
     const bool hybrid_tev;
     const bool force_tev;
+    // AstraEH: Draw counters belong to the render thread; wait counters belong to the scheduler.
     u64 draw_requests{};
     u64 specialized_pending{};
     u64 fallback_draws{};
+    u64 fallback_warming{};
     u64 fallback_unavailable{};
     u64 skipped_draws{};
     std::atomic<u64> pipeline_waits{};

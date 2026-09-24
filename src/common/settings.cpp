@@ -92,6 +92,7 @@ void LogSettings() {
     log_setting("Renderer_UseGLES", values.use_gles.GetValue());
     log_setting("Renderer_GraphicsAPI", GetGraphicsAPIName(values.graphics_api.GetValue()));
     log_setting("Renderer_AsyncShaders", values.async_shader_compilation.GetValue());
+    // AstraEH: Include experimental mode in logs so device reports can be compared.
     log_setting("Uberhar_HybridTEV", values.uberhar_hybrid_tev.GetValue());
     log_setting("Uberhar_ForceTEV", values.uberhar_force_tev.GetValue());
     log_setting("Renderer_AsyncPresentation", values.async_presentation.GetValue());
@@ -213,6 +214,7 @@ void RestoreGlobalState(bool is_powered_on) {
     values.physical_device.SetGlobal(true);
     values.spirv_shader_gen.SetGlobal(true);
     values.async_shader_compilation.SetGlobal(true);
+    // AstraEH: Release per-game overrides with the rest of the renderer settings.
     values.uberhar_hybrid_tev.SetGlobal(true);
     values.uberhar_force_tev.SetGlobal(true);
     values.async_presentation.SetGlobal(true);

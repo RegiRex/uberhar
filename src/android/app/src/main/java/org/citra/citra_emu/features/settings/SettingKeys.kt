@@ -34,6 +34,7 @@ object SettingKeys {
     external fun spirv_shader_gen(): String
     external fun disable_spirv_optimizer(): String
     external fun async_shader_compilation(): String
+    // AstraEH: Match the generated native keys; keep spelling in one CMake registry.
     external fun uberhar_hybrid_tev(): String
     external fun uberhar_force_tev(): String
     external fun async_presentation(): String

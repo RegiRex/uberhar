@@ -713,6 +713,7 @@ void QtConfig::ReadRendererValues() {
     ReadGlobalSetting(Settings::values.spirv_shader_gen);
     ReadGlobalSetting(Settings::values.disable_spirv_optimizer);
     ReadGlobalSetting(Settings::values.async_shader_compilation);
+    // AstraEH: Preserve Uberhar flags in desktop configs for renderer development.
     ReadGlobalSetting(Settings::values.uberhar_hybrid_tev);
     ReadGlobalSetting(Settings::values.uberhar_force_tev);
     ReadGlobalSetting(Settings::values.async_presentation);
@@ -1267,6 +1268,7 @@ void QtConfig::SaveRendererValues() {
     WriteGlobalSetting(Settings::values.spirv_shader_gen);
     WriteGlobalSetting(Settings::values.disable_spirv_optimizer);
     WriteGlobalSetting(Settings::values.async_shader_compilation);
+    // AstraEH: Round-trip both experiment flags even though the alpha targets Android.
     WriteGlobalSetting(Settings::values.uberhar_hybrid_tev);
     WriteGlobalSetting(Settings::values.uberhar_force_tev);
     WriteGlobalSetting(Settings::values.async_presentation);

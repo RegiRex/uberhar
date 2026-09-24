@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Execute production TEV GLSL on Mesa and compare with specialized GLSL.
+"""AstraEH: Execute production TEV GLSL on Mesa and compare with specialized GLSL.
 
 This isolates combiner math from sampling and lighting: all four texture
 functions return independently randomized colors. Full Vulkan fragment modules
@@ -21,11 +21,13 @@ dynamic = (cases / "dynamic-0.frag").read_text()
 
 
 def tev_body(source):
+    # AstraEH: Extract the actual combiner code, ending before the alpha-test statement.
     start = source.index("vec4 combiner_buffer =")
     end = source.index("if (false) discard;", start)
     return source[start:end] + "return combiner_output;\n"
 
 
+# AstraEH: Replace only the Vulkan uniform transport; preserve generated interpreter formulas.
 helpers = dynamic[dynamic.index("layout(push_constant)"):dynamic.index("void main()")]
 helpers = helpers.replace(
     "layout(push_constant) uniform UberTev",
@@ -60,7 +62,7 @@ void main() {
 samples = 256
 rng = random.Random(0x55424552)
 values = [rng.randrange(256) / 255.0 for _ in range(samples * 14 * 4)]
-# Filtered texture samples are not restricted to byte values. Exercise those
+# AstraEH: Filtered texture samples are not restricted to byte values. Exercise those
 # too, while retaining byte-quantized primary/lighting/constant colors.
 for sample in range(samples // 2, samples):
     for texture in range(3, 7):
@@ -77,6 +79,7 @@ outputs.bind_to_storage_buffer(2)
 count = 0
 mismatches = 0
 maximum_delta = 0
+# AstraEH: Evaluate both paths on identical inputs and require exact quantized RGBA agreement.
 for file in sorted(cases.glob("*.bin"), key=lambda p: int(p.stem)):
     specialized = file.with_suffix(".frag").read_text()
     source = (

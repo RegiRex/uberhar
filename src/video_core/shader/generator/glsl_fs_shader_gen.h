@@ -8,11 +8,12 @@
 
 namespace Pica::Shader::Generator::GLSL {
 
-/// Conservative support gate for the initial Vulkan TEV experiment.
+/// AstraEH: Conservative support gate for the initial Vulkan TEV experiment.
 bool SupportsDynamicTev(const FSConfig& config, const UserConfig& user);
 
 class FragmentModule {
 public:
+    // AstraEH: Existing callers stay specialized; Vulkan fallback callers opt into dynamic TEV.
     explicit FragmentModule(const FSConfig& config, const UserConfig& user, const Profile& profile,
                             bool dynamic_tev = false);
     ~FragmentModule();
@@ -68,7 +69,7 @@ private:
     /// Writes the code to emulate the specified TEV stage
     void WriteTevStage(u32 index);
 
-    /// Vulkan experiment: interpret TEV registers supplied in push constants.
+    /// AstraEH: Vulkan experiment: interpret TEV registers supplied in push constants.
     void DefineDynamicTev();
     void WriteDynamicTevStage(u32 index);
 
@@ -95,7 +96,8 @@ private:
     const UserConfig& user;
     const Profile& profile;
     std::string out;
-    bool dynamic_tev{};
+    bool
+        dynamic_tev{}; // AstraEH: Select runtime TEV instructions instead of baked stage constants.
     bool use_blend_fallback{};
     bool use_fragment_shader_interlock{};
     bool use_fragment_shader_barycentric{};

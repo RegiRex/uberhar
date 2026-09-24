@@ -37,6 +37,7 @@ foreach(KEY IN ITEMS
     "spirv_shader_gen"
     "disable_spirv_optimizer"
     "async_shader_compilation"
+    # AstraEH: Shared native/JNI keys for the opt-in Uberhar experiment.
     "uberhar_hybrid_tev"
     "uberhar_force_tev"
     "async_presentation"

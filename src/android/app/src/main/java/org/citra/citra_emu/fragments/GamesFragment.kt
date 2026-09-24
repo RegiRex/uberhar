@@ -253,6 +253,7 @@ class GamesFragment : Fragment() {
         super.onResume()
 
         // Perform update check
+        // AstraEH: Uberhar has its own package ID and must not offer Azahar update downloads.
         @Suppress("SimplifyBooleanWithConstants", "RedundantSuppression")
         if (!BuildConfig.DEBUG &&
             BuildConfig.FLAVOR != "uberhar" &&

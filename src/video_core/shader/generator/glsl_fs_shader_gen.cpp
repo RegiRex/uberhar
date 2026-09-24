@@ -14,6 +14,7 @@ using TextureType = Pica::TexturingRegs::TextureConfig::TextureType;
 
 constexpr static std::size_t RESERVE_SIZE = 8 * 1024 * 1024;
 
+// AstraEH: Route unvalidated shadow/custom-normal paths through the existing specialized renderer.
 bool SupportsDynamicTev(const FSConfig& config, const UserConfig& user) {
     if (config.UsesSpirvIncompatibleConfig() ||
         config.texture.texture0_type == TexturingRegs::TextureConfig::Shadow2D ||
@@ -21,7 +22,7 @@ bool SupportsDynamicTev(const FSConfig& config, const UserConfig& user) {
         return false;
     }
     for (const TexturingRegs::TevStageConfig stage : config.texture.tev_stages) {
-        // AddSigned produces half-byte ties. Different compiler optimizations
+        // AstraEH: AddSigned produces half-byte ties. Different compiler optimizations
         // between dynamic and specialized expressions can round these ties in
         // opposite directions, with later stages amplifying the difference.
         // Keep it on the established path until that behavior is resolved.
@@ -124,6 +125,7 @@ layout (binding = 2, std140) uniform fs_data {
 FragmentModule::FragmentModule(const FSConfig& config_, const UserConfig& user_,
                                const Profile& profile_, bool dynamic_tev_)
     : config{config_}, user{user_}, profile{profile_}, dynamic_tev{dynamic_tev_} {
+    // AstraEH: The interpreter uses Vulkan push constants; OpenGL retains specialized generation.
     ASSERT(!dynamic_tev || profile.is_vulkan);
     config.ApplyProfile(profile_);
     out.reserve(RESERVE_SIZE);
@@ -141,6 +143,7 @@ FragmentModule::FragmentModule(const FSConfig& config_, const UserConfig& user_,
     for (u32 i = 0; i < 4; i++) {
         DefineTexUnitSampler(i);
     }
+    // AstraEH: Emit interpreter helpers after the sampling functions they call.
     if (dynamic_tev) {
         DefineDynamicTev();
     }
@@ -461,6 +464,7 @@ void FragmentModule::WriteAlphaTestCondition(FramebufferRegs::CompareFunc func) 
 }
 
 void FragmentModule::WriteTevStage(u32 index) {
+    // AstraEH: Both paths share surrounding lighting, fog and framebuffer code.
     if (dynamic_tev) {
         WriteDynamicTevStage(index);
         return;
@@ -511,9 +515,10 @@ void FragmentModule::WriteTevStage(u32 index) {
 }
 
 void FragmentModule::DefineDynamicTev() {
-    // std430 uvec4 array stride is 16 bytes; the mask follows at byte 96.
+    // AstraEH: std430 uvec4 array stride is 16 bytes; the mask follows at byte 96.
     // All branches depend on draw-uniform state, including texture selection.
     out += R"(
+// AstraEH: Runtime source/modifier decoding uses PICA register enum values.
 layout(push_constant) uniform UberTev {
     uvec4 stages[6];
     uint buffer_mask;
@@ -568,6 +573,7 @@ float uber_alpha_modifier(vec4 value, uint modifier) {
 )";
 }
 
+// AstraEH: Decode packed TEV instructions while preserving upstream rounding/scale order.
 void FragmentModule::WriteDynamicTevStage(u32 index) {
     using Operation = TexturingRegs::TevStageConfig::Operation;
     out += fmt::format("{{\nuvec4 instruction = uber_tev.stages[{}];\n", index);
@@ -578,7 +584,7 @@ uint color_scale = instruction.w & 3u;
 uint alpha_scale = (instruction.w >> 16u) & 3u;
 float color_multiplier = float(color_scale < 3u ? 1u << color_scale : 1u);
 float alpha_multiplier = float(alpha_scale < 3u ? 1u << alpha_scale : 1u);
-// Match the specialized generator's passthrough optimization, including stage 0.
+// AstraEH: Match the specialized generator's passthrough optimization, including stage 0.
 bool passthrough = color_op == 0u && alpha_op == 0u &&
     (instruction.x & 0x000f000fu) == 0x000f000fu &&
     (instruction.y & 0x0000700fu) == 0u &&
@@ -587,6 +593,7 @@ if (!passthrough) {
 )";
     for (u32 input = 0; input < 3; ++input) {
         out += fmt::format("{{ uint source = (instruction.x >> {}u) & 15u;\n", input * 4);
+        // AstraEH: Stage 0 redirects Previous to source 3 exactly once, not recursively.
         if (index == 0) {
             out += "if (source == 15u) source = (instruction.x >> 8u) & 15u;\n";
         }
@@ -596,6 +603,7 @@ if (!passthrough) {
             "const_color[{}]), (instruction.y >> {}u) & 15u); }}\n",
             input + 1, index, input * 4);
     }
+    // AstraEH: Reuse upstream operation emitters so formulas are not maintained twice.
     out += "vec3 color_output;\nswitch (color_op) {\n";
     for (u32 operation = 0; operation <= 9; ++operation) {
         out += fmt::format("case {}u: color_output = ", operation);
@@ -633,6 +641,7 @@ combiner_output = vec4(clamp(color_output * color_multiplier, vec3(0.0), vec3(1.
 }
 combiner_buffer = next_combiner_buffer;
 )";
+    // AstraEH: Buffer writes take effect one stage later; only stages 0-3 have write masks.
     if (index < 4) {
         out += fmt::format("if ((uber_tev.buffer_mask & {}u) != 0u) "
                            "next_combiner_buffer.rgb = combiner_output.rgb;\n"

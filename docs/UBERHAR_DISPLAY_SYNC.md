@@ -1,3 +1,4 @@
+<!-- AstraEH: Source audit and proposed measurements; no display-sync implementation is claimed. -->
 # Dual-display follow-up
 
 Status: source audit and proposed investigation, not implemented in alpha 1.

@@ -1,3 +1,4 @@
+# AstraEH: Build pinned, unmodified upstream source to verify the Android toolchain.
 name: Uberhar ARM64 baseline
 
 on:
@@ -76,10 +77,14 @@ jobs:
               echo 'Missing ARM64 emulator library' >&2
               exit 1
             fi
-            if unzip -Z1 "$apk" | grep '^lib/x86_64/' > /dev/null; then
-              echo 'Unexpected x86_64 libraries in ARM64 build' >&2
+            # AstraEH: Upstream bundles an unused x86_64 validation layer even with ARM64 codegen.
+            # Permit only that known packaging artifact; reject other non-ARM64 native files.
+            if unzip -Z1 "$apk" | grep '^lib/' | grep -v '^lib/arm64-v8a/' | \
+                grep -v '^lib/x86_64/libVkLayer_khronos_validation.so$' > /dev/null; then
+              echo 'Unexpected non-ARM64 native library in baseline' >&2
               exit 1
             fi
+            "$ANDROID_SDK_ROOT/build-tools/35.0.0/apksigner" verify "$apk"
             cp "$apk" artifacts/
           done
           git -C baseline rev-parse HEAD > artifacts/upstream-commit.txt
