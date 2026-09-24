@@ -21,7 +21,9 @@ public:
     AsyncHandle(bool is_done_ = false) : is_done{is_done_} {}
 
     [[nodiscard]] bool IsDone() noexcept {
-        return is_done.load(std::memory_order::relaxed);
+        // Publish the shader/pipeline handle along with completion. The render
+        // thread can read it without taking mutex after observing this flag.
+        return is_done.load(std::memory_order::acquire);
     }
 
     void WaitDone() noexcept {

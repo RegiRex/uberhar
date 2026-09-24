@@ -92,6 +92,8 @@ void LogSettings() {
     log_setting("Renderer_UseGLES", values.use_gles.GetValue());
     log_setting("Renderer_GraphicsAPI", GetGraphicsAPIName(values.graphics_api.GetValue()));
     log_setting("Renderer_AsyncShaders", values.async_shader_compilation.GetValue());
+    log_setting("Uberhar_HybridTEV", values.uberhar_hybrid_tev.GetValue());
+    log_setting("Uberhar_ForceTEV", values.uberhar_force_tev.GetValue());
     log_setting("Renderer_AsyncPresentation", values.async_presentation.GetValue());
     log_setting("Renderer_SpirvShaderGen", values.spirv_shader_gen.GetValue());
     log_setting("Renderer_DisableSpirvOptimizer", values.disable_spirv_optimizer.GetValue());
@@ -211,6 +213,8 @@ void RestoreGlobalState(bool is_powered_on) {
     values.physical_device.SetGlobal(true);
     values.spirv_shader_gen.SetGlobal(true);
     values.async_shader_compilation.SetGlobal(true);
+    values.uberhar_hybrid_tev.SetGlobal(true);
+    values.uberhar_force_tev.SetGlobal(true);
     values.async_presentation.SetGlobal(true);
     values.use_hw_shader.SetGlobal(true);
     values.use_disk_shader_cache.SetGlobal(true);

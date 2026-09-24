@@ -1,0 +1,93 @@
+name: Uberhar ARM64 experimental alpha
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [uberhar/hybrid-shaders]
+    paths:
+      - src/**
+      - CMakeModules/**
+      - .github/workflows/uberhar-alpha.yml
+      - tools/uberhar/validate_apk.py
+
+permissions:
+  contents: read
+
+concurrency:
+  group: uberhar-alpha
+  cancel-in-progress: true
+
+jobs:
+  android:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Cache compilation dependencies
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            ~/.cache/ccache
+          key: uberhar-android-v1-${{ github.run_id }}
+          restore-keys: |
+            uberhar-android-v1-
+            baseline-android-v1-
+
+      - name: Reuse development signing key when available
+        uses: actions/cache@v5
+        with:
+          path: ~/.android/debug.keystore
+          key: uberhar-development-signing-v1
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ccache ninja-build
+          "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" \
+            "platforms;android-35" "build-tools;35.0.0" \
+            "ndk;27.3.13750724" "cmake;3.30.3"
+
+      - name: Build Android ARM64
+        working-directory: src/android
+        run: |
+          set -o pipefail
+          export JAVA_HOME="$JAVA_HOME_17_X64"
+          export PATH="$JAVA_HOME/bin:$PATH"
+          export NDK_CCACHE="$(command -v ccache)"
+          bash ./gradlew --no-daemon --max-workers=2 \
+            -Pandroid.injected.build.abi=arm64-v8a \
+            assembleUberharRelease 2>&1 | tee "$GITHUB_WORKSPACE/uberhar-build.log"
+
+      - name: Validate package and record provenance
+        run: |
+          python3 tools/uberhar/validate_apk.py src/android/app/build/outputs/apk artifacts
+          APK="$(find artifacts -name '*.apk' -print -quit)"
+          "$ANDROID_SDK_ROOT/build-tools/35.0.0/aapt" dump badging "$APK" > artifacts/package.txt
+          grep "package: name='org.uberhar.uberhar_emu'" artifacts/package.txt
+          "$ANDROID_SDK_ROOT/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK" > artifacts/signature.txt
+          git rev-parse HEAD > artifacts/uberhar-commit.txt
+          git submodule status --recursive > artifacts/submodules.txt
+          cp UBERHAR.md artifacts/
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: uberhar-alpha1-arm64-${{ github.run_number }}
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: uberhar-build-log-${{ github.run_number }}
+          path: uberhar-build.log
+          if-no-files-found: ignore
+          retention-days: 14

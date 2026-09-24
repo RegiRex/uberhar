@@ -14,6 +14,8 @@ enum class BooleanSetting(
     EXPAND_TO_CUTOUT_AREA(SettingKeys.expand_to_cutout_area(), Settings.SECTION_LAYOUT, false),
     SPIRV_SHADER_GEN(SettingKeys.spirv_shader_gen(), Settings.SECTION_RENDERER, true),
     ASYNC_SHADERS(SettingKeys.async_shader_compilation(), Settings.SECTION_RENDERER, false),
+    UBERHAR_HYBRID_TEV(SettingKeys.uberhar_hybrid_tev(), Settings.SECTION_RENDERER, false),
+    UBERHAR_FORCE_TEV(SettingKeys.uberhar_force_tev(), Settings.SECTION_RENDERER, false),
     DISABLE_SPIRV_OPTIMIZER(SettingKeys.disable_spirv_optimizer(), Settings.SECTION_RENDERER, true),
     PLUGIN_LOADER(SettingKeys.plugin_loader(), Settings.SECTION_SYSTEM, false),
     ALLOW_PLUGIN_LOADER(SettingKeys.allow_plugin_loader(), Settings.SECTION_SYSTEM, true),

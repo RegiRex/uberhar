@@ -34,6 +34,8 @@ object SettingKeys {
     external fun spirv_shader_gen(): String
     external fun disable_spirv_optimizer(): String
     external fun async_shader_compilation(): String
+    external fun uberhar_hybrid_tev(): String
+    external fun uberhar_force_tev(): String
     external fun async_presentation(): String
     external fun use_hw_shader(): String
     external fun use_disk_shader_cache(): String

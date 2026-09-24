@@ -5,6 +5,7 @@
 #pragma once
 
 #include <bitset>
+#include <unordered_map>
 
 #include "video_core/rasterizer_interface.h"
 #include "video_core/renderer_vulkan/vk_graphics_pipeline.h"
@@ -137,6 +138,10 @@ private:
     /// Returns the transferable shader dir
     std::string GetTransferableDir() const;
 
+    GraphicsPipeline* GetTevFallback(const PipelineInfo& info);
+    void ClearTevFallbacks();
+    void ReportUberharStats();
+
 private:
     const Instance& instance;
     Scheduler& scheduler;
@@ -159,6 +164,29 @@ private:
     std::array<Shader*, MAX_SHADER_STAGES> current_shaders;
 
     Shader trivial_vertex_shader;
+
+    // Separate maps keep experimental shaders out of the transferable cache.
+    // Limit growth; after the limit we wait for the accurate specialized path.
+    struct TevPushConstants {
+        std::array<Pica::Shader::TevStageConfigRaw, 6> stages;
+        u32 buffer_mask;
+    };
+    static_assert(sizeof(TevPushConstants) == 100);
+    static_assert(offsetof(TevPushConstants, buffer_mask) == 96);
+    TevPushConstants tev_constants{};
+    std::optional<Pica::Shader::FSConfig> tev_family_config;
+    Pica::Shader::UserConfig tev_user{};
+    std::unordered_map<u64, std::unique_ptr<Shader>> tev_shaders;
+    std::unordered_map<u64, std::unique_ptr<GraphicsPipeline>> tev_pipelines;
+    const bool hybrid_tev;
+    const bool force_tev;
+    u64 draw_requests{};
+    u64 specialized_pending{};
+    u64 fallback_draws{};
+    u64 fallback_unavailable{};
+    u64 skipped_draws{};
+    std::atomic<u64> pipeline_waits{};
+    std::atomic<u64> pipeline_wait_ns{};
 
     u64 current_program_id{0};
     std::vector<std::shared_ptr<ShaderDiskCache>> disk_caches;

@@ -2,6 +2,7 @@
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
 
+#include <chrono>
 #include <boost/container/static_vector.hpp>
 
 #include "common/common_paths.h"
@@ -93,7 +94,10 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
           DescriptorHeap{instance, scheduler.GetMasterSemaphore(), UTILITY_BINDINGS, 32}},
       trivial_vertex_shader{
           instance, vk::ShaderStageFlagBits::eVertex,
-          GLSL::GenerateTrivialVertexShader(instance.IsShaderClipDistanceSupported(), true)} {
+          GLSL::GenerateTrivialVertexShader(instance.IsShaderClipDistanceSupported(), true)},
+      hybrid_tev{Settings::values.uberhar_hybrid_tev.GetValue()},
+      force_tev{hybrid_tev && Settings::values.uberhar_force_tev.GetValue()} {
+    LOG_INFO(Render_Vulkan, "Uberhar: hybrid_tev={} force_tev={}", hybrid_tev, force_tev);
     scheduler.RegisterOnDispatch([this] { update_queue.Flush(); });
     profile = Pica::Shader::Profile{
         .enable_accurate_mul = false,
@@ -135,18 +139,25 @@ void PipelineCache::BuildLayout() {
     descriptor_set_layouts[1] = descriptor_heaps[1].Layout();
     descriptor_set_layouts[2] = descriptor_heaps[2].Layout();
 
+    const vk::PushConstantRange tev_range{
+        .stageFlags = vk::ShaderStageFlagBits::eFragment,
+        .offset = 0,
+        .size = sizeof(TevPushConstants),
+    };
     const vk::PipelineLayoutCreateInfo layout_info = {
         .setLayoutCount = NumRasterizerSets,
         .pSetLayouts = descriptor_set_layouts.data(),
-        .pushConstantRangeCount = 0,
-        .pPushConstantRanges = nullptr,
+        .pushConstantRangeCount = hybrid_tev ? 1U : 0U,
+        .pPushConstantRanges = hybrid_tev ? &tev_range : nullptr,
     };
     pipeline_layout = instance.GetDevice().createPipelineLayoutUnique(layout_info);
 }
 
 PipelineCache::~PipelineCache() {
+    scheduler.WaitWorker();
     pipeline_workers.WaitForRequests();
     shader_workers.WaitForRequests();
+    ReportUberharStats();
     SaveDriverPipelineDiskCache();
 }
 
@@ -177,6 +188,12 @@ void PipelineCache::SwitchCache(u64 title_id, const std::atomic_bool& stop_loadi
     }
 
     LOG_INFO(Render_Vulkan, "Switching pipeline cache to title_id={:016X}", title_id);
+
+    // Fallback pipelines reference the current title's VS/GS objects and driver
+    // cache. Drain both GPU commands and compiler jobs before replacing either.
+    if (hybrid_tev) {
+        ClearTevFallbacks();
+    }
 
     // Save current driver cache, update program ID and load the new driver cache
     SaveDriverPipelineDiskCache();
@@ -370,14 +387,38 @@ bool PipelineCache::BindPipeline(PipelineInfo& info, bool wait_built) {
         info.state.shader_ids[i] = shader_hashes[i];
     }
 
-    GraphicsPipeline* const pipeline = curr_disk_cache->GetPipeline(info);
-    if (!pipeline->IsDone() && !pipeline->TryBuild(wait_built)) {
+    ++draw_requests;
+    GraphicsPipeline* pipeline = curr_disk_cache->GetPipeline(info);
+    const bool pending = !pipeline->IsDone();
+    specialized_pending += pending;
+    bool using_fallback = false;
+    if (hybrid_tev) {
+        // Always queue the specialized pipeline. Unlike the upstream async
+        // policy, a hybrid miss must never silently omit a draw.
+        if (pending) {
+            pipeline->TryBuild(true);
+        }
+        if (force_tev || !pipeline->IsDone()) {
+            if (auto* fallback = GetTevFallback(info)) {
+                pipeline = fallback;
+                using_fallback = true;
+                ++fallback_draws;
+                if (!pipeline->IsDone()) {
+                    pipeline->TryBuild(true);
+                }
+            } else {
+                ++fallback_unavailable;
+            }
+        }
+    } else if (pending && !pipeline->TryBuild(wait_built)) {
+        ++skipped_draws;
         return false;
     }
 
     const bool is_dirty = scheduler.IsStateDirty(StateFlags::Pipeline);
     const bool pipeline_dirty = (current_pipeline != pipeline) || is_dirty;
-    scheduler.Record([this, is_dirty, pipeline_dirty, pipeline,
+    scheduler.Record([this, is_dirty, pipeline_dirty, pipeline, using_fallback,
+                      constants = tev_constants,
                       current_dynamic = current_info.dynamic_info, dynamic = info.dynamic_info,
                       descriptor_sets = bound_descriptor_sets, offsets = offsets,
                       current_rasterization = current_info.state.rasterization,
@@ -480,13 +521,23 @@ bool PipelineCache::BindPipeline(PipelineInfo& info, bool wait_built) {
 
         if (pipeline_dirty) {
             if (!pipeline->IsDone()) {
+                const auto start = std::chrono::steady_clock::now();
                 pipeline->WaitDone();
+                const auto elapsed = std::chrono::steady_clock::now() - start;
+                pipeline_waits.fetch_add(1, std::memory_order::relaxed);
+                pipeline_wait_ns.fetch_add(
+                    std::chrono::duration_cast<std::chrono::nanoseconds>(elapsed).count(),
+                    std::memory_order::relaxed);
             }
             cmdbuf.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline->Handle());
         }
 
         cmdbuf.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *pipeline_layout, 0,
                                   descriptor_sets, offsets);
+        if (using_fallback) {
+            cmdbuf.pushConstants(*pipeline_layout, vk::ShaderStageFlagBits::eFragment, 0,
+                                 sizeof(constants), &constants);
+        }
     });
 
     current_info = info;
@@ -572,12 +623,87 @@ void PipelineCache::UseTrivialGeometryShader() {
 void PipelineCache::UseFragmentShader(const Pica::RegsInternal& regs,
                                       const Pica::Shader::UserConfig& user) {
 
+    if (hybrid_tev) {
+        tev_family_config.emplace(regs);
+        tev_constants = {tev_family_config->texture.tev_stages,
+                         tev_family_config->texture.combiner_buffer_input.Value()};
+        tev_family_config->texture.tev_stages = {};
+        tev_family_config->texture.combiner_buffer_input.Assign(0);
+        tev_user = user;
+    }
+
     auto res = curr_disk_cache->UseFragmentShader(regs, user);
 
     if (res.has_value()) {
         current_shaders[ProgramType::FS] = (*res).second;
         shader_hashes[ProgramType::FS] = (*res).first;
     }
+}
+
+GraphicsPipeline* PipelineCache::GetTevFallback(const PipelineInfo& info) {
+    // Shadow sampling and custom normal maps are outside the alpha's scope.
+    if (!tev_family_config || tev_family_config->UsesSpirvIncompatibleConfig() ||
+        tev_family_config->texture.texture0_type == Pica::TexturingRegs::TextureConfig::Shadow2D ||
+        !tev_user.IsCacheable()) {
+        return nullptr;
+    }
+    constexpr std::size_t MaxFamilies = 128;
+    constexpr std::size_t MaxPipelines = 1024;
+    const u64 family_hash = tev_family_config->Hash();
+    auto shader_it = tev_shaders.find(family_hash);
+    if (shader_it == tev_shaders.end()) {
+        if (tev_shaders.size() >= MaxFamilies || tev_pipelines.size() >= MaxPipelines) {
+            return nullptr;
+        }
+        auto shader = std::make_unique<Shader>(instance);
+        auto* shader_ptr = shader.get();
+        shader_it = tev_shaders.emplace(family_hash, std::move(shader)).first;
+        shader_workers.QueueWork([this, shader_ptr, config = *tev_family_config, user = tev_user] {
+            GLSL::FragmentModule module{config, user, profile, true};
+            shader_ptr->module = Compile(module.Generate(), vk::ShaderStageFlagBits::eFragment,
+                                         instance.GetDevice());
+            shader_ptr->MarkDone();
+        });
+    }
+    PipelineInfo fallback_info = info;
+    fallback_info.state.shader_ids[ProgramType::FS] = family_hash;
+    const u64 hash = fallback_info.state.OptimizedHash(instance);
+    auto pipeline_it = tev_pipelines.find(hash);
+    if (pipeline_it == tev_pipelines.end()) {
+        if (tev_pipelines.size() >= MaxPipelines) {
+            return nullptr;
+        }
+        auto shaders = current_shaders;
+        shaders[ProgramType::FS] = shader_it->second.get();
+        if (!instance.UseGeometryShaders() || instance.IsFragmentShaderBarycentricSupported()) {
+            shaders[ProgramType::GS] = nullptr;
+        }
+        auto pipeline = std::make_unique<GraphicsPipeline>(
+            instance, renderpass_cache, fallback_info, *driver_pipeline_cache, *pipeline_layout,
+            shaders, &pipeline_workers);
+        pipeline_it = tev_pipelines.emplace(hash, std::move(pipeline)).first;
+    }
+    return pipeline_it->second.get();
+}
+
+void PipelineCache::ClearTevFallbacks() {
+    scheduler.Finish();
+    pipeline_workers.WaitForRequests();
+    shader_workers.WaitForRequests();
+    tev_pipelines.clear();
+    tev_shaders.clear();
+    current_pipeline = nullptr;
+    tev_family_config.reset();
+}
+
+void PipelineCache::ReportUberharStats() {
+    LOG_INFO(Render_Vulkan,
+             "Uberhar totals: draws={} specialized_pending={} fallback_draws={} "
+             "fallback_unavailable={} skipped={} families={} fallback_pipelines={} "
+             "scheduler_pipeline_waits={} scheduler_pipeline_wait_ms={:.3f}",
+             draw_requests, specialized_pending, fallback_draws, fallback_unavailable, skipped_draws,
+             tev_shaders.size(), tev_pipelines.size(), pipeline_waits.load(),
+             pipeline_wait_ns.load() / 1000000.0);
 }
 
 bool PipelineCache::IsCacheValid(std::span<const u8> data) const {

@@ -986,6 +986,24 @@ class SettingsFragmentPresenter(private val fragmentView: SettingsFragmentView) 
                 )
             )
             add(
+                SwitchSetting(
+                    BooleanSetting.UBERHAR_HYBRID_TEV,
+                    R.string.uberhar_hybrid_tev,
+                    R.string.uberhar_hybrid_tev_description,
+                    BooleanSetting.UBERHAR_HYBRID_TEV.key,
+                    BooleanSetting.UBERHAR_HYBRID_TEV.defaultValue
+                )
+            )
+            add(
+                SwitchSetting(
+                    BooleanSetting.UBERHAR_FORCE_TEV,
+                    R.string.uberhar_force_tev,
+                    R.string.uberhar_force_tev_description,
+                    BooleanSetting.UBERHAR_FORCE_TEV.key,
+                    BooleanSetting.UBERHAR_FORCE_TEV.defaultValue
+                )
+            )
+            add(
                 SingleChoiceSetting(
                     IntSetting.RESOLUTION_FACTOR,
                     R.string.internal_resolution,

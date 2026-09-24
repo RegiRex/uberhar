@@ -6,8 +6,12 @@ package org.citra.citra_emu.utils
 
 import android.content.Intent
 import android.net.Uri
+import androidx.documentfile.provider.DocumentFile
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.ViewModelProvider
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import org.citra.citra_emu.BuildConfig
+import org.citra.citra_emu.R
 import org.citra.citra_emu.fragments.CitraDirectoryDialogFragment
 import org.citra.citra_emu.fragments.CopyDirProgressDialogFragment
 import org.citra.citra_emu.model.SetupCallback
@@ -41,6 +45,24 @@ class CitraDirectoryHelper(
                     path,
                     takeFlags
                 )
+                if (BuildConfig.FLAVOR == "uberhar" && path != previous) {
+                    val directory = DocumentFile.fromTreeUri(fragmentActivity, path)
+                    val marker = directory?.findFile("uberhar-data.txt")
+                    val isEmpty = directory?.listFiles()?.isEmpty() == true
+                    if (directory == null || (marker == null && !isEmpty) ||
+                        (marker == null && directory.createFile("text/plain", "uberhar-data.txt") == null)
+                    ) {
+                        MaterialAlertDialogBuilder(fragmentActivity)
+                            .setTitle(R.string.uberhar_separate_folder_title)
+                            .setMessage(R.string.uberhar_separate_folder_description)
+                            .setPositiveButton(android.R.string.ok, null)
+                            .show()
+                        ViewModelProvider(fragmentActivity)[HomeViewModel::class.java]
+                            .setPickingUserDir(false)
+                        buttonState()
+                        return@Listener
+                    }
+                }
                 if (!moveData || previous.toString().isEmpty()) {
                     initializeCitraDirectory(path)
                     buttonState()

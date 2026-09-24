@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name" translatable="false">Uberhar Alpha</string>
+    <string name="select_citra_user_folder">Select a separate Uberhar data folder</string>
+    <string name="select_citra_user_folder_description">Create an empty folder named Uberhar for this experimental build. Your Azahar data folder must stay separate.</string>
+</resources>

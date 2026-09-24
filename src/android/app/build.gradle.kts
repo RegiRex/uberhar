@@ -182,6 +182,11 @@ android {
             versionNameSuffix = "-googleplay"
             applicationId = "io.github.lime3ds.android"
         }
+        register("uberhar") {
+            dimension = "version"
+            applicationId = "org.uberhar.uberhar_emu"
+            versionNameSuffix = "-uberhar-alpha1"
+        }
     }
 
     externalNativeBuild {

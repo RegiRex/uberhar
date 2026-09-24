@@ -102,8 +102,9 @@ layout (binding = 2, std140) uniform fs_data {
 )";
 
 FragmentModule::FragmentModule(const FSConfig& config_, const UserConfig& user_,
-                               const Profile& profile_)
-    : config{config_}, user{user_}, profile{profile_} {
+                               const Profile& profile_, bool dynamic_tev_)
+    : config{config_}, user{user_}, profile{profile_}, dynamic_tev{dynamic_tev_} {
+    ASSERT(!dynamic_tev || profile.is_vulkan);
     config.ApplyProfile(profile_);
     out.reserve(RESERVE_SIZE);
     DefineExtensions();
@@ -119,6 +120,9 @@ FragmentModule::FragmentModule(const FSConfig& config_, const UserConfig& user_,
     DefineProcTexSampler();
     for (u32 i = 0; i < 4; i++) {
         DefineTexUnitSampler(i);
+    }
+    if (dynamic_tev) {
+        DefineDynamicTev();
     }
 }
 
@@ -437,6 +441,10 @@ void FragmentModule::WriteAlphaTestCondition(FramebufferRegs::CompareFunc func) 
 }
 
 void FragmentModule::WriteTevStage(u32 index) {
+    if (dynamic_tev) {
+        WriteDynamicTevStage(index);
+        return;
+    }
     const TexturingRegs::TevStageConfig stage = config.texture.tev_stages[index];
     if (!IsPassThroughTevStage(stage)) {
         out += "color_results_1 = ";
@@ -480,6 +488,140 @@ void FragmentModule::WriteTevStage(u32 index) {
     if (config.TevStageUpdatesCombinerBufferAlpha(index)) {
         out += "next_combiner_buffer.a = combiner_output.a;\n";
     }
+}
+
+void FragmentModule::DefineDynamicTev() {
+    // std430 uvec4 array stride is 16 bytes; the mask follows at byte 96.
+    // All branches depend on draw-uniform state, including texture selection.
+    out += R"(
+layout(push_constant) uniform UberTev {
+    uvec4 stages[6];
+    uint buffer_mask;
+} uber_tev;
+
+vec4 uber_source(uint source, vec4 primary, vec4 lit, vec4 secondary,
+                 vec4 buffer_value, vec4 previous, vec4 constant_value) {
+    switch (source) {
+    case 0u: return primary;
+    case 1u: return lit;
+    case 2u: return secondary;
+    case 3u: return sampleTexUnit0();
+    case 4u: return sampleTexUnit1();
+    case 5u: return sampleTexUnit2();
+    case 6u: return sampleTexUnit3();
+    case 13u: return buffer_value;
+    case 14u: return constant_value;
+    case 15u: return previous;
+    default: return vec4(0.0);
+    }
+}
+
+vec3 uber_color_modifier(vec4 value, uint modifier) {
+    switch (modifier) {
+    case 0u: return value.rgb;
+    case 1u: return vec3(1.0) - value.rgb;
+    case 2u: return value.aaa;
+    case 3u: return vec3(1.0) - value.aaa;
+    case 4u: return value.rrr;
+    case 5u: return vec3(1.0) - value.rrr;
+    case 8u: return value.ggg;
+    case 9u: return vec3(1.0) - value.ggg;
+    case 12u: return value.bbb;
+    case 13u: return vec3(1.0) - value.bbb;
+    default: return vec3(0.0);
+    }
+}
+
+float uber_alpha_modifier(vec4 value, uint modifier) {
+    switch (modifier) {
+    case 0u: return value.a;
+    case 1u: return 1.0 - value.a;
+    case 2u: return value.r;
+    case 3u: return 1.0 - value.r;
+    case 4u: return value.g;
+    case 5u: return 1.0 - value.g;
+    case 6u: return value.b;
+    case 7u: return 1.0 - value.b;
+    default: return 0.0;
+    }
+}
+)";
+}
+
+void FragmentModule::WriteDynamicTevStage(u32 index) {
+    using Operation = TexturingRegs::TevStageConfig::Operation;
+    out += fmt::format("{{\nuvec4 instruction = uber_tev.stages[{}];\n", index);
+    out += R"(
+uint color_op = instruction.z & 15u;
+uint alpha_op = (instruction.z >> 16u) & 15u;
+uint color_scale = instruction.w & 3u;
+uint alpha_scale = (instruction.w >> 16u) & 3u;
+float color_multiplier = float(color_scale < 3u ? 1u << color_scale : 1u);
+float alpha_multiplier = float(alpha_scale < 3u ? 1u << alpha_scale : 1u);
+// Match the specialized generator's passthrough optimization, including stage 0.
+bool passthrough = color_op == 0u && alpha_op == 0u &&
+    (instruction.x & 0x000f000fu) == 0x000f000fu &&
+    (instruction.y & 0x0000700fu) == 0u &&
+    color_multiplier == 1.0 && alpha_multiplier == 1.0;
+if (!passthrough) {
+)";
+    for (u32 input = 0; input < 3; ++input) {
+        out += fmt::format("{{ uint source = (instruction.x >> {}u) & 15u;\n", input * 4);
+        if (index == 0) {
+            out += "if (source == 15u) source = (instruction.x >> 8u) & 15u;\n";
+        }
+        out += fmt::format(
+            "color_results_{} = uber_color_modifier(uber_source(source, rounded_primary_color, "
+            "primary_fragment_color, secondary_fragment_color, combiner_buffer, combiner_output, "
+            "const_color[{}]), (instruction.y >> {}u) & 15u); }}\n",
+            input + 1, index, input * 4);
+    }
+    out += "vec3 color_output;\nswitch (color_op) {\n";
+    for (u32 operation = 0; operation <= 9; ++operation) {
+        out += fmt::format("case {}u: color_output = ", operation);
+        AppendColorCombiner(static_cast<Operation>(operation));
+        out += "; break;\n";
+    }
+    out += "default: color_output = vec3(0.0); break;\n}\n"
+           "color_output = byteround(color_output);\n"
+           "float alpha_output;\n"
+           "if (color_op == 7u) { alpha_output = color_output.r; } else {\n";
+    for (u32 input = 0; input < 3; ++input) {
+        out += fmt::format("{{ uint source = (instruction.x >> {}u) & 15u;\n", 16 + input * 4);
+        if (index == 0) {
+            out += "if (source == 15u) source = (instruction.x >> 24u) & 15u;\n";
+        }
+        out += fmt::format(
+            "alpha_results_{} = uber_alpha_modifier(uber_source(source, rounded_primary_color, "
+            "primary_fragment_color, secondary_fragment_color, combiner_buffer, combiner_output, "
+            "const_color[{}]), (instruction.y >> {}u) & 7u); }}\n",
+            input + 1, index, 12 + input * 4);
+    }
+    out += "switch (alpha_op) {\n";
+    for (u32 operation : {0U, 1U, 2U, 3U, 4U, 5U, 8U, 9U}) {
+        out += fmt::format("case {}u: alpha_output = ", operation);
+        AppendAlphaCombiner(static_cast<Operation>(operation));
+        out += "; break;\n";
+    }
+    out += R"(
+default: alpha_output = 0.0; break;
+}
+alpha_output = byteround(alpha_output);
+}
+combiner_output = vec4(clamp(color_output * color_multiplier, vec3(0.0), vec3(1.0)),
+                       clamp(alpha_output * alpha_multiplier, 0.0, 1.0));
+}
+combiner_buffer = next_combiner_buffer;
+)";
+    if (index < 4) {
+        out += fmt::format(
+            "if ((uber_tev.buffer_mask & {}u) != 0u) "
+            "next_combiner_buffer.rgb = combiner_output.rgb;\n"
+            "if ((uber_tev.buffer_mask & {}u) != 0u) "
+            "next_combiner_buffer.a = combiner_output.a;\n",
+            1U << index, 1U << (index + 4));
+    }
+    out += "}\n";
 }
 
 void FragmentModule::WriteLighting() {
