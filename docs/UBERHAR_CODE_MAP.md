@@ -31,7 +31,7 @@ rg -n AstraEH src CMakeModules tools/uberhar .github/workflows README.md UBERHAR
 | `CMakeModules/GenerateSettingKeys.cmake` | Shared keys for hybrid and forced TEV modes. |
 | `src/common/settings.{h,cpp}` | Defaults, settings log entries and per-game override reset. |
 | `src/citra_qt/configuration/config.cpp` | Read/write both experiment flags in desktop configuration. |
-| `src/android/app/build.gradle.kts` | ARM64-only build property, separate Uberhar flavor/application ID, and numeric version read from `UBERHAR_VERSION`. |
+| `src/android/app/build.gradle.kts` | ARM64-only build property, separate Uberhar flavor/application ID, numeric version read from `UBERHAR_VERSION`, and JVM-only log-name test dependency. |
 | `src/android/app/src/main/jni/{config.cpp,default_ini.h}` | Native setting reads and mandatory default-INI declarations. |
 | `src/android/app/src/main/java/org/citra/citra_emu/features/settings/SettingKeys.kt` | JNI declarations matching the generated keys. |
 | `src/android/app/src/main/java/org/citra/citra_emu/features/settings/model/BooleanSetting.kt` | Android boolean settings, both default off. |
@@ -40,6 +40,11 @@ rg -n AstraEH src CMakeModules tools/uberhar .github/workflows README.md UBERHAR
 | `src/android/app/src/main/java/org/citra/citra_emu/utils/CitraDirectoryHelper.kt` | Require an empty or previously initialized Uberhar data directory. |
 | `src/android/app/src/main/res/values/strings.xml` | Experiment descriptions and data-folder messages. |
 | `src/android/app/src/uberhar/res/values/strings.xml` | Launcher label and flavor-specific folder guidance. |
+| `src/android/app/src/main/java/org/citra/citra_emu/fragments/{HomeSettingsFragment,LogExportDialogFragment}.kt` | Explicit current/previous session picker, filename styles/preview, Android file creation and sharing, background IO and saved picker state. |
+| `src/android/app/src/main/java/org/citra/citra_emu/utils/{LogExportNames,LogExporter}.kt` | Session/title parsing, acronym and prefix filenames, legacy-log fallback, private snapshots, scoped file provider and destination copying. |
+| `src/android/app/src/main/java/org/citra/citra_emu/utils/{Log,DirectoryInitialization}.kt` and `fragments/EmulationFragment.kt` | Remove stale launch flag; add flush JNI declaration, session date and game-title records. |
+| `src/common/logging/{backend.cpp,backend.h,log_entry.h}` and `src/android/app/src/main/jni/native_log.cpp` | Queue an export flush barrier, acknowledge it on the log worker and avoid replaying it during shutdown. |
+| `src/android/app/src/main/{AndroidManifest.xml,res/xml/log_export_paths.xml}` | Private, flavor-specific provider exposing only staged log copies through explicit URI grants; no new permissions. |
 
 ## Validation and build automation
 
@@ -54,6 +59,7 @@ All files in `tools/uberhar/` are new AstraEH work.
 | `tools/uberhar/validate_apk.py` | Find AGP's actual APK, reject ambiguity, verify ARM64 ELF headers, native dependencies and ZIP integrity, and emit a versioned APK and checksum. |
 | `tools/uberhar/validate_manifest.py` | Reject known install blockers and identity/authority/permission conflicts in the final decoded manifest. |
 | `tools/uberhar/test_manifest.py` | Regression cases for test-only/debug/split flags, version mismatch, shared identity, provider collisions, new permissions and required external Java libraries. |
+| `src/android/app/src/test/java/org/citra/citra_emu/utils/LogExportNamesTest.kt` | Ten production-parser JVM cases: owner examples, dates/offsets, game order/deduplication, older paths, short/numeric titles and portable bounded filenames. |
 | `tools/uberhar/development-certificate.sha256` | Public certificate fingerprint pinned by AstraEH so a lost signing cache cannot silently produce incompatible updates. |
 | `UBERHAR_VERSION` | Owner-requested release.beta.alpha version shared by Gradle and the release pipeline; this plain data file intentionally has no inline comment. |
 | `.github/workflows/uberhar-alpha.yml` | Build/sign the isolated app, reject test-only packaging, verify manifest/native/alignment/signing metadata, and publish versioned GitHub pre-releases from a separate job. |

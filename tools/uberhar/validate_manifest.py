@@ -54,6 +54,16 @@ def validate(root, version):
     for provider in app.findall("provider"):
         authorities = provider.get(ANDROID + "authorities", "").split(";")
         require(all(a.startswith(PACKAGE + ".") for a in authorities), "Foreign provider authority")
+    # AstraEH: The export provider must stay private and grant access only through selected URIs.
+    export = next((p for p in app.findall("provider") if p.get(ANDROID + "name") ==
+                   "org.citra.citra_emu.utils.LogFileProvider"), None)
+    require(export is not None, "Missing log export provider")
+    require(export.get(ANDROID + "authorities") == PACKAGE + ".logexports", "Wrong export authority")
+    require(export.get(ANDROID + "exported") == "false", "Log export provider is publicly exported")
+    require(enabled(export, "grantUriPermissions"), "Log export provider cannot share selected files")
+    require(any(m.get(ANDROID + "name") == "android.support.FILE_PROVIDER_PATHS" and
+                m.get(ANDROID + "resource") for m in export.findall("meta-data")),
+            "Missing log export path metadata")
     for permission in root.findall("permission"):
         require(permission.get(ANDROID + "name", "").startswith(PACKAGE + "."), "Foreign custom permission")
     requested = {p.get(ANDROID + "name") for p in root if p.tag.startswith("uses-permission")}

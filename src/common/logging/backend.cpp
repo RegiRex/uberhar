@@ -311,6 +311,21 @@ public:
         instance->StopBackendThread();
     }
 
+    // AstraEH: Execute flushes on the logger thread, after all earlier queued messages.
+    // A shared promise remains alive even if an export times out before it is processed.
+    static bool Flush() {
+        if (!logging_initialized || !instance) {
+            return false;
+        }
+        Entry barrier{};
+        barrier.flush_request = std::make_shared<std::promise<void>>();
+        auto done = barrier.flush_request->get_future();
+        if (!instance->message_queue.TryEmplace(std::move(barrier))) {
+            return false;
+        }
+        return done.wait_for(std::chrono::seconds{5}) == std::future_status::ready;
+    }
+
     Impl(const Impl&) = delete;
     Impl& operator=(const Impl&) = delete;
 
@@ -453,13 +468,22 @@ private:
             Common::SetCurrentThreadName("citra:Log");
             Entry entry;
             const auto write_logs = [this, &entry]() {
+                // AstraEH: Barriers are control messages, never formatted as log lines.
+                if (entry.flush_request) {
+                    ForEachBackend([](Backend& backend) { backend.Flush(); });
+                    entry.flush_request->set_value();
+                    return;
+                }
                 ForEachBackend([&entry](Backend& backend) { backend.Write(entry); });
             };
             while (!stop_token.stop_requested()) {
+                // AstraEH: A cancelled PopWait leaves its output untouched; clear the
+                // previous entry so shutdown cannot acknowledge a flush barrier twice.
+                entry = {};
                 message_queue.PopWait(entry, stop_token);
                 // Only write the log if something was actually popped (entry.filename != nullptr)
                 // (for example, when the stop token is signaled).
-                if (entry.filename != nullptr) {
+                if (entry.filename != nullptr || entry.flush_request) {
                     write_logs();
                 }
             }
@@ -571,6 +595,11 @@ void Initialize(std::string_view log_file) {
 
 void Start() {
     Impl::Start();
+}
+
+// AstraEH: Public export barrier; the logging instance owns its queue and file handles.
+bool Flush() {
+    return Impl::Flush();
 }
 
 void Stop() {

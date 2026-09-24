@@ -16,7 +16,9 @@ and limits fallback compilation after the first gameplay stall report, following
 **release.beta.alpha** numbering. Test builds are published as
 [GitHub pre-releases](https://github.com/RegiRex/uberhar/releases) after package validation.
 See [UBERHAR.md](UBERHAR.md) for status and testing instructions.
-This is a limited Vulkan TEV experiment; device performance is not yet measured.
+Version **0.0.4** adds a current/previous log picker, named file downloads and
+sharing; its renderer is unchanged from 0.0.3. This remains a limited Vulkan TEV
+experiment; a controlled normal-hybrid performance comparison is still pending.
 
 See the [AstraEH code map](docs/UBERHAR_CODE_MAP.md) to locate the fork's changes.
 

@@ -18,8 +18,22 @@
     <string name="settings_description">Configure emulator settings</string>
     <string name="install_game_content">Install CIA file</string>
     <string name="install_game_content_description">Install applications, updates or DLC</string>
-    <string name="share_log">Share Log</string>
-    <string name="share_log_description">Share Azahar\'s log file to debug issues</string>
+    <!-- AstraEH: Explicit session selection, named downloads and sharing in one log picker. -->
+    <string name="share_log">Save or Share Log</string>
+    <string name="share_log_description">Choose a session, then save or share its log</string>
+    <string name="log_export_title">Save or share a log</string>
+    <string name="log_export_choose">Choose the session to export:</string>
+    <string name="log_export_current">Current session</string>
+    <string name="log_export_previous">Previous session</string>
+    <string name="log_export_name_style">Game abbreviations in filename:</string>
+    <string name="log_export_initials">Word initials (FEA, MK7)</string>
+    <string name="log_export_first_three">First 3 characters (FIR, MAR)</string>
+    <string name="log_export_download">Save to file</string>
+    <string name="log_export_share">Share</string>
+    <string name="log_export_saved">Log saved</string>
+    <string name="log_export_failed">Could not export the log. Check folder access and free space, then try again.</string>
+    <string name="log_export_no_games">No games recorded</string>
+    <string name="log_export_unknown_date">Date unavailable</string>
     <string name="gpu_driver_manager">GPU Driver Manager</string>
     <string name="install_gpu_driver">Install GPU driver</string>
     <string name="install_gpu_driver_description">Install alternative drivers for potentially better performance or accuracy</string>

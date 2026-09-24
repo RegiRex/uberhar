@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- AstraEH: Expose only staged log copies, never the whole cache or user data directory. -->
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <cache-path name="logs" path="log_exports/" />
+</paths>

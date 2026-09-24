@@ -4,8 +4,14 @@
 #include <common/logging/log.h>
 #include <jni.h>
 #include "android_common/android_common.h"
+#include "common/logging/backend.h" // AstraEH: Snapshot logs after queued messages are flushed.
 
 extern "C" {
+
+// AstraEH: Called by the Android export worker, never by the UI or native logging thread.
+jboolean Java_org_citra_citra_1emu_utils_Log_flush(JNIEnv*, jobject) {
+    return Common::Log::Flush();
+}
 
 void Java_org_citra_citra_1emu_utils_Log_debug(JNIEnv* env, jobject obj, jstring jmessage) {
     LOG_DEBUG(Frontend, "{}", GetJString(env, jmessage));

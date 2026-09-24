@@ -43,6 +43,16 @@
         android:banner="@mipmap/ic_launcher"
         android:requestLegacyExternalStorage="true">
 
+        <!-- AstraEH: Each flavor has a unique authority; only explicit read grants share logs. -->
+        <provider
+            android:name="org.citra.citra_emu.utils.LogFileProvider"
+            android:authorities="${applicationId}.logexports"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/log_export_paths" />
+        </provider>
+
         <meta-data android:name="android.game_mode_config"
             android:resource="@xml/game_mode_config" />
 

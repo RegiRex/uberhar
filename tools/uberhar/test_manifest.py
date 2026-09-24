@@ -17,6 +17,12 @@ class ManifestValidationTest(unittest.TestCase):
                     android:extractNativeLibs="true">
                     <activity android:name="org.citra.citra_emu.ui.main.MainActivity"
                         android:exported="true"/>
+                    <provider android:name="org.citra.citra_emu.utils.LogFileProvider"
+                        android:authorities="{PACKAGE}.logexports"
+                        android:exported="false" android:grantUriPermissions="true">
+                        <meta-data android:name="android.support.FILE_PROVIDER_PATHS"
+                            android:resource="@xml/log_export_paths"/>
+                    </provider>
                 </application>
             </manifest>
         """)
@@ -49,6 +55,28 @@ class ManifestValidationTest(unittest.TestCase):
         ET.SubElement(self.root, "uses-permission", {ANDROID + "name": "android.permission.READ_CONTACTS"})
         with self.assertRaisesRegex(ValueError, "permissions"):
             validate(self.root, "0.0.2")
+
+    # AstraEH: A broken export provider must fail before an APK can be published.
+    def test_log_provider_must_be_private_and_grant_selected_uris(self):
+        provider = self.app.find("provider")
+        for field, value in [("exported", "true"), ("grantUriPermissions", "false")]:
+            with self.subTest(field=field):
+                previous = provider.get(ANDROID + field)
+                provider.set(ANDROID + field, value)
+                with self.assertRaises(ValueError):
+                    validate(self.root, "0.0.2")
+                provider.set(ANDROID + field, previous)
+        self.app.remove(provider)
+        with self.assertRaisesRegex(ValueError, "Missing log"):
+            validate(self.root, "0.0.2")
+
+    def test_export_paths_are_limited_to_log_snapshots(self):
+        from pathlib import Path
+        root = Path(__file__).resolve().parents[2]
+        paths = ET.parse(root / "src/android/app/src/main/res/xml/log_export_paths.xml").getroot()
+        self.assertEqual(len(paths), 1)
+        self.assertEqual(paths[0].tag, "cache-path")
+        self.assertEqual(paths[0].get("path"), "log_exports/")
 
     def test_required_external_library_is_rejected(self):
         library = ET.SubElement(self.app, "uses-library", {ANDROID + "name": "third.party.library"})

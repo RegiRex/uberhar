@@ -43,6 +43,9 @@ object DirectoryInitialization {
                 if (setCitraUserDirectory()) {
                     CitraApplication.documentsTree.setRoot(Uri.parse(userPath))
                     NativeLibrary.createLogFile()
+                    // AstraEH: Store the session's local date/offset inside the log itself,
+                    // so exporting a previous session cannot give it today's timestamp.
+                    Log.info("Uberhar log session: ${java.time.OffsetDateTime.now()}")
                     NativeLibrary.logUserDirectory(userPath.toString())
                     NativeLibrary.createConfigFile()
                     GpuDriverHelper.initializeDriverParameters()

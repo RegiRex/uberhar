@@ -7,6 +7,17 @@ Baseline: Azahar 2126.1.2, commit
 
 ## Current status
 
+<!-- AstraEH: 0.0.4 changes log collection without changing the 0.0.3 renderer. -->
+**0.0.4 is being prepared** with **Options → Save or Share Log**. Choose the
+current or previous session, choose word initials or the first three characters
+for each game's abbreviation, then save through Android's file picker or share
+the named text file. The preview uses the selected log's session date and games;
+replayed titles appear once. Example: `uberhar_log_9_24_0100_FEA_MK7.txt`.
+The unused launch flag that selected the wrong log has been removed. A native
+queue barrier flushes buffered entries before a fixed export copy is made.
+The [0.0.4 notes](docs/releases/0.0.4.md) explain older logs and filename limits.
+No shader algorithm or shader cache format changes accompany this export update.
+
 Experimental dynamic TEV fallback implemented. Local tests passed 49,152 exact
 RGBA8 comparisons against specialized GLSL across 192 six-stage programs, using
 Mesa llvmpipe with synthetic byte and fractional texture colors. All 64 tested
@@ -16,8 +27,11 @@ Vulkan fragment modules passed GLSL compilation and SPIR-V validation in CI.
 `android:testOnly=true`, so normal Android installation rejected it. The original
 validation missed this flag. The owner subsequently reported running Fire Emblem
 Awakening with long shader-related pauses. Effective settings and a device log
-have not yet been supplied; the exact source and duration of those pauses remain
-unconfirmed.
+were subsequently supplied in a 0.0.2 log: hybrid and forced TEV were both enabled.
+The first completed run recorded 63 pipeline waits totaling 29.100457 seconds.
+The exact duration of individual pauses is unavailable in that build. A 0.0.3
+normal-hybrid cold/warm retest is pending; the log does not establish whether
+the scheduling correction improves device performance.
 
 <!-- AstraEH: 0.0.3 scheduling correction motivated by the first gameplay report. -->
 **0.0.3 is published as a pre-release.** Fallback shaders and pipelines now compile as one
@@ -162,7 +176,7 @@ presentation queues and a measurement plan for the next phase.
 ## Build workflow
 
 `UBERHAR_VERSION` contains the owner's **release.beta.alpha** version, currently
-`0.0.3`. The unnumbered failed first attempt counts as `0.0.1`. Future alpha
+`0.0.4`. The unnumbered failed first attempt counts as `0.0.1`. Future alpha
 iterations increment the third number. Beta and release milestones use the second
 and first numbers. Gradle's independent numeric `versionCode` still increases
 with build time so Android can order updates correctly.

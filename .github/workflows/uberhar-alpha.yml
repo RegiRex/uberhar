@@ -105,6 +105,15 @@ jobs:
             -Pandroid.injected.testOnly=false \
             assembleUberharRelease 2>&1 | tee "$GITHUB_WORKSPACE/uberhar-build.log"
 
+      # AstraEH: Exercise production naming/parser logic before publishing any download UI.
+      - name: Test Android log export names
+        working-directory: src/android
+        run: |
+          export JAVA_HOME="$JAVA_HOME_17_X64"
+          export PATH="$JAVA_HOME/bin:$PATH"
+          bash ./gradlew --no-daemon --max-workers=2 -PuberharArm64Only=true \
+            -Pandroid.injected.testOnly=false testUberharReleaseUnitTest
+
       # AstraEH: Publish only an intact ARM64 app with the separate ID, label and valid signature.
       - name: Validate package and record provenance
         run: |

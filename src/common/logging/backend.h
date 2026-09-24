@@ -22,6 +22,10 @@ void LibRetroStart(retro_log_printf_t callback);
 
 void Start();
 
+// AstraEH: Flush earlier queued entries before exporting a log. Call off the UI/log thread.
+// Returns false if the queue is full, logging is uninitialized, or the barrier times out.
+bool Flush();
+
 /// Explictily stops the logger thread and flushes the buffers
 void Stop();
 

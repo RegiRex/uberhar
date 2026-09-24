@@ -17,7 +17,6 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.updatePadding
 import androidx.core.widget.doOnTextChanged
-import androidx.documentfile.provider.DocumentFile
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.activityViewModels
 import androidx.navigation.findNavController
@@ -41,7 +40,6 @@ import org.citra.citra_emu.model.HomeSetting
 import org.citra.citra_emu.ui.main.MainActivity
 import org.citra.citra_emu.utils.GameHelper
 import org.citra.citra_emu.utils.GpuDriverHelper
-import org.citra.citra_emu.utils.Log
 import org.citra.citra_emu.utils.PermissionsHandler
 import org.citra.citra_emu.viewmodel.DriverViewModel
 import org.citra.citra_emu.viewmodel.HomeViewModel
@@ -253,30 +251,10 @@ class HomeSettingsFragment : Fragment() {
             homeViewModel.setGamesDir(requireActivity(), result.path!!)
         }
 
+    // AstraEH: Let the user choose the session; never infer it from the stale launch flag.
     private fun shareLog() {
-        val logDirectory = DocumentFile.fromTreeUri(
-            requireContext(),
-            PermissionsHandler.citraDirectory
-        )?.findFile("log")
-        val currentLog = logDirectory?.findFile("azahar_log.txt")
-        val oldLog = logDirectory?.findFile("azahar_log.old.txt")
-
-        val intent = Intent().apply {
-            action = Intent.ACTION_SEND
-            type = "text/plain"
-        }
-        if (!Log.gameLaunched && oldLog?.exists() == true) {
-            intent.putExtra(Intent.EXTRA_STREAM, oldLog.uri)
-            startActivity(Intent.createChooser(intent, getText(R.string.share_log)))
-        } else if (currentLog?.exists() == true) {
-            intent.putExtra(Intent.EXTRA_STREAM, currentLog.uri)
-            startActivity(Intent.createChooser(intent, getText(R.string.share_log)))
-        } else {
-            Toast.makeText(
-                requireContext(),
-                getText(R.string.share_log_not_found),
-                Toast.LENGTH_SHORT
-            ).show()
+        if (parentFragmentManager.findFragmentByTag("log_export") == null) {
+            LogExportDialogFragment().show(parentFragmentManager, "log_export")
         }
     }
 

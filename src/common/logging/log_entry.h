@@ -5,6 +5,8 @@
 #pragma once
 
 #include <chrono>
+#include <future> // AstraEH: A queued export barrier waits for buffered log data.
+#include <memory>
 
 #include "common/logging/types.h"
 
@@ -22,6 +24,8 @@ struct Entry {
     u32 line_num = 0;
     std::string function;
     std::string message;
+    // AstraEH: Present only on a flush request; ordinary entries allocate no promise.
+    std::shared_ptr<std::promise<void>> flush_request;
 };
 
 } // namespace Common::Log

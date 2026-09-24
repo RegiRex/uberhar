@@ -5,8 +5,9 @@
 package org.citra.citra_emu.utils
 
 object Log {
-    // Tracks whether we should share the old log or the current log
-    var gameLaunched = false
+    // AstraEH: Export selection is explicit; remove the never-updated old/current flag.
+    // Flush on an IO worker before reading the current log, including shutdown totals.
+    external fun flush(): Boolean
 
     external fun debug(message: String)
 

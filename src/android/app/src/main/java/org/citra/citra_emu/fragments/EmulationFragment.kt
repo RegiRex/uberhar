@@ -192,6 +192,9 @@ class EmulationFragment :
             return
         }
 
+        // AstraEH: Record the displayed title on one line for date/game-aware log exports.
+        // Older logs can still use the following application-path line as a fallback.
+        Log.info("Uberhar game title: " + game.title.replace(Regex("[\\p{Cntrl}]"), " ").trim())
         Log.info("[EmulationFragment] Starting application " + game.path)
 
         // So this fragment doesn't restart on configuration changes; i.e. rotation.
