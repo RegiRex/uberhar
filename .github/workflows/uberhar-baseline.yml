@@ -1,0 +1,86 @@
+name: Uberhar ARM64 baseline
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [uberhar/hybrid-shaders]
+    paths:
+      - .github/workflows/uberhar-baseline.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: uberhar-baseline
+  cancel-in-progress: false
+
+jobs:
+  baseline:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Check out pinned upstream source
+        uses: actions/checkout@v6
+        with:
+          repository: azahar-emu/azahar
+          ref: 9e6f523a57fac9564ac0bf8286db3c3702d301ec
+          path: baseline
+          fetch-depth: 0
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ccache ninja-build
+          "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" \
+            "platforms;android-35" "build-tools;35.0.0" \
+            "ndk;27.3.13750724" "cmake;3.30.3"
+
+      - name: Build ARM64 baseline
+        shell: bash
+        working-directory: baseline/src/android
+        run: |
+          set -o pipefail
+          export JAVA_HOME="$JAVA_HOME_17_X64"
+          export PATH="$JAVA_HOME/bin:$PATH"
+          export NDK_CCACHE="$(command -v ccache)"
+          bash ./gradlew --no-daemon --max-workers=2 \
+            -Pandroid.injected.build.abi=arm64-v8a \
+            assembleVanillaRelease 2>&1 | tee "$GITHUB_WORKSPACE/baseline-build.log"
+
+      - name: Validate APK and record provenance
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          shopt -s nullglob
+          apks=(baseline/src/android/app/build/outputs/apk/vanilla/release/*.apk)
+          test "${#apks[@]}" -gt 0
+          for apk in "${apks[@]}"; do
+            unzip -Z1 "$apk" | grep '^lib/arm64-v8a/libcitra-android.so$' > /dev/null
+            if unzip -Z1 "$apk" | grep '^lib/x86_64/' > /dev/null; then
+              echo 'Unexpected x86_64 libraries in ARM64 build' >&2
+              exit 1
+            fi
+            cp "$apk" artifacts/
+          done
+          git -C baseline rev-parse HEAD > artifacts/upstream-commit.txt
+          git -C baseline submodule status --recursive > artifacts/submodules.txt
+          sha256sum artifacts/*.apk > artifacts/apk-sha256.txt
+
+      - name: Upload baseline
+        uses: actions/upload-artifact@v7
+        with:
+          name: azahar-2126.1.2-arm64-baseline-${{ github.run_number }}
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: baseline-log-${{ github.run_number }}
+          path: baseline-build.log
+          if-no-files-found: ignore
+          retention-days: 14
