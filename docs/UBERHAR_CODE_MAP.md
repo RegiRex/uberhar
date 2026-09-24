@@ -21,7 +21,7 @@ rg -n AstraEH src CMakeModules tools/uberhar .github/workflows README.md UBERHAR
 | Files | AstraEH work |
 | --- | --- |
 | `src/video_core/shader/generator/glsl_fs_shader_gen.{h,cpp}` | Optional dynamic six-stage TEV generation, support gate, register decoding, shared operation formulas, rounding/scales and delayed buffer writes. Other fragment behavior remains specialized. |
-| `src/video_core/renderer_vulkan/vk_pipeline_cache.{h,cpp}` | Mode capture, push-constant layout, bounded family/pipeline caches, background compilation, ready-fallback selection, per-draw register snapshots, title-switch cleanup and wait/draw diagnostics. |
+| `src/video_core/renderer_vulkan/vk_pipeline_cache.{h,cpp}` | Mode capture, push-constant layout, bounded family/pipeline caches, dedicated serial fallback compilation with one-pipeline warm-up admission, ready-fallback selection, per-draw register snapshots, title-switch cleanup and measured wait/build diagnostics. |
 | `src/video_core/renderer_vulkan/vk_graphics_pipeline.h` | Acquire ordering when observing completed shader/pipeline compilation. |
 
 ## Settings and Android application

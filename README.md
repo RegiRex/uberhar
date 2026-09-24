@@ -11,7 +11,8 @@ Uberhar builds are produced by this repository's **Uberhar ARM64 experimental
 alpha** workflow.
 
 **The initial APK was withdrawn:** an unintended Android `testOnly` flag
-blocked normal installation. The replacement is **0.0.2**, following the owner's
+blocked normal installation. Packaging was fixed in **0.0.2**; **0.0.3** isolates
+and limits fallback compilation after the first gameplay stall report, following the owner's
 **release.beta.alpha** numbering. Test builds are published as
 [GitHub pre-releases](https://github.com/RegiRex/uberhar/releases) after package validation.
 See [UBERHAR.md](UBERHAR.md) for status and testing instructions.

@@ -11,10 +11,27 @@ Experimental dynamic TEV fallback implemented. Local tests passed 49,152 exact
 RGBA8 comparisons against specialized GLSL across 192 six-stage programs, using
 Mesa llvmpipe with synthetic byte and fractional texture colors. All 64 tested
 Vulkan fragment modules passed GLSL compilation and SPIR-V validation in CI.
-**The first Alpha 1 APK is withdrawn; its replacement is 0.0.2.** The published
+**The first Alpha 1 APK is withdrawn; packaging was corrected in 0.0.2.** The published
 `0789e08bd` package passed signing and architecture checks but was marked
 `android:testOnly=true`, so normal Android installation rejected it. The original
-validation missed this flag. No successful on-device run has been confirmed.
+validation missed this flag. The owner subsequently reported running Fire Emblem
+Awakening with long shader-related pauses. Effective settings and a device log
+have not yet been supplied; the exact source and duration of those pauses remain
+unconfirmed.
+
+<!-- AstraEH: 0.0.3 scheduling correction motivated by the first gameplay report. -->
+The next iteration is **0.0.3**. Fallback shaders and pipelines now compile as one
+job on a separate serial worker. Normal hybrid mode admits only one unfinished
+fallback pipeline at a time, preventing speculative work from filling the
+specialized compiler queues. Existing ready fallbacks remain reusable. Force mode
+can queue additional builds because it explicitly waits for comparison. Driver
+locks and CPU/GPU contention can still cause stalls; this change does not establish
+the cause of the owner's pauses or a measured speedup. See
+[0.0.3 notes](docs/releases/0.0.3.md) for the targeted retest.
+Upstream's cache fingerprint includes pipeline-cache source files, so this update
+can regenerate existing cached shader programs at launch. The stored game shader
+configurations and driver pipeline cache can still be reused where valid. Do not
+treat that initial cache regeneration as a measured in-game regression.
 
 The cause is verified in Android Gradle Plugin 8.13.2's `isTestApk()` source:
 `android.injected.build.abi` implies a test-only APK unless explicitly overridden.
@@ -25,7 +42,7 @@ The baseline build receives the explicit override and the same rejection check.
 Android documents the installation restriction under
 [`android:testOnly`](https://developer.android.com/guide/topics/manifest/application-element#testOnly).
 
-Shader code is unchanged from the
+Fragment shader generation is unchanged from the
 [passing shader CI run](https://github.com/RegiRex/uberhar/actions/runs/35946513141).
 **[Download uberhar-0.0.2-arm64.apk](https://github.com/RegiRex/uberhar/releases/download/0.0.2/uberhar-0.0.2-arm64.apk)**
 from the published [0.0.2 pre-release](https://github.com/RegiRex/uberhar/releases/tag/0.0.2).
@@ -37,8 +54,8 @@ passed all Android package and shader checks. The release tag points to
 58e4954e2d1d9ee35cbf93dfc21630321f3a9cebb04b408ce6bdfb62fa7d64e5
 ```
 
- It retains the ready-fallback safeguard
-and AstraEH attribution comments. Device correctness and performance remain unverified.
+The ready-fallback safeguard and AstraEH attribution comments remain in place.
+Device correctness and comparative performance remain unverified.
 The baseline workflow builds unmodified upstream code. Its APK retains Azahar's
 application ID and is not intended to replace your installed Azahar. Do not
 uninstall Azahar to work around a signing-key mismatch.
@@ -59,7 +76,8 @@ push constants. It preserves the specialized generator's stage-0 source rule,
 
 Lighting, texture sampling modes, fog, alpha/depth tests, vertex/geometry shaders
 and pipeline state are still specialized. New fallback families/pipelines warm
-in the background; normal hybrid mode uses a ready fallback or waits for the
+on a dedicated worker, with one unfinished pipeline admitted in normal hybrid
+mode; normal hybrid mode uses a ready fallback or waits for the
 specialized pipeline. It never waits specifically for an unready fallback.
 First-use stalls therefore remain. There is no vertex interpreter or startup
 prewarming yet. Shadow
@@ -77,7 +95,13 @@ OpenGL. Experimental fallback entries stay out of transferable shader caches.
 
 On normal game shutdown, the log includes `Uberhar totals`: draw requests,
 specialized-pipeline pending observations, fallback draws, warming/unavailable fallbacks,
-skipped draws, cache sizes, and measured scheduler pipeline wait time. A pending
+skipped draws, cache sizes, and measured scheduler pipeline wait time. Version
+0.0.3 also reports the longest wait, forced-fallback wait time, waits over 50 ms,
+deferred warm-up observations, and fallback shader/pipeline build wall time.
+`fallback_deferred` is a subset of `fallback_unavailable`, not an additional draw
+count. Pipeline build time includes waiting for vertex/geometry dependencies.
+The first 20 long waits and fallback builds are logged during play, while the
+startup line records effective hybrid/force/async/SPIR-V settings. A pending
 observation is not a unique compilation and the wait time is not total stutter.
 These counters do not measure physical display synchronization or GPU frame time.
 
@@ -135,7 +159,7 @@ presentation queues and a measurement plan for the next phase.
 ## Build workflow
 
 `UBERHAR_VERSION` contains the owner's **release.beta.alpha** version, currently
-`0.0.2`. The unnumbered failed first attempt counts as `0.0.1`. Future alpha
+`0.0.3`. The unnumbered failed first attempt counts as `0.0.1`. Future alpha
 iterations increment the third number. Beta and release milestones use the second
 and first numbers. Gradle's independent numeric `versionCode` still increases
 with build time so Android can order updates correctly.

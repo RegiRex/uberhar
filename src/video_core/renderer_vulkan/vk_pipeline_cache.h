@@ -155,6 +155,9 @@ private:
     std::size_t num_worker_threads;
     Common::ThreadWorker pipeline_workers;
     Common::ThreadWorker shader_workers;
+    // AstraEH: Optional fallback work must not occupy workers needed by specialized draws.
+    // Created only in hybrid mode; shader and driver compilation run as one serial job.
+    std::unique_ptr<Common::ThreadWorker> tev_worker;
     PipelineInfo current_info{};
     GraphicsPipeline* current_pipeline{};
     std::array<DescriptorHeap, NumDescriptorHeaps> descriptor_heaps;
@@ -180,6 +183,9 @@ private:
     bool tev_supported{};
     std::unordered_map<u64, std::unique_ptr<Shader>> tev_shaders;
     std::unordered_map<u64, std::unique_ptr<GraphicsPipeline>> tev_pipelines;
+    // AstraEH: Normal hybrid mode admits one warm-up pipeline at a time. Ready entries
+    // remain usable; force mode may queue more because it explicitly waits for comparison.
+    GraphicsPipeline* warming_tev_pipeline{};
     const bool hybrid_tev;
     const bool force_tev;
     // AstraEH: Draw counters belong to the render thread; wait counters belong to the scheduler.
@@ -188,9 +194,18 @@ private:
     u64 fallback_draws{};
     u64 fallback_warming{};
     u64 fallback_unavailable{};
+    u64 fallback_deferred{};
     u64 skipped_draws{};
     std::atomic<u64> pipeline_waits{};
     std::atomic<u64> pipeline_wait_ns{};
+    // AstraEH: Scheduler-only updates; read after draining for shutdown diagnostics.
+    std::atomic<u64> pipeline_wait_max_ns{};
+    std::atomic<u64> fallback_wait_ns{};
+    std::atomic<u64> slow_pipeline_waits{};
+    // AstraEH: Only the serial fallback worker writes these; reporting follows its drain.
+    u64 fallback_compile_jobs{};
+    u64 fallback_shader_ns{};
+    u64 fallback_driver_ns{};
 
     u64 current_program_id{0};
     std::vector<std::shared_ptr<ShaderDiskCache>> disk_caches;
