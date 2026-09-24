@@ -20,7 +20,7 @@ have not yet been supplied; the exact source and duration of those pauses remain
 unconfirmed.
 
 <!-- AstraEH: 0.0.3 scheduling correction motivated by the first gameplay report. -->
-The next iteration is **0.0.3**. Fallback shaders and pipelines now compile as one
+**0.0.3 is published as a pre-release.** Fallback shaders and pipelines now compile as one
 job on a separate serial worker. Normal hybrid mode admits only one unfinished
 fallback pipeline at a time, preventing speculative work from filling the
 specialized compiler queues. Existing ready fallbacks remain reusable. Force mode
@@ -44,14 +44,17 @@ Android documents the installation restriction under
 
 Fragment shader generation is unchanged from the
 [passing shader CI run](https://github.com/RegiRex/uberhar/actions/runs/35946513141).
-**[Download uberhar-0.0.2-arm64.apk](https://github.com/RegiRex/uberhar/releases/download/0.0.2/uberhar-0.0.2-arm64.apk)**
-from the published [0.0.2 pre-release](https://github.com/RegiRex/uberhar/releases/tag/0.0.2).
-No ZIP extraction is needed. The [build and publication run](https://github.com/RegiRex/uberhar/actions/runs/35950115748)
-passed all Android package and shader checks. The release tag points to
-`f5bff77c37377fe2a16ddf389578df1b2b3ae493`; the public APK's SHA256 matches the tested artifact:
+**[Download uberhar-0.0.3-arm64.apk](https://github.com/RegiRex/uberhar/releases/download/0.0.3/uberhar-0.0.3-arm64.apk)**
+from the published [0.0.3 pre-release](https://github.com/RegiRex/uberhar/releases/tag/0.0.3).
+No ZIP extraction is needed. Install it over Uberhar 0.0.2; the signing certificate
+is unchanged and the Android version code increased to `33861721`.
+The [build and publication run](https://github.com/RegiRex/uberhar/actions/runs/35955052804)
+passed all Android package checks, 64 Vulkan fragment-module validations and
+49,152 exact shader comparisons. The release tag points to
+`d005385bd59ab55152af06362b1593f9c64e63d6`; the public APK's SHA256 matches the tested artifact:
 
 ```text
-58e4954e2d1d9ee35cbf93dfc21630321f3a9cebb04b408ce6bdfb62fa7d64e5
+5da4e8b2a16bc3aa2477b160e139d47b9c2530df79da1e93930bca4bcba912b8
 ```
 
 The ready-fallback safeguard and AstraEH attribution comments remain in place.
