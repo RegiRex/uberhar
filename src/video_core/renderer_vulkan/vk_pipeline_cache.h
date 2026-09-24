@@ -6,6 +6,7 @@
 
 #include <bitset>
 #include <unordered_map> // AstraEH: Separate in-memory caches for experimental TEV fallbacks.
+#include <unordered_set> // AstraEH: Bounded census of candidate fallback state dimensions.
 
 #include "video_core/rasterizer_interface.h"
 #include "video_core/renderer_vulkan/vk_graphics_pipeline.h"
@@ -193,6 +194,12 @@ private:
     bool tev_supported{};
     std::unordered_map<u64, std::unique_ptr<Shader>> tev_shaders;
     std::unordered_map<u64, std::unique_ptr<GraphicsPipeline>> tev_pipelines;
+    // AstraEH: Renderer-thread-only, per-title observations before admission limits.
+    // Dimensions: raw/canonical FS, raw/canonical pipeline, VS, GS, vertex layout,
+    // attachments, blending, rasterization and depth/stencil. Each set is bounded;
+    // a saturated census is a lower bound, not an exact coverage estimate.
+    std::array<std::unordered_set<u64>, 11> tev_candidate_keys;
+    bool tev_census_capped{};
     // AstraEH: Normal hybrid mode admits one warm-up pipeline at a time. Ready entries
     // remain usable; force mode may queue more because it explicitly waits for comparison.
     GraphicsPipeline* warming_tev_pipeline{};

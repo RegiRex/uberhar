@@ -99,11 +99,12 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
       hybrid_tev{Settings::values.uberhar_hybrid_tev.GetValue()},
       force_tev{hybrid_tev && Settings::values.uberhar_force_tev.GetValue()} {
     // AstraEH: Record effective settings so a device log identifies the tested path.
-    LOG_INFO(Render_Vulkan,
-             "Uberhar: hybrid_tev={} force_tev={} async_shaders={} spirv_generator={} "
-             "diagnostics=3 first_ready=true compact_tev=true fast_fallback=false",
-             hybrid_tev, force_tev, Settings::values.async_shader_compilation.GetValue(),
-             Settings::values.spirv_shader_gen.GetValue());
+    LOG_INFO(
+        Render_Vulkan,
+        "Uberhar: hybrid_tev={} force_tev={} async_shaders={} spirv_generator={} "
+        "diagnostics=4 first_ready=true compact_tev=true fast_fallback=false canonical_tev=true",
+        hybrid_tev, force_tev, Settings::values.async_shader_compilation.GetValue(),
+        Settings::values.spirv_shader_gen.GetValue());
     // AstraEH: Allocate the isolated compiler only when the experiment is enabled.
     if (hybrid_tev) {
         tev_worker = std::make_unique<Common::ThreadWorker>(1, "Uberhar TEV");
@@ -736,13 +737,44 @@ GraphicsPipeline* PipelineCache::GetTevFallback(const PipelineInfo& info) {
     }
     constexpr std::size_t MaxFamilies = 128;
     constexpr std::size_t MaxPipelines = 1024;
-    const u64 family_hash = tev_family_config->Hash();
+    // AstraEH: Canonicalize only on a fallback request, so ready specialized draws
+    // do not pay for the additional copies/hashes or candidate diagnostics.
+    const auto family_config = GLSL::MakeDynamicTevFamilyConfig(*tev_family_config, profile);
+    const u64 raw_family_hash = tev_family_config->Hash();
+    const u64 family_hash = family_config.Hash();
 
     // AstraEH: Look up ready/pending entries before applying the admission limit.
     // A long warm-up must not prevent reuse of a different, already compiled fallback.
     PipelineInfo fallback_info = info;
+    fallback_info.state.shader_ids[ProgramType::FS] = raw_family_hash;
+    const u64 raw_pipeline_hash = fallback_info.state.OptimizedHash(instance);
     fallback_info.state.shader_ids[ProgramType::FS] = family_hash;
     const u64 hash = fallback_info.state.OptimizedHash(instance);
+    // AstraEH: Count eligible candidates even when the serial admission limit
+    // defers their build. These are independent dimensions, not a Cartesian
+    // product or counts of actual compilations. No guest shader contents are logged.
+    const std::array<u64, 11> candidate_keys{
+        raw_family_hash,
+        family_hash,
+        raw_pipeline_hash,
+        hash,
+        info.state.shader_ids[ProgramType::VS],
+        info.state.shader_ids[ProgramType::GS],
+        Common::ComputeStructHash64(info.state.vertex_layout),
+        Common::ComputeStructHash64(info.state.attachments),
+        Common::ComputeStructHash64(info.state.blending),
+        Common::ComputeStructHash64(info.state.rasterization),
+        Common::ComputeStructHash64(info.state.depth_stencil),
+    };
+    constexpr std::size_t MaxCensusKeys = 2048;
+    for (std::size_t i = 0; i < candidate_keys.size(); ++i) {
+        auto& keys = tev_candidate_keys[i];
+        if (keys.size() < MaxCensusKeys) {
+            keys.insert(candidate_keys[i]);
+        } else if (!keys.contains(candidate_keys[i])) {
+            tev_census_capped = true;
+        }
+    }
     if (auto it = tev_pipelines.find(hash); it != tev_pipelines.end()) {
         return it->second.get();
     }
@@ -784,7 +816,7 @@ GraphicsPipeline* PipelineCache::GetTevFallback(const PipelineInfo& info) {
     // Owned config copies and map-stable pointers stay alive until ClearTevFallbacks drains.
     const auto queued = std::chrono::steady_clock::now();
     tev_worker->QueueWork([this, shader_ptr, pipeline_ptr, family_hash, queued,
-                           config = *tev_family_config, user = tev_user] {
+                           config = family_config, user = tev_user] {
         const auto start = std::chrono::steady_clock::now();
         // AstraEH: Size diagnostics let device logs confirm the compact module
         // reached the driver. Zero means this family reused an existing module.
@@ -835,6 +867,11 @@ void PipelineCache::ClearTevFallbacks() {
     warming_tev_pipeline = nullptr;
     tev_pipelines.clear();
     tev_shaders.clear();
+    // AstraEH: Keep candidate coverage scoped to the same title as the fallback maps.
+    for (auto& keys : tev_candidate_keys) {
+        keys.clear();
+    }
+    tev_census_capped = false;
     bound_pipeline = nullptr;
     tev_family_config.reset();
 }
@@ -874,6 +911,20 @@ void PipelineCache::ReportUberharStats(const char* kind) {
     if (hybrid_tev) {
         report_builds("specialized", specialized_build_stats);
         report_builds("fallback_compact", fallback_build_stats);
+        // AstraEH: Capped counts are lower bounds. Fixed-state counts describe raw
+        // candidates even when a device can make some of those states dynamic.
+        LOG_INFO(
+            Render_Vulkan,
+            "Uberhar variant census {}: scope=current_title_candidates raw_families={} "
+            "canonical_families={} raw_pipelines={} canonical_pipelines={} vertex_programs={} "
+            "geometry_programs={} vertex_layouts={} attachments={} blending={} rasterization={} "
+            "depth_stencil={} capped={} limit=2048",
+            kind, tev_candidate_keys[0].size(), tev_candidate_keys[1].size(),
+            tev_candidate_keys[2].size(), tev_candidate_keys[3].size(),
+            tev_candidate_keys[4].size(), tev_candidate_keys[5].size(),
+            tev_candidate_keys[6].size(), tev_candidate_keys[7].size(),
+            tev_candidate_keys[8].size(), tev_candidate_keys[9].size(),
+            tev_candidate_keys[10].size(), tev_census_capped);
         // AstraEH: Unused means not selected by the scheduler as of this snapshot,
         // not permanently useless. Only completed builds contribute driver time.
         u64 used = 0;

@@ -122,6 +122,45 @@ layout (binding = 2, std140) uniform fs_data {
 };
 )";
 
+// AstraEH: Share fallback modules across raw register states that emit identical GLSL.
+// Keep this out of FSConfig's transferable representation and the specialized path.
+// Applying the profile again in FragmentModule must leave these effective choices intact.
+FSConfig MakeDynamicTevFamilyConfig(const FSConfig& original, const Profile& profile) {
+    auto config = original;
+    config.ApplyProfile(profile);
+    config.texture.tev_stages = {};
+    config.texture.combiner_buffer_input.Assign(0);
+
+    // AstraEH: Native blending and inactive logic requests do not alter this shader.
+    // Active emulated operations remain part of the key; Vulkan pipeline blending
+    // is independently keyed and must never be normalized by this function.
+    auto& framebuffer = config.framebuffer;
+    framebuffer.requested_logic_op = framebuffer.logic_op.Value();
+    const auto normalize_blend = [](BlendConfig& blend) {
+        if (!blend.RequiresMinMaxEmulation()) {
+            blend = {};
+            blend.SetMinMaxEmulationDisabled();
+        }
+    };
+    normalize_blend(framebuffer.requested_rgb_blend);
+    normalize_blend(framebuffer.requested_alpha_blend);
+
+    // AstraEH: The shader only distinguishes emulated border checks. Repeat,
+    // mirror and native border handling remain properties of the bound sampler.
+    using Wrap = TexturingRegs::TextureConfig::WrapMode;
+    for (std::size_t i = 0; i < config.texture.requested_wrap.size(); ++i) {
+        const auto border = config.texture.texture_border_color[i];
+        config.texture.requested_wrap[i].s =
+            border.enable_s ? Wrap::ClampToBorder : Wrap::ClampToEdge;
+        config.texture.requested_wrap[i].t =
+            border.enable_t ? Wrap::ClampToBorder : Wrap::ClampToEdge;
+    }
+    if (config.texture.fog_mode == TexturingRegs::FogMode::None) {
+        config.texture.fog_flip.Assign(0);
+    }
+    return config;
+}
+
 FragmentModule::FragmentModule(const FSConfig& config_, const UserConfig& user_,
                                const Profile& profile_, bool dynamic_tev_)
     : config{config_}, user{user_}, profile{profile_}, dynamic_tev{dynamic_tev_} {

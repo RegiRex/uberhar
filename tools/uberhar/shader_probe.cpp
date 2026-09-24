@@ -126,9 +126,13 @@ int main(int argc, char** argv) {
             config.proctex.enable.Assign(1);
             config.proctex.lut_width = 128;
         }
-        std::ofstream(output / fmt::format("dynamic-{}.frag", test))
-            << "#version 450\n"
-            << Generator::GLSL::FragmentModule{config, user, profile, true}.Generate();
+        // AstraEH: Validate the exact canonical family passed to the Vulkan worker.
+        const auto family = Generator::GLSL::MakeDynamicTevFamilyConfig(config, profile);
+        const auto source = Generator::GLSL::FragmentModule{family, user, profile, true}.Generate();
+        if (source != Generator::GLSL::FragmentModule{config, user, profile, true}.Generate()) {
+            throw std::runtime_error("Full fragment family changed during canonicalization");
+        }
+        std::ofstream(output / fmt::format("dynamic-{}.frag", test)) << "#version 450\n" << source;
     }
     fmt::print("Emitted 224 TEV cases and 64 dynamic fragment families\n");
 }

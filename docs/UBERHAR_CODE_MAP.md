@@ -20,8 +20,8 @@ rg -n AstraEH src CMakeModules tools/uberhar .github/workflows README.md UBERHAR
 
 | Files | AstraEH work |
 | --- | --- |
-| `src/video_core/shader/generator/glsl_fs_shader_gen.{h,cpp}` | Optional dynamic six-stage TEV generation, support gate, register decoding, shared operation formulas, rounding/scales and delayed buffer writes. 0.0.6 replaces six expanded copies with a loop carrying DontUnroll, lazily reuses per-fragment TEV texture samples and skips unused operands. Other fragment behavior remains specialized. |
-| `src/video_core/renderer_vulkan/vk_pipeline_cache.{h,cpp}` | Mode capture, push-constant layout, bounded family/pipeline caches, dedicated serial fallback compilation with one-pipeline warm-up admission, first-ready selection on the scheduler, per-draw register snapshots, title-switch cleanup and periodic wait/build diagnostics. |
+| `src/video_core/shader/generator/glsl_fs_shader_gen.{h,cpp}` | Optional dynamic six-stage TEV generation, support gate, register decoding, shared operation formulas, rounding/scales and delayed buffer writes. 0.0.6 replaces six expanded copies with a loop carrying DontUnroll, lazily reuses per-fragment TEV texture samples and skips unused operands. 0.0.7 adds profile-aware family canonicalization for source-equivalent states without changing transferable FSConfig layout. Other fragment behavior remains specialized. |
+| `src/video_core/renderer_vulkan/vk_pipeline_cache.{h,cpp}` | Mode capture, push-constant layout, bounded family/pipeline caches, dedicated serial fallback compilation with one-pipeline warm-up admission, first-ready selection on the scheduler, per-draw register snapshots, title-switch cleanup and periodic wait/build diagnostics. 0.0.7 uses canonical families and logs a bounded per-title census of candidate fragment/pipeline keys and individual state dimensions, without changing native sampler or fixed-function state. |
 | `src/common/async_handle.h` | Shared completion signal, acquire/release publication and event-driven wait for either compatible pipeline; moved the existing single-handle primitive here. |
 | `src/video_core/renderer_vulkan/vk_graphics_pipeline.{h,cpp}` | Background-only hybrid creation, queue/dependency/driver timing, build phase and aggregate statistics. 0.0.6 restores normal driver optimization and records per-pipeline fallback use/driver duration for utility reports in PipelineCache. |
 | `src/video_core/renderer_vulkan/vk_shader_disk_cache.cpp` | Connect both new and disk-loaded specializations to the same completion signal and diagnostics. |
@@ -55,8 +55,9 @@ All files in `tools/uberhar/` are new AstraEH work.
 | Files | Purpose and limit |
 | --- | --- |
 | `tools/uberhar/test_async_completion.cpp` | Production completion tests covering both winners, already-completed handles, delayed completion, unrelated notifications, 1,000 publication races and standalone waits. |
-| `tools/uberhar/build_probe.sh` | Compile the production generator as a small host executable. |
-| `tools/uberhar/shader_probe.cpp` | 224 reproducible TEV cases, directed edge/texture-reuse/unused-operand cases, AddSigned exclusion and 64 full fragment modules. |
+| `tools/uberhar/build_probe.sh` | Compile the production generator as small host executables and run family-key regressions before emitting shader cases. |
+| `tools/uberhar/test_tev_family.cpp` | Source equivalence, non-mutation and idempotence across device profiles and fog/lighting/blending states; active border, logic, alpha, fog and texture interface distinctions. |
+| `tools/uberhar/shader_probe.cpp` | 224 reproducible TEV cases, directed edge/texture-reuse/unused-operand cases, AddSigned exclusion and 64 full fragment modules. 0.0.7 emits canonical families and checks their source against the original family. |
 | `tools/uberhar/compare_tev.py` | Compare generated specialized/interpreted combiner math on Mesa and independently verify texture fetch counts; synthetic sampling inputs do not test real texture derivatives or device drivers. |
 | `tools/uberhar/validate_shaders.py` | Compile and validate all 64 full modules with frontend optimization off/on; verify the TEV loop's DontUnroll hint reaches SPIR-V. |
 | `tools/uberhar/check_android_keys.py` | Catch missing default-INI keys that would abort Android startup. |
@@ -77,6 +78,10 @@ development branch. Their contents are upstream code, not AstraEH implementation
 ## Documentation
 
 `README.md` has an AstraEH branch overview above the upstream README.
+`AGENTS.md` records owner preferences, including the review cadence and CI handoff.
+`docs/UBERHAR_REVIEW_CADENCE.md` tracks the covered version and next review window.
+`docs/UBERHAR_ARCHITECTURE_2026-09-24.md` contains the 0.0.6 source/evidence audit,
+architectural alternatives, target execution model and ordered validation gates.
 `UBERHAR.md` describes scope, limits and device testing. `docs/releases/` holds
 versioned pre-release notes. `docs/UBERHAR_LOG_ANALYSIS_0.0.5.md` records the complete
 0.0.5 cold/warm analysis, preprocessing limits and the compact-shader response.

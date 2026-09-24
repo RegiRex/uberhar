@@ -7,23 +7,27 @@ Baseline: Azahar 2126.1.2, commit
 
 ## Current status
 
-<!-- AstraEH: Course correction based on complete 0.0.5 cold/warm device totals. -->
-**0.0.6 is prepared for the build gates; publication is pending.** The owner's
-0.0.5 log records 29.128 seconds of cold scheduler pipeline waits and 3.943 seconds
-warm with altered gameplay. Fallback driver creation consumed 24.113 seconds
-cold while serving just 149 draws. This does not establish an improvement over
-the previous capture. The new version uses a compact six-stage interpreter loop,
-reuses TEV texture samples and removes the reduced-optimization driver flag.
-New diagnostics report module size and whether compiled fallbacks serve draws.
-See the [0.0.5 analysis](docs/UBERHAR_LOG_ANALYSIS_0.0.5.md) and
-[0.0.6 retest instructions](docs/releases/0.0.6.md). Thor performance is unverified.
+<!-- AstraEH: 0.0.6 device evidence and the first implementation from the full review. -->
+**0.0.6 is published; 0.0.7 is prepared for the build gates.** The complete 0.0.6
+Awakening log records 18.849 seconds of cold scheduler pipeline waits and zero
+warm, with 43 of 52 fallback pipelines unused. The cold total is lower than
+0.0.5's 29.128 seconds, but differing workloads prevent a controlled speedup
+claim. The fallback still compiles on demand and cannot guarantee smooth first
+encounters.
 
-Local 0.0.6 checks pass 57,344 exact RGBA8 comparisons across 224 programs,
-57,344 texture-use checks and 128 Vulkan module validations (64 families with
-each frontend optimizer setting). These are synthetic host tests, not device
-rendering measurements. Android compilation and package gates run in Actions;
-the workflow publishes only after all required jobs pass. Development does not
-need to keep a chat turn open while that build runs.
+The [full architectural review](docs/UBERHAR_ARCHITECTURE_2026-09-24.md) prioritizes
+ready generic fragment programs, vertex independence, Vulkan pipeline coverage
+and bounded background specialization. **0.0.7 implements the foundation:**
+canonical shader-family keys for proven source-equivalent states and bounded
+candidate-state diagnostics. It preserves actual sampler and pipeline state,
+transferable cache layouts and the existing correctness exclusions. See the
+[0.0.7 notes](docs/releases/0.0.7.md) for validation and the device retest.
+The review cadence is every three to five alpha builds, targeting four; the
+[next full review](docs/UBERHAR_REVIEW_CADENCE.md) is due around 0.0.10.
+
+Android compilation and package gates run in Actions; the workflow publishes
+only after all required jobs pass. Development does not need to keep a chat turn
+open while that build runs. 0.0.7 device performance is not yet measured.
 
 <!-- AstraEH: 0.0.4 changes log collection without changing the 0.0.3 renderer. -->
 **0.0.4 is published as a pre-release** with **Options → Save or Share Log**. Choose the
@@ -74,22 +78,17 @@ The baseline build receives the explicit override and the same rejection check.
 Android documents the installation restriction under
 [`android:testOnly`](https://developer.android.com/guide/topics/manifest/application-element#testOnly).
 
-<!-- AstraEH: Preserve verified 0.0.5 release evidence while 0.0.6 builds. -->
-The published 0.0.5 fragment generator matched the
-[earlier passing shader CI run](https://github.com/RegiRex/uberhar/actions/runs/35946513141).
-**[Download uberhar-0.0.5-arm64.apk](https://github.com/RegiRex/uberhar/releases/download/0.0.5/uberhar-0.0.5-arm64.apk)**
-from the published [0.0.5 pre-release](https://github.com/RegiRex/uberhar/releases/tag/0.0.5).
-No ZIP extraction is needed. Install it over Uberhar 0.0.2, 0.0.3 or 0.0.4; the signing
-certificate is unchanged and the Android version code increased to `33862496`.
-The [build and publication run](https://github.com/RegiRex/uberhar/actions/runs/35964508066)
-passed Android compilation, ten parser/filename JVM tests, eight manifest
-regression tests, first-ready completion tests (including 1,000 publication races),
-final APK checks, 64 Vulkan fragment-module validations and 49,152 exact shader
-comparisons. A local ThreadSanitizer run of the completion tests also passed. The release tag points to
-`a3c0476502c5ea217b6546de46ee8b9733806312`; the public APK's SHA256 matches the tested artifact:
+<!-- AstraEH: Preserve verified published release evidence while the next version builds. -->
+**[Download uberhar-0.0.6-arm64.apk](https://github.com/RegiRex/uberhar/releases/download/0.0.6/uberhar-0.0.6-arm64.apk)**
+from the published [0.0.6 pre-release](https://github.com/RegiRex/uberhar/releases/tag/0.0.6).
+No ZIP extraction is needed. Install it over an existing Uberhar installation;
+the signing certificate is unchanged. The
+[build and publication run](https://github.com/RegiRex/uberhar/actions/runs/35969852337)
+passed its Android, shader and package gates. The tag points to
+`9be1cd41068029a253412f1430562f3081c8e52b`. The APK SHA256 is:
 
 ```text
-cc1f5584f12370327acbcd2d9adc0ebb9dc7ebde939381d22fa9e1c52979ef3b
+265a53d47ba77a91d2057a7453471efc08400318930236fa1657f9dee62e4a68
 ```
 
 The export feature adds no Android permissions or runtime dependencies. The
@@ -97,7 +96,8 @@ private sharing provider exposes only staged log copies with explicit read
 grants. Actual file-picker and share-target behavior still needs device testing.
 
 The ready-fallback safeguard and AstraEH attribution comments remain in place.
-Device correctness and comparative performance remain unverified.
+The supplied 0.0.6 capture supports the observations above; broader device
+correctness and comparative performance still require controlled tests.
 The baseline workflow builds unmodified upstream code. Its APK retains Azahar's
 application ID and is not intended to replace your installed Azahar. Do not
 uninstall Azahar to work around a signing-key mismatch.

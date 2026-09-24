@@ -16,17 +16,20 @@ and limits fallback compilation after the first gameplay stall report, following
 **release.beta.alpha** numbering. Test builds are published as
 [GitHub pre-releases](https://github.com/RegiRex/uberhar/releases) after package validation.
 See [UBERHAR.md](UBERHAR.md) for status and testing instructions.
-**[Download Uberhar 0.0.5 ARM64](https://github.com/RegiRex/uberhar/releases/download/0.0.5/uberhar-0.0.5-arm64.apk)**.
-Version **0.0.4** adds a current/previous log picker, named file downloads and
-sharing; its renderer is unchanged from 0.0.3. This remains a limited Vulkan TEV
-experiment. The 0.0.3 cold-run log confirmed substantial remaining waits;
-**0.0.5** adds first-ready pipeline selection and more precise build diagnostics.
-Its device log still shows substantial driver compilation stalls. **0.0.6**
-rewrites the fallback as a compact loop, reuses texture samples, restores normal
-driver optimization and measures fallback usefulness. Publication is pending
-the build gates; see the [0.0.6 notes](docs/releases/0.0.6.md) and
+**[Download the published Uberhar 0.0.6 ARM64](https://github.com/RegiRex/uberhar/releases/download/0.0.6/uberhar-0.0.6-arm64.apk)**.
+The owner's 0.0.6 Awakening capture records 18.849 seconds of cold pipeline
+waiting and none in its warm run. Different workloads prevent a controlled
+comparison with 0.0.5. **0.0.7** consolidates equivalent fallback shader families
+and adds a bounded census of the state combinations responsible for pipeline
+variation. Publication is pending the build gates; see the
+[0.0.7 notes](docs/releases/0.0.7.md) and
 [Actions](https://github.com/RegiRex/uberhar/actions/workflows/uberhar-alpha.yml).
-No Thor performance gain is claimed before the next device test.
+
+The [architectural review](docs/UBERHAR_ARCHITECTURE_2026-09-24.md) explains the
+larger move toward generic programs ready before gameplay, vertex fallback and
+capability-dependent pipeline preparation. These are staged development goals,
+not features all implemented in 0.0.7. Reviews repeat every three to five alpha
+builds, normally four; the next is due around 0.0.10.
 
 See the [AstraEH code map](docs/UBERHAR_CODE_MAP.md) to locate the fork's changes.
 

@@ -11,6 +11,10 @@ namespace Pica::Shader::Generator::GLSL {
 /// AstraEH: Conservative support gate for the initial Vulkan TEV experiment.
 bool SupportsDynamicTev(const FSConfig& config, const UserConfig& user);
 
+/// AstraEH: Canonicalize only shader-irrelevant fallback state for a fixed device profile.
+/// Sampler and fixed-function pipeline state must still be supplied separately by the caller.
+FSConfig MakeDynamicTevFamilyConfig(const FSConfig& config, const Profile& profile);
+
 class FragmentModule {
 public:
     // AstraEH: Existing callers stay specialized; Vulkan fallback callers opt into dynamic TEV.
