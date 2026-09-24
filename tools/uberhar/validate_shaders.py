@@ -32,6 +32,11 @@ for label, option in (("unoptimized", "-Od"), ("optimized", "-Os")):
         if not any("OpLoopMerge" in line and "DontUnroll" in line
                    for line in assembly.splitlines()):
             raise AssertionError(f"TEV loop hint missing: {binary}")
+        # AstraEH: Catch Vulkan push-constant ABI drift, including the two new controls.
+        for member, offset in enumerate((0, 96, 100, 104)):
+            expected = f"OpMemberDecorate %UberTev {member} Offset {offset}"
+            if expected not in assembly:
+                raise AssertionError(f"Fallback ABI mismatch: {binary}: {expected}")
         sizes.append(binary.stat().st_size)
-    print(f"PASS: {len(cases)} {label} Vulkan modules; DontUnroll retained; "
+    print(f"PASS: {len(cases)} {label} Vulkan modules; DontUnroll and 108-byte ABI verified; "
           f"SPIR-V size {min(sizes)}..{max(sizes)} bytes", flush=True)

@@ -18,7 +18,7 @@ constexpr static std::size_t RESERVE_SIZE = 8 * 1024 * 1024;
 bool SupportsDynamicTev(const FSConfig& config, const UserConfig& user) {
     if (config.UsesSpirvIncompatibleConfig() ||
         config.texture.texture0_type == TexturingRegs::TextureConfig::Shadow2D ||
-        !user.IsCacheable()) {
+        config.texture.fog_mode == TexturingRegs::FogMode::Gas || !user.IsCacheable()) {
         return false;
     }
     for (const TexturingRegs::TevStageConfig stage : config.texture.tev_stages) {
@@ -158,7 +158,46 @@ FSConfig MakeDynamicTevFamilyConfig(const FSConfig& original, const Profile& pro
     if (config.texture.fog_mode == TexturingRegs::FogMode::None) {
         config.texture.fog_flip.Assign(0);
     }
+    // AstraEH: These controls now live in the per-draw ABI, so one program covers
+    // their combinations. Keep cube/shadow resource types and lighting specialized.
+    config.framebuffer.alpha_test_func.Assign(FramebufferRegs::CompareFunc::Always);
+    config.framebuffer.scissor_test_mode.Assign(RasterizerRegs::ScissorMode::Disabled);
+    config.framebuffer.depthmap_enable.Assign(RasterizerRegs::DepthBuffering::ZBuffering);
+    config.texture.fog_mode.Assign(TexturingRegs::FogMode::None);
+    config.texture.fog_flip.Assign(0);
+    config.texture.texture2_use_coord1.Assign(0);
+    for (std::size_t i = 0; i < config.texture.requested_wrap.size(); ++i) {
+        config.texture.requested_wrap[i] = {Wrap::ClampToEdge, Wrap::ClampToEdge};
+        config.texture.texture_border_color[i].raw = 0;
+    }
+    if (config.texture.texture0_type == TextureType::Projection2D ||
+        config.texture.texture0_type == TextureType::Disabled) {
+        config.texture.texture0_type.Assign(TextureType::Texture2D);
+    }
     return config;
+}
+
+// AstraEH: Encode the original effective state, never a canonical family. Copying
+// this value into each scheduler command preserves the registers of that draw.
+DynamicTevState MakeDynamicTevState(const FSConfig& original, const Profile& profile) {
+    auto config = original;
+    config.ApplyProfile(profile);
+    DynamicTevState state{config.texture.tev_stages, config.texture.combiner_buffer_input.Value()};
+    state.framebuffer =
+        static_cast<u32>(config.framebuffer.alpha_test_func.Value()) |
+        (static_cast<u32>(config.framebuffer.scissor_test_mode.Value()) << 3) |
+        ((config.framebuffer.depthmap_enable == RasterizerRegs::DepthBuffering::WBuffering ? 1U
+                                                                                           : 0U)
+         << 5);
+    for (u32 i = 0; i < 3; ++i) {
+        state.texture |= config.texture.texture_border_color[i].enable_s.Value() << (i * 2);
+        state.texture |= config.texture.texture_border_color[i].enable_t.Value() << (i * 2 + 1);
+    }
+    state.texture |= config.texture.texture2_use_coord1.Value() << 6;
+    state.texture |= (config.texture.fog_mode == TexturingRegs::FogMode::Fog ? 1U : 0U) << 7;
+    state.texture |= config.texture.fog_flip.Value() << 8;
+    state.texture |= static_cast<u32>(config.texture.texture0_type.Value()) << 10;
+    return state;
 }
 
 FragmentModule::FragmentModule(const FSConfig& config_, const UserConfig& user_,
@@ -174,6 +213,9 @@ FragmentModule::FragmentModule(const FSConfig& config_, const UserConfig& user_,
         DefineBindingsVK();
     } else {
         DefineBindingsGL();
+    }
+    if (dynamic_tev) {
+        DefineDynamicState();
     }
     DefineHelpers();
     DefineShadowHelpers();
@@ -201,7 +243,7 @@ vec4 secondary_fragment_color = vec4(0.0);
 )";
 
     // Do not do any sort of processing if it's obvious we're not going to pass the alpha test
-    if (config.framebuffer.alpha_test_func == FramebufferRegs::CompareFunc::Never) {
+    if (!dynamic_tev && config.framebuffer.alpha_test_func == FramebufferRegs::CompareFunc::Never) {
         out += "discard; }";
         return out;
     }
@@ -239,17 +281,23 @@ vec4 secondary_fragment_color = vec4(0.0);
     WriteAlphaTestCondition(config.framebuffer.alpha_test_func);
 
     // Emulate the fog
-    switch (config.texture.fog_mode) {
-    case TexturingRegs::FogMode::Fog:
+    if (dynamic_tev) {
+        // AstraEH: The branch is uniform across the draw, preserving derivative validity.
+        out += "if ((uber_tev.texture & 128u) != 0u) {\n";
         WriteFog();
-        break;
-    case TexturingRegs::FogMode::Gas:
-        WriteGas();
-        // Return early due to unimplemented gas mode
-        return out;
-    default:
-        break;
-    }
+        out += "}\n";
+    } else
+        switch (config.texture.fog_mode) {
+        case TexturingRegs::FogMode::Fog:
+            WriteFog();
+            break;
+        case TexturingRegs::FogMode::Gas:
+            WriteGas();
+            // Return early due to unimplemented gas mode
+            return out;
+        default:
+            break;
+        }
 
     if (config.framebuffer.shadow_rendering) {
         WriteShadow();
@@ -281,12 +329,27 @@ void FragmentModule::WriteDepth() {
         out += "float z_over_w = -gl_FragCoord.z;\n";
     }
     out += "float depth = z_over_w * depth_scale + depth_offset;\n";
-    if (config.framebuffer.depthmap_enable == RasterizerRegs::DepthBuffering::WBuffering) {
+    if (dynamic_tev) {
+        // AstraEH: Keep the same arithmetic/order as the specialized depth conversion.
+        out += "if ((uber_tev.framebuffer & 32u) != 0u) depth /= gl_FragCoord.w;\n";
+    } else if (config.framebuffer.depthmap_enable == RasterizerRegs::DepthBuffering::WBuffering) {
         out += "depth /= gl_FragCoord.w;\n";
     }
 }
 
 void FragmentModule::WriteScissor() {
+    if (dynamic_tev) {
+        // AstraEH: Inclusive lower/exclusive upper bounds match the existing path.
+        out += R"(
+uint uber_scissor = (uber_tev.framebuffer >> 3u) & 3u;
+if (uber_scissor != 0u) {
+    bool inside = gl_FragCoord.x >= float(scissor_x1) && gl_FragCoord.y >= float(scissor_y1) &&
+                  gl_FragCoord.x < float(scissor_x2) && gl_FragCoord.y < float(scissor_y2);
+    if (uber_scissor == 3u ? !inside : inside) discard;
+}
+)";
+        return;
+    }
     const auto scissor_mode = config.framebuffer.scissor_test_mode.Value();
     if (scissor_mode == RasterizerRegs::ScissorMode::Disabled) {
         return;
@@ -481,6 +544,24 @@ void FragmentModule::AppendAlphaCombiner(Pica::TexturingRegs::TevStageConfig::Op
 }
 
 void FragmentModule::WriteAlphaTestCondition(FramebufferRegs::CompareFunc func) {
+    if (dynamic_tev) {
+        // AstraEH: Marker also bounds the numerical TEV extraction in host tests.
+        out += R"(
+// AstraEH: TEV output ends; runtime fragment tests begin.
+int uber_alpha = int(combiner_output.a * 255.0);
+switch (uber_tev.framebuffer & 7u) {
+case 0u: discard;
+case 1u: break;
+case 2u: if (uber_alpha != alphatest_ref) discard; break;
+case 3u: if (uber_alpha == alphatest_ref) discard; break;
+case 4u: if (uber_alpha >= alphatest_ref) discard; break;
+case 5u: if (uber_alpha >  alphatest_ref) discard; break;
+case 6u: if (uber_alpha <= alphatest_ref) discard; break;
+case 7u: if (uber_alpha <  alphatest_ref) discard; break;
+}
+)";
+        return;
+    }
     const auto get_cond = [func]() -> std::string {
         using CompareFunc = Pica::FramebufferRegs::CompareFunc;
         switch (func) {
@@ -553,7 +634,7 @@ void FragmentModule::WriteTevStage(u32 index) {
     }
 }
 
-void FragmentModule::DefineDynamicTev() {
+void FragmentModule::DefineDynamicState() {
     // AstraEH: std430 uvec4 array stride is 16 bytes; the mask follows at byte 96.
     // All branches depend on draw-uniform state, including texture selection.
     out += R"(
@@ -561,8 +642,15 @@ void FragmentModule::DefineDynamicTev() {
 layout(push_constant) uniform UberTev {
     uvec4 stages[6];
     uint buffer_mask;
+    uint framebuffer;
+    uint texture;
 } uber_tev;
+)";
+}
 
+void FragmentModule::DefineDynamicTev() {
+    out += R"(
+// AstraEH: TEV interpreter helpers begin.
 // AstraEH: These are private to one fragment invocation. TEV stages share the
 // same texture coordinates and samplers, so fetch each referenced unit once.
 // Lazy reads avoid sampling unused units; control depends only on draw state.
@@ -1054,7 +1142,11 @@ void FragmentModule::WriteLighting() {
 
 void FragmentModule::WriteFog() {
     // Get index into fog LUT
-    if (config.texture.fog_flip) {
+    if (dynamic_tev) {
+        // AstraEH: Runtime orientation shares the original LUT interpolation below.
+        out += "float fog_index = ((uber_tev.texture & 256u) != 0u ? "
+               "(1.0 - float(depth)) : depth) * 128.0;\n";
+    } else if (config.texture.fog_flip) {
         out += "float fog_index = (1.0 - float(depth)) * 128.0;\n";
     } else {
         out += "float fog_index = depth * 128.0;\n";
@@ -1923,6 +2015,33 @@ vec4 shadowTextureCube(vec2 uv, float w) {
 
 void FragmentModule::DefineTexUnitSampler(u32 texture_unit) {
     out += fmt::format("vec4 sampleTexUnit{}() {{\n", texture_unit);
+    if (dynamic_tev && texture_unit < 3) {
+        // AstraEH: Runtime border and coordinate choices keep the established
+        // unprojected border test and sampling formulas. Cubes retain a typed family.
+        if (texture_unit == 0 && config.texture.texture0_type != TextureType::TextureCube) {
+            out += "uint uber_type = (uber_tev.texture >> 10u) & 7u;\n"
+                   "if (uber_type == 5u) return vec4(0.0);\n";
+        }
+        out += texture_unit == 2
+                   ? "vec2 uv = (uber_tev.texture & 64u) != 0u ? texcoord1 : texcoord2;\n"
+                   : fmt::format("vec2 uv = texcoord{};\n", texture_unit);
+        out += fmt::format(
+            "uint border = (uber_tev.texture >> {}u) & 3u;\n"
+            "if (((border & 1u) != 0u && (uv.x < 0.0 || uv.x > 1.0)) || "
+            "((border & 2u) != 0u && (uv.y < 0.0 || uv.y > 1.0))) return tex_border_color[{}];\n",
+            texture_unit * 2, texture_unit);
+        if (texture_unit == 0 && config.texture.texture0_type == TextureType::TextureCube) {
+            out += "return texture(tex0, vec3(uv, texcoord0_w));\n}\n";
+        } else {
+            if (texture_unit == 0) {
+                out += "if (uber_type == 3u) return textureProj(tex0, vec3(uv, texcoord0_w));\n";
+            }
+            out += fmt::format("return textureLod(tex{0}, uv, getLod(uv * "
+                               "vec2(textureSize(tex{0}, 0))) + tex_lod_bias[{0}]);\n}}\n",
+                               texture_unit);
+        }
+        return;
+    }
     if (texture_unit == 0 &&
         config.texture.texture0_type == TexturingRegs::TextureConfig::Disabled) {
         out += "return vec4(0.0);\n}";

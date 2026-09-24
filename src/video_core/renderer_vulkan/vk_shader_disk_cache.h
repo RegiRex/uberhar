@@ -39,12 +39,18 @@ public:
         const Pica::RegsInternal& regs);
 
     GraphicsPipeline* GetPipeline(const PipelineInfo& info);
+    // AstraEH: Read renderer-owned cache sizes and foreground VS translation costs.
+    void ReportUberharStats(const char* kind) const;
 
     u64 GetProgramID() const {
         return title_id;
     }
 
 private:
+    // AstraEH: Only newly encountered live VS configurations contribute to these timings.
+    u64 live_vs_codegen_count{};
+    u64 live_vs_codegen_ns{};
+    u64 live_vs_codegen_max_ns{};
     static constexpr std::size_t SOURCE_FILE_HASH_LENGTH = 64;
     using SourceFileCacheVersionHash = std::array<u8, SOURCE_FILE_HASH_LENGTH>;
 

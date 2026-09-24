@@ -288,6 +288,9 @@
     <string name="uberhar_separate_folder_title">Use an empty folder for Uberhar</string>
     <string name="uberhar_separate_folder_description">Create an empty folder for Uberhar data, or select a folder already initialized by Uberhar. This keeps your Azahar saves, settings, and shader caches separate. Copy any saves you want to test after setup.</string>
     <string name="uberhar_hybrid_tev_description">Vulkan only. Draws through a texture-combiner fallback while specialized pipelines compile. New fallback families and vertex shaders can still pause. Overrides asynchronous draw skipping. Restart the game after changing.</string>
+    <!-- AstraEH: Independent control makes CPU bridge effects measurable on the device. -->
+    <string name="uberhar_cpu_vertex_bridge">CPU vertex bridge (experimental)</string>
+    <string name="uberhar_cpu_vertex_bridge_description">Requires hybrid TEV. Uses the CPU for eligible vertex work while an optimized GPU pipeline compiles. Turn off to compare performance. Restart the game after changing.</string>
     <string name="uberhar_force_tev">Force TEV fallback for comparison</string>
     <string name="uberhar_force_tev_description">Requires hybrid TEV. Uses the fallback for every supported draw to check image correctness. May be much slower. Restart the game after changing.</string>
     <string name="async_shaders_description">Compiles shaders in the background to reduce stuttering during gameplay. When enabled expect temporary graphical glitches</string>

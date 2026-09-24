@@ -103,8 +103,17 @@ std::optional<std::pair<u64, Shader* const>> ShaderDiskCache::UseProgrammableVer
 
         ExtraVSConfig extra_config = parent.CalcExtraConfig(config);
 
+        // AstraEH: This translation is foreground work; distinguish it from driver compilation.
+        const auto codegen_start = std::chrono::steady_clock::now();
         auto program =
             Common::HashableString(GLSL::GenerateVertexShader(setup, config, extra_config));
+        const auto codegen_ns =
+            static_cast<u64>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                 std::chrono::steady_clock::now() - codegen_start)
+                                 .count());
+        ++live_vs_codegen_count;
+        live_vs_codegen_ns += codegen_ns;
+        live_vs_codegen_max_ns = std::max(live_vs_codegen_max_ns, codegen_ns);
 
         if (program.empty()) {
             LOG_ERROR(Render_Vulkan, "Failed to retrieve programmable vertex shader");
@@ -238,21 +247,21 @@ std::optional<std::pair<u64, Shader* const>> ShaderDiskCache::UseFixedGeometrySh
 GraphicsPipeline* ShaderDiskCache::GetPipeline(const PipelineInfo& info) {
 
     u64 hash = info.Hash();
-    u64 optimized_hash = info.state.OptimizedHash(parent.instance);
+    // AstraEH: Deduplicate equivalent host pipelines without rewriting the guest
+    // configuration IDs used by transferable PL/VS/FS/GS records.
+    auto shaders = parent.current_shaders;
+    if (!parent.instance.UseGeometryShaders() ||
+        parent.instance.IsFragmentShaderBarycentricSupported()) {
+        shaders[ProgramType::GS] = nullptr;
+    }
+    const u64 optimized_hash = info.state.ExecutionHash(
+        parent.instance.IsExtendedDynamicStateSupported(), HostShaderIds(shaders));
 
     auto [it, new_pipeline] = graphics_pipelines.try_emplace(optimized_hash);
     if (new_pipeline) {
-        if (!parent.instance.UseGeometryShaders() ||
-            parent.instance.IsFragmentShaderBarycentricSupported()) {
-            // If we don't need geometry shaders disable
-            // them before building the pipeline. It's done here
-            // so that the shader ID could be hashed and saved with
-            // the pipeline info so that it is transferable.
-            parent.UseTrivialGeometryShader();
-        }
         it.value() = std::make_unique<GraphicsPipeline>(
             parent.instance, parent.renderpass_cache, info, *parent.driver_pipeline_cache,
-            *parent.pipeline_layout, parent.current_shaders, &parent.pipeline_workers,
+            *parent.pipeline_layout, shaders, &parent.pipeline_workers,
             // AstraEH: Connect specialization completion to first-ready waits and diagnostics.
             parent.SpecializedBuildOptions());
     }
@@ -269,6 +278,19 @@ GraphicsPipeline* ShaderDiskCache::GetPipeline(const PipelineInfo& info) {
     }
 
     return it.value().get();
+}
+
+// AstraEH: No new per-draw strings or sets: existing maps provide the census.
+void ShaderDiskCache::ReportUberharStats(const char* kind) const {
+    // AstraEH Log Line: bounded aggregate identifying module/pipeline reuse and foreground work.
+    LOG_INFO(Render_Vulkan,
+             "Uberhar execution cache {}: guest_pipeline_records={} host_pipelines={} "
+             "vertex_configs={} vertex_modules={} live_vs_codegen={} vs_codegen_ms={:.3f} "
+             "vs_codegen_max_ms={:.3f}",
+             kind, known_graphic_pipelines.size(), graphics_pipelines.size(),
+             programmable_vertex_map.size(), programmable_vertex_cache.size(),
+             live_vs_codegen_count, live_vs_codegen_ns / 1000000.0,
+             live_vs_codegen_max_ns / 1000000.0);
 }
 
 ShaderDiskCache::SourceFileCacheVersionHash ShaderDiskCache::GetSourceFileCacheVersionHash() {
@@ -1395,13 +1417,6 @@ bool ShaderDiskCache::InitPLCache(const std::atomic_bool& stop_loading,
             }
 
             known_graphic_pipelines.emplace(curr.Id());
-            auto pl_hash_opt = entry->pl_info.OptimizedHash(parent.instance);
-
-            if (graphics_pipelines.find(pl_hash_opt) != graphics_pipelines.end()) {
-                // Multiple entries can have the same optimized hash. Skip if that's the case.
-                LOG_DEBUG(Render_Vulkan, "    skipping.", curr.Id());
-                continue;
-            }
 
             // Fetch all the shaders used in the pipeline,
             // if any is missing we cannot build it.
@@ -1449,6 +1464,13 @@ bool ShaderDiskCache::InitPLCache(const std::atomic_bool& stop_loading,
             }
 
             // Build the pipeline using the cached pipeline info.
+            // AstraEH: Use the same host-module/active-state key on cache reload as
+            // on first play. Guest shader IDs remain resolvable in the disk records.
+            const u64 pl_hash_opt = entry->pl_info.ExecutionHash(
+                parent.instance.IsExtendedDynamicStateSupported(), HostShaderIds(shaders));
+            if (graphics_pipelines.find(pl_hash_opt) != graphics_pipelines.end()) {
+                continue;
+            }
             // The dynamic state can be left default initialized.
             PipelineInfo info{};
             info.state = entry->pl_info;

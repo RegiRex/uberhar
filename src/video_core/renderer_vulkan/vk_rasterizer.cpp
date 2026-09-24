@@ -426,6 +426,8 @@ bool RasterizerVulkan::SetupGeometryShader() {
 }
 
 bool RasterizerVulkan::AccelerateDrawBatch(bool is_indexed) {
+    // AstraEH: A decision cannot leak into a later batch or an unsupported draw.
+    cpu_bridge = {};
     if (regs.pipeline.use_gs != Pica::PipelineRegs::UseGS::No) {
         if (regs.pipeline.gs_config.mode != Pica::PipelineRegs::GSMode::Point) {
             return false;
@@ -468,7 +470,7 @@ bool RasterizerVulkan::AccelerateDrawBatchInternal(bool is_indexed) {
     }
 
     const bool wait_built = !async_shaders || regs.pipeline.num_vertices <= 6;
-    if (!pipeline_cache.BindPipeline(pipeline_info, wait_built)) {
+    if (!pipeline_cache.BindPipeline(pipeline_info, wait_built, nullptr, !cpu_bridge.preferred)) {
         return true;
     }
 
@@ -526,7 +528,17 @@ void RasterizerVulkan::SetupIndexArray() {
 
 void RasterizerVulkan::DrawTriangles() {
     if (vertex_batch.empty()) {
+        // AstraEH: Invalid/empty CPU output must not leave a prepared handle latched.
+        cpu_bridge = {};
         return;
+    }
+
+    if (cpu_bridge.ready) {
+        // AstraEH: Measure only CPU preparation; exclude this function's GPU setup/submission.
+        const auto elapsed = std::chrono::steady_clock::now() - cpu_bridge_start;
+        pipeline_cache.RecordCpuBridgeVertices(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(elapsed).count(),
+            static_cast<u32>(vertex_batch.size()));
     }
 
     pipeline_info.state.rasterization.topology.Assign(Pica::PipelineRegs::TriangleTopology::List);
@@ -536,6 +548,8 @@ void RasterizerVulkan::DrawTriangles() {
     pipeline_cache.UseTrivialGeometryShader();
 
     Draw(false, false);
+    // AstraEH: The prepared generic pipeline is valid for exactly this guest batch.
+    cpu_bridge = {};
 }
 
 bool RasterizerVulkan::Draw(bool accelerate, bool is_indexed) {
@@ -582,6 +596,17 @@ bool RasterizerVulkan::Draw(bool accelerate, bool is_indexed) {
     // Sync and bind the shader
     pipeline_cache.UseFragmentShader(regs, user_config);
 
+    if (accelerate) {
+        // AstraEH: No draw, index binding, uniforms or render pass has been submitted
+        // for this batch yet. Returning false invokes PicaCore's existing CPU path.
+        cpu_bridge = pipeline_cache.PrepareCpuFallback(pipeline_info, software_layout,
+                                                       regs.pipeline.num_vertices);
+        if (cpu_bridge.ready) {
+            cpu_bridge_start = std::chrono::steady_clock::now();
+            return false;
+        }
+    }
+
     // Sync the LUTs within the texture buffer
     SyncAndUploadLUTs();
     SyncAndUploadLUTsLF();
@@ -606,7 +631,8 @@ bool RasterizerVulkan::Draw(bool accelerate, bool is_indexed) {
     if (accelerate) {
         succeeded = AccelerateDrawBatchInternal(is_indexed);
     } else {
-        pipeline_cache.BindPipeline(pipeline_info, true);
+        // AstraEH: A ready bridge bypasses creation of an unnecessary CPU-specialized PSO.
+        pipeline_cache.BindPipeline(pipeline_info, true, cpu_bridge.ready);
 
         const u32 vertex_count = static_cast<u32>(vertex_batch.size());
         const u32 vertex_size = vertex_count * sizeof(HardwareVertex);

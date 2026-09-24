@@ -12,6 +12,7 @@
 #include "video_core/renderer_vulkan/vk_graphics_pipeline.h"
 #include "video_core/renderer_vulkan/vk_resource_pool.h"
 #include "video_core/renderer_vulkan/vk_shader_disk_cache.h"
+#include "video_core/shader/generator/glsl_fs_shader_gen.h" // AstraEH: Shared fallback ABI.
 #include "video_core/shader/generator/pica_fs_config.h"
 #include "video_core/shader/generator/profile.h"
 #include "video_core/shader/generator/shader_gen.h"
@@ -69,7 +70,20 @@ public:
                      const VideoCore::DiskResourceLoadCallback& callback = {});
 
     /// Binds a pipeline using the provided information
-    bool BindPipeline(PipelineInfo& info, bool wait_built = false);
+    // AstraEH: A ready CPU bridge may bind its generic pipeline directly; admitting
+    // another GPU-vertex fallback is optional while the shared CPU route warms.
+    bool BindPipeline(PipelineInfo& info, bool wait_built = false,
+                      GraphicsPipeline* ready_cpu_fallback = nullptr, bool allow_tev_build = true);
+
+    struct CpuBridgePreparation {
+        GraphicsPipeline* ready{};
+        bool preferred{};
+    };
+    // AstraEH: Called before any draw submission. A non-null result authorizes
+    // the existing PICA CPU vertex path, with a compatible completed GPU pipeline.
+    CpuBridgePreparation PrepareCpuFallback(const PipelineInfo& info,
+                                            const VertexLayout& software_layout, u32 vertices);
+    void RecordCpuBridgeVertices(u64 elapsed_ns, u32 vertices);
 
     Pica::Shader::Generator::ExtraVSConfig CalcExtraConfig(
         const Pica::Shader::Generator::PicaVSConfig& config);
@@ -140,7 +154,7 @@ private:
     std::string GetTransferableDir() const;
 
     // AstraEH: Fallback cache lifecycle and diagnostics; see the implementation for support caps.
-    GraphicsPipeline* GetTevFallback(const PipelineInfo& info);
+    GraphicsPipeline* GetTevFallback(const PipelineInfo& info, bool cpu_vertex = false);
     void ClearTevFallbacks();
     void ReportUberharStats(const char* kind = "totals");
     PipelineBuildOptions SpecializedBuildOptions() {
@@ -182,12 +196,8 @@ private:
 
     // AstraEH: Separate maps keep experimental shaders out of the transferable cache.
     // Limit growth; after the limit we wait for the accurate specialized path.
-    struct TevPushConstants {
-        std::array<Pica::Shader::TevStageConfigRaw, 6> stages;
-        u32 buffer_mask;
-    };
-    static_assert(sizeof(TevPushConstants) == 100);
-    static_assert(offsetof(TevPushConstants, buffer_mask) == 96);
+    // AstraEH: The generator owns the versioned 108-byte transport and layout assertions.
+    using TevPushConstants = Pica::Shader::Generator::GLSL::DynamicTevState;
     TevPushConstants tev_constants{};
     std::optional<Pica::Shader::FSConfig> tev_family_config;
     Pica::Shader::UserConfig tev_user{};
@@ -200,11 +210,24 @@ private:
     // a saturated census is a lower bound, not an exact coverage estimate.
     std::array<std::unordered_set<u64>, 11> tev_candidate_keys;
     bool tev_census_capped{};
+    // AstraEH: Renderer-thread counters only; emit aggregates at the existing five-second cadence.
+    u64 cpu_bridge_pending{};
+    u64 cpu_bridge_selected{};
+    u64 cpu_bridge_warming{};
+    u64 cpu_bridge_limited{};
+    u64 cpu_bridge_draws{};
+    u64 cpu_bridge_mismatches{};
+    u64 cpu_bridge_batches{};
+    u64 cpu_bridge_vertices{};
+    u64 cpu_bridge_cpu_ns{};
+    u64 cpu_bridge_cpu_max_ns{};
     // AstraEH: Normal hybrid mode admits one warm-up pipeline at a time. Ready entries
     // remain usable; force mode may queue more because it explicitly waits for comparison.
     GraphicsPipeline* warming_tev_pipeline{};
     const bool hybrid_tev;
     const bool force_tev;
+    // AstraEH: A/B switch captured at startup, effective only in normal hybrid mode.
+    const bool cpu_vertex_bridge;
     // AstraEH: Draw counters belong to the render thread; wait counters belong to the scheduler.
     u64 draw_requests{};
     u64 specialized_pending{};
@@ -224,6 +247,8 @@ private:
     std::atomic<u64> fallback_shader_ns{};
     std::atomic<u64> fallback_driver_ns{};
     std::atomic<u64> fallback_job_queue_ns{};
+    // AstraEH: Error output is capped independently of successful build diagnostics.
+    std::atomic<u64> fallback_failures{};
     // AstraEH: Count decisions on the scheduler, including fallbacks that became ready late.
     std::atomic<u64> first_ready_waits{};
     std::atomic<u64> late_fallback_draws{};

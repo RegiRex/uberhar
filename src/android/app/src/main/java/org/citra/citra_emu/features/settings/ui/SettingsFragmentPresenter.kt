@@ -998,6 +998,16 @@ class SettingsFragmentPresenter(private val fragmentView: SettingsFragmentView) 
                     BooleanSetting.UBERHAR_HYBRID_TEV.defaultValue
                 )
             )
+            // AstraEH: Isolate bridge performance without disabling the broader fragment fallback.
+            add(
+                SwitchSetting(
+                    BooleanSetting.UBERHAR_CPU_VERTEX_BRIDGE,
+                    R.string.uberhar_cpu_vertex_bridge,
+                    R.string.uberhar_cpu_vertex_bridge_description,
+                    BooleanSetting.UBERHAR_CPU_VERTEX_BRIDGE.key,
+                    BooleanSetting.UBERHAR_CPU_VERTEX_BRIDGE.defaultValue
+                )
+            )
             // AstraEH: Force mode is a correctness diagnostic, not a performance preset.
             add(
                 SwitchSetting(

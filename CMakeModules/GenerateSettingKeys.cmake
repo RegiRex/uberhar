@@ -40,6 +40,8 @@ foreach(KEY IN ITEMS
     # AstraEH: Shared native/JNI keys for the opt-in Uberhar experiment.
     "uberhar_hybrid_tev"
     "uberhar_force_tev"
+    # AstraEH: Independently compare the ready-only CPU vertex bridge.
+    "uberhar_cpu_vertex_bridge"
     "async_presentation"
     "use_hw_shader"
     "use_disk_shader_cache"

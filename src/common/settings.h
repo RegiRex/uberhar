@@ -538,6 +538,8 @@ struct Values {
     // AstraEH: Vulkan-only experiments; false preserves upstream rendering by default.
     SwitchableSetting<bool> uberhar_hybrid_tev{false, Keys::uberhar_hybrid_tev};
     SwitchableSetting<bool> uberhar_force_tev{false, Keys::uberhar_force_tev};
+    // AstraEH: Effective only inside hybrid mode; independently disable for A/B tests.
+    SwitchableSetting<bool> uberhar_cpu_vertex_bridge{true, Keys::uberhar_cpu_vertex_bridge};
     SwitchableSetting<bool> async_presentation{true, Keys::async_presentation};
     SwitchableSetting<bool> use_hw_shader{true, Keys::use_hw_shader};
     SwitchableSetting<bool> use_disk_shader_cache{true, Keys::use_disk_shader_cache};

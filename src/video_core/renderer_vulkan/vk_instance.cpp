@@ -605,6 +605,50 @@ bool Instance::CreateDevice() {
                  min_imported_host_pointer_alignment);
     }
 
+    // AstraEH: Probe future pipeline strategies without enabling extensions or
+    // bypassing inherited driver blacklists. Log once per Vulkan device creation.
+    const auto advertised = [&](std::string_view name) {
+        return std::find(available_extensions.begin(), available_extensions.end(), name) !=
+               available_extensions.end();
+    };
+    const bool gpl_advertised = advertised(VK_EXT_GRAPHICS_PIPELINE_LIBRARY_EXTENSION_NAME);
+    const bool shader_object_advertised = advertised(VK_EXT_SHADER_OBJECT_EXTENSION_NAME);
+    bool gpl_feature = false;
+    bool fast_linking = false;
+    bool shader_object_feature = false;
+    if (gpl_advertised) {
+        const auto gpl_features =
+            physical_device.getFeatures2<vk::PhysicalDeviceFeatures2,
+                                         vk::PhysicalDeviceGraphicsPipelineLibraryFeaturesEXT>();
+        gpl_feature = gpl_features.get<vk::PhysicalDeviceGraphicsPipelineLibraryFeaturesEXT>()
+                          .graphicsPipelineLibrary;
+        const auto gpl_properties =
+            physical_device
+                .getProperties2<vk::PhysicalDeviceProperties2,
+                                vk::PhysicalDeviceGraphicsPipelineLibraryPropertiesEXT>();
+        fast_linking = gpl_properties.get<vk::PhysicalDeviceGraphicsPipelineLibraryPropertiesEXT>()
+                           .graphicsPipelineLibraryFastLinking;
+    }
+    if (shader_object_advertised) {
+        const auto object_features =
+            physical_device.getFeatures2<vk::PhysicalDeviceFeatures2,
+                                         vk::PhysicalDeviceShaderObjectFeaturesEXT>();
+        shader_object_feature =
+            object_features.get<vk::PhysicalDeviceShaderObjectFeaturesEXT>().shaderObject;
+    }
+    // AstraEH Log Line: bounded capability evidence; advertised support is not enabled support.
+    LOG_INFO(Render_Vulkan,
+             "Uberhar capabilities: gpl_advertised={} gpl_feature={} gpl_fast_linking={} "
+             "gpl_enabled=false "
+             "shader_object_advertised={} shader_object_feature={} shader_object_enabled=false "
+             "dynamic_state_advertised={} dynamic_state_enabled={} border_advertised={} "
+             "border_enabled={} "
+             "max_push_constants={}",
+             gpl_advertised, gpl_feature, fast_linking, shader_object_advertised,
+             shader_object_feature, advertised(VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME),
+             extended_dynamic_state, advertised(VK_EXT_CUSTOM_BORDER_COLOR_EXTENSION_NAME),
+             custom_border_color, properties.limits.maxPushConstantsSize);
+
     if (has_fragment_shader_barycentric) {
         FEAT_SET(vk::PhysicalDeviceFragmentShaderBarycentricFeaturesKHR, fragmentShaderBarycentric,
                  fragment_shader_barycentric)

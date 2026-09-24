@@ -4,7 +4,8 @@
 
 #pragma once
 
-#include <chrono> // AstraEH: Pipeline queue and driver timings.
+#include <algorithm> // AstraEH: Bound active-layout hashing to stored arrays.
+#include <chrono>    // AstraEH: Pipeline queue and driver timings.
 
 #include "common/async_handle.h" // AstraEH: Shared completion signal for first-ready selection.
 #include "common/hash.h"
@@ -216,6 +217,43 @@ struct StaticPipelineInfo {
 
     [[nodiscard]] u64 OptimizedHash(const Instance& instance) const;
 
+    // AstraEH: Execution identity is separate from transferable register identity.
+    // Ignore only state Vulkan does not consume; active native state stays distinct.
+    [[nodiscard]] u64 ExecutionHash(bool extended_dynamic_state,
+                                    const std::array<u64, MAX_SHADER_STAGES>& host_shaders) const {
+        const auto& layout = vertex_layout;
+        const u64 layout_hash = Common::HashCombine(
+            layout.binding_count, layout.attribute_count,
+            Common::ComputeHash64(
+                layout.bindings.data(),
+                std::min<std::size_t>(layout.binding_count, layout.bindings.size()) *
+                    sizeof(VertexBinding)),
+            Common::ComputeHash64(
+                layout.attributes.data(),
+                std::min<std::size_t>(layout.attribute_count, layout.attributes.size()) *
+                    sizeof(VertexAttribute)));
+        const u64 blend_hash = Common::HashCombine(
+            blending.blend_enable, blending.color_write_mask,
+            static_cast<u64>(blending.blend_enable ? Pica::FramebufferRegs::LogicOp::Copy
+                                                   : blending.logic_op),
+            blending.blend_enable ? blending.value : 0U);
+        u64 hash =
+            Common::HashCombine(host_shaders[0], host_shaders[1], host_shaders[2], layout_hash,
+                                Common::ComputeStructHash64(attachments), blend_hash);
+        if (!extended_dynamic_state) {
+            auto depth = depth_stencil;
+            if (!depth.depth_test_enable) {
+                depth.depth_compare_op.Assign(Pica::FramebufferRegs::CompareFunc::Always);
+            }
+            if (!depth.stencil_test_enable) {
+                // AstraEH: Bits 6 and above describe stencil operations/comparison only.
+                depth.value &= 0x3FU;
+            }
+            hash = Common::HashCombine(hash, rasterization.value, depth.value);
+        }
+        return hash;
+    }
+
     static consteval u64 StructHash() {
         constexpr u64 STRUCT_VERSION = 0;
 
@@ -282,7 +320,31 @@ struct Shader : public Common::AsyncHandle {
     vk::ShaderModule module;
     vk::Device device;
     std::string program;
+    // AstraEH: Only experimental fallback failures use this state; done publishes
+    // completion so queued jobs can stop safely without treating a null module as ready.
+    void MarkFailed() {
+        failed.store(true, std::memory_order_release);
+        MarkDone();
+    }
+    bool HasFailed() const {
+        return failed.load(std::memory_order_acquire);
+    }
+
+private:
+    std::atomic_bool failed{};
 };
+
+// AstraEH: Identical Shader objects already share a compiled module, even when
+// several guest configurations refer to it. These process-local IDs never enter
+// disk records; maps and their owning shader objects have the same lifetime.
+inline std::array<u64, MAX_SHADER_STAGES> HostShaderIds(
+    const std::array<Shader*, MAX_SHADER_STAGES>& shaders) {
+    std::array<u64, MAX_SHADER_STAGES> ids{};
+    for (std::size_t i = 0; i < ids.size(); ++i) {
+        ids[i] = reinterpret_cast<std::uintptr_t>(shaders[i]);
+    }
+    return ids;
+}
 
 // AstraEH: Atomics allow bounded progress reports while compiler workers remain active.
 // Durations are wall time; parallel work overlaps and must not be summed as gameplay stalls.
@@ -321,6 +383,15 @@ public:
         return build_phase.load(std::memory_order::relaxed);
     }
     [[nodiscard]] u64 Key() const noexcept;
+    // AstraEH: Failed fallback completion releases waiters but is never bindable.
+    void MarkFailed() {
+        failed.store(true, std::memory_order_release);
+        build_phase.store(4, std::memory_order_relaxed);
+        MarkDone();
+    }
+    bool HasFailed() const {
+        return failed.load(std::memory_order_acquire);
+    }
 
     // AstraEH: Track whether speculative compilation ever served a draw. Atomics
     // permit progress snapshots while the command/compiler workers are active.
@@ -350,11 +421,12 @@ private:
     PipelineInfo info;
     std::array<Shader*, 3> stages;
     bool is_pending{};
-    // AstraEH: Phase 0=queued/not started, 1=shader dependencies, 2=driver, 3=complete.
+    // AstraEH: Phase 0=queued/not started, 1=shader dependencies, 2=driver, 3=complete, 4=failed.
     const PipelineBuildOptions build_options;
     std::atomic<u32> build_phase{};
     std::atomic<u64> fallback_uses{};
     std::atomic<u64> driver_build_ns{};
+    std::atomic_bool failed{};
     std::chrono::steady_clock::time_point queued_at{};
 };
 

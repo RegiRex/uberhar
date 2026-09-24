@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include <chrono> // AstraEH: CPU bridge batch timing.
+
 #include "video_core/rasterizer_accelerated.h"
 #include "video_core/renderer_vulkan/vk_descriptor_update_queue.h"
 #include "video_core/renderer_vulkan/vk_pipeline_cache.h"
@@ -128,6 +130,9 @@ private:
     std::array<vk::Buffer, 16> vertex_buffers;
     VertexArrayInfo vertex_info;
     PipelineInfo pipeline_info{};
+    // AstraEH: One draw's pre-submission CPU routing decision, consumed by DrawTriangles.
+    PipelineCache::CpuBridgePreparation cpu_bridge{};
+    std::chrono::steady_clock::time_point cpu_bridge_start{};
 
     StreamBuffer stream_buffer;     ///< Vertex+Index buffer
     StreamBuffer uniform_buffer;    ///< Uniform buffer

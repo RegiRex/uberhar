@@ -16,19 +16,21 @@ and limits fallback compilation after the first gameplay stall report, following
 **release.beta.alpha** numbering. Test builds are published as
 [GitHub pre-releases](https://github.com/RegiRex/uberhar/releases) after package validation.
 See [UBERHAR.md](UBERHAR.md) for status and testing instructions.
-**[Download the published Uberhar 0.0.6 ARM64](https://github.com/RegiRex/uberhar/releases/download/0.0.6/uberhar-0.0.6-arm64.apk)**.
-The owner's 0.0.6 Awakening capture records 18.849 seconds of cold pipeline
-waiting and none in its warm run. Different workloads prevent a controlled
-comparison with 0.0.5. **0.0.7** consolidates equivalent fallback shader families
-and adds a bounded census of the state combinations responsible for pipeline
-variation. Publication is pending the build gates; see the
-[0.0.7 notes](docs/releases/0.0.7.md) and
+**[Download the published Uberhar 0.0.7 ARM64](https://github.com/RegiRex/uberhar/releases/download/0.0.7/uberhar-0.0.7-arm64.apk)**.
+The supplied 0.0.7 Awakening capture records 18.957 seconds of cold pipeline
+waiting versus 18.849 seconds in 0.0.6; both warm runs record none. Family
+consolidation did not establish a latency improvement. **0.0.8** broadens runtime
+fragment state, adds a ready CPU vertex bridge, reuses equivalent host pipelines,
+and introduces failure recovery and bounded feature-specific diagnostics.
+Publication is pending the build gates; see the
+[0.0.8 notes](docs/releases/0.0.8.md),
+[device analysis](docs/UBERHAR_LOG_ANALYSIS_0.0.7.md) and
 [Actions](https://github.com/RegiRex/uberhar/actions/workflows/uberhar-alpha.yml).
 
 The [architectural review](docs/UBERHAR_ARCHITECTURE_2026-09-24.md) explains the
 larger move toward generic programs ready before gameplay, vertex fallback and
 capability-dependent pipeline preparation. These are staged development goals,
-not features all implemented in 0.0.7. Reviews repeat every three to five alpha
+not features all implemented in 0.0.8. Reviews repeat every three to five alpha
 builds, normally four; the next is due around 0.0.10.
 
 See the [AstraEH code map](docs/UBERHAR_CODE_MAP.md) to locate the fork's changes.

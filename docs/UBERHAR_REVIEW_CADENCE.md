@@ -14,7 +14,8 @@ Review early for correctness regressions or a changed architectural assumption.
 
 The [current review](UBERHAR_ARCHITECTURE_2026-09-24.md) completes the three steps:
 source/evidence audit, design validation, and an ordered implementation roadmap.
-The next implementation is 0.0.7. This ledger is a development instruction; it
+0.0.7 implemented family consolidation; 0.0.8 implements broader runtime state,
+ready CPU vertex routing and host-pipeline reuse. This ledger is a development instruction; it
 does not claim an unattended review will run while development is idle.
 
 For each review, record the exact source revision, available device captures,

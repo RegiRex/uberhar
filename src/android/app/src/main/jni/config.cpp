@@ -147,6 +147,8 @@ void Config::ReadValues() {
     // AstraEH: Load the same opt-in flags exposed in Android's Graphics settings.
     ReadSetting("Renderer", Settings::values.uberhar_hybrid_tev);
     ReadSetting("Renderer", Settings::values.uberhar_force_tev);
+    // AstraEH: Share the bridge switch between global and per-game settings.
+    ReadSetting("Renderer", Settings::values.uberhar_cpu_vertex_bridge);
     ReadSetting("Renderer", Settings::values.spirv_shader_gen);
     ReadSetting("Renderer", Settings::values.disable_spirv_optimizer);
     ReadSetting("Renderer", Settings::values.use_hw_shader);

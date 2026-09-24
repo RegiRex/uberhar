@@ -5,6 +5,8 @@
 Comments use `AstraEH:` at each logical change section to explain intent and
 important constraints. In new Uberhar-only files, the file comment attributes
 the whole file; additional section comments explain non-obvious behavior.
+Temporary renderer output carries adjacent `AstraEH Log Line` markers;
+[the diagnostics map](UBERHAR_DIAGNOSTICS.md) lists caps and removal constraints.
 Existing copyright headers and upstream authorship remain intact. Imports and
 small declarations belong to the annotated feature section that uses them.
 
@@ -20,23 +22,26 @@ rg -n AstraEH src CMakeModules tools/uberhar .github/workflows README.md UBERHAR
 
 | Files | AstraEH work |
 | --- | --- |
-| `src/video_core/shader/generator/glsl_fs_shader_gen.{h,cpp}` | Optional dynamic six-stage TEV generation, support gate, register decoding, shared operation formulas, rounding/scales and delayed buffer writes. 0.0.6 replaces six expanded copies with a loop carrying DontUnroll, lazily reuses per-fragment TEV texture samples and skips unused operands. 0.0.7 adds profile-aware family canonicalization for source-equivalent states without changing transferable FSConfig layout. Other fragment behavior remains specialized. |
-| `src/video_core/renderer_vulkan/vk_pipeline_cache.{h,cpp}` | Mode capture, push-constant layout, bounded family/pipeline caches, dedicated serial fallback compilation with one-pipeline warm-up admission, first-ready selection on the scheduler, per-draw register snapshots, title-switch cleanup and periodic wait/build diagnostics. 0.0.7 uses canonical families and logs a bounded per-title census of candidate fragment/pipeline keys and individual state dimensions, without changing native sampler or fixed-function state. |
+| `src/video_core/shader/generator/glsl_fs_shader_gen.{h,cpp}` | Optional dynamic six-stage TEV generation, support gate, register decoding, shared operation formulas, rounding/scales and delayed buffer writes. 0.0.6 replaces six expanded copies with a loop carrying DontUnroll, lazily reuses per-fragment TEV texture samples and skips unused operands. 0.0.7 adds profile-aware family canonicalization for source-equivalent states without changing transferable FSConfig layout. 0.0.8 adds the shared 108-byte runtime ABI and interprets alpha/scissor/depth mapping, fog, emulated borders and compatible 2D sampling controls; lighting/procedural structure and cube resources stay specialized. |
+| `src/video_core/renderer_vulkan/vk_pipeline_cache.{h,cpp}` | Mode capture, push-constant layout, bounded family/pipeline caches, dedicated serial fallback compilation with one-pipeline warm-up admission, first-ready selection on the scheduler, per-draw register snapshots, title-switch cleanup and periodic wait/build diagnostics. 0.0.7 uses canonical families and logs a bounded per-title census of candidate fragment/pipeline keys and individual state dimensions, without changing native sampler or fixed-function state. 0.0.8 adds ready CPU-bank preparation/validation, module-based keys, independent bridge control, failure signaling/recovery and tagged bounded diagnostics. |
 | `src/common/async_handle.h` | Shared completion signal, acquire/release publication and event-driven wait for either compatible pipeline; moved the existing single-handle primitive here. |
-| `src/video_core/renderer_vulkan/vk_graphics_pipeline.{h,cpp}` | Background-only hybrid creation, queue/dependency/driver timing, build phase and aggregate statistics. 0.0.6 restores normal driver optimization and records per-pipeline fallback use/driver duration for utility reports in PipelineCache. |
-| `src/video_core/renderer_vulkan/vk_shader_disk_cache.cpp` | Connect both new and disk-loaded specializations to the same completion signal and diagnostics. |
+| `src/video_core/renderer_vulkan/vk_graphics_pipeline.{h,cpp}` | Background-only hybrid creation, queue/dependency/driver timing, build phase and aggregate statistics. 0.0.6 restores normal driver optimization and records per-pipeline fallback use/driver duration for utility reports in PipelineCache. 0.0.8 adds process-local host-module identity, active-state execution hashing and explicit failed completion. |
+| `src/video_core/renderer_vulkan/vk_shader_disk_cache.{h,cpp}` | Connect new/disk-loaded specializations to completion diagnostics. 0.0.8 keys both runtime and reloaded pipelines by resolved host modules while preserving disk guest IDs; reports cache reuse and foreground VS translation cost. |
+| `src/video_core/renderer_vulkan/vk_rasterizer.{h,cpp}` | 0.0.8 makes the ready CPU-bridge decision before draw submission, returns through existing PICA CPU vertex processing, validates/binds the prepared pipeline and times CPU preparation. Clears the decision after the batch, including empty output. |
+| `src/video_core/renderer_vulkan/uberhar_pipeline_policy.h` | Production triangle-list/vertex-count admission and failure-aware normal/forced first-ready selection, shared with host tests. |
+| `src/video_core/renderer_vulkan/vk_instance.cpp` | Read-only capability/feature queries for future GPL/shader-object work; reports advertised versus enabled support without changing device extension selection or driver workarounds. |
 
 ## Settings and Android application
 
 | Files | AstraEH work |
 | --- | --- |
-| `CMakeModules/GenerateSettingKeys.cmake` | Shared keys for hybrid and forced TEV modes. |
+| `CMakeModules/GenerateSettingKeys.cmake` | Shared keys for hybrid, forced TEV and CPU vertex bridge modes. |
 | `src/common/settings.{h,cpp}` | Defaults, settings log entries and per-game override reset. |
-| `src/citra_qt/configuration/config.cpp` | Read/write both experiment flags in desktop configuration. |
+| `src/citra_qt/configuration/config.cpp` | Read/write all three experiment flags in desktop configuration. |
 | `src/android/app/build.gradle.kts` | ARM64-only build property, separate Uberhar flavor/application ID, numeric version read from `UBERHAR_VERSION`, and JVM-only log-name test dependency. |
 | `src/android/app/src/main/jni/{config.cpp,default_ini.h}` | Native setting reads and mandatory default-INI declarations. |
 | `src/android/app/src/main/java/org/citra/citra_emu/features/settings/SettingKeys.kt` | JNI declarations matching the generated keys. |
-| `src/android/app/src/main/java/org/citra/citra_emu/features/settings/model/BooleanSetting.kt` | Android boolean settings, both default off. |
+| `src/android/app/src/main/java/org/citra/citra_emu/features/settings/model/BooleanSetting.kt` | Hybrid/forced booleans default off; CPU bridge defaults on and is effective only in normal hybrid mode. |
 | `src/android/app/src/main/java/org/citra/citra_emu/features/settings/ui/SettingsFragmentPresenter.kt` | Graphics switches and disabled upstream updater controls for Uberhar. |
 | `src/android/app/src/main/java/org/citra/citra_emu/fragments/GamesFragment.kt` | Suppress the upstream update prompt in Uberhar. |
 | `src/android/app/src/main/java/org/citra/citra_emu/utils/CitraDirectoryHelper.kt` | Require an empty or previously initialized Uberhar data directory. |
@@ -56,10 +61,13 @@ All files in `tools/uberhar/` are new AstraEH work.
 | --- | --- |
 | `tools/uberhar/test_async_completion.cpp` | Production completion tests covering both winners, already-completed handles, delayed completion, unrelated notifications, 1,000 publication races and standalone waits. |
 | `tools/uberhar/build_probe.sh` | Compile the production generator as small host executables and run family-key regressions before emitting shader cases. |
-| `tools/uberhar/test_tev_family.cpp` | Source equivalence, non-mutation and idempotence across device profiles and fog/lighting/blending states; active border, logic, alpha, fog and texture interface distinctions. |
+| `tools/uberhar/test_tev_family.cpp` | Source equivalence, non-mutation and idempotence across device profiles and fog/lighting/blending states; runtime border/alpha/fog/coordinate packing and sharing; retained active logic and typed resource distinctions. |
 | `tools/uberhar/shader_probe.cpp` | 224 reproducible TEV cases, directed edge/texture-reuse/unused-operand cases, AddSigned exclusion and 64 full fragment modules. 0.0.7 emits canonical families and checks their source against the original family. |
 | `tools/uberhar/compare_tev.py` | Compare generated specialized/interpreted combiner math on Mesa and independently verify texture fetch counts; synthetic sampling inputs do not test real texture derivatives or device drivers. |
-| `tools/uberhar/validate_shaders.py` | Compile and validate all 64 full modules with frontend optimization off/on; verify the TEV loop's DontUnroll hint reaches SPIR-V. |
+| `tools/uberhar/validate_shaders.py` | Compile and validate all 64 full modules with frontend optimization off/on; verify the TEV loop's DontUnroll hint and all four fallback state offsets reach SPIR-V. |
+| `tools/uberhar/fragment_state_probe.cpp` and `compare_fragment_state.py` | 192 full specialized/generic fragment comparisons, production state/uniform transport, real textured offscreen color/depth/discard checks on Mesa; GL resource-declaration adaptation is not Vulkan-driver validation. |
+| `tools/uberhar/test_pipeline_keys.cpp` | 36 production execution-key checks covering equivalent host modules/inactive fields and active state that must remain distinct. |
+| `tools/uberhar/test_pipeline_policy.cpp` | Production CPU admission bounds and normal/forced selection under successful, pending and failed fallback completions. |
 | `tools/uberhar/check_android_keys.py` | Catch missing default-INI keys that would abort Android startup. |
 | `tools/uberhar/validate_apk.py` | Find AGP's actual APK, reject ambiguity, verify ARM64 ELF headers, native dependencies and ZIP integrity, and emit a versioned APK and checksum. |
 | `tools/uberhar/validate_manifest.py` | Reject known install blockers and identity/authority/permission conflicts in the final decoded manifest. |
@@ -69,7 +77,7 @@ All files in `tools/uberhar/` are new AstraEH work.
 | `UBERHAR_VERSION` | Owner-requested release.beta.alpha version shared by Gradle and the release pipeline; this plain data file intentionally has no inline comment. |
 | `.github/workflows/uberhar-alpha.yml` | Build/sign the isolated app, reject test-only packaging, verify manifest/native/alignment/signing metadata, and publish versioned GitHub pre-releases from a separate job. |
 | `.github/workflows/uberhar-baseline.yml` | Build pinned unmodified upstream; allow its known extra x86 validation library without allowing an x86 emulator library. |
-| `.github/workflows/uberhar-shaders.yml` | Compile and validate shader modules, then run differential numerical comparisons. |
+| `.github/workflows/uberhar-shaders.yml` | Compile and validate shader modules and pipeline policies, then run TEV and full-fragment differential comparisons using pinned test dependencies. |
 
 The inherited workflows were moved unchanged from `.github/workflows/` to
 `.github/upstream-workflows/` to prevent unrelated jobs from running on this
@@ -82,6 +90,9 @@ development branch. Their contents are upstream code, not AstraEH implementation
 `docs/UBERHAR_REVIEW_CADENCE.md` tracks the covered version and next review window.
 `docs/UBERHAR_ARCHITECTURE_2026-09-24.md` contains the 0.0.6 source/evidence audit,
 architectural alternatives, target execution model and ordered validation gates.
+`docs/UBERHAR_LOG_ANALYSIS_0.0.7.md` compares the supplied cold/warm captures and
+explains the 0.0.8 response. `docs/UBERHAR_DIAGNOSTICS.md` maps feature counters,
+frequency/count limits and diagnostic removal markers.
 `UBERHAR.md` describes scope, limits and device testing. `docs/releases/` holds
 versioned pre-release notes. `docs/UBERHAR_LOG_ANALYSIS_0.0.5.md` records the complete
 0.0.5 cold/warm analysis, preprocessing limits and the compact-shader response.

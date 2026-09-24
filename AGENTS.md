@@ -5,6 +5,9 @@
 - Attribute new logical implementation sections and their purpose with `AstraEH`
   comments. Keep the file-level map in `docs/UBERHAR_CODE_MAP.md` current. Do not
   imply that inherited Azahar code is AstraEH work.
+- Mark each experimental/debug log call with an adjacent `AstraEH Log Line`
+  comment. Bound record counts or reporting frequency; retain error recovery when
+  removing diagnostics. Document each feature's counters and their limits.
 - Use release.beta.alpha versions. Publish Android ARM64 tests as GitHub
   pre-releases through the existing build, correctness, package and signing gates.
 - Perform a full architectural review every **3–5 alpha builds**, targeting four.

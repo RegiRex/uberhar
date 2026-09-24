@@ -93,8 +93,12 @@ void LogSettings() {
     log_setting("Renderer_GraphicsAPI", GetGraphicsAPIName(values.graphics_api.GetValue()));
     log_setting("Renderer_AsyncShaders", values.async_shader_compilation.GetValue());
     // AstraEH: Include experimental mode in logs so device reports can be compared.
+    // AstraEH Log Line: Capture the master experiment switch.
     log_setting("Uberhar_HybridTEV", values.uberhar_hybrid_tev.GetValue());
+    // AstraEH Log Line: Identify forced comparison sessions.
     log_setting("Uberhar_ForceTEV", values.uberhar_force_tev.GetValue());
+    // AstraEH Log Line: Capture the independent bridge switch in each session.
+    log_setting("Uberhar_CPUVertexBridge", values.uberhar_cpu_vertex_bridge.GetValue());
     log_setting("Renderer_AsyncPresentation", values.async_presentation.GetValue());
     log_setting("Renderer_SpirvShaderGen", values.spirv_shader_gen.GetValue());
     log_setting("Renderer_DisableSpirvOptimizer", values.disable_spirv_optimizer.GetValue());
@@ -217,6 +221,8 @@ void RestoreGlobalState(bool is_powered_on) {
     // AstraEH: Release per-game overrides with the rest of the renderer settings.
     values.uberhar_hybrid_tev.SetGlobal(true);
     values.uberhar_force_tev.SetGlobal(true);
+    // AstraEH: Reset this per-game override with the other renderer switches.
+    values.uberhar_cpu_vertex_bridge.SetGlobal(true);
     values.async_presentation.SetGlobal(true);
     values.use_hw_shader.SetGlobal(true);
     values.use_disk_shader_cache.SetGlobal(true);

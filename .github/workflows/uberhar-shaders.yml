@@ -25,7 +25,7 @@ jobs:
             -o build/uberhar-tests/test-async-completion
           timeout 30s build/uberhar-tests/test-async-completion
       - name: Get generator dependencies
-        run: git submodule update --init --depth 1 externals/fmt externals/xxHash externals/boost externals/nihstro
+        run: git submodule update --init --depth 1 externals/fmt externals/xxHash externals/boost externals/nihstro externals/vulkan-headers
       - name: Install validation tools
         run: |
           sudo apt-get update
@@ -42,3 +42,8 @@ jobs:
         env:
           LIBGL_ALWAYS_SOFTWARE: '1'
         run: /tmp/uberhar-test-env/bin/python tools/uberhar/compare_tev.py build/uberhar-probe/cases
+      # AstraEH: Exercise runtime alpha/fog/scissor/depth/texture state on complete fragment shaders.
+      - name: Compare full fragment color and depth
+        env:
+          LIBGL_ALWAYS_SOFTWARE: '1'
+        run: /tmp/uberhar-test-env/bin/python tools/uberhar/compare_fragment_state.py build/uberhar-probe/fragment-state

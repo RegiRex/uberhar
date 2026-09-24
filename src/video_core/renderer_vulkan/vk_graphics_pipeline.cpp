@@ -33,16 +33,9 @@ vk::ShaderStageFlagBits MakeShaderStage(std::size_t index) {
 }
 
 u64 StaticPipelineInfo::OptimizedHash(const Instance& instance) const {
-    u64 info_hash = Common::HashCombine(
-        shader_ids[0], shader_ids[1], shader_ids[2], Common::ComputeStructHash64(vertex_layout),
-        Common::ComputeStructHash64(attachments), Common::ComputeStructHash64(blending));
-
-    if (!instance.IsExtendedDynamicStateSupported()) {
-        info_hash = Common::HashCombine(info_hash, Common::ComputeStructHash64(rasterization),
-                                        Common::ComputeStructHash64(depth_stencil));
-    }
-
-    return info_hash;
+    // AstraEH: Preserve guest shader IDs for candidate diagnostics; runtime caches
+    // supply effective host-module IDs through ExecutionHash instead.
+    return ExecutionHash(instance.IsExtendedDynamicStateSupported(), shader_ids);
 }
 
 u16 PipelineInfo::GetFinalColorWriteMask(const Instance& instance) {
@@ -123,7 +116,9 @@ u32 GraphicsPipeline::PendingShaderMask() const noexcept {
 }
 
 u64 GraphicsPipeline::Key() const noexcept {
-    return info.state.OptimizedHash(instance);
+    // AstraEH: Match the runtime map key, including effective shader-module identity.
+    return info.state.ExecutionHash(instance.IsExtendedDynamicStateSupported(),
+                                    HostShaderIds(stages));
 }
 
 bool GraphicsPipeline::Build(bool fail_on_compile_required) {
@@ -329,6 +324,10 @@ bool GraphicsPipeline::Build(bool fail_on_compile_required) {
     } else if (result.result == vk::Result::eErrorPipelineCompileRequiredEXT) {
         return false;
     } else {
+        // AstraEH: Let the fallback owner publish failure and retain specialization.
+        if (build_options.is_fallback) {
+            return false;
+        }
         UNREACHABLE_MSG("Graphics pipeline creation failed!");
     }
 
@@ -346,6 +345,7 @@ bool GraphicsPipeline::Build(bool fail_on_compile_required) {
         const auto total_ns = nanoseconds(std::chrono::steady_clock::now() - build_start);
         if (total_ns + queue_ns >= 50000000 &&
             stats->slow_builds.fetch_add(1, std::memory_order::relaxed) < 20) {
+            // AstraEH Log Line: bounded renderer diagnostics; see docs/UBERHAR_DIAGNOSTICS.md.
             LOG_INFO(Render_Vulkan,
                      "Uberhar pipeline build: path={} key={:016X} queue_ms={:.3f} "
                      "vs_wait_ms={:.3f} fs_wait_ms={:.3f} gs_wait_ms={:.3f} driver_ms={:.3f}",

@@ -23,14 +23,19 @@ dynamic = (cases / "dynamic-0.frag").read_text()
 def tev_body(source):
     # AstraEH: Extract the actual combiner code, ending before the alpha-test statement.
     start = source.index("vec4 combiner_buffer =")
-    end = source.index("if (false) discard;", start)
+    # AstraEH: The generic path now interprets alpha testing after this explicit boundary.
+    marker = "// AstraEH: TEV output ends;" if "// AstraEH: TEV output ends;" in source else "if (false) discard;"
+    end = source.index(marker, start)
     # AstraEH: Desktop GL does not expose this Vulkan frontend hint. Strip only
     # the hint here; the Vulkan gate verifies DontUnroll survives into SPIR-V.
     return source[start:end].replace("[[dont_unroll]] ", "") + "return combiner_output;\n"
 
 
 # AstraEH: Replace only the Vulkan uniform transport; preserve generated interpreter formulas.
-helpers = dynamic[dynamic.index("layout(push_constant)"):dynamic.index("void main()")]
+state_start = dynamic.index("layout(push_constant)")
+state_end = dynamic.index("} uber_tev;", state_start) + len("} uber_tev;")
+helpers = (dynamic[state_start:state_end] + "\n"
+           + dynamic[dynamic.index("// AstraEH: TEV interpreter helpers begin."):dynamic.index("void main()")])
 helpers = helpers.replace(
     "layout(push_constant) uniform UberTev",
     "layout(std430, binding=1) readonly buffer UberTev",
@@ -121,7 +126,7 @@ for file in sorted(cases.glob("*.bin"), key=lambda p: int(p.stem)):
     )
     shader = ctx.compute_shader(source)
     constants = file.read_bytes()
-    instructions.write(constants + bytes(12))
+    instructions.write(constants + bytes(112 - len(constants)))
     fetches = expected_fetches(constants)
     shader.run(group_x=samples // 64)
     ctx.memory_barrier()

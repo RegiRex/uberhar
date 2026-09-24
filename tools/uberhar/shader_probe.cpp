@@ -96,12 +96,10 @@ int main(int argc, char** argv) {
         std::ofstream(prefix.string() + ".frag")
             << "#version 450\n"
             << Generator::GLSL::FragmentModule{config, user, profile}.Generate();
-        // AstraEH: Serialize the same 100-byte layout that Vulkan receives as push
-        // constants.
+        // AstraEH: Serialize the production 108-byte runtime-state transport.
         std::ofstream constants(prefix.string() + ".bin", std::ios::binary);
-        constants.write(reinterpret_cast<const char*>(config.texture.tev_stages.data()), 96);
-        const u32 mask = config.texture.combiner_buffer_input;
-        constants.write(reinterpret_cast<const char*>(&mask), 4);
+        const auto state = Generator::GLSL::MakeDynamicTevState(config, profile);
+        constants.write(reinterpret_cast<const char*>(&state), sizeof(state));
     }
     // AstraEH: Full fragment modules exercise Vulkan bindings and code outside
     // TEV too.

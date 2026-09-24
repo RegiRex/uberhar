@@ -81,16 +81,24 @@ int main() {
         regs.texturing.fog_mode.Assign((flags & 16) ? Fog::Fog : Fog::None);
         const FSConfig base{regs};
 
-        // AstraEH: All six wrap axes, including inherited aliases 4–7. An emulated
-        // ClampToBorder must stay distinct; native sampler differences may share GLSL.
+        // AstraEH: All six wrap axes now share source; active border checks move
+        // into per-draw data rather than being dropped from the actual behavior.
         for (u32 axis = 0; axis < 6; ++axis) {
             for (u32 mode = 1; mode < 8; ++mode) {
                 auto variant = base;
                 auto& wrap = variant.texture.requested_wrap[axis / 2];
                 (axis & 1 ? wrap.t : wrap.s) = static_cast<Texture::WrapMode>(mode);
-                CheckPair(base, variant, profile,
-                          profile.has_custom_border_color || mode != Texture::ClampToBorder,
+                CheckPair(base, variant, profile, true,
                           "Sampler alias or active border distinction failed");
+                const auto state = MakeDynamicTevState(variant, profile);
+                const u32 expected =
+                    !profile.has_custom_border_color && mode == Texture::ClampToBorder
+                        ? (1U << axis)
+                        : 0U;
+                if ((state.texture & 63U) != expected) {
+                    throw std::runtime_error(
+                        "Runtime border transport differs from device profile");
+                }
             }
         }
 
@@ -129,15 +137,14 @@ int main() {
 
         auto variant = base;
         variant.texture.fog_flip.Assign(1);
-        CheckPair(base, variant, profile, base.texture.fog_mode == Fog::None,
-                  "Fog orientation distinction failed");
+        CheckPair(base, variant, profile, true, "Fog orientation distinction failed");
 
         variant = base;
         variant.framebuffer.alpha_test_func.Assign(Framebuffer::CompareFunc::LessThan);
-        CheckPair(base, variant, profile, false, "Active alpha test collapsed");
+        CheckPair(base, variant, profile, true, "Runtime alpha test failed to share source");
         variant = base;
         variant.texture.texture2_use_coord1.Assign(1);
-        CheckPair(base, variant, profile, false, "Texture coordinate interface collapsed");
+        CheckPair(base, variant, profile, true, "Runtime coordinate choice failed to share source");
         variant = base;
         variant.texture.texture0_type.Assign(Texture::TextureType::TextureCube);
         CheckPair(base, variant, profile, false, "Texture resource type collapsed");

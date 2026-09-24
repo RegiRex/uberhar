@@ -7,27 +7,28 @@ Baseline: Azahar 2126.1.2, commit
 
 ## Current status
 
-<!-- AstraEH: 0.0.6 device evidence and the first implementation from the full review. -->
-**0.0.6 is published; 0.0.7 is prepared for the build gates.** The complete 0.0.6
-Awakening log records 18.849 seconds of cold scheduler pipeline waits and zero
-warm, with 43 of 52 fallback pipelines unused. The cold total is lower than
-0.0.5's 29.128 seconds, but differing workloads prevent a controlled speedup
-claim. The fallback still compiles on demand and cannot guarantee smooth first
-encounters.
+<!-- AstraEH: 0.0.7 device evidence and broader 0.0.8 implementation. -->
+**0.0.7 is published; 0.0.8 is prepared for the build gates.** The supplied
+Awakening capture records 18.957 seconds of cold scheduler pipeline waits
+versus 18.849 seconds in 0.0.6; both warm sessions record zero. Fragment families
+fell from 37 to 18, but fallback driver work stayed near 10.075 seconds.
+Different workloads prevent a controlled performance claim. See the
+[device analysis](docs/UBERHAR_LOG_ANALYSIS_0.0.7.md).
 
-The [full architectural review](docs/UBERHAR_ARCHITECTURE_2026-09-24.md) prioritizes
-ready generic fragment programs, vertex independence, Vulkan pipeline coverage
-and bounded background specialization. **0.0.7 implements the foundation:**
-canonical shader-family keys for proven source-equivalent states and bounded
-candidate-state diagnostics. It preserves actual sampler and pipeline state,
-transferable cache layouts and the existing correctness exclusions. See the
-[0.0.7 notes](docs/releases/0.0.7.md) for validation and the device retest.
-The review cadence is every three to five alpha builds, targeting four; the
-[next full review](docs/UBERHAR_REVIEW_CADENCE.md) is due around 0.0.10.
+**0.0.8** broadens fragment state interpreted at runtime, adds a bounded CPU
+vertex bridge to completed generic pipelines, shares complete host pipelines
+across equivalent guest configurations, and recovers experimental build failures.
+It adds independent bridge control and bounded diagnostics, with searchable
+`AstraEH Log Line` comments. The [release notes](docs/releases/0.0.8.md) document
+implementation, host validation, remaining gaps and the next device test.
+This is still an on-demand fallback bank; first-state waits remain possible.
 
-Android compilation and package gates run in Actions; the workflow publishes
-only after all required jobs pass. Development does not need to keep a chat turn
-open while that build runs. 0.0.7 device performance is not yet measured.
+The [full architectural review](docs/UBERHAR_ARCHITECTURE_2026-09-24.md) remains
+the staged roadmap. Reviews occur every three to five alpha builds, targeting
+four; the [next full review](docs/UBERHAR_REVIEW_CADENCE.md) is due around 0.0.10.
+Android compilation and package gates run in Actions, with automatic publication
+only after all required jobs pass. Development does not keep a chat turn open
+while that build runs. **0.0.8 device performance is not yet measured.**
 
 <!-- AstraEH: 0.0.4 changes log collection without changing the 0.0.3 renderer. -->
 **0.0.4 is published as a pre-release** with **Options → Save or Share Log**. Choose the
@@ -79,16 +80,16 @@ Android documents the installation restriction under
 [`android:testOnly`](https://developer.android.com/guide/topics/manifest/application-element#testOnly).
 
 <!-- AstraEH: Preserve verified published release evidence while the next version builds. -->
-**[Download uberhar-0.0.6-arm64.apk](https://github.com/RegiRex/uberhar/releases/download/0.0.6/uberhar-0.0.6-arm64.apk)**
-from the published [0.0.6 pre-release](https://github.com/RegiRex/uberhar/releases/tag/0.0.6).
+**[Download uberhar-0.0.7-arm64.apk](https://github.com/RegiRex/uberhar/releases/download/0.0.7/uberhar-0.0.7-arm64.apk)**
+from the published [0.0.7 pre-release](https://github.com/RegiRex/uberhar/releases/tag/0.0.7).
 No ZIP extraction is needed. Install it over an existing Uberhar installation;
 the signing certificate is unchanged. The
-[build and publication run](https://github.com/RegiRex/uberhar/actions/runs/35969852337)
+[build and publication run](https://github.com/RegiRex/uberhar/actions/runs/35978915221)
 passed its Android, shader and package gates. The tag points to
-`9be1cd41068029a253412f1430562f3081c8e52b`. The APK SHA256 is:
+`09fb76f5ad110534612edfee7df39a3183d7dd7b`. The APK SHA256 is:
 
 ```text
-265a53d47ba77a91d2057a7453471efc08400318930236fa1657f9dee62e4a68
+9fdb2bd1a9cc097cc14777f23b15b9b7939fae693f87b6e55be9e7a06c4fd941
 ```
 
 The export feature adds no Android permissions or runtime dependencies. The
@@ -116,26 +117,32 @@ fallback cache interprets all six texture-combiner stages through draw-uniform
 push constants. It preserves the specialized generator's stage-0 source rule,
 8-bit rounding, DOT3 alpha, saturation, scales and delayed combiner-buffer updates.
 
-Lighting, texture sampling modes, fog, alpha/depth tests, vertex/geometry shaders
-and pipeline state are still specialized. New fallback families/pipelines warm
-on a dedicated worker, with one unfinished pipeline admitted in normal hybrid
-mode. Version 0.0.5 selects on the command worker and waits for either compatible
-candidate if necessary. A ready specialization always takes priority in normal
-mode; a missing/unsupported fallback still waits for specialization. Temporary
-fallbacks use a compact loop and normal driver optimization as of 0.0.6.
-First-use stalls remain. There is no vertex interpreter or fallback startup
-prewarming yet; upstream already rebuilds previously observed specialized
-pipelines at startup. Shadow
-rendering/sampling, custom normal maps and AddSigned combiner operations use the
-specialized path. Numerical comparisons found rounding-boundary differences in
-AddSigned, so that operation is deliberately excluded pending a correct fix. Caps of
-128 fallback fragment families and 1,024 fallback pipelines bound memory growth;
-reaching a cap also uses the specialized path. Hybrid mode waits for an accurate
-path when necessary and overrides upstream asynchronous draw skipping.
+Version 0.0.8 also interprets alpha/scissor tests, depth mapping, fog and
+compatible sampling controls. Lighting/procedural structure and cube resource
+types remain specialized. **CPU vertex bridge (experimental)**, default on but
+effective only in normal hybrid mode, can use the existing CPU engine for complete
+triangle-list batches of at most 4,096 vertices when a compatible generic pipeline
+is already ready. This allows sharing a fixed vertex interface while GPU
+specialization compiles. It is not a GPU vertex interpreter; CPU JIT and
+preparation can still cost time. Toggle it independently and restart to compare.
+
+Generic pipelines still warm on a dedicated serial worker, with one unfinished
+build admitted in normal hybrid mode. A ready specialization has priority.
+Missing or unsupported fallbacks wait for specialization; experimental failures
+wake waiters and recover through specialization. Shadow paths, custom normal
+maps, gas fog and AddSigned operations retain the specialized path. AddSigned
+was excluded after rounding-boundary differences in numerical tests.
+Caps of 128 fallback families and 1,024 fallback pipelines bound memory growth.
+Hybrid mode preserves draws instead of using upstream asynchronous skipping.
+There is no complete startup generic bank yet, and first-use stalls remain.
+
+Runtime pipeline keys share already-identical host shader objects and exclude
+inactive state. Transferable records retain guest IDs and their existing layout.
+The private fragment state ABI is 108 bytes in this version.
 
 **Force TEV fallback for comparison** (requires hybrid mode, then restart)
 keeps supported draws on the interpreter even after specialization. Use it for
-image comparisons; it may be substantially slower. Neither option affects
+image comparisons; it may be substantially slower. The experiment switches do not affect
 OpenGL. Experimental fallback entries stay out of transferable shader caches.
 
 On normal game shutdown, the log includes `Uberhar totals`: draw requests,
@@ -155,9 +162,16 @@ Version 0.0.6 adds `Uberhar fallback utility`: completed pipelines that have/hav
 not served a draw, and the driver-call time of the latter. At progress snapshots,
 an unused pipeline may still become useful later. Bounded build records report
 GLSL/SPIR-V byte sizes; zero means an existing fragment module was reused.
-`diagnostics=3 compact_tev=true fast_fallback=false` identifies this revision.
+`diagnostics=3 compact_tev=true fast_fallback=false` identifies 0.0.6.
+Version 0.0.8 uses `diagnostics=5`; see the
+[diagnostics map](docs/UBERHAR_DIAGNOSTICS.md) for bridge/translation/cache counters,
+capability probes, limits and diagnostic-removal markers.
 
-## First device test
+## Device testing
+
+For the current 0.0.8 comparison, follow the shorter cold/warm procedure in the
+[release notes](docs/releases/0.0.8.md). The original baseline procedure is below;
+keep the CPU bridge off when reproducing those initial two-switch comparisons.
 
 1. Install the Uberhar APK alongside Azahar and create an empty Uberhar folder.
 2. Use Vulkan, the same driver and resolution in both apps, stereo off. Start
@@ -194,10 +208,10 @@ signing problem.
 3. Measure shader/pipeline misses, skipped draws, compilation waits, frame times.
 4. Implement and validate a limited Vulkan fragment interpreter fallback.
    Unsupported states use the existing accurate path and are counted.
-5. Measure the compact fallback on Thor, reduce unused compilation and broaden
-   reusable fragment/fixed-state coverage. Evaluate observed-state fallback
-   prewarming. A PICA vertex interpreter remains a later coverage project;
-   the supplied log points first to driver pipeline creation, not VS waits.
+5. Measure the broader fragment bank, ready CPU vertex bridge and host-pipeline
+   sharing on Thor. Reduce unused work, evaluate startup generic preparation and
+   capability-dependent pipeline libraries. A GPU PICA vertex interpreter remains
+   a later coverage project; driver creation dominates the supplied wait evidence.
 6. Compare cold/warm cache behavior and image correctness on Thor.
 7. Investigate paired top/bottom screen presentation, including input latency.
    Matching software frame IDs cannot prove simultaneous physical refresh.
@@ -213,7 +227,7 @@ presentation queues and a measurement plan for the next phase.
 ## Build workflow
 
 `UBERHAR_VERSION` contains the owner's **release.beta.alpha** version, currently
-`0.0.6`. The unnumbered failed first attempt counts as `0.0.1`. Future alpha
+`0.0.8`. The unnumbered failed first attempt counts as `0.0.1`. Future alpha
 iterations increment the third number. Beta and release milestones use the second
 and first numbers. Gradle's independent numeric `versionCode` still increases
 with build time so Android can order updates correctly.

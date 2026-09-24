@@ -15,6 +15,22 @@ bool SupportsDynamicTev(const FSConfig& config, const UserConfig& user);
 /// Sampler and fixed-function pipeline state must still be supplied separately by the caller.
 FSConfig MakeDynamicTevFamilyConfig(const FSConfig& config, const Profile& profile);
 
+// AstraEH: Version 2 of the private Vulkan fallback ABI. Stay below Vulkan's
+// 128-byte minimum push-constant limit; specialized/disk shader layouts are unchanged.
+struct DynamicTevState {
+    std::array<TevStageConfigRaw, 6> stages;
+    u32 buffer_mask;
+    u32 framebuffer; // alpha function [0:2], scissor [3:4], W buffering [5].
+    u32 texture;     // border axes [0:5], coord2 [6], fog [7], flip [8], tex0 type [10:12].
+};
+static_assert(sizeof(DynamicTevState) == 108);
+static_assert(offsetof(DynamicTevState, buffer_mask) == 96);
+static_assert(offsetof(DynamicTevState, framebuffer) == 100);
+static_assert(offsetof(DynamicTevState, texture) == 104);
+
+/// AstraEH: Capture effective runtime state before family canonicalization removes it.
+DynamicTevState MakeDynamicTevState(const FSConfig& config, const Profile& profile);
+
 class FragmentModule {
 public:
     // AstraEH: Existing callers stay specialized; Vulkan fallback callers opt into dynamic TEV.
@@ -75,6 +91,8 @@ private:
 
     /// AstraEH: Vulkan experiment: interpret TEV registers supplied in push constants.
     void DefineDynamicTev();
+    // AstraEH: Declare runtime state before sampling helpers that consume it.
+    void DefineDynamicState();
     void WriteDynamicTevLoop();
 
     void AppendProcTexShiftOffset(std::string_view v, Pica::TexturingRegs::ProcTexShift mode,

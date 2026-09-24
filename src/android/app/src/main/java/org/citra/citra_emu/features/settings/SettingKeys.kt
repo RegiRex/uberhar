@@ -37,6 +37,8 @@ object SettingKeys {
     // AstraEH: Match the generated native keys; keep spelling in one CMake registry.
     external fun uberhar_hybrid_tev(): String
     external fun uberhar_force_tev(): String
+    // AstraEH: Native key registration is generated from the shared CMake list.
+    external fun uberhar_cpu_vertex_bridge(): String
     external fun async_presentation(): String
     external fun use_hw_shader(): String
     external fun use_disk_shader_cache(): String
