@@ -27,9 +27,17 @@ Android documents the installation restriction under
 
 Shader code is unchanged from the
 [passing shader CI run](https://github.com/RegiRex/uberhar/actions/runs/35946513141).
-The replacement APK is named `uberhar-0.0.2-arm64.apk` and will be attached directly
-to the [0.0.2 pre-release](https://github.com/RegiRex/uberhar/releases/tag/0.0.2)
-after the build and package checks pass. It retains the ready-fallback safeguard
+**[Download uberhar-0.0.2-arm64.apk](https://github.com/RegiRex/uberhar/releases/download/0.0.2/uberhar-0.0.2-arm64.apk)**
+from the published [0.0.2 pre-release](https://github.com/RegiRex/uberhar/releases/tag/0.0.2).
+No ZIP extraction is needed. The [build and publication run](https://github.com/RegiRex/uberhar/actions/runs/35950115748)
+passed all Android package and shader checks. The release tag points to
+`f5bff77c37377fe2a16ddf389578df1b2b3ae493`; the public APK's SHA256 matches the tested artifact:
+
+```text
+58e4954e2d1d9ee35cbf93dfc21630321f3a9cebb04b408ce6bdfb62fa7d64e5
+```
+
+ It retains the ready-fallback safeguard
 and AstraEH attribution comments. Device correctness and performance remain unverified.
 The baseline workflow builds unmodified upstream code. Its APK retains Azahar's
 application ID and is not intended to replace your installed Azahar. Do not
@@ -40,7 +48,7 @@ The Uberhar flavor uses `org.uberhar.uberhar_emu` and the launcher name
 data directory or a directory previously initialized by Uberhar. Use a separate
 folder; copy saves only after setup. Do not move the live Azahar data directory.
 
-## Alpha 1 scope
+## Experimental renderer scope
 
 Enable **Uberhar hybrid TEV (experimental)** in Graphics and restart the game.
 The default is off, providing the original renderer for A/B comparison in the
