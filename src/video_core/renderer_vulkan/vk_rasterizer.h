@@ -63,6 +63,11 @@ public:
                            u32 pixel_stride, ScreenInfo& screen_info);
     bool AccelerateDrawBatch(bool is_indexed) override;
 
+    // AstraEH: PicaCore uses this only immediately after the unsubmitted GPU attempt.
+    bool HasPreparedCpuVertexBridge() const override {
+        return cpu_bridge.ready != nullptr;
+    }
+
     /// Switches the disk resources to the specified title
     void SwitchDiskResources(u64 title_id) override;
 

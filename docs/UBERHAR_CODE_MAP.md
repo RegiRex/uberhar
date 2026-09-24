@@ -27,8 +27,10 @@ rg -n AstraEH src CMakeModules tools/uberhar .github/workflows README.md UBERHAR
 | `src/common/async_handle.h` | Shared completion signal, acquire/release publication and event-driven wait for either compatible pipeline; moved the existing single-handle primitive here. |
 | `src/video_core/renderer_vulkan/vk_graphics_pipeline.{h,cpp}` | Background-only hybrid creation, queue/dependency/driver timing, build phase and aggregate statistics. 0.0.6 restores normal driver optimization and records per-pipeline fallback use/driver duration for utility reports in PipelineCache. 0.0.8 adds process-local host-module identity, active-state execution hashing and explicit failed completion. |
 | `src/video_core/renderer_vulkan/vk_shader_disk_cache.{h,cpp}` | Connect new/disk-loaded specializations to completion diagnostics. 0.0.8 keys both runtime and reloaded pipelines by resolved host modules while preserving disk guest IDs; reports cache reuse and foreground VS translation cost. |
-| `src/video_core/renderer_vulkan/vk_rasterizer.{h,cpp}` | 0.0.8 makes the ready CPU-bridge decision before draw submission, returns through existing PICA CPU vertex processing, validates/binds the prepared pipeline and times CPU preparation. Clears the decision after the batch, including empty output. |
-| `src/video_core/renderer_vulkan/uberhar_pipeline_policy.h` | Production triangle-list/vertex-count admission and failure-aware normal/forced first-ready selection, shared with host tests. |
+| `src/video_core/renderer_vulkan/vk_rasterizer.{h,cpp}` | 0.0.8 makes the ready CPU-bridge decision before draw submission, returns through existing PICA CPU vertex processing, validates/binds the prepared pipeline and times CPU preparation. 0.0.9 exposes the prepared-bridge contract to PICA. Clears the decision after the batch, including empty output. |
+| `src/video_core/renderer_vulkan/uberhar_pipeline_policy.h` | Production list/strip/fan input/output-bounded admission with rejection reasons and failure-aware normal/forced first-ready selection, shared with host tests. |
+| `src/video_core/pica/primitive_assembly.h`, `pica_core.cpp` and `src/video_core/rasterizer_interface.h` | 0.0.9 adds the explicit prepared-bridge query and isolates assembly for already-acceleratable bridge draws, restoring prior empty/winding state on every exit. Ordinary software assembly is unchanged; inherited accelerated strip/fan continuity limitations remain. |
+| `src/video_core/renderer_vulkan/uberhar_wait_diagnostics.h` | Constant-memory histogram and eight worst waits, protected for concurrent reporting. PipelineCache records only actual waits and emits bounded final diagnostics. |
 | `src/video_core/renderer_vulkan/vk_instance.cpp` | Read-only capability/feature queries for future GPL/shader-object work; reports advertised versus enabled support without changing device extension selection or driver workarounds. |
 
 ## Settings and Android application
@@ -68,6 +70,8 @@ All files in `tools/uberhar/` are new AstraEH work.
 | `tools/uberhar/fragment_state_probe.cpp` and `compare_fragment_state.py` | 192 full specialized/generic fragment comparisons, production state/uniform transport, real textured offscreen color/depth/discard checks on Mesa; GL resource-declaration adaptation is not Vulkan-driver validation. |
 | `tools/uberhar/test_pipeline_keys.cpp` | 36 production execution-key checks covering equivalent host modules/inactive fields and active state that must remain distinct. |
 | `tools/uberhar/test_pipeline_policy.cpp` | Production CPU admission bounds and normal/forced selection under successful, pending and failed fallback completions. |
+| `tools/uberhar/test_bridge_assembly.cpp` | 264 comparisons using the actual PICA assembler against independent topology sequences, plus persistent ordinary batches, winding restoration and exceptional exit. |
+| `tools/uberhar/test_wait_diagnostics.cpp` | Histogram boundaries, late worst events beyond the original detail cap and concurrent bounded retention. |
 | `tools/uberhar/check_android_keys.py` | Catch missing default-INI keys that would abort Android startup. |
 | `tools/uberhar/validate_apk.py` | Find AGP's actual APK, reject ambiguity, verify ARM64 ELF headers, native dependencies and ZIP integrity, and emit a versioned APK and checksum. |
 | `tools/uberhar/validate_manifest.py` | Reject known install blockers and identity/authority/permission conflicts in the final decoded manifest. |
@@ -91,7 +95,8 @@ development branch. Their contents are upstream code, not AstraEH implementation
 `docs/UBERHAR_ARCHITECTURE_2026-09-24.md` contains the 0.0.6 source/evidence audit,
 architectural alternatives, target execution model and ordered validation gates.
 `docs/UBERHAR_LOG_ANALYSIS_0.0.7.md` compares the supplied cold/warm captures and
-explains the 0.0.8 response. `docs/UBERHAR_DIAGNOSTICS.md` maps feature counters,
+explains the 0.0.8 response. `docs/UBERHAR_LOG_ANALYSIS_0.0.8.md` records the
+zero-bridge result, driver evidence and 0.0.9 coverage correction. `docs/UBERHAR_DIAGNOSTICS.md` maps feature counters,
 frequency/count limits and diagnostic removal markers.
 `UBERHAR.md` describes scope, limits and device testing. `docs/releases/` holds
 versioned pre-release notes. `docs/UBERHAR_LOG_ANALYSIS_0.0.5.md` records the complete

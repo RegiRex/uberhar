@@ -9,6 +9,8 @@
 #include <unordered_set> // AstraEH: Bounded census of candidate fallback state dimensions.
 
 #include "video_core/rasterizer_interface.h"
+#include "video_core/renderer_vulkan/uberhar_pipeline_policy.h" // AstraEH: Admission reason counters.
+#include "video_core/renderer_vulkan/uberhar_wait_diagnostics.h" // AstraEH: Bounded worst waits.
 #include "video_core/renderer_vulkan/vk_graphics_pipeline.h"
 #include "video_core/renderer_vulkan/vk_resource_pool.h"
 #include "video_core/renderer_vulkan/vk_shader_disk_cache.h"
@@ -221,6 +223,10 @@ private:
     u64 cpu_bridge_vertices{};
     u64 cpu_bridge_cpu_ns{};
     u64 cpu_bridge_cpu_max_ns{};
+    // AstraEH: Renderer-owned bounded reason/topology counts, never per-draw text.
+    std::array<u64, static_cast<std::size_t>(CpuBridgeAdmission::Count)> cpu_bridge_admission{};
+    std::array<u64, 5> cpu_bridge_topology{}; // list, strip, fan, shader-list, unknown.
+    std::array<u64, 5> cpu_bridge_selected_topology{};
     // AstraEH: Normal hybrid mode admits one warm-up pipeline at a time. Ready entries
     // remain usable; force mode may queue more because it explicitly waits for comparison.
     GraphicsPipeline* warming_tev_pipeline{};
@@ -242,6 +248,10 @@ private:
     std::atomic<u64> pipeline_wait_max_ns{};
     std::atomic<u64> fallback_wait_ns{};
     std::atomic<u64> slow_pipeline_waits{};
+    // AstraEH: Histograms survive detail caps; final worst records are read after drain.
+    PipelineWaitDiagnostics wait_diagnostics;
+    const std::chrono::steady_clock::time_point diagnostics_start =
+        std::chrono::steady_clock::now();
     // AstraEH: Compiler totals are atomic so progress logging never races with a build.
     std::atomic<u64> fallback_compile_jobs{};
     std::atomic<u64> fallback_shader_ns{};

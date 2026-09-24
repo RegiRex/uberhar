@@ -7,10 +7,41 @@
 
 namespace Vulkan {
 
+// AstraEH: Bound both CPU input work and expanded triangle output. The PICA core
+// isolates admitted batches from persistent assembly state before loading vertices.
+enum class CpuBridgeAdmission : u32 {
+    Eligible,
+    TooSmall,
+    InputLimit,
+    IncompleteList,
+    OutputLimit,
+    UnsupportedTopology,
+    Count,
+};
+
+constexpr CpuBridgeAdmission CheckCpuBridgeAdmission(Pica::PipelineRegs::TriangleTopology topology,
+                                                     u32 vertices) {
+    using Topology = Pica::PipelineRegs::TriangleTopology;
+    if (vertices < 3)
+        return CpuBridgeAdmission::TooSmall;
+    if (vertices > 4096)
+        return CpuBridgeAdmission::InputLimit;
+    switch (topology) {
+    case Topology::List:
+    case Topology::Shader:
+        return vertices % 3 == 0 ? CpuBridgeAdmission::Eligible
+                                 : CpuBridgeAdmission::IncompleteList;
+    case Topology::Strip:
+    case Topology::Fan:
+        return (vertices - 2) * 3 <= 4096 ? CpuBridgeAdmission::Eligible
+                                          : CpuBridgeAdmission::OutputLimit;
+    default:
+        return CpuBridgeAdmission::UnsupportedTopology;
+    }
+}
+
 constexpr bool CpuBridgeEligible(Pica::PipelineRegs::TriangleTopology topology, u32 vertices) {
-    // AstraEH: List batches cannot leave strip/fan vertices behind when switching routes.
-    return topology == Pica::PipelineRegs::TriangleTopology::List && vertices != 0 &&
-           vertices <= 4096 && vertices % 3 == 0;
+    return CheckCpuBridgeAdmission(topology, vertices) == CpuBridgeAdmission::Eligible;
 }
 
 template <typename Pipeline>

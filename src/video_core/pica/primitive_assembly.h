@@ -8,6 +8,8 @@
 #include <functional>
 #include <boost/serialization/access.hpp>
 #include <boost/serialization/array.hpp>
+#include "common/assert.h"     // AstraEH: Enforce the accelerated-batch entry contract.
+#include "common/scope_exit.h" // AstraEH: Restore assembly state on every exit path.
 #include "video_core/pica/output_vertex.h"
 #include "video_core/pica/regs_pipeline.h"
 
@@ -69,6 +71,24 @@ struct PrimitiveAssembler {
      */
     PipelineRegs::TriangleTopology GetTopology() const {
         return topology;
+    }
+
+    // AstraEH: An accelerated host draw assembles its own primitives and leaves
+    // this persistent assembler untouched. A ready CPU bridge must do the same:
+    // otherwise a strip/fan tail forces later draws onto the ordinary CPU path.
+    // Entry is allowed only at the existing acceleration boundary (empty buffer,
+    // guest GS disabled). Preserve the saved winding flag even after exceptions;
+    // no uninitialized vertex-buffer contents need to be copied.
+    template <typename Draw>
+    void RunIsolatedBatch(Draw&& draw) {
+        ASSERT(IsEmpty());
+        const bool saved_winding = winding;
+        Reset();
+        SCOPE_EXIT({
+            Reset();
+            winding = saved_winding;
+        });
+        std::forward<Draw>(draw)();
     }
 
 private:

@@ -1083,8 +1083,17 @@ void PicaCore::DrawArrays(bool is_indexed) {
         return;
     }
 
-    // We cannot accelerate the draw, so load and execute the vertex shader for each vertex.
-    LoadVertices(is_indexed);
+    // AstraEH: A bridge replaces a draw that already met the hardware path's
+    // empty-assembler/no-GS contract. Isolate strip/fan expansion to preserve that
+    // path's existing state semantics and allow the next ready GPU draw to resume.
+    // This does not fix upstream's documented cross-draw strip/fan limitation.
+    if (accelerate_draw && rasterizer->HasPreparedCpuVertexBridge()) {
+        ASSERT(regs.internal.pipeline.use_gs == PipelineRegs::UseGS::No);
+        primitive_assembler.RunIsolatedBatch([&] { LoadVertices(is_indexed); });
+    } else {
+        // Ordinary CPU rendering retains persistent assembly and partial primitives.
+        LoadVertices(is_indexed);
+    }
 
     // Draw emitted triangles.
     rasterizer->DrawTriangles();

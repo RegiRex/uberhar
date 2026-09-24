@@ -31,6 +31,14 @@ build/uberhar-probe/test-pipeline-keys
 c++ -std=c++20 -O2 -pthread -DFMT_HEADER_ONLY -Isrc -Iexternals/fmt/include \
   tools/uberhar/test_pipeline_policy.cpp -o build/uberhar-probe/test-pipeline-policy
 timeout 30s build/uberhar-probe/test-pipeline-policy
+# AstraEH: Real primitive assembly must match native topology and leave no bridge tail.
+c++ -std=c++20 -O2 -DFMT_HEADER_ONLY -Isrc -Iexternals/fmt/include -Iexternals/boost \
+  tools/uberhar/test_bridge_assembly.cpp src/video_core/pica/primitive_assembly.cpp \
+  -o build/uberhar-probe/test-bridge-assembly
+build/uberhar-probe/test-bridge-assembly
+c++ -std=c++20 -O2 -pthread -Isrc tools/uberhar/test_wait_diagnostics.cpp \
+  -o build/uberhar-probe/test-wait-diagnostics
+timeout 30s build/uberhar-probe/test-wait-diagnostics
 # AstraEH: Emit complete shaders and production transports for offscreen rendering checks.
 c++ -std=c++20 -O2 -DFMT_HEADER_ONLY -DXXH_INLINE_ALL \
   -Isrc -Iexternals/fmt/include -Iexternals/boost -Iexternals/xxHash -Iexternals/nihstro/include \

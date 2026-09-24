@@ -76,6 +76,13 @@ public:
         return false;
     }
 
+    // AstraEH: A failed acceleration attempt may have prepared a complete generic
+    // pipeline for CPU vertices. Only that explicit route uses batch-local assembly;
+    // ordinary software rendering must keep its cross-draw primitive state.
+    virtual bool HasPreparedCpuVertexBridge() const {
+        return false;
+    }
+
     virtual void LoadDefaultDiskResources(
         [[maybe_unused]] const std::atomic_bool& stop_loading,
         [[maybe_unused]] const DiskResourceLoadCallback& callback) {}

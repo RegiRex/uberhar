@@ -107,9 +107,9 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
     LOG_INFO(
         Render_Vulkan,
         "Uberhar: hybrid_tev={} force_tev={} async_shaders={} spirv_generator={} "
-        "diagnostics=5 first_ready=true compact_tev=true canonical_tev=true dynamic_fragment=true "
+        "diagnostics=6 first_ready=true compact_tev=true canonical_tev=true dynamic_fragment=true "
         "cpu_bridge={} bridge_policy=ready_only fallback_abi=2 push_bytes=108 "
-        "host_pipeline_identity=true "
+        "host_pipeline_identity=true bridge_assembly=isolated_lists_strips_fans "
         "compiler_workers={}",
         hybrid_tev, force_tev, Settings::values.async_shader_compilation.GetValue(),
         Settings::values.spirv_shader_gen.GetValue(), cpu_vertex_bridge, num_worker_threads);
@@ -484,7 +484,7 @@ bool PipelineCache::BindPipeline(PipelineInfo& info, bool wait_built,
     const bool is_dirty = scheduler.IsStateDirty(StateFlags::Pipeline);
     // AstraEH: Copy TEV registers into the queued command; later draws may change them.
     scheduler.Record([this, is_dirty, pipeline, using_fallback, alternative,
-                      alternative_was_pending, constants = tev_constants,
+                      draw_id = draw_requests, alternative_was_pending, constants = tev_constants,
                       current_dynamic = current_info.dynamic_info, dynamic = info.dynamic_info,
                       descriptor_sets = bound_descriptor_sets, offsets = offsets,
                       current_rasterization = current_info.state.rasterization,
@@ -609,6 +609,24 @@ bool PipelineCache::BindPipeline(PipelineInfo& info, bool wait_built,
             const u64 elapsed_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
                                        std::chrono::steady_clock::now() - wait_start)
                                        .count();
+            // AstraEH: Retain the worst events even when the early detail budget
+            // is exhausted. Keys are process-local; timestamp is renderer-relative.
+            wait_diagnostics.Record({
+                .elapsed_ns = elapsed_ns,
+                .start_ns = static_cast<u64>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                                 wait_start - diagnostics_start)
+                                                 .count()),
+                .draw = draw_id,
+                .wait_key = pipeline->Key(),
+                .chosen_key = selected->Key(),
+                .stages = pending_stages,
+                .phase = initial_phase,
+                .alternative_phase = alternative_phase,
+                .alternative_stages = alternative_stages,
+                .topology = static_cast<u32>(rasterization.topology.Value()),
+                .alternative = alternative != nullptr,
+                .fallback = selected_fallback,
+            });
             pipeline_waits.fetch_add(1, std::memory_order::relaxed);
             pipeline_wait_ns.fetch_add(elapsed_ns, std::memory_order::relaxed);
             pipeline_wait_max_ns.store(
@@ -935,9 +953,14 @@ PipelineCache::CpuBridgePreparation PipelineCache::PrepareCpuFallback(
     if (!cpu_vertex_bridge || !tev_supported || !tev_family_config) {
         return {};
     }
-    // AstraEH: List batches cannot retain strip/fan vertices across route changes.
-    // Bound CPU work until device timings justify broader topology/size coverage.
-    if (!CpuBridgeEligible(original.state.rasterization.topology, vertices)) {
+    // AstraEH: The PICA bridge contract now isolates strip/fan assembly. Record
+    // exact admission reasons so a disabled route cannot hide behind one total.
+    const auto topology = original.state.rasterization.topology.Value();
+    const auto topology_index = std::min<u32>(static_cast<u32>(topology), 4);
+    ++cpu_bridge_topology[topology_index];
+    const auto admission = CheckCpuBridgeAdmission(topology, vertices);
+    ++cpu_bridge_admission[static_cast<std::size_t>(admission)];
+    if (admission != CpuBridgeAdmission::Eligible) {
         ++cpu_bridge_limited;
         return {};
     }
@@ -951,6 +974,9 @@ PipelineCache::CpuBridgePreparation PipelineCache::PrepareCpuFallback(
     info.state.shader_ids[ProgramType::VS] = 0;
     info.state.shader_ids[ProgramType::GS] = 0;
     info.state.vertex_layout = software_layout;
+    // AstraEH: CPU assembly emits independent triangles regardless of input
+    // topology. Key and build the same list pipeline that DrawTriangles binds.
+    info.state.rasterization.topology.Assign(Pica::PipelineRegs::TriangleTopology::List);
     auto* fallback = GetTevFallback(info, true);
     specialized->TryBuild(true, true);
     // AstraEH: Prefer specialization if it finished while the generic lookup ran.
@@ -959,6 +985,7 @@ PipelineCache::CpuBridgePreparation PipelineCache::PrepareCpuFallback(
     }
     if (fallback && fallback->IsDone() && !fallback->HasFailed()) {
         ++cpu_bridge_selected;
+        ++cpu_bridge_selected_topology[topology_index];
         return {fallback, true};
     }
     ++cpu_bridge_warming;
@@ -1027,6 +1054,42 @@ void PipelineCache::ReportUberharStats(const char* kind) {
                  stats.driver_max_ns.load() / 1000000.0, stats.slow_builds.load());
     };
     if (hybrid_tev) {
+        const auto histogram = wait_diagnostics.Histogram();
+        // AstraEH Log Line: one aggregate covers every wait, including late-session events.
+        LOG_INFO(Render_Vulkan,
+                 "Uberhar wait histogram {}: lt1ms={} lt16_667ms={} lt50ms={} lt100ms={} "
+                 "lt250ms={} lt500ms={} lt1000ms={} ge1000ms={}",
+                 kind, histogram[0], histogram[1], histogram[2], histogram[3], histogram[4],
+                 histogram[5], histogram[6], histogram[7]);
+        if (std::string_view{kind} == "totals") {
+            // AstraEH: At shutdown all command/compiler workers have drained.
+            for (const auto& event : wait_diagnostics.Worst()) {
+                if (event.elapsed_ns == 0)
+                    continue;
+                // AstraEH Log Line: at most eight worst waits per renderer shutdown.
+                LOG_INFO(
+                    Render_Vulkan,
+                    "Uberhar worst wait: start_ms={:.3f} draw={} wait_ms={:.3f} "
+                    "wait_key={:016X} chosen_key={:016X} topology={} pending_stages={} phase={} "
+                    "alternative={} alternative_phase={} alternative_stages={} fallback={}",
+                    event.start_ns / 1000000.0, event.draw, event.elapsed_ns / 1000000.0,
+                    event.wait_key, event.chosen_key, event.topology, event.stages, event.phase,
+                    event.alternative, event.alternative_phase, event.alternative_stages,
+                    event.fallback);
+            }
+        }
+        const auto& admission = cpu_bridge_admission;
+        const auto& topology = cpu_bridge_topology;
+        const auto& selected = cpu_bridge_selected_topology;
+        // AstraEH Log Line: bounded coverage reasons; all are observations, not unique programs.
+        LOG_INFO(Render_Vulkan,
+                 "Uberhar bridge coverage {}: eligible={} too_small={} input_limit={} "
+                 "incomplete_list={} output_limit={} unsupported_topology={} "
+                 "seen_list={} seen_strip={} seen_fan={} seen_shader_list={} seen_unknown={} "
+                 "selected_list={} selected_strip={} selected_fan={} selected_shader_list={}",
+                 kind, admission[0], admission[1], admission[2], admission[3], admission[4],
+                 admission[5], topology[0], topology[1], topology[2], topology[3], topology[4],
+                 selected[0], selected[1], selected[2], selected[3]);
         // AstraEH Log Line: aggregate bridge utility and CPU cost; no per-draw output.
         LOG_INFO(
             Render_Vulkan,

@@ -32,8 +32,25 @@ int main() {
         Check(!CpuBridgeEligible(Topology::List, n), "Unsafe CPU batch admitted");
     for (u32 n : {3U, 6U, 4095U})
         Check(CpuBridgeEligible(Topology::List, n), "Eligible CPU list batch rejected");
-    for (auto topology : {Topology::Strip, Topology::Fan, Topology::Shader})
-        Check(!CpuBridgeEligible(topology, 6), "Stateful topology admitted to CPU bridge");
+    // AstraEH: Every admitted topology must bound expanded output as well as input.
+    for (auto topology : {Topology::List, Topology::Shader}) {
+        Check(CpuBridgeEligible(topology, 4095), "Complete list incorrectly rejected");
+        Check(CheckCpuBridgeAdmission(topology, 4) == CpuBridgeAdmission::IncompleteList,
+              "Incomplete list was not identified");
+    }
+    for (auto topology : {Topology::Strip, Topology::Fan}) {
+        for (u32 n : {3U, 4U, 6U, 1367U})
+            Check(CpuBridgeEligible(topology, n), "Isolated strip/fan incorrectly rejected");
+        Check(CheckCpuBridgeAdmission(topology, 1368) == CpuBridgeAdmission::OutputLimit,
+              "Expanded output cap was not enforced");
+        Check(CheckCpuBridgeAdmission(topology, 4097) == CpuBridgeAdmission::InputLimit,
+              "Input cap was not enforced");
+        Check(CheckCpuBridgeAdmission(topology, 2) == CpuBridgeAdmission::TooSmall,
+              "Incomplete triangle admitted");
+    }
+    Check(CheckCpuBridgeAdmission(static_cast<Topology>(4), 6) ==
+              CpuBridgeAdmission::UnsupportedTopology,
+          "Unknown topology admitted");
 
     // AstraEH: All precompleted combinations, including forced mode, preserve the
     // preference policy while excluding an already-failed experimental handle.
