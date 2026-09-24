@@ -16,6 +16,7 @@ and limits fallback compilation after the first gameplay stall report, following
 **release.beta.alpha** numbering. Test builds are published as
 [GitHub pre-releases](https://github.com/RegiRex/uberhar/releases) after package validation.
 See [UBERHAR.md](UBERHAR.md) for status and testing instructions.
+**[Download Uberhar 0.0.4 ARM64](https://github.com/RegiRex/uberhar/releases/download/0.0.4/uberhar-0.0.4-arm64.apk)**.
 Version **0.0.4** adds a current/previous log picker, named file downloads and
 sharing; its renderer is unchanged from 0.0.3. This remains a limited Vulkan TEV
 experiment; a controlled normal-hybrid performance comparison is still pending.

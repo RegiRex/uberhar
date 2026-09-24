@@ -8,7 +8,7 @@ Baseline: Azahar 2126.1.2, commit
 ## Current status
 
 <!-- AstraEH: 0.0.4 changes log collection without changing the 0.0.3 renderer. -->
-**0.0.4 is being prepared** with **Options → Save or Share Log**. Choose the
+**0.0.4 is published as a pre-release** with **Options → Save or Share Log**. Choose the
 current or previous session, choose word initials or the first three characters
 for each game's abbreviation, then save through Android's file picker or share
 the named text file. The preview uses the selected log's session date and games;
@@ -58,18 +58,23 @@ Android documents the installation restriction under
 
 Fragment shader generation is unchanged from the
 [passing shader CI run](https://github.com/RegiRex/uberhar/actions/runs/35946513141).
-**[Download uberhar-0.0.3-arm64.apk](https://github.com/RegiRex/uberhar/releases/download/0.0.3/uberhar-0.0.3-arm64.apk)**
-from the published [0.0.3 pre-release](https://github.com/RegiRex/uberhar/releases/tag/0.0.3).
-No ZIP extraction is needed. Install it over Uberhar 0.0.2; the signing certificate
-is unchanged and the Android version code increased to `33861721`.
-The [build and publication run](https://github.com/RegiRex/uberhar/actions/runs/35955052804)
-passed all Android package checks, 64 Vulkan fragment-module validations and
+**[Download uberhar-0.0.4-arm64.apk](https://github.com/RegiRex/uberhar/releases/download/0.0.4/uberhar-0.0.4-arm64.apk)**
+from the published [0.0.4 pre-release](https://github.com/RegiRex/uberhar/releases/tag/0.0.4).
+No ZIP extraction is needed. Install it over Uberhar 0.0.2 or 0.0.3; the signing
+certificate is unchanged and the Android version code increased to `33862173`.
+The [build and publication run](https://github.com/RegiRex/uberhar/actions/runs/35960440521)
+passed Android compilation, ten parser/filename JVM tests, eight manifest
+regression tests, final APK checks, 64 Vulkan fragment-module validations and
 49,152 exact shader comparisons. The release tag points to
-`d005385bd59ab55152af06362b1593f9c64e63d6`; the public APK's SHA256 matches the tested artifact:
+`23c2a0f1e87637799a57c496500708df9fa58e42`; the public APK's SHA256 matches the tested artifact:
 
 ```text
-5da4e8b2a16bc3aa2477b160e139d47b9c2530df79da1e93930bca4bcba912b8
+02eff39e86e0c41ff2f998e85780eb8ff46c0a562ddd9306605eb62d411c62d8
 ```
+
+The export feature adds no Android permissions or runtime dependencies. The
+private sharing provider exposes only staged log copies with explicit read
+grants. Actual file-picker and share-target behavior still needs device testing.
 
 The ready-fallback safeguard and AstraEH attribution comments remain in place.
 Device correctness and comparative performance remain unverified.
