@@ -11,25 +11,25 @@ Experimental dynamic TEV fallback implemented. Local tests passed 49,152 exact
 RGBA8 comparisons against specialized GLSL across 192 six-stage programs, using
 Mesa llvmpipe with synthetic byte and fractional texture colors. All 64 tested
 Vulkan fragment modules passed GLSL compilation and SPIR-V validation in CI.
-**Alpha 1 is ready for initial device testing.** Source commit
-`0789e08bdd58446d7ba5f41208b68c888eb3e0df` passed Android compilation, ARM64 ELF
-and package-identity checks, and APK signature verification in
-[run 35946513191](https://github.com/RegiRex/uberhar/actions/runs/35946513191).
-Its [shader CI run](https://github.com/RegiRex/uberhar/actions/runs/35946513141)
-also passed all checks above. No on-device performance or correctness result
-exists yet.
+**The first Alpha 1 APK is withdrawn; Alpha 1a is being rebuilt.** The published
+`0789e08bd` package passed signing and architecture checks but was marked
+`android:testOnly=true`, so normal Android installation rejected it. The original
+validation missed this flag. No successful on-device run has been confirmed.
 
-[Download Alpha 1 ARM64](https://github.com/RegiRex/uberhar/actions/runs/35946513191/artifacts/10787127308)
-(GitHub sign-in required). Extract `uberhar-alpha1-arm64.apk` from the ZIP.
-The artifact is named `uberhar-alpha1-arm64-3` and is retained until
-2026-10-24. It includes the source revision, library revisions, signature
-certificate and checksum. The APK's SHA256 is:
+The cause is verified in Android Gradle Plugin 8.13.2's `isTestApk()` source:
+`android.injected.build.abi` implies a test-only APK unless explicitly overridden.
+Alpha 1a removes that IDE option from the Uberhar build, selects ARM64 through
+`ndk.abiFilters`, explicitly sets `android.injected.testOnly=false`, and rejects
+any final APK whose `aapt dump badging` output still contains `testOnly=`.
+The baseline build receives the explicit override and the same rejection check.
+Android documents the installation restriction under
+[`android:testOnly`](https://developer.android.com/guide/topics/manifest/application-element#testOnly).
 
-```text
-e56f57799244a1789686fb9a2540aac2cc8c164109d6d0b1b4f122c61f20a25c
-```
-
-This build includes the ready-fallback safeguard and AstraEH attribution comments.
+Shader code is unchanged from the
+[passing shader CI run](https://github.com/RegiRex/uberhar/actions/runs/35946513141).
+The replacement APK will be named `uberhar-alpha1a-arm64.apk` so it can be
+distinguished from the failed download. It retains the ready-fallback safeguard
+and AstraEH attribution comments. Device correctness and performance remain unverified.
 The baseline workflow builds unmodified upstream code. Its APK retains Azahar's
 application ID and is not intended to replace your installed Azahar. Do not
 uninstall Azahar to work around a signing-key mismatch.
@@ -96,7 +96,7 @@ in Actions. The cache can
 expire, so seamless updates are not guaranteed; `signature.txt` records the
 certificate for each artifact. A durable release signing key is still needed
 before distributing regular releases. The first internal build (`f7274114b`)
-used a different certificate; begin device testing with `0789e08bd` above.
+used a different certificate; Alpha 1a reuses the development key cached for `0789e08bd`.
 Do not uninstall Azahar for any Uberhar
 signing problem.
 

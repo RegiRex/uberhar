@@ -52,7 +52,7 @@ All files in `tools/uberhar/` are new AstraEH work.
 | `tools/uberhar/compare_tev.py` | Compare generated specialized/interpreted combiner math on Mesa; synthetic sampling inputs do not test real texture derivatives or device drivers. |
 | `tools/uberhar/check_android_keys.py` | Catch missing default-INI keys that would abort Android startup. |
 | `tools/uberhar/validate_apk.py` | Find AGP's actual APK, reject ambiguity, verify ARM64 ELF headers and ZIP integrity, and emit a checksum. |
-| `.github/workflows/uberhar-alpha.yml` | Build/sign the isolated app, validate package identity, publish APK/provenance/logs and cache compilation. |
+| `.github/workflows/uberhar-alpha.yml` | Build/sign the isolated app, validate package identity, reject test-only APKs, publish APK/provenance/logs and cache compilation. The Alpha 1a fix removes IDE ABI injection and explicitly disables test-only packaging. |
 | `.github/workflows/uberhar-baseline.yml` | Build pinned unmodified upstream; allow its known extra x86 validation library without allowing an x86 emulator library. |
 | `.github/workflows/uberhar-shaders.yml` | Compile and validate shader modules, then run differential numerical comparisons. |
 

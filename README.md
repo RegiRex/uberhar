@@ -10,9 +10,9 @@ The upstream project information and download links below describe Azahar.
 Uberhar builds are produced by this repository's **Uberhar ARM64 experimental
 alpha** workflow.
 
-**Alpha 1 ARM64 is ready for device testing:**
-[download the APK bundle](https://github.com/RegiRex/uberhar/actions/runs/35946513191/artifacts/10787127308)
-and follow the [setup and comparison guide](UBERHAR.md#first-device-test).
+**Alpha 1's first APK was withdrawn:** an unintended Android `testOnly` flag
+blocks normal installation. Alpha 1a fixes packaging and is being rebuilt.
+See [UBERHAR.md](UBERHAR.md) for the replacement and testing instructions.
 This is a limited Vulkan TEV experiment; device performance is not yet measured.
 
 See the [AstraEH code map](docs/UBERHAR_CODE_MAP.md) to locate the fork's changes.

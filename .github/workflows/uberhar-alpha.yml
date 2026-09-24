@@ -78,9 +78,11 @@ jobs:
           export ANDROID_KEYSTORE_FILE="$HOME/.android/debug.keystore"
           export ANDROID_KEYSTORE_PASS=android
           export ANDROID_KEY_ALIAS=androiddebugkey
+          # AstraEH: IDE ABI injection implicitly marks APKs test-only in AGP 8.13.2.
+          # Use our ndk.abiFilters property and explicitly allow ordinary tap-to-install.
           bash ./gradlew --no-daemon --max-workers=2 \
             -PuberharArm64Only=true \
-            -Pandroid.injected.build.abi=arm64-v8a \
+            -Pandroid.injected.testOnly=false \
             assembleUberharRelease 2>&1 | tee "$GITHUB_WORKSPACE/uberhar-build.log"
 
       # AstraEH: Publish only an intact ARM64 app with the separate ID, label and valid signature.
@@ -91,6 +93,12 @@ jobs:
           "$ANDROID_SDK_ROOT/build-tools/35.0.0/aapt" dump badging "$APK" > artifacts/package.txt
           grep "package: name='org.uberhar.uberhar_emu'" artifacts/package.txt
           grep -F "application-label:'Uberhar Alpha'" artifacts/package.txt
+          # AstraEH: Signatures can verify even when Android refuses normal installation.
+          # aapt emits this marker only for test-only apps; reject before publishing.
+          if grep -q '^testOnly=' artifacts/package.txt; then
+            echo 'Refusing to publish a test-only APK: normal Android installation would fail' >&2
+            exit 1
+          fi
           "$ANDROID_SDK_ROOT/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK" > artifacts/signature.txt
           git rev-parse HEAD > artifacts/uberhar-commit.txt
           git submodule status --recursive > artifacts/submodules.txt
@@ -98,7 +106,7 @@ jobs:
 
       - uses: actions/upload-artifact@v7
         with:
-          name: uberhar-alpha1-arm64-${{ github.run_number }}
+          name: uberhar-alpha1a-arm64-${{ github.run_number }}
           path: artifacts/
           if-no-files-found: error
           retention-days: 30

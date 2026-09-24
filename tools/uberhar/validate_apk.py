@@ -40,7 +40,7 @@ with zipfile.ZipFile(apk) as archive:
         raise SystemExit("APK failed ZIP integrity check")
 # AstraEH: Publish one stable filename and a checksum only after the package passes every gate.
 destination.mkdir(parents=True, exist_ok=True)
-target = destination / "uberhar-alpha1-arm64.apk"
+target = destination / "uberhar-alpha1a-arm64.apk"
 shutil.copyfile(apk, target)
 digest = hashlib.sha256(target.read_bytes()).hexdigest()
 (destination / "apk-sha256.txt").write_text(f"{digest}  {target.name}\n")

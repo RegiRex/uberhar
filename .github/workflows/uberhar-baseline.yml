@@ -56,8 +56,10 @@ jobs:
           export JAVA_HOME="$JAVA_HOME_17_X64"
           export PATH="$JAVA_HOME/bin:$PATH"
           export NDK_CCACHE="$(command -v ccache)"
+          # AstraEH: Keep upstream's ABI selection without the implied test-only install flag.
           bash ./gradlew --no-daemon --max-workers=2 \
             -Pandroid.injected.build.abi=arm64-v8a \
+            -Pandroid.injected.testOnly=false \
             assembleVanillaRelease 2>&1 | tee "$GITHUB_WORKSPACE/baseline-build.log"
 
       - name: Validate APK and record provenance
@@ -82,6 +84,12 @@ jobs:
             if unzip -Z1 "$apk" | grep '^lib/' | grep -v '^lib/arm64-v8a/' | \
                 grep -v '^lib/x86_64/libVkLayer_khronos_validation.so$' > /dev/null; then
               echo 'Unexpected non-ARM64 native library in baseline' >&2
+              exit 1
+            fi
+            # AstraEH: Verify ordinary-install eligibility as well as the signing certificate.
+            "$ANDROID_SDK_ROOT/build-tools/35.0.0/aapt" dump badging "$apk" > artifacts/package.txt
+            if grep -q '^testOnly=' artifacts/package.txt; then
+              echo 'Refusing to publish a test-only baseline APK' >&2
               exit 1
             fi
             "$ANDROID_SDK_ROOT/build-tools/35.0.0/apksigner" verify "$apk"

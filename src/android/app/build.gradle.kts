@@ -191,7 +191,8 @@ android {
         register("uberhar") {
             dimension = "version"
             applicationId = "org.uberhar.uberhar_emu"
-            versionNameSuffix = "-uberhar-alpha1"
+            // AstraEH: Distinguish the installable packaging repair from the withdrawn Alpha 1 APK.
+            versionNameSuffix = "-uberhar-alpha1a"
         }
     }
 
