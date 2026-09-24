@@ -9,7 +9,10 @@ on:
       - src/**
       - CMakeModules/**
       - .github/workflows/uberhar-alpha.yml
-      - tools/uberhar/validate_apk.py
+      - .github/workflows/uberhar-shaders.yml
+      - tools/uberhar/**
+      - UBERHAR_VERSION
+      - docs/releases/**
 
 permissions:
   contents: read
@@ -19,15 +22,32 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # AstraEH: Reuse the shader gate and require its success before publishing any pre-release.
+  shaders:
+    uses: ./.github/workflows/uberhar-shaders.yml
+
   android:
     runs-on: ubuntu-24.04
     timeout-minutes: 120
+    outputs:
+      version: ${{ steps.version.outputs.value }}
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
           submodules: recursive
           persist-credentials: false
+
+      # AstraEH: Share one numeric release.beta.alpha version across Gradle, assets and publication.
+      - name: Read release version
+        id: version
+        run: |
+          UBERHAR_VERSION="$(cat UBERHAR_VERSION)"
+          [[ "$UBERHAR_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          test -f "docs/releases/$UBERHAR_VERSION.md"
+          echo "value=$UBERHAR_VERSION" >> "$GITHUB_OUTPUT"
+          echo "UBERHAR_VERSION=$UBERHAR_VERSION" >> "$GITHUB_ENV"
+          python3 tools/uberhar/test_manifest.py
 
       - name: Cache compilation dependencies
         uses: actions/cache/restore@v5
@@ -88,7 +108,9 @@ jobs:
       # AstraEH: Publish only an intact ARM64 app with the separate ID, label and valid signature.
       - name: Validate package and record provenance
         run: |
-          python3 tools/uberhar/validate_apk.py src/android/app/build artifacts
+          set -o pipefail
+          mkdir -p artifacts
+          python3 tools/uberhar/validate_apk.py src/android/app/build artifacts | tee artifacts/native-validation.txt
           APK="$(find artifacts -name '*.apk' -print -quit)"
           "$ANDROID_SDK_ROOT/build-tools/35.0.0/aapt" dump badging "$APK" > artifacts/package.txt
           grep "package: name='org.uberhar.uberhar_emu'" artifacts/package.txt
@@ -99,14 +121,26 @@ jobs:
             echo 'Refusing to publish a test-only APK: normal Android installation would fail' >&2
             exit 1
           fi
+          # AstraEH: Inspect the final merged manifest, including third-party dependency declarations.
+          export JAVA_HOME="$JAVA_HOME_17_X64"
+          "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/apkanalyzer" manifest print "$APK" > artifacts/AndroidManifest.xml
+          python3 tools/uberhar/validate_manifest.py artifacts/AndroidManifest.xml "$UBERHAR_VERSION" > artifacts/install-validation.txt
+          "$ANDROID_SDK_ROOT/build-tools/35.0.0/zipalign" -c -P 16 -v 4 "$APK" > artifacts/alignment.txt
           "$ANDROID_SDK_ROOT/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK" > artifacts/signature.txt
+          # AstraEH: Reject a changed signing key instead of releasing an APK that cannot update.
+          grep -F "Signer #1 certificate SHA-256 digest: $(cat tools/uberhar/development-certificate.sha256)" artifacts/signature.txt
           git rev-parse HEAD > artifacts/uberhar-commit.txt
           git submodule status --recursive > artifacts/submodules.txt
           cp UBERHAR.md artifacts/
+          cp "docs/releases/$UBERHAR_VERSION.md" artifacts/release-notes.md
+          python3 -m zipfile -c "artifacts/uberhar-$UBERHAR_VERSION-validation.zip" \
+            artifacts/package.txt artifacts/AndroidManifest.xml artifacts/install-validation.txt \
+            artifacts/native-validation.txt artifacts/alignment.txt artifacts/signature.txt \
+            artifacts/uberhar-commit.txt artifacts/submodules.txt artifacts/UBERHAR.md
 
       - uses: actions/upload-artifact@v7
         with:
-          name: uberhar-alpha1a-arm64-${{ github.run_number }}
+          name: uberhar-${{ steps.version.outputs.value }}-arm64
           path: artifacts/
           if-no-files-found: error
           retention-days: 30
@@ -129,3 +163,43 @@ jobs:
             ~/.gradle/wrapper
             ~/.cache/ccache
           key: uberhar-android-v1-${{ github.run_id }}
+
+  # AstraEH: Only the publishing job can write releases; compilation keeps read-only permissions.
+  publish:
+    needs: [android, shaders]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      UBERHAR_VERSION: ${{ needs.android.outputs.version }}
+    steps:
+      - name: Fetch the validated APK from this build
+        run: |
+          gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --name "uberhar-$UBERHAR_VERSION-arm64" --dir artifacts
+          test "$(cat artifacts/uberhar-commit.txt)" = "$GITHUB_SHA"
+          cd artifacts
+          sha256sum --check apk-sha256.txt
+
+      # AstraEH: Attach assets to a draft first; publish only when all uploads succeed.
+      # Existing versions are never overwritten: increment UBERHAR_VERSION for the next iteration.
+      - name: Publish GitHub pre-release
+        run: |
+          if gh release view "$UBERHAR_VERSION" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo 'This version already exists; increment UBERHAR_VERSION before publishing again' >&2
+            exit 1
+          fi
+          # AstraEH: An inherited tag must never redirect this release to unrelated upstream code.
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$UBERHAR_VERSION" > existing-tag.json 2>/dev/null; then
+            test "$(jq -r '.object.sha' existing-tag.json)" = "$GITHUB_SHA"
+          fi
+          gh release create "$UBERHAR_VERSION" --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" --title "Uberhar $UBERHAR_VERSION" \
+            --draft --prerelease --latest=false --notes-file artifacts/release-notes.md \
+            "artifacts/uberhar-$UBERHAR_VERSION-arm64.apk" artifacts/apk-sha256.txt \
+            "artifacts/uberhar-$UBERHAR_VERSION-validation.zip"
+          gh release edit "$UBERHAR_VERSION" --repo "$GITHUB_REPOSITORY" \
+            --draft=false --prerelease --latest=false

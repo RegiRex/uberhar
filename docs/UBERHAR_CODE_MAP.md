@@ -31,7 +31,7 @@ rg -n AstraEH src CMakeModules tools/uberhar .github/workflows README.md UBERHAR
 | `CMakeModules/GenerateSettingKeys.cmake` | Shared keys for hybrid and forced TEV modes. |
 | `src/common/settings.{h,cpp}` | Defaults, settings log entries and per-game override reset. |
 | `src/citra_qt/configuration/config.cpp` | Read/write both experiment flags in desktop configuration. |
-| `src/android/app/build.gradle.kts` | ARM64-only build property and separate Uberhar flavor/application ID. |
+| `src/android/app/build.gradle.kts` | ARM64-only build property, separate Uberhar flavor/application ID, and numeric version read from `UBERHAR_VERSION`. |
 | `src/android/app/src/main/jni/{config.cpp,default_ini.h}` | Native setting reads and mandatory default-INI declarations. |
 | `src/android/app/src/main/java/org/citra/citra_emu/features/settings/SettingKeys.kt` | JNI declarations matching the generated keys. |
 | `src/android/app/src/main/java/org/citra/citra_emu/features/settings/model/BooleanSetting.kt` | Android boolean settings, both default off. |
@@ -51,8 +51,12 @@ All files in `tools/uberhar/` are new AstraEH work.
 | `tools/uberhar/shader_probe.cpp` | Reproducible TEV cases, directed edge cases, AddSigned exclusion and 64 full fragment modules. |
 | `tools/uberhar/compare_tev.py` | Compare generated specialized/interpreted combiner math on Mesa; synthetic sampling inputs do not test real texture derivatives or device drivers. |
 | `tools/uberhar/check_android_keys.py` | Catch missing default-INI keys that would abort Android startup. |
-| `tools/uberhar/validate_apk.py` | Find AGP's actual APK, reject ambiguity, verify ARM64 ELF headers and ZIP integrity, and emit a checksum. |
-| `.github/workflows/uberhar-alpha.yml` | Build/sign the isolated app, validate package identity, reject test-only APKs, publish APK/provenance/logs and cache compilation. The Alpha 1a fix removes IDE ABI injection and explicitly disables test-only packaging. |
+| `tools/uberhar/validate_apk.py` | Find AGP's actual APK, reject ambiguity, verify ARM64 ELF headers, native dependencies and ZIP integrity, and emit a versioned APK and checksum. |
+| `tools/uberhar/validate_manifest.py` | Reject known install blockers and identity/authority/permission conflicts in the final decoded manifest. |
+| `tools/uberhar/test_manifest.py` | Regression cases for test-only/debug/split flags, version mismatch, shared identity, provider collisions, new permissions and required external Java libraries. |
+| `tools/uberhar/development-certificate.sha256` | Public certificate fingerprint pinned by AstraEH so a lost signing cache cannot silently produce incompatible updates. |
+| `UBERHAR_VERSION` | Owner-requested release.beta.alpha version shared by Gradle and the release pipeline; this plain data file intentionally has no inline comment. |
+| `.github/workflows/uberhar-alpha.yml` | Build/sign the isolated app, reject test-only packaging, verify manifest/native/alignment/signing metadata, and publish versioned GitHub pre-releases from a separate job. |
 | `.github/workflows/uberhar-baseline.yml` | Build pinned unmodified upstream; allow its known extra x86 validation library without allowing an x86 emulator library. |
 | `.github/workflows/uberhar-shaders.yml` | Compile and validate shader modules, then run differential numerical comparisons. |
 
@@ -63,7 +67,8 @@ development branch. Their contents are upstream code, not AstraEH implementation
 ## Documentation
 
 `README.md` has an AstraEH branch overview above the upstream README.
-`UBERHAR.md` describes scope, limits and device testing. This map and
+`UBERHAR.md` describes scope, limits and device testing. `docs/releases/` holds
+versioned pre-release notes. This map and
 `docs/UBERHAR_DISPLAY_SYNC.md` are AstraEH documents. The display document is a
 follow-up investigation plan; alpha 1 contains no screen synchronization or
 model-sharpening changes.

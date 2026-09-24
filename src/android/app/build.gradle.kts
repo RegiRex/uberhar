@@ -21,6 +21,9 @@ plugins {
  * next 680 years.
  */
 val autoVersion = (((System.currentTimeMillis() / 1000) - 1451606400) / 10).toInt()
+// AstraEH: The owner's release.beta.alpha version is shared with APK names and GitHub releases.
+val uberharVersion = rootProject.file("../../UBERHAR_VERSION").readText().trim()
+require(uberharVersion.matches(Regex("[0-9]+\\.[0-9]+\\.[0-9]+")))
 // AstraEH: Constrain both compilation and bundled JNI libraries for the Thor alpha.
 val abiFilter = if (providers.gradleProperty("uberharArm64Only").orNull == "true") {
     listOf("arm64-v8a")
@@ -191,8 +194,8 @@ android {
         register("uberhar") {
             dimension = "version"
             applicationId = "org.uberhar.uberhar_emu"
-            // AstraEH: Distinguish the installable packaging repair from the withdrawn Alpha 1 APK.
-            versionNameSuffix = "-uberhar-alpha1a"
+            // AstraEH: Keep the display version exactly numeric; versionCode still increases by time.
+            versionName = uberharVersion
         }
     }
 

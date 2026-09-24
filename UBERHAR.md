@@ -11,14 +11,14 @@ Experimental dynamic TEV fallback implemented. Local tests passed 49,152 exact
 RGBA8 comparisons against specialized GLSL across 192 six-stage programs, using
 Mesa llvmpipe with synthetic byte and fractional texture colors. All 64 tested
 Vulkan fragment modules passed GLSL compilation and SPIR-V validation in CI.
-**The first Alpha 1 APK is withdrawn; Alpha 1a is being rebuilt.** The published
+**The first Alpha 1 APK is withdrawn; its replacement is 0.0.2.** The published
 `0789e08bd` package passed signing and architecture checks but was marked
 `android:testOnly=true`, so normal Android installation rejected it. The original
 validation missed this flag. No successful on-device run has been confirmed.
 
 The cause is verified in Android Gradle Plugin 8.13.2's `isTestApk()` source:
 `android.injected.build.abi` implies a test-only APK unless explicitly overridden.
-Alpha 1a removes that IDE option from the Uberhar build, selects ARM64 through
+Version 0.0.2 removes that IDE option from the Uberhar build, selects ARM64 through
 `ndk.abiFilters`, explicitly sets `android.injected.testOnly=false`, and rejects
 any final APK whose `aapt dump badging` output still contains `testOnly=`.
 The baseline build receives the explicit override and the same rejection check.
@@ -27,8 +27,9 @@ Android documents the installation restriction under
 
 Shader code is unchanged from the
 [passing shader CI run](https://github.com/RegiRex/uberhar/actions/runs/35946513141).
-The replacement APK will be named `uberhar-alpha1a-arm64.apk` so it can be
-distinguished from the failed download. It retains the ready-fallback safeguard
+The replacement APK is named `uberhar-0.0.2-arm64.apk` and will be attached directly
+to the [0.0.2 pre-release](https://github.com/RegiRex/uberhar/releases/tag/0.0.2)
+after the build and package checks pass. It retains the ready-fallback safeguard
 and AstraEH attribution comments. Device correctness and performance remain unverified.
 The baseline workflow builds unmodified upstream code. Its APK retains Azahar's
 application ID and is not intended to replace your installed Azahar. Do not
@@ -96,7 +97,9 @@ in Actions. The cache can
 expire, so seamless updates are not guaranteed; `signature.txt` records the
 certificate for each artifact. A durable release signing key is still needed
 before distributing regular releases. The first internal build (`f7274114b`)
-used a different certificate; Alpha 1a reuses the development key cached for `0789e08bd`.
+used a different certificate; 0.0.2 reuses the development key cached for `0789e08bd`.
+Publication now checks that certificate fingerprint. If the key cache is lost,
+publication stops instead of silently distributing an incompatible update.
 Do not uninstall Azahar for any Uberhar
 signing problem.
 
@@ -122,6 +125,24 @@ The [dual-display source audit](docs/UBERHAR_DISPLAY_SYNC.md) records the separa
 presentation queues and a measurement plan for the next phase.
 
 ## Build workflow
+
+`UBERHAR_VERSION` contains the owner's **release.beta.alpha** version, currently
+`0.0.2`. The unnumbered failed first attempt counts as `0.0.1`. Future alpha
+iterations increment the third number. Beta and release milestones use the second
+and first numbers. Gradle's independent numeric `versionCode` still increases
+with build time so Android can order updates correctly.
+
+After the ARM64 build and shader checks pass, a separate job publishes a GitHub pre-release with
+the APK, checksum and validation records. It creates a draft, uploads assets, then
+publishes; it never overwrites an existing version. The build job has read-only
+repository access and only the publishing job has release-write permission.
+
+The final APK is checked for test/debug/split flags, package/version, SDK metadata,
+entry points, provider-authority conflicts, unreviewed permissions and required
+external Java libraries. Native checks cover ZIP integrity, ARM64 ELF headers,
+linked dependencies, package alignment, signature validity and certificate
+continuity. These checks address known packaging problems; they cannot establish
+runtime compatibility with every game, driver or third-party Android app.
 
 The baseline workflow checks out the pinned upstream source in a separate
 directory. It uses JDK 17, Android platform 35, NDK 27.3.13750724, and CMake

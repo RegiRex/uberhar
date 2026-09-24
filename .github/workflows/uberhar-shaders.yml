@@ -3,12 +3,8 @@ name: Uberhar shader correctness
 
 on:
   workflow_dispatch:
-  push:
-    branches: [uberhar/hybrid-shaders]
-    paths:
-      - src/video_core/shader/generator/**
-      - tools/uberhar/**
-      - .github/workflows/uberhar-shaders.yml
+  # AstraEH: The release workflow calls this gate and waits for it before publication.
+  workflow_call:
 
 permissions:
   contents: read
