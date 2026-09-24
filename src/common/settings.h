@@ -25,6 +25,9 @@ enum class GraphicsAPI {
     Vulkan = 2,
 };
 
+// AstraEH: Values match Android's mutually exclusive test switches; zero preserves custom settings.
+enum class UberharTestMode : u32 { Custom = 0, Native = 1, Compute = 2, Automatic = 3 };
+
 enum class InitClock : u32 {
     SystemTime = 0,
     FixedTime = 1,
@@ -540,6 +543,9 @@ struct Values {
     SwitchableSetting<bool> uberhar_force_tev{false, Keys::uberhar_force_tev};
     // AstraEH: Effective only inside hybrid mode; independently disable for A/B tests.
     SwitchableSetting<bool> uberhar_cpu_vertex_bridge{true, Keys::uberhar_cpu_vertex_bridge};
+    // AstraEH: Profiles are applied after loading custom values, never written back over them.
+    SwitchableSetting<UberharTestMode> uberhar_test_mode{UberharTestMode::Custom,
+                                                         Keys::uberhar_test_mode};
     SwitchableSetting<bool> async_presentation{true, Keys::async_presentation};
     SwitchableSetting<bool> use_hw_shader{true, Keys::use_hw_shader};
     SwitchableSetting<bool> use_disk_shader_cache{true, Keys::use_disk_shader_cache};

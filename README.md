@@ -16,23 +16,20 @@ and limits fallback compilation after the first gameplay stall report, following
 **release.beta.alpha** numbering. Test builds are published as
 [GitHub pre-releases](https://github.com/RegiRex/uberhar/releases) after package validation.
 See [UBERHAR.md](UBERHAR.md) for status and testing instructions.
-**[Download the published Uberhar 0.0.8 ARM64](https://github.com/RegiRex/uberhar/releases/download/0.0.8/uberhar-0.0.8-arm64.apk)**.
-The supplied 0.0.8 Awakening capture shows more pipeline reuse but 20.790 seconds
-of cold waiting and zero CPU bridge draws. Its warm run has no waits.
-**0.0.9** broadens bridge coverage to bounded strips/fans and list-equivalent
-batches with isolated assembly, and retains the worst waits across the whole
-session. Publication is pending the build gates; see the
-[0.0.9 notes](docs/releases/0.0.9.md),
-[device analysis](docs/UBERHAR_LOG_ANALYSIS_0.0.8.md) and
+[Published ARM64 pre-releases](https://github.com/RegiRex/uberhar/releases).
+The 0.0.9 normal cold test still records 20.821 seconds of waiting; the warm
+run has no pipeline waits. See the [four-session analysis](docs/UBERHAR_LOG_ANALYSIS_0.0.9.md).
+
+**0.0.10** introduces one-click native, compute and automatic test profiles while
+preserving custom settings. These share a CPU vertex interpreter; compute coverage
+initially includes only validated solid rectangles. The native generic path can
+still compile new families/pipelines on demand. Full GPU interpretation, general
+compute rasterization and zero-wait first playthroughs remain development goals.
+See the [0.0.10 notes](docs/releases/0.0.10.md),
+[architectural review](docs/UBERHAR_ARCHITECTURE_0.0.9.md) and
 [Actions](https://github.com/RegiRex/uberhar/actions/workflows/uberhar-alpha.yml).
-
-The [architectural review](docs/UBERHAR_ARCHITECTURE_2026-09-24.md) explains the
-larger move toward generic programs ready before gameplay, vertex fallback and
-capability-dependent pipeline preparation. These are staged development goals,
-not features all implemented in 0.0.9. Reviews repeat every three to five alpha
-builds, normally four; the next is due around 0.0.10.
-
-See the [AstraEH code map](docs/UBERHAR_CODE_MAP.md) to locate the fork's changes.
+Publication requires all build/package/shader gates. The next default architectural
+review is after 0.0.13; see the [review ledger](docs/UBERHAR_REVIEW_CADENCE.md).
 
 ---
 

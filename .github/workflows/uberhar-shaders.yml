@@ -47,3 +47,8 @@ jobs:
         env:
           LIBGL_ALWAYS_SOFTWARE: '1'
         run: /tmp/uberhar-test-env/bin/python tools/uberhar/compare_fragment_state.py build/uberhar-probe/fragment-state
+      # AstraEH: Native-vs-compute pixels plus Vulkan/SPIR-V validation gate publication.
+      - name: Compare compute rasterization with native triangles
+        env:
+          LIBGL_ALWAYS_SOFTWARE: '1'
+        run: /tmp/uberhar-test-env/bin/python tools/uberhar/compare_compute_rect.py --require-vulkan

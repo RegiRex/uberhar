@@ -1,5 +1,5 @@
 <!-- AstraEH: Bounded troubleshooting and removal map for the hybrid renderer. -->
-# Renderer diagnostics, schema 6
+# Renderer diagnostics, schema 7
 
 Every Uberhar renderer log call has an adjacent **`AstraEH Log Line`** comment.
 Find it with `rg -n 'AstraEH Log Line' src`. These markers identify diagnostic
@@ -9,7 +9,7 @@ logging to this fork. Android session/title/export records remain functional
 parts of log export, rather than temporary shader debugging.
 
 The startup record identifies effective switches, compiler worker count,
-`diagnostics=6`, `dynamic_fragment=true`, `bridge_policy=ready_only`,
+`diagnostics=7`, `dynamic_fragment=true`, `bridge_policy=ready_only`,
 `fallback_abi=2`, `push_bytes=108`, `host_pipeline_identity=true` and
 `bridge_assembly=isolated_lists_strips_fans`.
 `cpu_bridge` is false when hybrid is off or forced fallback is on, even if the
@@ -68,3 +68,39 @@ live GLSL translation misses, not driver compilation or startup reconstruction.
 Existing upstream compiler diagnostics can print source after a compilation
 failure. The caps above apply to Uberhar's own records, not every upstream log
 category. Keep ordinary logging filters; verbose shader tracing is unnecessary.
+
+## Virtual PICA profiles (0.0.10)
+
+<!-- AstraEH: New counters separate coverage, CPU interpretation and moved compilation waits. -->
+
+`Uberhar_TestMode` is 0 custom, 1 native, 2 compute, 3 automatic. All profiles use
+`vertex_engine=cpu_interpreter`; this is not GPU vertex interpretation. Existing
+custom-mode counters retain their meaning.
+
+- `Uberhar virtual native`: primary generic/recovery draw counts, foreground generic
+  wait count/total/maximum, and `complete_ready_bank=false`. Uses the existing
+  bounded progress/final reporting cadence. These waits are distinct from the old
+  scheduler wait counter; do not conclude that zero scheduler waits means zero
+  shader stalls. Different thread intervals may overlap.
+- `Uberhar virtual vertices totals`: one shutdown summary of batches, submitted
+  input vertices, full vertex-stage wall time and worst batch. This includes
+  setup/memory synchronization, not just shader arithmetic. Immediate-mode vertex
+  processing is outside this batch counter.
+- `Uberhar compute prepared`: one startup record with actual coverage, pipeline
+  count, timing availability and mode. Initialization failures/capability rejection
+  have one explicit diagnostic; native recovery remains active.
+- `Uberhar virtual routes totals`: one shutdown record of state/geometry/format
+  rejection, admitted rectangles, actual native/compute draw counts, compute pixel
+  count and sampled GPU times. Zero compute draws is an honest coverage result,
+  not proof that the compute kernel was fast or slow.
+
+Automatic selection has eight area buckets and at most 32 in-flight query pairs.
+It initially samples to learn both routes, then throttles ordinary observations
+and resamples exploration draws. Results are read only after GPU completion,
+without `WAIT_BIT`. CPU compilation is prepared before recording the native
+measurement. Timings are draw intervals and may split render passes; they are not
+whole-frame benchmarks or a guarantee that the chosen route is always faster.
+
+The compute kernel has one pre-game pipeline creation and no per-draw compilation.
+The wider native route remains on demand. A later version must implement/validate
+broader coverage before claiming a complete compilation-free first playthrough.

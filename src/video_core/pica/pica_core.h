@@ -411,6 +411,9 @@ private:
     PrimitiveAssembler primitive_assembler;
     CommandList cmd_list;
     std::unique_ptr<ShaderEngine> shader_engine;
+    // AstraEH: Measure the full interpreted vertex stage separately from GPU pipeline waits.
+    u64 virtual_vertex_batches{}, virtual_vertex_inputs{}, virtual_vertex_ns{},
+        virtual_vertex_max_ns{};
 };
 
 #define GPU_REG_INDEX(field_name) (offsetof(Pica::PicaCore::Regs, field_name) / sizeof(u32))

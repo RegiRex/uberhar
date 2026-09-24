@@ -47,6 +47,7 @@ import org.citra.citra_emu.features.settings.model.AbstractShortSetting
 import org.citra.citra_emu.features.settings.model.AbstractStringSetting
 import org.citra.citra_emu.features.settings.model.FloatSetting
 import org.citra.citra_emu.features.settings.model.ScaledFloatSetting
+import org.citra.citra_emu.features.settings.model.UberharTestModeSwitch
 import org.citra.citra_emu.features.settings.model.view.DateTimeSetting
 import org.citra.citra_emu.features.settings.model.view.InputBindingSetting
 import org.citra.citra_emu.features.settings.model.view.MultiChoiceSetting
@@ -225,6 +226,8 @@ class SettingsAdapter(private val fragmentView: SettingsFragmentView, public val
     }
 
     fun onBooleanClick(item: SwitchSetting, position: Int, checked: Boolean) {
+        // AstraEH: Recheck profile locks even if a stale view delivers a click.
+        if (!item.isActive) return
         val setting = item.setChecked(checked)
         fragmentView.putSetting(setting)
         fragmentView.onSettingChanged()
@@ -233,6 +236,8 @@ class SettingsAdapter(private val fragmentView: SettingsFragmentView, public val
         if (fragmentView.activityView != null) {
             // Reload the settings list to update the UI
             fragmentView.loadSettingsList()
+            // AstraEH: Sibling switches share a mutable mode; DiffUtil cannot see old values.
+            if (setting is UberharTestModeSwitch) notifyDataSetChanged()
         }
     }
 
@@ -617,9 +622,12 @@ class SettingsAdapter(private val fragmentView: SettingsFragmentView, public val
 
                     is AbstractShortSetting -> setting.short = setting.defaultValue as Short
                 }
+                // AstraEH: Resetting a test switch also persists its underlying mode.
+                fragmentView.putSetting(setting)
                 notifyItemChanged(position)
                 fragmentView.onSettingChanged()
                 fragmentView.loadSettingsList()
+                if (setting is UberharTestModeSwitch) notifyDataSetChanged()
             }
             .setNegativeButton(android.R.string.cancel, null)
             .show()

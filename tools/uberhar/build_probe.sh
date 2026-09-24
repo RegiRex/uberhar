@@ -47,3 +47,23 @@ c++ -std=c++20 -O2 -DFMT_HEADER_ONLY -DXXH_INLINE_ALL \
   src/video_core/shader/generator/pica_fs_config.cpp \
   -o build/uberhar-probe/fragment-state-probe
 build/uberhar-probe/fragment-state-probe build/uberhar-probe/fragment-state
+
+# AstraEH: Profile/compute admission gates exercise the same code compiled into Android.
+c++ -std=c++20 -O2 -DFMT_HEADER_ONLY -Isrc -Iexternals/fmt/include -Iexternals/boost \
+  tools/uberhar/test_compute_rect.cpp -o build/uberhar-probe/test-compute-rect
+build/uberhar-probe/test-compute-rect
+# Generate native setting keys without configuring the full emulator.
+mkdir -p build/uberhar-profile-source/common
+cp src/common/setting_keys.h.in build/uberhar-profile-source/common/setting_keys.h.in
+python3 - <<'INNER'
+from pathlib import Path
+root = Path.cwd()
+Path("build/uberhar-profile-source/CMakeLists.txt").write_text(
+    'cmake_minimum_required(VERSION 3.22)\nproject(UberharProfile NONE)\n'
+    f'include("{root}/CMakeModules/GenerateSettingKeys.cmake")\n')
+INNER
+cmake -S build/uberhar-profile-source -B build/uberhar-profile
+c++ -std=c++20 -O2 -DENABLE_VULKAN -DFMT_HEADER_ONLY -Isrc -Ibuild/uberhar-profile \
+  -Iexternals/fmt/include -Iexternals/boost tools/uberhar/test_graphics_profile.cpp \
+  -o build/uberhar-probe/test-graphics-profile
+build/uberhar-probe/test-graphics-profile

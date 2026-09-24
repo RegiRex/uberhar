@@ -109,6 +109,10 @@ static const char* android_config_default_file_content = (BOOST_HANA_STRING(R"(
 # Requires a game restart. 0 (default): Off, 1: On
 )") DECLARE_KEY(uberhar_force_tev) BOOST_HANA_STRING(R"(
 
+# AstraEH: 0=custom, 1=virtual native, 2=compute prototype, 3=automatic prototype.
+# Requires a game restart. Custom graphics settings are preserved.
+)") DECLARE_KEY(uberhar_test_mode) BOOST_HANA_STRING(R"(
+
 # AstraEH: Ready-only CPU vertex bridge; active only with hybrid TEV and Force off.
 # Requires a restart. 0: Off, 1 (default): On
 )") DECLARE_KEY(uberhar_cpu_vertex_bridge) BOOST_HANA_STRING(R"(

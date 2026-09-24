@@ -87,6 +87,26 @@ The inherited workflows were moved unchanged from `.github/workflows/` to
 `.github/upstream-workflows/` to prevent unrelated jobs from running on this
 development branch. Their contents are upstream code, not AstraEH implementation.
 
+## Virtual PICA experiment (0.0.10)
+
+<!-- AstraEH: Attribution for the new profile and compute prototype implementation. -->
+
+| File or section | AstraEH work |
+| --- | --- |
+| `src/common/uberhar_test_profile.h` | Temporary effective profile settings; custom values remain in Android's saved model. |
+| `src/common/settings.h`, `settings.cpp`, `CMakeModules/GenerateSettingKeys.cmake` | One mode enum/key, global reset, session identification. |
+| Android `UberharTestMode.kt`, `UberharGraphicsProfile.kt` | Mutually exclusive switch model and read-only effective values. |
+| Android `SettingsFragmentPresenter.kt`, `SettingsAdapter.kt` | Top switches, persistence delegation, sibling refresh, lower-option locking. |
+| Android `IntSetting.kt`, `SettingKeys.kt`, `config.cpp`, `default_ini.h`, `strings.xml` | Mode persistence, restart requirement, native overrides and truthful prototype descriptions. |
+| `vk_pipeline_cache.*`, `vk_shader_disk_cache.*` | Primary generic mode, no speculative specialization for covered draws, explicit accurate recovery, measured foreground waits and preserved custom cache records. |
+| `uberhar_compute_rect.h` | Exact rectangle/state admission, bounded constant combiner interpretation and area-bucket routing policy. |
+| `uberhar_compute_rect_shader.h`, `vk_compute_rect.*` | Real compute pixel writes, startup compilation, fenced resources/barriers, bounded asynchronous GPU sampling and diagnostics. |
+| `vk_rasterizer.*`, `src/video_core/CMakeLists.txt` | Actual route integration, framebuffer invalidation ownership, preparation and shutdown ordering. |
+| `pica_core.*` | Interpreted vertex-stage time/input summaries for profile comparisons. |
+| `test_compute_rect.cpp`, `compare_compute_rect.py` | Admission/rejection, measured route selection and native-vs-compute pixel comparisons. |
+| `test_graphics_profile.cpp`, Android `UberharTestModeTest.kt` | Native setting contracts, exclusive transitions and restart rules. |
+| `build_probe.sh`, `uberhar-shaders.yml` | Mandatory new profile, compute and Vulkan/SPIR-V gates alongside existing checks. |
+
 ## Documentation
 
 `README.md` has an AstraEH branch overview above the upstream README.
@@ -106,3 +126,7 @@ the device evidence and new counter definitions without uploading raw logs. This
 `docs/UBERHAR_DISPLAY_SYNC.md` are AstraEH documents. The display document is a
 follow-up investigation plan; alpha 1 contains no screen synchronization or
 model-sharpening changes.
+
+`docs/UBERHAR_LOG_ANALYSIS_0.0.9.md` separates the owner's four sessions.
+`docs/UBERHAR_ARCHITECTURE_0.0.9.md` is the early review and records implemented
+scope, unresolved limits, test contracts and the next engineering order.

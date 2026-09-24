@@ -107,7 +107,7 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
     LOG_INFO(
         Render_Vulkan,
         "Uberhar: hybrid_tev={} force_tev={} async_shaders={} spirv_generator={} "
-        "diagnostics=6 first_ready=true compact_tev=true canonical_tev=true dynamic_fragment=true "
+        "diagnostics=7 first_ready=true compact_tev=true canonical_tev=true dynamic_fragment=true "
         "cpu_bridge={} bridge_policy=ready_only fallback_abi=2 push_bytes=108 "
         "host_pipeline_identity=true bridge_assembly=isolated_lists_strips_fans "
         "compiler_workers={}",
@@ -439,15 +439,48 @@ bool PipelineCache::BindPipeline(PipelineInfo& info, bool wait_built,
         }
     }
     const bool cpu_bridge = pipeline != nullptr;
+    bool virtual_generic = false;
+    if (virtual_fs_config) {
+        // AstraEH: Start only the requested generic pipeline, never a speculative rival.
+        // Until the ready bank is complete this wait is real, separately measured work.
+        auto* generic = GetTevFallback(info, true);
+        if (generic && !generic->IsDone()) {
+            const auto start = std::chrono::steady_clock::now();
+            generic->WaitDone();
+            const auto ns = static_cast<u64>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                                 std::chrono::steady_clock::now() - start)
+                                                 .count());
+            ++virtual_waits;
+            virtual_wait_ns += ns;
+            virtual_max_wait_ns = std::max(virtual_max_wait_ns, ns);
+        }
+        if (generic && !generic->HasFailed()) {
+            pipeline = generic;
+            virtual_generic = true;
+            ++virtual_generic_draws;
+        } else {
+            // AstraEH: Recover before submission, so a failed/unsupported generic never drops a
+            // draw.
+            ++virtual_recovery_draws;
+            auto specialized = curr_disk_cache->UseFragmentShader(*virtual_fs_config, tev_user);
+            if (!specialized)
+                throw std::runtime_error("Uberhar native recovery shader unavailable");
+            current_shaders[ProgramType::FS] = specialized->second;
+            shader_hashes[ProgramType::FS] = specialized->first;
+            info.state.shader_ids[ProgramType::FS] = specialized->first;
+        }
+    } else if (Settings::values.uberhar_test_mode.GetValue() != Settings::UberharTestMode::Custom) {
+        ++virtual_recovery_draws;
+    }
     if (!pipeline) {
         pipeline = curr_disk_cache->GetPipeline(info);
     }
     const bool pending = !pipeline->IsDone();
     specialized_pending += pending;
-    bool using_fallback = cpu_bridge;
+    bool using_fallback = cpu_bridge || virtual_generic;
     GraphicsPipeline* alternative = nullptr;
     bool alternative_was_pending = false;
-    if (hybrid_tev && !cpu_bridge) {
+    if (hybrid_tev && !cpu_bridge && !virtual_generic) {
         // AstraEH: Admit a bounded fallback before queuing specialization. The scheduler
         // can use either completed result; neither path is allowed to omit this draw.
         if (force_tev || (pending && allow_tev_build)) {
@@ -764,7 +797,17 @@ void PipelineCache::UseFragmentShader(const Pica::RegsInternal& regs,
         tev_user = user;
     }
 
-    auto res = curr_disk_cache->UseFragmentShader(regs, user);
+    // AstraEH: Do not even enqueue a specialized FS for covered test-profile draws.
+    // Keep the original config for accurate recovery if a generic build fails.
+    virtual_fs_config.reset();
+    if (Settings::values.uberhar_test_mode.GetValue() != Settings::UberharTestMode::Custom &&
+        hybrid_tev && tev_supported) {
+        virtual_fs_config.emplace(regs);
+        current_shaders[ProgramType::FS] = nullptr;
+        shader_hashes[ProgramType::FS] = 0;
+        return;
+    }
+    auto res = curr_disk_cache->UseFragmentShader(FSConfig{regs}, user);
 
     if (res.has_value()) {
         current_shaders[ProgramType::FS] = (*res).second;
@@ -1021,6 +1064,15 @@ void PipelineCache::ClearTevFallbacks() {
 
 // AstraEH: These are draw observations and CPU wait durations, not GPU timings or frame counts.
 void PipelineCache::ReportUberharStats(const char* kind) {
+    if (Settings::values.uberhar_test_mode.GetValue() != Settings::UberharTestMode::Custom) {
+        // AstraEH Log Line: Foreground generic waits must not disappear from measured stutter.
+        LOG_INFO(Render_Vulkan,
+                 "Uberhar virtual native {}: generic_draws={} recovery_draws={} generic_waits={} "
+                 "generic_wait_ms={:.3f} generic_max_wait_ms={:.3f} vertex_engine=cpu_interpreter "
+                 "complete_ready_bank=false",
+                 kind, virtual_generic_draws, virtual_recovery_draws, virtual_waits,
+                 virtual_wait_ns / 1000000.0, virtual_max_wait_ns / 1000000.0);
+    }
     // AstraEH Log Line: bounded renderer diagnostics; see docs/UBERHAR_DIAGNOSTICS.md.
     LOG_INFO(
         Render_Vulkan,

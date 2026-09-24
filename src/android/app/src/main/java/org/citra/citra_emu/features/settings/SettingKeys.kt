@@ -39,6 +39,8 @@ object SettingKeys {
     external fun uberhar_force_tev(): String
     // AstraEH: Native key registration is generated from the shared CMake list.
     external fun uberhar_cpu_vertex_bridge(): String
+    // AstraEH: Persist only the selected profile, not three conflicting booleans.
+    external fun uberhar_test_mode(): String
     external fun async_presentation(): String
     external fun use_hw_shader(): String
     external fun use_disk_shader_cache(): String

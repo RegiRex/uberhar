@@ -7,27 +7,30 @@ Baseline: Azahar 2126.1.2, commit
 
 ## Current status
 
-<!-- AstraEH: 0.0.8 device evidence and 0.0.9 bridge coverage correction. -->
-**0.0.8 is published; 0.0.9 is prepared for the build gates.** The supplied
-Awakening capture records 20.790 seconds of cold scheduler waits versus 18.957
-seconds in 0.0.7; the longest grows from 1.063 to 1.337 seconds. The warm run
-records none. Reuse improves, but the CPU bridge handles zero draws. See the
-[device analysis](docs/UBERHAR_LOG_ANALYSIS_0.0.8.md).
+<!-- AstraEH: 0.0.9 evidence and first virtual-PICA test profiles. -->
+**0.0.9 device testing is analyzed; 0.0.10 is prepared for the build gates.**
+The normal cold run records 20.821 seconds of pipeline waits and a 1.124-second
+maximum; the warm run has none. Forced TEV's full cold run records 50.410 seconds.
+The CPU bridge now serves draws, but total waiting remains essentially unchanged.
+See the [four-session analysis](docs/UBERHAR_LOG_ANALYSIS_0.0.9.md).
 
-**0.0.9** broadens ready CPU-bridge coverage to bounded strip/fan and list-equivalent
-batches. Explicit isolated assembly preserves the accelerated route's state
-semantics, and admission reasons/topology counts expose remaining coverage gaps.
-Bounded diagnostics now retain the eight worst waits over the whole session and
-an exhaustive duration histogram. The [release notes](docs/releases/0.0.9.md)
-document validation, limits and the cold/warm test. First-state waits remain
-possible, and **0.0.9 device performance is not yet measured**.
+**0.0.10** adds three mutually exclusive switches at the top of Graphics: native
+virtual PICA, compute, and automatic combination. All-off restores saved custom
+settings. Other Graphics controls are locked except internal resolution/integer
+scaling. These experiments share CPU-interpreted vertex processing and primary
+generic fragments; new generic families/pipelines still compile on demand. The
+compute prototype covers only validated solid rectangles with a single startup-
+compiled kernel, with native recovery for everything else. Automatic choice uses
+sampled GPU timings for those rectangles. These are incomplete prototypes, not a
+full GPU interpreter or complete compute renderer. They may be substantially
+slower than warm specialized rendering. No Thor speedup has been measured yet.
 
-The [full architectural review](docs/UBERHAR_ARCHITECTURE_2026-09-24.md) remains
-the staged roadmap. Reviews occur every three to five alpha builds, targeting
-four; the [next full review](docs/UBERHAR_REVIEW_CADENCE.md) is due around 0.0.10.
-Android compilation and package gates run in Actions, with publication only
-after all required jobs pass. Development does not keep a chat turn open while
-that build runs.
+The [release notes](docs/releases/0.0.10.md) give a test sequence and exact limits.
+The [early architectural review](docs/UBERHAR_ARCHITECTURE_0.0.9.md) sets the next
+implementation order. Reviews remain every three to five alpha builds, targeting
+four; the next default review is after 0.0.13. Android compilation, shader,
+package and signing gates must pass before a prerelease is published. Development
+hands off Actions rather than waiting through APK compilation.
 
 <!-- AstraEH: 0.0.4 changes log collection without changing the 0.0.3 renderer. -->
 **0.0.4 is published as a pre-release** with **Options → Save or Share Log**. Choose the
@@ -79,16 +82,14 @@ Android documents the installation restriction under
 [`android:testOnly`](https://developer.android.com/guide/topics/manifest/application-element#testOnly).
 
 <!-- AstraEH: Preserve verified published release evidence while the next version builds. -->
-**[Download uberhar-0.0.8-arm64.apk](https://github.com/RegiRex/uberhar/releases/download/0.0.8/uberhar-0.0.8-arm64.apk)**
-from the published [0.0.8 pre-release](https://github.com/RegiRex/uberhar/releases/tag/0.0.8).
-No ZIP extraction is needed. Install it over an existing Uberhar installation;
-the signing certificate is unchanged. The
-[build and publication run](https://github.com/RegiRex/uberhar/actions/runs/35986014654)
-passed its Android, shader and package gates. The tag points to
-`2aa367d0a10f554f6612bb8beb7bee7303d0b535`. The APK SHA256 is:
+**[Published 0.0.9 APK](https://github.com/RegiRex/uberhar/releases/download/0.0.9/uberhar-0.0.9-arm64.apk)**
+is the baseline for the supplied log; 0.0.10 becomes available only after its gates
+pass. No ZIP extraction is needed. Install published updates over Uberhar.
+The [0.0.9 pre-release](https://github.com/RegiRex/uberhar/releases/tag/0.0.9)
+targets `71657e2b58292690fd24185703197365bdab57bc`. GitHub records its APK SHA256 as:
 
 ```text
-cdfc380b5a76ea984f616e19daa16cf25fe63ad2439a769b4d32b90df7dcd365
+f2993dc6aae3d08861e896fe78369ab80f2369c0827a1b33deefe3e557a3498a
 ```
 
 The export feature adds no Android permissions or runtime dependencies. The
@@ -96,7 +97,7 @@ private sharing provider exposes only staged log copies with explicit read
 grants. Actual file-picker and share-target behavior still needs device testing.
 
 The ready-fallback safeguard and AstraEH attribution comments remain in place.
-The supplied 0.0.6 capture supports the observations above; broader device
+The supplied 0.0.9 capture supports the current analysis; broader device
 correctness and comparative performance still require controlled tests.
 The baseline workflow builds unmodified upstream code. Its APK retains Azahar's
 application ID and is not intended to replace your installed Azahar. Do not
@@ -166,14 +167,14 @@ not served a draw, and the driver-call time of the latter. At progress snapshots
 an unused pipeline may still become useful later. Bounded build records report
 GLSL/SPIR-V byte sizes; zero means an existing fragment module was reused.
 `diagnostics=3 compact_tev=true fast_fallback=false` identifies 0.0.6.
-Version 0.0.9 uses `diagnostics=6`; see the
+Version 0.0.10 uses `diagnostics=7`; see the
 [diagnostics map](docs/UBERHAR_DIAGNOSTICS.md) for bridge/translation/cache counters,
 capability probes, limits and diagnostic-removal markers.
 
 ## Device testing
 
-For the current 0.0.9 comparison, follow the shorter cold/warm procedure in the
-[release notes](docs/releases/0.0.9.md). The original baseline procedure is below;
+For the current 0.0.10 comparison, follow the shorter cold/warm procedure in the
+[release notes](docs/releases/0.0.10.md). The original baseline procedure is below;
 keep the CPU bridge off when reproducing those initial two-switch comparisons.
 
 1. Install the Uberhar APK alongside Azahar and create an empty Uberhar folder.
@@ -230,7 +231,7 @@ presentation queues and a measurement plan for the next phase.
 ## Build workflow
 
 `UBERHAR_VERSION` contains the owner's **release.beta.alpha** version, currently
-`0.0.9`. The unnumbered failed first attempt counts as `0.0.1`. Future alpha
+`0.0.10`. The unnumbered failed first attempt counts as `0.0.1`. Future alpha
 iterations increment the third number. Beta and release milestones use the second
 and first numbers. Gradle's independent numeric `versionCode` still increases
 with build time so Android can order updates correctly.

@@ -284,6 +284,15 @@
     <string name="disable_spirv_optimizer_description">Disables the SPIR-V optimization pass, reducing stuttering considerably while barely affecting performance.</string>
     <string name="async_shaders">Enable Asynchronous Shader Compilation</string>
     <!-- AstraEH: Uberhar controls and data-isolation messages; both rendering options are opt-in. -->
+    <!-- AstraEH: One-click experiments; descriptions state the actual initial coverage. -->
+    <string name="uberhar_test_modes">Virtual PICA test modes — choose one</string>
+    <string name="uberhar_test_native">Virtual PICA: native rasterization</string>
+    <string name="uberhar_test_native_description">Prototype: interprets vertex shaders on the CPU and uses generic fragment processing. New fragment families and pipelines can still pause. Restart the game after changing.</string>
+    <string name="uberhar_test_compute">Virtual PICA: compute rendering</string>
+    <string name="uberhar_test_compute_description">Prototype: compute rendering for supported solid rectangles; other draws use the native test path. Coverage is recorded in the log. Restart the game after changing.</string>
+    <string name="uberhar_test_auto">Virtual PICA: automatic combination</string>
+    <string name="uberhar_test_auto_description">Prototype: samples GPU time and selects the faster measured route for supported rectangles. Other draws use the native test path. Restart the game after changing.</string>
+    <string name="uberhar_test_locked">Turn off the active Virtual PICA test mode to edit custom graphics settings. Your saved custom values are preserved.</string>
     <string name="uberhar_hybrid_tev">Uberhar hybrid TEV (experimental)</string>
     <string name="uberhar_separate_folder_title">Use an empty folder for Uberhar</string>
     <string name="uberhar_separate_folder_description">Create an empty folder for Uberhar data, or select a folder already initialized by Uberhar. This keeps your Azahar saves, settings, and shader caches separate. Copy any saves you want to test after setup.</string>

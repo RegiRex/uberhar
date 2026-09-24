@@ -76,6 +76,10 @@ RasterizerVulkan::RasterizerVulkan(Memory::MemorySystem& memory, Pica::PicaCore&
                         TextureBufferSize(instance)},
       async_shaders{Settings::values.async_shader_compilation.GetValue()} {
 
+    // AstraEH: All test modes share interpreted CPU vertex/geometry processing.
+    if (Settings::values.uberhar_test_mode.GetValue() != Settings::UberharTestMode::Custom) {
+        compute_rect = std::make_unique<ComputeRectRenderer>(instance, scheduler, update_queue);
+    }
     vertex_buffers.fill(stream_buffer.Handle());
 
     // Query uniform buffer alignment.
@@ -137,11 +141,21 @@ RasterizerVulkan::RasterizerVulkan(Memory::MemorySystem& memory, Pica::PicaCore&
     update_queue.Flush();
 }
 
-RasterizerVulkan::~RasterizerVulkan() = default;
+RasterizerVulkan::~RasterizerVulkan() {
+    if (compute_rect) {
+        // AstraEH: Queued compute/timestamp commands must finish before their owners die.
+        scheduler.Finish();
+        compute_rect->Poll();
+        compute_rect->Report();
+    }
+}
 
 void RasterizerVulkan::TickFrame() {
     scheduler.WaitWorker();
     res_cache.TickFrame();
+    // AstraEH: Read only completed GPU queries; do not add a per-frame GPU wait.
+    if (compute_rect)
+        compute_rect->Poll();
 }
 
 void RasterizerVulkan::LoadDefaultDiskResources(
@@ -160,6 +174,9 @@ void RasterizerVulkan::LoadDefaultDiskResources(
     pipeline_cache.SetProgramID(program_id);
     pipeline_cache.SetAccurateMul(accurate_mul);
     pipeline_cache.LoadCache(stop_loading, callback);
+    // AstraEH: The compute program is prepared before the loading screen completes.
+    if (compute_rect && !stop_loading)
+        compute_rect->Initialize(pipeline_cache.DriverCache());
 
     if (callback) {
         callback(VideoCore::LoadCallbackStage::Complete, 0, 0, "");
@@ -577,6 +594,47 @@ bool RasterizerVulkan::Draw(bool accelerate, bool is_indexed) {
     pipeline_info.state.attachments.color = framebuffer->Format(SurfaceType::Color);
     pipeline_info.state.attachments.depth = framebuffer->Format(SurfaceType::Depth);
 
+    // AstraEH: Admit a complete compute operation before texture/fragment setup.
+    // Unsupported draws retain the native route, and the framebuffer helper still
+    // publishes correct cache invalidation for either route when this scope exits.
+    std::optional<ComputeRectPacket> compute_packet;
+    int timing_slot = -1;
+    if (compute_rect && !accelerate) {
+        ++compute_rect->considered;
+        if (!SupportsComputeRectState(regs)) {
+            ++compute_rect->unsupported;
+        } else if (!framebuffer->color_id || framebuffer->color_level != 0 ||
+                   framebuffer->Format(SurfaceType::Color) != VideoCore::PixelFormat::RGBA8) {
+            ++compute_rect->format_rejected;
+        } else {
+            auto& surface = res_cache.GetSurface(framebuffer->color_id);
+            const auto viewport = fb_helper.Viewport();
+            const auto rect = fb_helper.DrawRect();
+            if (surface.traits.native != vk::Format::eR8G8B8A8Unorm ||
+                !surface.traits.storage_support || surface.Image() != framebuffer->Images()[0]) {
+                ++compute_rect->format_rejected;
+            } else {
+                compute_packet =
+                    MakeComputeRect(regs, std::span<const HardwareVertex>{vertex_batch},
+                                    {viewport.x, viewport.y, viewport.width, viewport.height},
+                                    {static_cast<s32>(rect.left), static_cast<s32>(rect.bottom),
+                                     static_cast<s32>(rect.right), static_cast<s32>(rect.top)});
+                if (!compute_packet) {
+                    ++compute_rect->geometry_rejected;
+                } else if (compute_rect->Choose(*compute_packet)) {
+                    renderpass_cache.EndRendering();
+                    timing_slot = compute_rect->ReserveSample(true, compute_packet->PixelCount());
+                    compute_rect->BeginSample(timing_slot);
+                    compute_rect->Draw(surface, *compute_packet);
+                    compute_rect->EndSample(timing_slot);
+                    vertex_batch.clear();
+                    return true;
+                }
+            }
+        }
+        ++compute_rect->native_draws;
+    }
+
     // Update scissor uniforms
     const auto [scissor_x1, scissor_y2, scissor_x2, scissor_y1] = fb_helper.Scissor();
     if (fs_data.scissor_x1 != scissor_x1 || fs_data.scissor_x2 != scissor_x2 ||
@@ -612,10 +670,7 @@ bool RasterizerVulkan::Draw(bool accelerate, bool is_indexed) {
     SyncAndUploadLUTsLF();
     UploadUniforms(accelerate);
 
-    // Begin rendering
     const auto draw_rect = fb_helper.DrawRect();
-    renderpass_cache.BeginRendering(framebuffer, draw_rect);
-
     // Configure viewport and scissor
     const auto viewport = fb_helper.Viewport();
     pipeline_info.dynamic_info.viewport = Common::Rectangle<s32>{
@@ -626,13 +681,27 @@ bool RasterizerVulkan::Draw(bool accelerate, bool is_indexed) {
     };
     pipeline_info.dynamic_info.scissor = draw_rect;
 
+    // AstraEH: Prepare/bind the native pipeline before recording its timestamp.
+    // This prevents an initial compilation stall being mistaken for slow GPU math.
+    // Queries must be reset outside a render pass; only measured test routes split it.
+    if (compute_rect && compute_packet)
+        timing_slot = compute_rect->ReserveSample(false, compute_packet->PixelCount());
+    const bool prebound = timing_slot >= 0;
+    if (prebound) {
+        renderpass_cache.EndRendering();
+        pipeline_cache.BindPipeline(pipeline_info, true, cpu_bridge.ready);
+        compute_rect->BeginSample(timing_slot);
+    }
+    renderpass_cache.BeginRendering(framebuffer, draw_rect);
+
     // Draw the vertex batch
     bool succeeded = true;
     if (accelerate) {
         succeeded = AccelerateDrawBatchInternal(is_indexed);
     } else {
         // AstraEH: A ready bridge bypasses creation of an unnecessary CPU-specialized PSO.
-        pipeline_cache.BindPipeline(pipeline_info, true, cpu_bridge.ready);
+        if (!prebound)
+            pipeline_cache.BindPipeline(pipeline_info, true, cpu_bridge.ready);
 
         const u32 vertex_count = static_cast<u32>(vertex_batch.size());
         const u32 vertex_size = vertex_count * sizeof(HardwareVertex);
@@ -647,6 +716,9 @@ bool RasterizerVulkan::Draw(bool accelerate, bool is_indexed) {
         });
     }
 
+    // AstraEH: This sample covers the native draw's GPU work, not its compilation wait.
+    if (compute_rect)
+        compute_rect->EndSample(timing_slot);
     vertex_batch.clear();
     return succeeded;
 }

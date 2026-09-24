@@ -99,6 +99,8 @@ void LogSettings() {
     log_setting("Uberhar_ForceTEV", values.uberhar_force_tev.GetValue());
     // AstraEH Log Line: Capture the independent bridge switch in each session.
     log_setting("Uberhar_CPUVertexBridge", values.uberhar_cpu_vertex_bridge.GetValue());
+    // AstraEH Log Line: The effective profile accompanies every session's settings.
+    log_setting("Uberhar_TestMode", static_cast<u32>(values.uberhar_test_mode.GetValue()));
     log_setting("Renderer_AsyncPresentation", values.async_presentation.GetValue());
     log_setting("Renderer_SpirvShaderGen", values.spirv_shader_gen.GetValue());
     log_setting("Renderer_DisableSpirvOptimizer", values.disable_spirv_optimizer.GetValue());
@@ -223,6 +225,8 @@ void RestoreGlobalState(bool is_powered_on) {
     values.uberhar_force_tev.SetGlobal(true);
     // AstraEH: Reset this per-game override with the other renderer switches.
     values.uberhar_cpu_vertex_bridge.SetGlobal(true);
+    // AstraEH: Reset the profile together with the other per-title renderer settings.
+    values.uberhar_test_mode.SetGlobal(true);
     values.async_presentation.SetGlobal(true);
     values.use_hw_shader.SetGlobal(true);
     values.use_disk_shader_cache.SetGlobal(true);

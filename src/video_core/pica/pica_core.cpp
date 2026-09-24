@@ -2,6 +2,7 @@
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
 
+#include <chrono> // AstraEH: Bounded virtual-PICA stage timing.
 #include "common/arch.h"
 #include "common/archives.h"
 #include "common/microprofile.h"
@@ -89,7 +90,17 @@ PicaCore::PicaCore(Memory::MemorySystem& memory_, std::shared_ptr<DebugContext> 
     primitive_assembler.Reconfigure(PipelineRegs::TriangleTopology::List);
 }
 
-PicaCore::~PicaCore() = default;
+PicaCore::~PicaCore() {
+    if (Settings::values.uberhar_test_mode.GetValue() != Settings::UberharTestMode::Custom) {
+        // AstraEH Log Line: Includes vertex setup and memory synchronization, not just arithmetic.
+        LOG_INFO(
+            Render_Vulkan,
+            "Uberhar virtual vertices totals: batches={} input_vertices={} stage_wall_ms={:.3f} "
+            "stage_max_wall_ms={:.3f} engine=cpu_interpreter",
+            virtual_vertex_batches, virtual_vertex_inputs, virtual_vertex_ns / 1000000.0,
+            virtual_vertex_max_ns / 1000000.0);
+    }
+}
 
 void PicaCore::InitializeRegs() {
     // Values initialized by GSP
@@ -1083,6 +1094,12 @@ void PicaCore::DrawArrays(bool is_indexed) {
         return;
     }
 
+    // AstraEH: Custom mode pays no clock-read cost for the virtual-PICA experiment.
+    const bool virtual_test =
+        Settings::values.uberhar_test_mode.GetValue() != Settings::UberharTestMode::Custom;
+    const auto virtual_start =
+        virtual_test ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+
     // AstraEH: A bridge replaces a draw that already met the hardware path's
     // empty-assembler/no-GS contract. Isolate strip/fan expansion to preserve that
     // path's existing state semantics and allow the next ready GPU draw to resume.
@@ -1093,6 +1110,16 @@ void PicaCore::DrawArrays(bool is_indexed) {
     } else {
         // Ordinary CPU rendering retains persistent assembly and partial primitives.
         LoadVertices(is_indexed);
+    }
+
+    if (virtual_test) {
+        const auto elapsed = static_cast<u64>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                                  std::chrono::steady_clock::now() - virtual_start)
+                                                  .count());
+        ++virtual_vertex_batches;
+        virtual_vertex_inputs += regs.internal.pipeline.num_vertices;
+        virtual_vertex_ns += elapsed;
+        virtual_vertex_max_ns = std::max(virtual_vertex_max_ns, elapsed);
     }
 
     // Draw emitted triangles.

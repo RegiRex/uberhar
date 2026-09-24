@@ -59,7 +59,10 @@ static VideoCore::DiskResourceLoadCallback MakeThrottledCallback(
 void ShaderDiskCache::Init(const std::atomic_bool& stop_loading,
                            const VideoCore::DiskResourceLoadCallback& callback) {
 
-    if (!Settings::values.use_disk_shader_cache)
+    // AstraEH: A test profile must not warm or write the user's specialized shader cache.
+    // Driver compilation data is managed separately by PipelineCache and is retained.
+    if (!Settings::values.use_disk_shader_cache ||
+        Settings::values.uberhar_test_mode.GetValue() != Settings::UberharTestMode::Custom)
         return;
 
     auto new_callback = MakeThrottledCallback(callback);
@@ -156,9 +159,7 @@ std::optional<std::pair<u64, Shader* const>> ShaderDiskCache::UseProgrammableVer
 }
 
 std::optional<std::pair<u64, Shader* const>> ShaderDiskCache::UseFragmentShader(
-    const Pica::RegsInternal& regs, const Pica::Shader::UserConfig& user) {
-
-    const FSConfig fs_config{regs};
+    const FSConfig& fs_config, const Pica::Shader::UserConfig& user) {
     const auto fs_config_hash = fs_config.Hash();
     const auto [it, new_shader] = fragment_shaders.try_emplace(fs_config_hash, parent.instance);
     auto& shader = it->second;

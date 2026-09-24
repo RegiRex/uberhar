@@ -160,6 +160,11 @@ if (ENABLE_VULKAN)
         renderer_vulkan/pica_to_vk.h
         renderer_vulkan/renderer_vulkan.cpp
         renderer_vulkan/renderer_vulkan.h
+        # AstraEH: Startup-compiled compute subset and measured automatic routing.
+        renderer_vulkan/vk_compute_rect.cpp
+        renderer_vulkan/vk_compute_rect.h
+        renderer_vulkan/uberhar_compute_rect.h
+        renderer_vulkan/uberhar_compute_rect_shader.h
         renderer_vulkan/vk_blit_helper.cpp
         renderer_vulkan/vk_blit_helper.h
         renderer_vulkan/vk_common.cpp

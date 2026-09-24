@@ -32,6 +32,9 @@ import org.citra.citra_emu.features.settings.model.IntSetting
 import org.citra.citra_emu.features.settings.model.ScaledFloatSetting
 import org.citra.citra_emu.features.settings.model.Settings
 import org.citra.citra_emu.features.settings.model.StringSetting
+import org.citra.citra_emu.features.settings.model.UberharGraphicsProfile
+import org.citra.citra_emu.features.settings.model.UberharTestMode
+import org.citra.citra_emu.features.settings.model.UberharTestModeSwitch
 import org.citra.citra_emu.features.settings.model.view.DateTimeSetting
 import org.citra.citra_emu.features.settings.model.view.HeaderSetting
 import org.citra.citra_emu.features.settings.model.view.InputBindingSetting
@@ -75,7 +78,9 @@ class SettingsFragmentPresenter(private val fragmentView: SettingsFragmentView) 
         loadSettingsList()
     }
 
-    fun putSetting(setting: AbstractSetting) {
+    // AstraEH: Synthetic profile switches must never become standalone INI keys.
+    fun putSetting(item: AbstractSetting) {
+        val setting = if (item is UberharTestModeSwitch) item.backing else item
         if (setting.section == null || setting.key == null) {
             return
         }
@@ -946,6 +951,31 @@ class SettingsFragmentPresenter(private val fragmentView: SettingsFragmentView) 
 
     private fun addGraphicsSettings(sl: ArrayList<SettingsItem>) {
         settingsActivity.setToolbarTitle(settingsActivity.getString(R.string.preferences_graphics))
+        // AstraEH: Three switches select one profile. Custom settings are not mutated.
+        val mode = UberharTestMode.from(IntSetting.UBERHAR_TEST_MODE.int)
+        sl.add(HeaderSetting(R.string.uberhar_test_modes))
+        val modes = listOf(
+            Triple(
+                UberharTestMode.NATIVE,
+                R.string.uberhar_test_native,
+                R.string.uberhar_test_native_description
+            ),
+            Triple(
+                UberharTestMode.COMPUTE,
+                R.string.uberhar_test_compute,
+                R.string.uberhar_test_compute_description
+            ),
+            Triple(
+                UberharTestMode.AUTOMATIC,
+                R.string.uberhar_test_auto,
+                R.string.uberhar_test_auto_description
+            )
+        )
+        for ((choice, title, description) in modes) {
+            val setting = UberharTestModeSwitch(IntSetting.UBERHAR_TEST_MODE, choice)
+            sl.add(SwitchSetting(setting, title, description, setting.key))
+        }
+        val customStart = sl.size
         sl.apply {
             add(HeaderSetting(R.string.renderer))
             add(
@@ -1252,6 +1282,19 @@ class SettingsFragmentPresenter(private val fragmentView: SettingsFragmentView) 
             //         BooleanSetting.PRELOAD_TEXTURES.defaultValue
             //     )
             // )
+        }
+        // AstraEH: Keep both resolution controls editable; lock and display the effective
+        // values of the session profile without overwriting the user's custom settings.
+        if (mode != UberharTestMode.CUSTOM) {
+            for (item in sl.subList(customStart, sl.size)) {
+                if (item.setting == IntSetting.RESOLUTION_FACTOR ||
+                    item.setting == BooleanSetting.USE_INTEGER_SCALING ||
+                    item.type == SettingsItem.TYPE_HEADER
+                ) continue
+                UberharGraphicsProfile.applyTo(item)
+                item.isEnabled = false
+                item.disabledMessage = R.string.uberhar_test_locked
+            }
         }
     }
 

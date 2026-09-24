@@ -15,6 +15,7 @@
 #include "common/param_package.h"
 #include "common/setting_keys.h"
 #include "common/settings.h"
+#include "common/uberhar_test_profile.h" // AstraEH: Temporary renderer experiment overrides.
 #include "core/core.h"
 #include "core/hle/service/cfg/cfg.h"
 #include "core/hle/service/service.h"
@@ -149,6 +150,8 @@ void Config::ReadValues() {
     ReadSetting("Renderer", Settings::values.uberhar_force_tev);
     // AstraEH: Share the bridge switch between global and per-game settings.
     ReadSetting("Renderer", Settings::values.uberhar_cpu_vertex_bridge);
+    // AstraEH: Read the profile before applying its temporary in-memory overrides.
+    ReadSetting("Renderer", Settings::values.uberhar_test_mode);
     ReadSetting("Renderer", Settings::values.spirv_shader_gen);
     ReadSetting("Renderer", Settings::values.disable_spirv_optimizer);
     ReadSetting("Renderer", Settings::values.use_hw_shader);
@@ -336,6 +339,9 @@ void Config::ReadValues() {
     // Web Service
     ReadSetting("WebService", Settings::values.web_api_url);
     ReadSetting("WebService", Settings::values.network_token);
+
+    // AstraEH: Apply last, after reloading every saved setting; never write these overrides to INI.
+    Settings::ApplyUberharTestProfile();
 }
 
 void Config::Reload() {

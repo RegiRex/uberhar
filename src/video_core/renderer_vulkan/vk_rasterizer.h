@@ -7,6 +7,7 @@
 #include <chrono> // AstraEH: CPU bridge batch timing.
 
 #include "video_core/rasterizer_accelerated.h"
+#include "video_core/renderer_vulkan/vk_compute_rect.h" // AstraEH: Bounded compute test path.
 #include "video_core/renderer_vulkan/vk_descriptor_update_queue.h"
 #include "video_core/renderer_vulkan/vk_pipeline_cache.h"
 #include "video_core/renderer_vulkan/vk_render_manager.h"
@@ -129,6 +130,8 @@ private:
     TextureRuntime runtime;
     RasterizerCache res_cache;
 
+    // AstraEH: Created only for a selected test profile; custom rendering allocates nothing.
+    std::unique_ptr<ComputeRectRenderer> compute_rect;
     VertexLayout software_layout;
     std::array<u32, 16> binding_offsets{};
     std::array<bool, 16> enable_attributes{};

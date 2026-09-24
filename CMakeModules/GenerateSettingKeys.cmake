@@ -42,6 +42,8 @@ foreach(KEY IN ITEMS
     "uberhar_force_tev"
     # AstraEH: Independently compare the ready-only CPU vertex bridge.
     "uberhar_cpu_vertex_bridge"
+    # AstraEH: One mutually exclusive experimental renderer profile.
+    "uberhar_test_mode"
     "async_presentation"
     "use_hw_shader"
     "use_disk_shader_cache"

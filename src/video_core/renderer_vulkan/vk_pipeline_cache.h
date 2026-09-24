@@ -50,6 +50,11 @@ public:
                            RenderManager& renderpass_cache, DescriptorUpdateQueue& update_queue);
     ~PipelineCache();
 
+    // AstraEH: Startup compute preparation shares persisted driver data, not guest shader records.
+    vk::PipelineCache DriverCache() const {
+        return driver_pipeline_cache.get();
+    }
+
     /// Acquires and binds a free descriptor set from the appropriate heap.
     vk::DescriptorSet Acquire(DescriptorHeapType type) {
         const u32 index = static_cast<u32>(type);
@@ -230,6 +235,10 @@ private:
     // AstraEH: Normal hybrid mode admits one warm-up pipeline at a time. Ready entries
     // remain usable; force mode may queue more because it explicitly waits for comparison.
     GraphicsPipeline* warming_tev_pipeline{};
+    // AstraEH: Profiles use generic fragments as the primary path, with explicit recovery.
+    std::optional<Pica::Shader::FSConfig> virtual_fs_config;
+    u64 virtual_generic_draws{}, virtual_recovery_draws{}, virtual_waits{}, virtual_wait_ns{},
+        virtual_max_wait_ns{};
     const bool hybrid_tev;
     const bool force_tev;
     // AstraEH: A/B switch captured at startup, effective only in normal hybrid mode.
