@@ -29,6 +29,16 @@ jobs:
           submodules: recursive
           persist-credentials: false
 
+      - name: Cache compilation dependencies
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            ~/.cache/ccache
+          key: baseline-android-v1-${{ github.run_id }}
+          restore-keys: baseline-android-v1-
+
       - name: Install build tools
         run: |
           sudo apt-get update
@@ -53,11 +63,19 @@ jobs:
         shell: bash
         run: |
           mkdir -p artifacts
-          shopt -s nullglob
-          apks=(baseline/src/android/app/build/outputs/apk/vanilla/release/*.apk)
-          test "${#apks[@]}" -gt 0
+          mapfile -d '' apks < <(find baseline/src/android/app/build/outputs/apk -type f -name '*.apk' -print0)
+          if [ "${#apks[@]}" -eq 0 ]; then
+            echo 'No APK found under Gradle outputs' >&2
+            find baseline/src/android/app/build/outputs -type f
+            exit 1
+          fi
           for apk in "${apks[@]}"; do
-            unzip -Z1 "$apk" | grep '^lib/arm64-v8a/libcitra-android.so$' > /dev/null
+            echo "Validating $apk"
+            unzip -Z1 "$apk" | grep '^lib/'
+            if ! unzip -Z1 "$apk" | grep '^lib/arm64-v8a/libcitra-android.so$' > /dev/null; then
+              echo 'Missing ARM64 emulator library' >&2
+              exit 1
+            fi
             if unzip -Z1 "$apk" | grep '^lib/x86_64/' > /dev/null; then
               echo 'Unexpected x86_64 libraries in ARM64 build' >&2
               exit 1
@@ -84,3 +102,12 @@ jobs:
           path: baseline-build.log
           if-no-files-found: ignore
           retention-days: 14
+
+      - name: Preserve APK for diagnosis if validation fails
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: unvalidated-baseline-${{ github.run_number }}
+          path: baseline/src/android/app/build/outputs/apk/**/*.apk
+          if-no-files-found: ignore
+          retention-days: 3
