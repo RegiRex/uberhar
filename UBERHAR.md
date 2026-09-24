@@ -8,14 +8,14 @@ Baseline: Azahar 2126.1.2, commit
 ## Current status
 
 <!-- AstraEH: Device-log-driven scheduling correction; release evidence is added after CI. -->
-**0.0.5 is being prepared.** The verified 0.0.3 cold run recorded 121 scheduler
+**0.0.5 is published as a pre-release.** The verified 0.0.3 cold run recorded 121 scheduler
 waits totaling 18.22 seconds, a 1.084-second maximum and only 78 selected fallback
 draws. This update lets an unfinished draw use whichever compatible pipeline
 finishes first, removes on-demand hybrid driver probes from the render thread,
 and requests faster compilation for temporary fallbacks. New progress/build
 logs separate queue, shader-dependency and driver time. See the
 [log analysis](docs/UBERHAR_LOG_ANALYSIS_2026-09-24.md) and
-[0.0.5 test instructions](docs/releases/0.0.5.md). Thor performance is unverified.
+[0.0.5 test instructions](docs/releases/0.0.5.md). Thor performance of 0.0.5 is unverified.
 
 <!-- AstraEH: 0.0.4 changes log collection without changing the 0.0.3 renderer. -->
 **0.0.4 is published as a pre-release** with **Options → Save or Share Log**. Choose the
@@ -68,18 +68,19 @@ Android documents the installation restriction under
 
 Fragment shader generation is unchanged from the
 [passing shader CI run](https://github.com/RegiRex/uberhar/actions/runs/35946513141).
-**[Download uberhar-0.0.4-arm64.apk](https://github.com/RegiRex/uberhar/releases/download/0.0.4/uberhar-0.0.4-arm64.apk)**
-from the published [0.0.4 pre-release](https://github.com/RegiRex/uberhar/releases/tag/0.0.4).
-No ZIP extraction is needed. Install it over Uberhar 0.0.2 or 0.0.3; the signing
-certificate is unchanged and the Android version code increased to `33862173`.
-The [build and publication run](https://github.com/RegiRex/uberhar/actions/runs/35960440521)
+**[Download uberhar-0.0.5-arm64.apk](https://github.com/RegiRex/uberhar/releases/download/0.0.5/uberhar-0.0.5-arm64.apk)**
+from the published [0.0.5 pre-release](https://github.com/RegiRex/uberhar/releases/tag/0.0.5).
+No ZIP extraction is needed. Install it over Uberhar 0.0.2, 0.0.3 or 0.0.4; the signing
+certificate is unchanged and the Android version code increased to `33862496`.
+The [build and publication run](https://github.com/RegiRex/uberhar/actions/runs/35964508066)
 passed Android compilation, ten parser/filename JVM tests, eight manifest
-regression tests, final APK checks, 64 Vulkan fragment-module validations and
-49,152 exact shader comparisons. The release tag points to
-`23c2a0f1e87637799a57c496500708df9fa58e42`; the public APK's SHA256 matches the tested artifact:
+regression tests, first-ready completion tests (including 1,000 publication races),
+final APK checks, 64 Vulkan fragment-module validations and 49,152 exact shader
+comparisons. A local ThreadSanitizer run of the completion tests also passed. The release tag points to
+`a3c0476502c5ea217b6546de46ee8b9733806312`; the public APK's SHA256 matches the tested artifact:
 
 ```text
-02eff39e86e0c41ff2f998e85780eb8ff46c0a562ddd9306605eb62d411c62d8
+cc1f5584f12370327acbcd2d9adc0ebb9dc7ebde939381d22fa9e1c52979ef3b
 ```
 
 The export feature adds no Android permissions or runtime dependencies. The
