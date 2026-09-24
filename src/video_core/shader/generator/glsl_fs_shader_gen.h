@@ -8,6 +8,9 @@
 
 namespace Pica::Shader::Generator::GLSL {
 
+/// Conservative support gate for the initial Vulkan TEV experiment.
+bool SupportsDynamicTev(const FSConfig& config, const UserConfig& user);
+
 class FragmentModule {
 public:
     explicit FragmentModule(const FSConfig& config, const UserConfig& user, const Profile& profile,

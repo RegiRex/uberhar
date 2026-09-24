@@ -176,6 +176,7 @@ private:
     TevPushConstants tev_constants{};
     std::optional<Pica::Shader::FSConfig> tev_family_config;
     Pica::Shader::UserConfig tev_user{};
+    bool tev_supported{};
     std::unordered_map<u64, std::unique_ptr<Shader>> tev_shaders;
     std::unordered_map<u64, std::unique_ptr<GraphicsPipeline>> tev_pipelines;
     const bool hybrid_tev;

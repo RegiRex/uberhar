@@ -14,6 +14,26 @@ using TextureType = Pica::TexturingRegs::TextureConfig::TextureType;
 
 constexpr static std::size_t RESERVE_SIZE = 8 * 1024 * 1024;
 
+bool SupportsDynamicTev(const FSConfig& config, const UserConfig& user) {
+    if (config.UsesSpirvIncompatibleConfig() ||
+        config.texture.texture0_type == TexturingRegs::TextureConfig::Shadow2D ||
+        !user.IsCacheable()) {
+        return false;
+    }
+    for (const TexturingRegs::TevStageConfig stage : config.texture.tev_stages) {
+        // AddSigned produces half-byte ties. Different compiler optimizations
+        // between dynamic and specialized expressions can round these ties in
+        // opposite directions, with later stages amplifying the difference.
+        // Keep it on the established path until that behavior is resolved.
+        using Operation = TexturingRegs::TevStageConfig::Operation;
+        if (stage.color_op == Operation::AddSigned ||
+            (stage.color_op != Operation::Dot3_RGBA && stage.alpha_op == Operation::AddSigned)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 enum class Semantic : u32 {
     Position,
     Color,
@@ -614,12 +634,11 @@ combiner_output = vec4(clamp(color_output * color_multiplier, vec3(0.0), vec3(1.
 combiner_buffer = next_combiner_buffer;
 )";
     if (index < 4) {
-        out += fmt::format(
-            "if ((uber_tev.buffer_mask & {}u) != 0u) "
-            "next_combiner_buffer.rgb = combiner_output.rgb;\n"
-            "if ((uber_tev.buffer_mask & {}u) != 0u) "
-            "next_combiner_buffer.a = combiner_output.a;\n",
-            1U << index, 1U << (index + 4));
+        out += fmt::format("if ((uber_tev.buffer_mask & {}u) != 0u) "
+                           "next_combiner_buffer.rgb = combiner_output.rgb;\n"
+                           "if ((uber_tev.buffer_mask & {}u) != 0u) "
+                           "next_combiner_buffer.a = combiner_output.a;\n",
+                           1U << index, 1U << (index + 4));
     }
     out += "}\n";
 }

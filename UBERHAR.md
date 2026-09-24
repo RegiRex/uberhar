@@ -6,7 +6,9 @@ Baseline: Azahar 2126.1.2, commit
 
 ## Current status
 
-Experimental dynamic TEV fallback implemented; build and shader validation are
+Experimental dynamic TEV fallback implemented. Local tests passed 49,152 exact
+RGBA8 comparisons against specialized GLSL across 192 six-stage programs, using
+Mesa llvmpipe with synthetic texture colors. Android packaging verification is
 in progress. No on-device performance or correctness result exists yet.
 The baseline workflow builds unmodified upstream code. Its APK retains Azahar's
 application ID and is not intended to replace your installed Azahar. Do not
@@ -29,7 +31,9 @@ push constants. It preserves the specialized generator's stage-0 source rule,
 Lighting, texture sampling modes, fog, alpha/depth tests, vertex/geometry shaders
 and pipeline state are still specialized. The first fallback family/pipeline
 can block. There is no vertex interpreter or startup prewarming yet. Shadow
-rendering/sampling and custom normal maps use the specialized path. Caps of
+rendering/sampling, custom normal maps and AddSigned combiner operations use the
+specialized path. Numerical comparisons found rounding-boundary differences in
+AddSigned, so that operation is deliberately excluded pending a correct fix. Caps of
 128 fallback fragment families and 1,024 fallback pipelines bound memory growth;
 reaching a cap also uses the specialized path. Hybrid mode waits for an accurate
 path when necessary and overrides upstream asynchronous draw skipping.

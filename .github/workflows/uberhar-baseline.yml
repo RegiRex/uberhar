@@ -30,7 +30,7 @@ jobs:
           persist-credentials: false
 
       - name: Cache compilation dependencies
-        uses: actions/cache@v5
+        uses: actions/cache/restore@v5
         with:
           path: |
             ~/.gradle/caches
@@ -63,10 +63,10 @@ jobs:
         shell: bash
         run: |
           mkdir -p artifacts
-          mapfile -d '' apks < <(find baseline/src/android/app/build/outputs/apk -type f -name '*.apk' -print0)
+          mapfile -d '' apks < <(find baseline/src/android/app/build -type f -name '*.apk' -print0)
           if [ "${#apks[@]}" -eq 0 ]; then
-            echo 'No APK found under Gradle outputs' >&2
-            find baseline/src/android/app/build/outputs -type f
+            echo 'No APK found under Gradle build directory' >&2
+            find baseline/src/android/app/build -name '*apk*' -o -name '*redirect*'
             exit 1
           fi
           for apk in "${apks[@]}"; do
@@ -108,6 +108,16 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: unvalidated-baseline-${{ github.run_number }}
-          path: baseline/src/android/app/build/outputs/apk/**/*.apk
+          path: baseline/src/android/app/build/**/*.apk
           if-no-files-found: ignore
           retention-days: 3
+
+      - name: Preserve compilation cache even if packaging validation fails
+        if: always()
+        uses: actions/cache/save@v5
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            ~/.cache/ccache
+          key: baseline-android-v1-${{ github.run_id }}

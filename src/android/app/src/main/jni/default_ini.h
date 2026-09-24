@@ -101,6 +101,14 @@ static const char* android_config_default_file_content = (BOOST_HANA_STRING(R"(
 # 0: Off, 1: On (default)
 )") DECLARE_KEY(async_shader_compilation) BOOST_HANA_STRING(R"(
 
+# Experimental Vulkan TEV fallback. Overrides asynchronous draw skipping.
+# Requires a game restart. 0 (default): Off, 1: On
+)") DECLARE_KEY(uberhar_hybrid_tev) BOOST_HANA_STRING(R"(
+
+# Force the TEV fallback for image comparisons; requires hybrid TEV.
+# Requires a game restart. 0 (default): Off, 1: On
+)") DECLARE_KEY(uberhar_force_tev) BOOST_HANA_STRING(R"(
+
 # Whether to emit PICA fragment shader using SPIRV or GLSL (Vulkan only)
 # 0: GLSL, 1: SPIR-V (default)
 )") DECLARE_KEY(spirv_shader_gen) BOOST_HANA_STRING(R"(

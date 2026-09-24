@@ -285,7 +285,7 @@ class SettingsFragmentPresenter(private val fragmentView: SettingsFragmentView) 
                     R.string.check_for_updates_description,
                     BooleanSetting.CHECK_FOR_UPDATES.key,
                     BooleanSetting.CHECK_FOR_UPDATES.defaultValue,
-                    isEnabled = !BuildConfig.DEBUG
+                    isEnabled = !BuildConfig.DEBUG && BuildConfig.FLAVOR != "uberhar"
                 )
             )
             if (!BuildUtil.isGooglePlayBuild) {
@@ -298,7 +298,8 @@ class SettingsFragmentPresenter(private val fragmentView: SettingsFragmentView) 
                         R.array.updateCheckChannelsValues,
                         IntSetting.UPDATE_CHECK_CHANNEL.key,
                         IntSetting.UPDATE_CHECK_CHANNEL.defaultValue,
-                        isEnabled = (!BuildConfig.DEBUG && BooleanSetting.CHECK_FOR_UPDATES.boolean)
+                        isEnabled = (!BuildConfig.DEBUG && BuildConfig.FLAVOR != "uberhar" &&
+                            BooleanSetting.CHECK_FOR_UPDATES.boolean)
                     )
                 )
                 add(

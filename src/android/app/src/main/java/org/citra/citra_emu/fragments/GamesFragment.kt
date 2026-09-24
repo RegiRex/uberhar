@@ -255,6 +255,7 @@ class GamesFragment : Fragment() {
         // Perform update check
         @Suppress("SimplifyBooleanWithConstants", "RedundantSuppression")
         if (!BuildConfig.DEBUG &&
+            BuildConfig.FLAVOR != "uberhar" &&
             !BuildUtil.isGooglePlayBuild &&
             BooleanSetting.CHECK_FOR_UPDATES.boolean &&
             !homeViewModel.updatePromptShown

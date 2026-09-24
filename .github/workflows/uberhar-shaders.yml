@@ -1,0 +1,42 @@
+name: Uberhar shader correctness
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [uberhar/hybrid-shaders]
+    paths:
+      - src/video_core/shader/generator/**
+      - tools/uberhar/**
+      - .github/workflows/uberhar-shaders.yml
+
+permissions:
+  contents: read
+
+jobs:
+  shaders:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Get generator dependencies
+        run: git submodule update --init --depth 1 externals/fmt externals/xxHash externals/boost externals/nihstro
+      - name: Install validation tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y glslang-tools spirv-tools libegl1-mesa-dev libgl1-mesa-dri
+          python3 -m venv /tmp/uberhar-test-env
+          /tmp/uberhar-test-env/bin/pip install moderngl==5.12.0 glcontext==3.0.0
+      - name: Compile production generator and emit cases
+        run: bash tools/uberhar/build_probe.sh
+      - name: Validate Vulkan fragment modules
+        run: |
+          for shader in build/uberhar-probe/cases/dynamic-*.frag; do
+            glslangValidator -V --target-env vulkan1.1 "$shader" -o "$shader.spv"
+            spirv-val --target-env vulkan1.1 "$shader.spv"
+          done
+      - name: Compare TEV results with specialized generator
+        env:
+          LIBGL_ALWAYS_SOFTWARE: '1'
+        run: /tmp/uberhar-test-env/bin/python tools/uberhar/compare_tev.py build/uberhar-probe/cases

@@ -29,7 +29,7 @@ jobs:
           persist-credentials: false
 
       - name: Cache compilation dependencies
-        uses: actions/cache@v5
+        uses: actions/cache/restore@v5
         with:
           path: |
             ~/.gradle/caches
@@ -62,12 +62,13 @@ jobs:
           export PATH="$JAVA_HOME/bin:$PATH"
           export NDK_CCACHE="$(command -v ccache)"
           bash ./gradlew --no-daemon --max-workers=2 \
+            -PuberharArm64Only=true \
             -Pandroid.injected.build.abi=arm64-v8a \
             assembleUberharRelease 2>&1 | tee "$GITHUB_WORKSPACE/uberhar-build.log"
 
       - name: Validate package and record provenance
         run: |
-          python3 tools/uberhar/validate_apk.py src/android/app/build/outputs/apk artifacts
+          python3 tools/uberhar/validate_apk.py src/android/app/build artifacts
           APK="$(find artifacts -name '*.apk' -print -quit)"
           "$ANDROID_SDK_ROOT/build-tools/35.0.0/aapt" dump badging "$APK" > artifacts/package.txt
           grep "package: name='org.uberhar.uberhar_emu'" artifacts/package.txt
@@ -91,3 +92,13 @@ jobs:
           path: uberhar-build.log
           if-no-files-found: ignore
           retention-days: 14
+
+      - name: Preserve compilation cache even if packaging validation fails
+        if: always()
+        uses: actions/cache/save@v5
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            ~/.cache/ccache
+          key: uberhar-android-v1-${{ github.run_id }}

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 mkdir -p build/uberhar-probe
+python3 tools/uberhar/check_android_keys.py
 c++ -std=c++20 -O2 -DFMT_HEADER_ONLY -DXXH_INLINE_ALL \
   -Isrc -Isrc/common -Iexternals/fmt/include -Iexternals/boost \
   -Iexternals/xxHash -Iexternals/nihstro/include \

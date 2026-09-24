@@ -41,7 +41,15 @@ int main(int argc, char** argv) {
     std::mt19937 random{0x55424552};
     constexpr std::array<u32, 10> sources{0, 1, 2, 3, 4, 5, 6, 13, 14, 15};
     constexpr std::array<u32, 10> modifiers{0, 1, 2, 3, 4, 5, 8, 9, 12, 13};
-    constexpr std::array<u32, 8> alpha_ops{0, 1, 2, 3, 4, 5, 8, 9};
+    constexpr std::array<u32, 9> color_ops{0, 1, 2, 4, 5, 6, 7, 8, 9};
+    constexpr std::array<u32, 7> alpha_ops{0, 1, 2, 4, 5, 8, 9};
+    for (bool alpha : {false, true}) {
+        auto unsupported = base;
+        unsupported.texture.tev_stages[0].ops_raw = alpha ? 3U << 16 : 3U;
+        if (Generator::GLSL::SupportsDynamicTev(unsupported, user)) {
+            throw std::runtime_error("AddSigned must stay on the specialized path");
+        }
+    }
     for (u32 test = 0; test < 192; ++test) {
         auto config = base;
         config.texture.combiner_buffer_input.Assign(test < 16 ? test : random() & 255);
@@ -53,7 +61,8 @@ int main(int argc, char** argv) {
                 stage.modifiers_raw |= modifiers[random() % modifiers.size()] << (i * 4);
                 stage.modifiers_raw |= (random() % 8) << (12 + i * 4);
             }
-            stage.ops_raw = random() % 10 | (alpha_ops[random() % alpha_ops.size()] << 16);
+            stage.ops_raw = color_ops[random() % color_ops.size()] |
+                            (alpha_ops[random() % alpha_ops.size()] << 16);
             stage.scales_raw = random() % 4 | ((random() % 4) << 16);
         }
         // Directed coverage: stage-0 Previous redirection and passthrough,
@@ -62,6 +71,9 @@ int main(int argc, char** argv) {
             config.texture.tev_stages[0] = {0x000f000f, 0, 0, test & 1 ? 0x00030003U : 0U};
             config.texture.tev_stages[1].ops_raw = 7;
             config.texture.tev_stages[1].scales_raw = (test % 4) << 16;
+        }
+        if (!Generator::GLSL::SupportsDynamicTev(config, user)) {
+            throw std::runtime_error("Generated case unexpectedly unsupported");
         }
         const auto prefix = output / std::to_string(test);
         std::ofstream(prefix.string() + ".frag")
@@ -73,7 +85,7 @@ int main(int argc, char** argv) {
         constants.write(reinterpret_cast<const char*>(&mask), 4);
     }
     // Full fragment modules exercise Vulkan bindings and code outside TEV too.
-    for (u32 test = 0; test < 16; ++test) {
+    for (u32 test = 0; test < 64; ++test) {
         auto config = base;
         constexpr std::array types{Pica::TexturingRegs::TextureConfig::Texture2D,
                                    Pica::TexturingRegs::TextureConfig::TextureCube,
@@ -81,13 +93,22 @@ int main(int argc, char** argv) {
                                    Pica::TexturingRegs::TextureConfig::Projection2D};
         config.texture.texture0_type.Assign(types[test % 4]);
         config.texture.fog_mode.Assign(test & 4 ? Pica::TexturingRegs::FogMode::Fog
-                                               : Pica::TexturingRegs::FogMode::None);
-        config.framebuffer.alpha_test_func.Assign(
-            test & 8 ? Pica::FramebufferRegs::CompareFunc::LessThan
-                     : Pica::FramebufferRegs::CompareFunc::Always);
+                                                : Pica::TexturingRegs::FogMode::None);
+        config.framebuffer.alpha_test_func.Assign(test & 8
+                                                      ? Pica::FramebufferRegs::CompareFunc::LessThan
+                                                      : Pica::FramebufferRegs::CompareFunc::Always);
+        if (test & 16) {
+            auto lit_regs = regs;
+            lit_regs.lighting.disable.Assign(0);
+            config.lighting = LightConfig{lit_regs.lighting};
+        }
+        if (test & 32) {
+            config.proctex.enable.Assign(1);
+            config.proctex.lut_width = 128;
+        }
         std::ofstream(output / fmt::format("dynamic-{}.frag", test))
             << "#version 450\n"
             << Generator::GLSL::FragmentModule{config, user, profile, true}.Generate();
     }
-    fmt::print("Emitted 192 TEV cases and 16 dynamic fragment families\n");
+    fmt::print("Emitted 192 TEV cases and 64 dynamic fragment families\n");
 }

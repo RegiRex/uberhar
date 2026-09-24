@@ -9,9 +9,12 @@ import zipfile
 
 source, destination = map(Path, sys.argv[1:])
 apks = list(source.rglob("*.apk"))
-if len(apks) != 1:
-    raise SystemExit(f"Expected one APK in {source}; found {apks}")
-apk = apks[0]
+# AGP may publish a redirect to an intermediate APK instead of copying it into
+# outputs/apk. Accept identical copies, but reject ambiguous different builds.
+unique = {hashlib.sha256(path.read_bytes()).hexdigest(): path for path in apks}
+if len(unique) != 1:
+    raise SystemExit(f"Expected one unique APK in {source}; found {apks}")
+apk = next(iter(unique.values()))
 with zipfile.ZipFile(apk) as archive:
     libraries = [name for name in archive.namelist() if name.startswith("lib/")]
     print("\n".join(libraries))

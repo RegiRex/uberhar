@@ -418,10 +418,9 @@ bool PipelineCache::BindPipeline(PipelineInfo& info, bool wait_built) {
     const bool is_dirty = scheduler.IsStateDirty(StateFlags::Pipeline);
     const bool pipeline_dirty = (current_pipeline != pipeline) || is_dirty;
     scheduler.Record([this, is_dirty, pipeline_dirty, pipeline, using_fallback,
-                      constants = tev_constants,
-                      current_dynamic = current_info.dynamic_info, dynamic = info.dynamic_info,
-                      descriptor_sets = bound_descriptor_sets, offsets = offsets,
-                      current_rasterization = current_info.state.rasterization,
+                      constants = tev_constants, current_dynamic = current_info.dynamic_info,
+                      dynamic = info.dynamic_info, descriptor_sets = bound_descriptor_sets,
+                      offsets = offsets, current_rasterization = current_info.state.rasterization,
                       current_depth_stencil = current_info.state.depth_stencil,
                       rasterization = info.state.rasterization,
                       depth_stencil = info.state.depth_stencil](vk::CommandBuffer cmdbuf) {
@@ -627,6 +626,7 @@ void PipelineCache::UseFragmentShader(const Pica::RegsInternal& regs,
         tev_family_config.emplace(regs);
         tev_constants = {tev_family_config->texture.tev_stages,
                          tev_family_config->texture.combiner_buffer_input.Value()};
+        tev_supported = GLSL::SupportsDynamicTev(*tev_family_config, user);
         tev_family_config->texture.tev_stages = {};
         tev_family_config->texture.combiner_buffer_input.Assign(0);
         tev_user = user;
@@ -641,10 +641,7 @@ void PipelineCache::UseFragmentShader(const Pica::RegsInternal& regs,
 }
 
 GraphicsPipeline* PipelineCache::GetTevFallback(const PipelineInfo& info) {
-    // Shadow sampling and custom normal maps are outside the alpha's scope.
-    if (!tev_family_config || tev_family_config->UsesSpirvIncompatibleConfig() ||
-        tev_family_config->texture.texture0_type == Pica::TexturingRegs::TextureConfig::Shadow2D ||
-        !tev_user.IsCacheable()) {
+    if (!tev_family_config || !tev_supported) {
         return nullptr;
     }
     constexpr std::size_t MaxFamilies = 128;
@@ -701,8 +698,8 @@ void PipelineCache::ReportUberharStats() {
              "Uberhar totals: draws={} specialized_pending={} fallback_draws={} "
              "fallback_unavailable={} skipped={} families={} fallback_pipelines={} "
              "scheduler_pipeline_waits={} scheduler_pipeline_wait_ms={:.3f}",
-             draw_requests, specialized_pending, fallback_draws, fallback_unavailable, skipped_draws,
-             tev_shaders.size(), tev_pipelines.size(), pipeline_waits.load(),
+             draw_requests, specialized_pending, fallback_draws, fallback_unavailable,
+             skipped_draws, tev_shaders.size(), tev_pipelines.size(), pipeline_waits.load(),
              pipeline_wait_ns.load() / 1000000.0);
 }
 
