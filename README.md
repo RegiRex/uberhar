@@ -23,6 +23,10 @@ cached CPU shader translation in the three profiles, accelerates vertex-cache
 lookup, persists generic shader modules and improves bounded diagnostics.
 **0.0.12** adds overlay-independent frame pacing, pause/fast-forward markers,
 late worst-hitch retention and bounded Android thermal/battery/memory sampling.
+Its [first Thor Native cold/warm test](docs/UBERHAR_LOG_ANALYSIS_0.0.12.md) at 2x
+reports 99.760% warm emulation speed and a substantial user-observed improvement.
+Cold generic compilation still produces hitches; this is the current reference
+result for continued refinement, not a completed compilation-free renderer.
 Test Native cold/warm at **2x** first. Compute/Automatic still have a restricted
 solid-rectangle subset; full GPU interpretation, general compute rasterization
 and zero-wait first playthroughs remain development goals.

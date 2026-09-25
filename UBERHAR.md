@@ -7,6 +7,16 @@ Baseline: Azahar 2126.1.2, commit
 
 ## Current status
 
+<!-- AstraEH: Verified 0.0.12 device milestone; retain as the next comparison baseline. -->
+**0.0.12 Native at 2x is now tested on Thor.** The owner reports a substantial
+improvement. The warm run records 99.760% emulation speed and 89.293 ms of generic
+foreground waiting, with all 37 requested generic modules loaded from disk.
+Cold generic waiting remains 8.121 s and the worst observed frame interval is
+806.541 ms. Extra animation and differing coverage limit direct replay comparisons.
+See the [full results and next target](docs/UBERHAR_LOG_ANALYSIS_0.0.12.md).
+Preserve this rendering baseline while reducing first-use fragment-program
+variation; broader compute and GPU vertex interpretation remain unfinished.
+
 <!-- AstraEH: Owner-requested diagnostic coverage added without changing the 0.0.11 renderer. -->
 **0.0.12 adds run diagnostics to the 0.0.11 rendering changes.** Frame pacing,
 emulation speed, pause/state-load boundaries, fast-forward ranges and late worst
@@ -15,7 +25,8 @@ thermal/battery/memory context with bounded frequency. See the
 [0.0.12 notes](docs/releases/0.0.12.md) and
 [diagnostic definitions](docs/UBERHAR_DIAGNOSTICS.md). Continue with one Native
 cold/warm pair at 2x; pause if called away. All earlier device tests were on Thor.
-Both new alphas still require device validation. Subsequent builds queue without
+The 0.0.12 log supplies the first device validation of these combined changes.
+Subsequent builds queue without
 cancelling the active alpha build; publication still requires every existing gate.
 
 <!-- AstraEH: 0.0.10 measurements and the 0.0.11 CPU/cache response. -->
@@ -38,7 +49,8 @@ other Graphics controls except resolution/integer scaling. Compute coverage rema
 limited to validated solid rectangles; rejected draws use native rendering.
 **These are incomplete prototypes.** CPU JIT and new generic GPU pipelines still
 compile on first use. A GPU vertex interpreter, full compute renderer and complete
-ready pipeline bank remain unfinished. No 0.0.11 Thor speedup is claimed yet.
+ready pipeline bank remain unfinished. The 0.0.12 results above test these combined
+changes; they do not isolate the speedup from each individual optimization.
 
 Start with **Native at 2x, cold then warm**, including the same battle. The
 [release notes](docs/releases/0.0.11.md) describe the comparison. Repeating all three
