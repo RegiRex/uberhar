@@ -109,7 +109,7 @@ for sample, value in enumerate([0.0, 1.0, 127 / 255.0, 128 / 255.0]):
     values[sample * 56:(sample + 1) * 56] = [value] * 56
 inputs = ctx.buffer(struct.pack(f"<{len(values)}f", *values))
 inputs.bind_to_storage_buffer(0)
-instructions = ctx.buffer(reserve=112)
+instructions = ctx.buffer(reserve=128)
 instructions.bind_to_storage_buffer(1)
 outputs = ctx.buffer(reserve=samples * 3 * 4 * 4)
 outputs.bind_to_storage_buffer(2)
@@ -126,7 +126,7 @@ for file in sorted(cases.glob("*.bin"), key=lambda p: int(p.stem)):
     )
     shader = ctx.compute_shader(source)
     constants = file.read_bytes()
-    instructions.write(constants + bytes(112 - len(constants)))
+    instructions.write(constants + bytes(128 - len(constants)))
     fetches = expected_fetches(constants)
     shader.run(group_x=samples // 64)
     ctx.memory_barrier()

@@ -12,12 +12,13 @@ Review early for correctness regressions or a changed architectural assumption.
 | --- | --- | --- | --- |
 | 2026-09-24 | 0.0.6 | After 0.0.10 | After 0.0.9 through 0.0.11; before 0.0.12 work |
 | 2026-09-24 | 0.0.9 | After 0.0.13 | After 0.0.12 through 0.0.14; before 0.0.15 work |
+| 2026-09-25 | 0.0.12 | After 0.0.16 | After 0.0.15 through 0.0.17; before 0.0.18 work |
 
 The [0.0.6 review](UBERHAR_ARCHITECTURE_2026-09-24.md) established the earlier
 roadmap. 0.0.7 implemented family consolidation; 0.0.8 added broader runtime state,
 ready CPU vertex routing and host-pipeline reuse; 0.0.9 corrected bridge coverage.
 
-The [current review](UBERHAR_ARCHITECTURE_0.0.9.md) rechecks all four 0.0.9 sessions
+The [0.0.9 review](UBERHAR_ARCHITECTURE_0.0.9.md) rechecks all four 0.0.9 sessions
 and starts explicit primary-generic/native and compute-subset experiments in
 0.0.10. The owner's request to compare virtual-PICA designs and essentially
 unchanged cold waiting justify reviewing after three builds. This ledger does
@@ -26,3 +27,8 @@ not claim unattended development or timed reviews.
 For each review, record exact revisions, device evidence, unanswered questions,
 accepted/rejected alternatives, validation gates, implementation order and the
 new review window. Keep previous entries for comparison.
+
+<!-- AstraEH: The third post-review alpha supplied a successful device baseline. -->
+The [current review](UBERHAR_ARCHITECTURE_0.0.12.md) rechecks source and the Thor
+cold/warm milestone, compares architectural alternatives, and selects runtime
+lighting controls for 0.0.13. Device performance remains to be measured.

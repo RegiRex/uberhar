@@ -80,8 +80,8 @@ All files in `tools/uberhar/` are new AstraEH work.
 | `tools/uberhar/test_tev_family.cpp` | Source equivalence, non-mutation and idempotence across device profiles and fog/lighting/blending states; runtime border/alpha/fog/coordinate packing and sharing; retained active logic and typed resource distinctions. |
 | `tools/uberhar/shader_probe.cpp` | 224 reproducible TEV cases, directed edge/texture-reuse/unused-operand cases, AddSigned exclusion and 64 full fragment modules. 0.0.7 emits canonical families and checks their source against the original family. |
 | `tools/uberhar/compare_tev.py` | Compare generated specialized/interpreted combiner math on Mesa and independently verify texture fetch counts; synthetic sampling inputs do not test real texture derivatives or device drivers. |
-| `tools/uberhar/validate_shaders.py` | Compile and validate all 64 full modules with frontend optimization off/on; verify the TEV loop's DontUnroll hint and all four fallback state offsets reach SPIR-V. |
-| `tools/uberhar/fragment_state_probe.cpp` and `compare_fragment_state.py` | 192 full specialized/generic fragment comparisons, production state/uniform transport, real textured offscreen color/depth/discard checks on Mesa; GL resource-declaration adaptation is not Vulkan-driver validation. |
+| `tools/uberhar/validate_shaders.py` | Compile and validate 64 baseline modules plus unique full lighting-corpus modules with frontend optimization off/on; verify the TEV loop's DontUnroll hint and all seven fallback state offsets reach SPIR-V. |
+| `tools/uberhar/fragment_state_probe.cpp` and `compare_fragment_state.py` | 416 full specialized/generic fragment comparisons, production state/uniform transport, real textured offscreen color/depth/discard checks on Mesa; GL resource-declaration adaptation is not Vulkan-driver validation. |
 | `tools/uberhar/test_pipeline_keys.cpp` | 36 production execution-key checks covering equivalent host modules/inactive fields and active state that must remain distinct. |
 | `tools/uberhar/test_pipeline_policy.cpp` | Production CPU admission bounds and normal/forced selection under successful, pending and failed fallback completions. |
 | `tools/uberhar/test_bridge_assembly.cpp` | 264 comparisons using the actual PICA assembler against independent topology sequences, plus persistent ordinary batches, winding restoration and exceptional exit. |
@@ -163,3 +163,17 @@ model-sharpening changes.
 scope, unresolved limits, test contracts and the next engineering order.
 
 `docs/UBERHAR_LOG_ANALYSIS_0.0.10.md` maps all eight sessions and the 0.0.11 response.
+
+## Runtime lighting controls (0.0.13)
+
+<!-- AstraEH: Attribution of the runtime-data expansion and its regression gates. -->
+
+| File or section | AstraEH work |
+| --- | --- |
+| `glsl_fs_shader_gen.{h,cpp}` | Private ABI v3 (120 bytes), exact LUT control packing/recovery checks, family normalization, runtime LUT evaluation and physical-light/attenuation selection. Structural lighting stays specialized. |
+| `vk_pipeline_cache.{h,cpp}` | Schema 10, same-run previous/current family census and lighting/procedural structural counts; existing bounded reporting cadence. |
+| `test_tev_family.cpp` | Runtime lighting aliases, retained structural distinctions, exact packed controls and unsupported-input recovery. |
+| `fragment_state_probe.cpp`, `compare_fragment_state.py` | 224 additional lighting cases, distinct physical-light uniforms and 24 LUT tables; complete specialized/generic color/depth agreement. |
+| `shader_probe.cpp`, `compare_tev.py`, `validate_shaders.py` | ABI-aware transport tests; all unique full lighting-corpus shaders join the dual-optimizer Vulkan validation gate. |
+| `.github/workflows/uberhar-shaders.yml` | Extended Vulkan corpus and 40-minute gate limit; publication still depends on success. |
+| `docs/UBERHAR_ARCHITECTURE_0.0.12.md`, review ledger, release notes | Evidence-based architectural review, device acceptance criteria and next review after 0.0.16. |

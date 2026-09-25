@@ -156,6 +156,81 @@ int main() {
         variant.texture.combiner_buffer_input.Assign(255);
         CheckPair(base, variant, profile, true, "Runtime TEV data entered the family key");
     }
+    // AstraEH: Each runtime lighting dimension must alias without changing source;
+    // structural lighting changes must remain distinct. Numerical behavior is
+    // independently checked against specialized rendering by the full fragment corpus.
+    for (u32 mode : {0U, 8U}) {
+        using Lighting = Pica::LightingRegs;
+        Profile profile{};
+        profile.is_vulkan = true;
+        profile.has_separable_shaders = true;
+        Pica::RegsInternal regs{};
+        regs.framebuffer.output_merger.alphablend_enable.Assign(1);
+        FSConfig base{regs};
+        base.lighting.config.Assign(static_cast<Lighting::LightingConfig>(mode));
+        base.lighting.src_num.Assign(3);
+        base.lighting.enable_primary_alpha.Assign(1);
+        for (auto* lut : {&base.lighting.lut_d0, &base.lighting.lut_d1, &base.lighting.lut_sp,
+                          &base.lighting.lut_fr, &base.lighting.lut_rr, &base.lighting.lut_rg,
+                          &base.lighting.lut_rb}) {
+            lut->enable.Assign(1);
+            lut->type.Assign(Lighting::LightingLutInput::LN);
+            lut->abs_input.Assign(1);
+            lut->SetScale(1.0f);
+        }
+        for (u32 slot = 0; slot < 7; ++slot) {
+            for (u32 input = 0; input < 6; ++input) {
+                for (float scale : {0.0f, 0.25f, 0.5f, 2.0f, 4.0f, 8.0f}) {
+                    auto variant = base;
+                    const std::array luts{&variant.lighting.lut_d0, &variant.lighting.lut_d1,
+                                          &variant.lighting.lut_sp, &variant.lighting.lut_fr,
+                                          &variant.lighting.lut_rr, &variant.lighting.lut_rg,
+                                          &variant.lighting.lut_rb};
+                    luts[slot]->SetScale(scale);
+                    luts[slot]->type.Assign(static_cast<Lighting::LightingLutInput>(input));
+                    luts[slot]->abs_input.Assign(input & 1);
+                    CheckPair(base, variant, profile, true, "LUT controls split a runtime family");
+                    const auto state = MakeDynamicTevState(variant, profile);
+                    const u32 word = slot < 4 ? state.lighting_luts_lo : state.lighting_luts_hi;
+                    const u32 control = (word >> ((slot % 4) * 8)) & 127;
+                    constexpr std::array decoded{0.0f, 0.25f, 0.5f, 1.0f, 2.0f, 4.0f, 8.0f};
+                    if ((control & 7) != input || ((control >> 3) & 1) != (input & 1) ||
+                        decoded.at(control >> 4) != scale) {
+                        throw std::runtime_error("Runtime LUT transport mismatch");
+                    }
+                }
+            }
+        }
+        for (u32 slot = 0; slot < 8; ++slot) {
+            for (u32 source = 1; source < 8; ++source) {
+                auto variant = base;
+                variant.lighting.lights[slot].num.Assign(source);
+                CheckPair(base, variant, profile, true, "Light source split a runtime family");
+                variant.lighting.lights[slot].two_sided_diffuse.Assign(1);
+                const auto state = MakeDynamicTevState(variant, profile);
+                if (((state.lighting_sources >> (slot * 3)) & 7) != source ||
+                    ((state.lighting_sources >> (24 + slot)) & 1) != 1) {
+                    throw std::runtime_error("Light source/two-sided transport mismatch");
+                }
+            }
+        }
+        auto variant = base;
+        variant.lighting.src_num.Assign(2);
+        CheckPair(base, variant, profile, false, "Unrolled light count was collapsed");
+        variant = base;
+        variant.lighting.lights[0].directional.Assign(1);
+        CheckPair(base, variant, profile, false, "Directional operation was collapsed");
+        variant = base;
+        variant.lighting.lut_d0.SetScale(1.5f);
+        if (SupportsDynamicTev(variant, UserConfig{})) {
+            throw std::runtime_error("Unknown lighting scale bypassed recovery");
+        }
+        variant.lighting.lut_d0.SetScale(1.0f);
+        variant.lighting.lut_d0.type.Assign(static_cast<Lighting::LightingLutInput>(6));
+        if (SupportsDynamicTev(variant, UserConfig{})) {
+            throw std::runtime_error("Unknown lighting input bypassed recovery");
+        }
+    }
     fmt::print("PASS: {} source-equivalence/idempotence checks, {} merged pairs, "
                "{} shader-affecting distinctions\n",
                comparisons, aliases, distinctions);

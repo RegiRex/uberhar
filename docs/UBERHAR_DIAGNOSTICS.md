@@ -1,5 +1,5 @@
 <!-- AstraEH: Bounded troubleshooting and removal map for the hybrid renderer. -->
-# Renderer diagnostics, schema 9
+# Renderer diagnostics, schema 10
 
 Every Uberhar renderer log call has an adjacent **`AstraEH Log Line`** comment.
 Find it with `rg -n 'AstraEH Log Line' src`. These markers identify diagnostic
@@ -9,8 +9,8 @@ logging to this fork. Android session/title/export records remain functional
 parts of log export, rather than temporary shader debugging.
 
 The startup record identifies effective switches, compiler worker count,
-`diagnostics=9`, `dynamic_fragment=true`, `bridge_policy=ready_only`,
-`fallback_abi=2`, `push_bytes=108`, `host_pipeline_identity=true` and
+`diagnostics=10`, `dynamic_fragment=true`, `bridge_policy=ready_only`,
+`fallback_abi=3`, `push_bytes=120`, `runtime_lighting_luts=true`, `host_pipeline_identity=true` and
 `bridge_assembly=isolated_lists_strips_fans`.
 `cpu_bridge` is false when hybrid is off or forced fallback is on, even if the
 saved bridge preference is on.
@@ -210,3 +210,20 @@ permissions, network uploads or root/debug access are needed.
 No log can anticipate every future optimization question. Screenshots and user
 observations remain necessary for visual correctness. Pausing when stepping away
 gives a real marker; continued rendering alone cannot establish human presence.
+
+## Runtime lighting family reduction (0.0.13)
+
+<!-- AstraEH: Same-workload evidence separates key reduction from unequal replays. -->
+
+`Uberhar variant census` adds `previous_lighting_families`, `lighting_shapes`,
+`proctex_shapes` and `lighting_abi=3`. The previous count restores original lighting
+into the otherwise canonical family, reproducing 0.0.12's family key for these
+same observations; no old shader is compiled. Compare it with `canonical_families`.
+Lighting/procedural counts hash the remaining structural configurations. Counts are
+independent dimensions, not a Cartesian product. They do not measure saved time.
+
+All 14 census sets remain renderer-thread-owned, title-scoped and capped at 2,048
+entries each. `capped=true` makes counts lower bounds. There are no new per-draw
+log records or timers. Actual compilation, foreground waits, frame pacing and warm
+speed remain the performance evidence. The startup record identifies schema 10 and
+the 120-byte ABI so old and new shader layouts cannot be mistaken for one another.

@@ -109,8 +109,9 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
     LOG_INFO(
         Render_Vulkan,
         "Uberhar: hybrid_tev={} force_tev={} async_shaders={} spirv_generator={} "
-        "diagnostics=9 first_ready=true compact_tev=true canonical_tev=true dynamic_fragment=true "
-        "cpu_bridge={} bridge_policy=ready_only fallback_abi=2 push_bytes=108 "
+        "diagnostics=10 first_ready=true compact_tev=true canonical_tev=true dynamic_fragment=true "
+        "cpu_bridge={} bridge_policy=ready_only fallback_abi=3 push_bytes=120 "
+        "runtime_lighting_luts=true "
         "host_pipeline_identity=true bridge_assembly=isolated_lists_strips_fans "
         "compiler_workers={}",
         hybrid_tev, force_tev, Settings::values.async_shader_compilation.GetValue(),
@@ -161,7 +162,7 @@ void PipelineCache::BuildLayout() {
     descriptor_set_layouts[2] = descriptor_heaps[2].Layout();
 
     // AstraEH: One shared layout lets specialized and interpreted pipelines alternate.
-    // AstraEH: The 108-byte ABI includes runtime tests, fog and sampling controls.
+    // AstraEH: The 120-byte ABI includes runtime fragment and lighting controls.
     const vk::PushConstantRange tev_range{
         .stageFlags = vk::ShaderStageFlagBits::eFragment,
         .offset = 0,
@@ -789,7 +790,7 @@ void PipelineCache::UseFragmentShader(const Pica::RegsInternal& regs,
                                       const Pica::Shader::UserConfig& user) {
 
     // AstraEH: Capture runtime controls before canonicalization. Lighting/procedural
-    // behavior and typed cube resources remain specialized in this alpha.
+    // structure and typed cube resources remain specialized; LUT controls/source slots are runtime.
     if (hybrid_tev) {
         tev_family_config.emplace(regs);
         tev_constants = GLSL::MakeDynamicTevState(*tev_family_config, profile);
@@ -840,7 +841,11 @@ GraphicsPipeline* PipelineCache::GetTevFallback(const PipelineInfo& info, bool c
     // AstraEH: Count eligible candidates even when the serial admission limit
     // defers their build. These are independent dimensions, not a Cartesian
     // product or counts of actual compilations. No guest shader contents are logged.
-    const std::array<u64, 11> candidate_keys{
+    // AstraEH: Counterfactual 0.0.12 key for this same workload isolates the new
+    // lighting reduction from unequal replays. Hash only; never compile this variant.
+    auto previous_family = family_config;
+    previous_family.lighting = tev_family_config->lighting;
+    const std::array<u64, 14> candidate_keys{
         raw_family_hash,
         family_hash,
         raw_pipeline_hash,
@@ -852,6 +857,9 @@ GraphicsPipeline* PipelineCache::GetTevFallback(const PipelineInfo& info, bool c
         Common::ComputeStructHash64(info.state.blending),
         Common::ComputeStructHash64(info.state.rasterization),
         Common::ComputeStructHash64(info.state.depth_stencil),
+        previous_family.Hash(),
+        Common::ComputeStructHash64(family_config.lighting),
+        Common::ComputeStructHash64(family_config.proctex),
     };
     constexpr std::size_t MaxCensusKeys = 2048;
     for (std::size_t i = 0; i < candidate_keys.size(); ++i) {
@@ -1232,13 +1240,15 @@ void PipelineCache::ReportUberharStats(const char* kind) {
             "Uberhar variant census {}: scope=current_title_candidates raw_families={} "
             "canonical_families={} raw_pipelines={} canonical_pipelines={} vertex_programs={} "
             "geometry_programs={} vertex_layouts={} attachments={} blending={} rasterization={} "
-            "depth_stencil={} capped={} limit=2048",
+            "depth_stencil={} previous_lighting_families={} lighting_shapes={} proctex_shapes={} "
+            "lighting_abi=3 capped={} limit=2048",
             kind, tev_candidate_keys[0].size(), tev_candidate_keys[1].size(),
             tev_candidate_keys[2].size(), tev_candidate_keys[3].size(),
             tev_candidate_keys[4].size(), tev_candidate_keys[5].size(),
             tev_candidate_keys[6].size(), tev_candidate_keys[7].size(),
             tev_candidate_keys[8].size(), tev_candidate_keys[9].size(),
-            tev_candidate_keys[10].size(), tev_census_capped);
+            tev_candidate_keys[10].size(), tev_candidate_keys[11].size(),
+            tev_candidate_keys[12].size(), tev_candidate_keys[13].size(), tev_census_capped);
         // AstraEH: Unused means not selected by the scheduler as of this snapshot,
         // not permanently useless. Only completed builds contribute driver time.
         u64 used = 0;

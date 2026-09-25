@@ -14,12 +14,40 @@ using TextureType = Pica::TexturingRegs::TextureConfig::TextureType;
 
 constexpr static std::size_t RESERVE_SIZE = 8 * 1024 * 1024;
 
+// AstraEH: Compact exact powers of two, including the inherited zero result for
+// reserved PICA scale encodings. No floating-point approximation enters the ABI.
+static u32 EncodeLightingScale(float scale) {
+    constexpr std::array scales{0.0f, 0.25f, 0.5f, 1.0f, 2.0f, 4.0f, 8.0f};
+    for (u32 i = 0; i < scales.size(); ++i) {
+        if (scale == scales[i]) {
+            return i;
+        }
+    }
+    return 7; // Unsupported synthetic/future scale; keep the specialized recovery path.
+}
+
+// AstraEH: One ordering for transport and validation; shader generation uses
+// matching explicit indices so changes cannot silently reorder the seven LUTs.
+static auto LightingLuts(const LightConfig& lighting) {
+    return std::array{&lighting.lut_d0, &lighting.lut_d1, &lighting.lut_sp, &lighting.lut_fr,
+                      &lighting.lut_rr, &lighting.lut_rg, &lighting.lut_rb};
+}
+
 // AstraEH: Route unvalidated shadow/custom-normal paths through the existing specialized renderer.
 bool SupportsDynamicTev(const FSConfig& config, const UserConfig& user) {
     if (config.UsesSpirvIncompatibleConfig() ||
         config.texture.texture0_type == TexturingRegs::TextureConfig::Shadow2D ||
         config.texture.fog_mode == TexturingRegs::FogMode::Gas || !user.IsCacheable()) {
         return false;
+    }
+    // AstraEH: Do not reinterpret unknown LUT inputs or non-hardware scale values.
+    if (config.lighting.enable) {
+        for (const auto* lut : LightingLuts(config.lighting)) {
+            if (lut->enable && (static_cast<u32>(lut->type.Value()) > 5 ||
+                                EncodeLightingScale(lut->GetScale()) == 7)) {
+                return false;
+            }
+        }
     }
     for (const TexturingRegs::TevStageConfig stage : config.texture.tev_stages) {
         // AstraEH: AddSigned produces half-byte ties. Different compiler optimizations
@@ -159,7 +187,7 @@ FSConfig MakeDynamicTevFamilyConfig(const FSConfig& original, const Profile& pro
         config.texture.fog_flip.Assign(0);
     }
     // AstraEH: These controls now live in the per-draw ABI, so one program covers
-    // their combinations. Keep cube/shadow resource types and lighting specialized.
+    // their combinations. Keep typed resources and lighting structure specialized.
     config.framebuffer.alpha_test_func.Assign(FramebufferRegs::CompareFunc::Always);
     config.framebuffer.scissor_test_mode.Assign(RasterizerRegs::ScissorMode::Disabled);
     config.framebuffer.depthmap_enable.Assign(RasterizerRegs::DepthBuffering::ZBuffering);
@@ -173,6 +201,19 @@ FSConfig MakeDynamicTevFamilyConfig(const FSConfig& original, const Profile& pro
     if (config.texture.texture0_type == TextureType::Projection2D ||
         config.texture.texture0_type == TextureType::Disabled) {
         config.texture.texture0_type.Assign(TextureType::Texture2D);
+    }
+    // AstraEH: LUT arithmetic choices and source slots are draw-uniform data.
+    // Keep enable bits, light count, bump mode and per-light operation structure
+    // specialized; sharing these controls must not add unused lighting operations.
+    auto& lighting = config.lighting;
+    for (auto* lut : {&lighting.lut_d0, &lighting.lut_d1, &lighting.lut_sp, &lighting.lut_fr,
+                      &lighting.lut_rr, &lighting.lut_rg, &lighting.lut_rb}) {
+        lut->abs_input.Assign(0);
+        lut->type.Assign(LightingRegs::LightingLutInput::NH);
+        lut->SetScale(1.0f);
+    }
+    for (auto& light : lighting.lights) {
+        light.num.Assign(0);
     }
     return config;
 }
@@ -197,6 +238,21 @@ DynamicTevState MakeDynamicTevState(const FSConfig& original, const Profile& pro
     state.texture |= (config.texture.fog_mode == TexturingRegs::FogMode::Fog ? 1U : 0U) << 7;
     state.texture |= config.texture.fog_flip.Value() << 8;
     state.texture |= static_cast<u32>(config.texture.texture0_type.Value()) << 10;
+    // AstraEH: Snapshot original lighting before family reduction. Scheduler
+    // commands already own the complete push-constant value for each draw.
+    const auto luts = LightingLuts(config.lighting);
+    for (u32 i = 0; i < luts.size(); ++i) {
+        const auto& lut = *luts[i];
+        const u32 control = static_cast<u32>(lut.type.Value()) | (lut.abs_input.Value() << 3) |
+                            (EncodeLightingScale(lut.GetScale()) << 4);
+        auto& packed = i < 4 ? state.lighting_luts_lo : state.lighting_luts_hi;
+        packed |= control << ((i % 4) * 8);
+    }
+    for (u32 i = 0; i < config.lighting.lights.size(); ++i) {
+        const auto& light = config.lighting.lights[i];
+        state.lighting_sources |= static_cast<u32>(light.num.Value()) << (i * 3);
+        state.lighting_sources |= static_cast<u32>(light.two_sided_diffuse.Value()) << (24 + i);
+    }
     return state;
 }
 
@@ -644,6 +700,9 @@ layout(push_constant) uniform UberTev {
     uint buffer_mask;
     uint framebuffer;
     uint texture;
+    uint lighting_luts_lo;
+    uint lighting_luts_hi;
+    uint lighting_sources;
 } uber_tev;
 )";
 }
@@ -904,8 +963,21 @@ void FragmentModule::WriteLighting() {
     }
 
     // Samples the specified lookup table for specular lighting
-    const auto get_lut_value = [&lighting](LightingRegs::LightingSampler sampler, u32 light_num,
-                                           LightingRegs::LightingLutInput input, bool abs) {
+    // AstraEH: Runtime selectors change data access, not the unrolled light sequence.
+    const auto get_lut_value = [&](LightingRegs::LightingSampler sampler, u32 light_num,
+                                   LightingRegs::LightingLutInput input, bool abs, u32 light_slot,
+                                   u32 lut_slot) {
+        if (dynamic_tev) {
+            const auto source = fmt::format("uber_light_{}", light_slot);
+            const auto sampler_id = static_cast<u32>(sampler);
+            const auto sampler_expr =
+                sampler_id >= 8 ? fmt::format("int({}u + {})", sampler_id >= 16 ? 16 : 8, source)
+                                : fmt::format("{}", sampler_id);
+            return fmt::format("UberLightingLUT(UberLutControl({}u), {}, "
+                               "((uber_tev.lighting_sources >> (24u + {})) & 1u) != 0u, "
+                               "normal, tangent, half_vector, light_vector, spot_dir)",
+                               lut_slot, sampler_expr, source);
+        }
         std::string index;
         switch (input) {
         case LightingRegs::LightingLutInput::NH:
@@ -962,7 +1034,14 @@ void FragmentModule::WriteLighting() {
     // Write the code to emulate each enabled light
     for (u32 light_index = 0; light_index < lighting.src_num; ++light_index) {
         const auto& light_config = lighting.lights[light_index];
-        const std::string light_src = fmt::format("light_src[{}]", light_config.num.Value());
+        // AstraEH: Keep the original slot ordering, including duplicate/remapped lights.
+        if (dynamic_tev) {
+            out += fmt::format("uint uber_light_{} = (uber_tev.lighting_sources >> {}u) & 7u;\n",
+                               light_index, light_index * 3);
+        }
+        const std::string light_src = dynamic_tev
+                                          ? fmt::format("light_src[uber_light_{}]", light_index)
+                                          : fmt::format("light_src[{}]", light_config.num.Value());
 
         // Compute light vector (directional or positional)
         if (light_config.directional) {
@@ -992,10 +1071,11 @@ void FragmentModule::WriteLighting() {
         if (light_config.spot_atten_enable &&
             LightingRegs::IsLightingSamplerSupported(
                 lighting.config, LightingRegs::LightingSampler::SpotlightAttenuation)) {
-            const std::string value =
-                get_lut_value(LightingRegs::SpotlightAttenuationSampler(light_config.num),
-                              light_config.num, lighting.lut_sp.type, lighting.lut_sp.abs_input);
-            spot_atten = fmt::format("({:#} * {})", lighting.lut_sp.GetScale(), value);
+            const std::string value = get_lut_value(
+                LightingRegs::SpotlightAttenuationSampler(light_config.num), light_config.num,
+                lighting.lut_sp.type, lighting.lut_sp.abs_input, light_index, 2);
+            spot_atten =
+                dynamic_tev ? value : fmt::format("({:#} * {})", lighting.lut_sp.GetScale(), value);
         }
 
         // If enabled, compute distance attenuation value
@@ -1005,7 +1085,11 @@ void FragmentModule::WriteLighting() {
                                                   "+ {}.dist_atten_bias, 0.0, 1.0)",
                                                   light_src, light_src, light_src);
             const auto sampler = LightingRegs::DistanceAttenuationSampler(light_config.num);
-            dist_atten = fmt::format("LookupLightingLUTUnsigned({}, {})", sampler, index);
+            // AstraEH: Attenuation tables follow the selected physical source, too.
+            const auto sampler_expr = dynamic_tev
+                                          ? fmt::format("int(16u + uber_light_{})", light_index)
+                                          : fmt::format("{}", sampler);
+            dist_atten = fmt::format("LookupLightingLUTUnsigned({}, {})", sampler_expr, index);
         }
 
         if (light_config.geometric_factor_0 || light_config.geometric_factor_1) {
@@ -1022,8 +1106,9 @@ void FragmentModule::WriteLighting() {
             // Lookup specular "distribution 0" LUT value
             const std::string value =
                 get_lut_value(LightingRegs::LightingSampler::Distribution0, light_config.num,
-                              lighting.lut_d0.type, lighting.lut_d0.abs_input);
-            d0_lut_value = fmt::format("({:#} * {})", lighting.lut_d0.GetScale(), value);
+                              lighting.lut_d0.type, lighting.lut_d0.abs_input, light_index, 0);
+            d0_lut_value =
+                dynamic_tev ? value : fmt::format("({:#} * {})", lighting.lut_d0.GetScale(), value);
         }
         std::string specular_0 = fmt::format("({} * {}.specular_0)", d0_lut_value, light_src);
         if (light_config.geometric_factor_0) {
@@ -1036,8 +1121,9 @@ void FragmentModule::WriteLighting() {
                                                      LightingRegs::LightingSampler::ReflectRed)) {
             std::string value =
                 get_lut_value(LightingRegs::LightingSampler::ReflectRed, light_config.num,
-                              lighting.lut_rr.type, lighting.lut_rr.abs_input);
-            value = fmt::format("({:#} * {})", lighting.lut_rr.GetScale(), value);
+                              lighting.lut_rr.type, lighting.lut_rr.abs_input, light_index, 4);
+            value =
+                dynamic_tev ? value : fmt::format("({:#} * {})", lighting.lut_rr.GetScale(), value);
             out += fmt::format("refl_value.r = {};\n", value);
         } else {
             out += "refl_value.r = 1.0;\n";
@@ -1049,8 +1135,9 @@ void FragmentModule::WriteLighting() {
                                                      LightingRegs::LightingSampler::ReflectGreen)) {
             std::string value =
                 get_lut_value(LightingRegs::LightingSampler::ReflectGreen, light_config.num,
-                              lighting.lut_rg.type, lighting.lut_rg.abs_input);
-            value = fmt::format("({:#} * {})", lighting.lut_rg.GetScale(), value);
+                              lighting.lut_rg.type, lighting.lut_rg.abs_input, light_index, 5);
+            value =
+                dynamic_tev ? value : fmt::format("({:#} * {})", lighting.lut_rg.GetScale(), value);
             out += fmt::format("refl_value.g = {};\n", value);
         } else {
             out += "refl_value.g = refl_value.r;\n";
@@ -1062,8 +1149,9 @@ void FragmentModule::WriteLighting() {
                                                      LightingRegs::LightingSampler::ReflectBlue)) {
             std::string value =
                 get_lut_value(LightingRegs::LightingSampler::ReflectBlue, light_config.num,
-                              lighting.lut_rb.type, lighting.lut_rb.abs_input);
-            value = fmt::format("({:#} * {})", lighting.lut_rb.GetScale(), value);
+                              lighting.lut_rb.type, lighting.lut_rb.abs_input, light_index, 6);
+            value =
+                dynamic_tev ? value : fmt::format("({:#} * {})", lighting.lut_rb.GetScale(), value);
             out += fmt::format("refl_value.b = {};\n", value);
         } else {
             out += "refl_value.b = refl_value.r;\n";
@@ -1077,8 +1165,9 @@ void FragmentModule::WriteLighting() {
             // Lookup specular "distribution 1" LUT value
             const std::string value =
                 get_lut_value(LightingRegs::LightingSampler::Distribution1, light_config.num,
-                              lighting.lut_d1.type, lighting.lut_d1.abs_input);
-            d1_lut_value = fmt::format("({:#} * {})", lighting.lut_d1.GetScale(), value);
+                              lighting.lut_d1.type, lighting.lut_d1.abs_input, light_index, 1);
+            d1_lut_value =
+                dynamic_tev ? value : fmt::format("({:#} * {})", lighting.lut_d1.GetScale(), value);
         }
         std::string specular_1 =
             fmt::format("({} * refl_value * {}.specular_1)", d1_lut_value, light_src);
@@ -1094,8 +1183,9 @@ void FragmentModule::WriteLighting() {
             // Lookup fresnel LUT value
             std::string value =
                 get_lut_value(LightingRegs::LightingSampler::Fresnel, light_config.num,
-                              lighting.lut_fr.type, lighting.lut_fr.abs_input);
-            value = fmt::format("({:#} * {})", lighting.lut_fr.GetScale(), value);
+                              lighting.lut_fr.type, lighting.lut_fr.abs_input, light_index, 3);
+            value =
+                dynamic_tev ? value : fmt::format("({:#} * {})", lighting.lut_fr.GetScale(), value);
 
             // Enabled for diffuse lighting alpha component
             if (lighting.enable_primary_alpha) {
@@ -1756,6 +1846,46 @@ float LookupLightingLUTSigned(int lut_index, float pos) {
     return LookupLightingLUT(lut_index, index, delta);
 }
 )";
+
+    // AstraEH: Uniform material controls share one LUT evaluator. All source
+    // expressions and signed/unsigned interpolation match the specialized path.
+    // CP remains configuration-7-only; do not normalize that structural choice.
+    if (dynamic_tev) {
+        out += R"(
+uint UberLutControl(uint slot) {
+    uint lut_word = slot < 4u ? uber_tev.lighting_luts_lo : uber_tev.lighting_luts_hi;
+    return (lut_word >> ((slot & 3u) * 8u)) & 127u;
+}
+float UberLightingLUT(uint control, int sampler_id, bool two_sided,
+                      vec3 normal, vec3 tangent, vec3 half_vector,
+                      vec3 light_vector, vec3 spot_dir) {
+    float index = 0.0;
+    switch (control & 7u) {
+    case 0u: index = dot(normal, normalize(half_vector)); break;
+    case 1u: index = dot(normalize(view), normalize(half_vector)); break;
+    case 2u: index = dot(normal, normalize(view)); break;
+    case 3u: index = dot(light_vector, normal); break;
+    case 4u: index = dot(light_vector, spot_dir); break;
+)";
+        if (config.lighting.config == LightingRegs::LightingConfig::Config7) {
+            out += "case 5u: index = dot(normalize(half_vector) - normal * "
+                   "dot(normal, normalize(half_vector)), tangent); break;\n";
+        }
+        out += R"(
+    }
+    float value;
+    if ((control & 8u) != 0u) {
+        index = two_sided ? abs(index) : max(index, 0.0);
+        value = LookupLightingLUTUnsigned(sampler_id, index);
+    } else {
+        value = LookupLightingLUTSigned(sampler_id, index);
+    }
+    uint scale_code = (control >> 4u) & 7u;
+    float scale = scale_code == 0u ? 0.0 : uintBitsToFloat((scale_code + 124u) << 23u);
+    return scale * value;
+}
+)";
+    }
 
     if (use_fragment_shader_barycentric) {
         out += R"(

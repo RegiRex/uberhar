@@ -7,6 +7,13 @@ Baseline: Azahar 2126.1.2, commit
 
 ## Current status
 
+<!-- AstraEH: 0.0.13 implementation is awaiting its own device comparison. -->
+**0.0.13 moves lighting LUT controls and light-source selection into per-draw data**
+to reduce first-use fragment families. It retains structural lighting specialization,
+adds same-workload previous/new family counts, and expands shader correctness gates.
+See the [release/test notes](docs/releases/0.0.13.md). Android publication requires
+Actions gates; runtime performance remains to be tested on Thor.
+
 <!-- AstraEH: Verified 0.0.12 device milestone; retain as the next comparison baseline. -->
 **0.0.12 Native at 2x is now tested on Thor.** The owner reports a substantial
 improvement. The warm run records 99.760% emulation speed and 89.293 ms of generic
@@ -55,7 +62,7 @@ changes; they do not isolate the speedup from each individual optimization.
 Start with **Native at 2x, cold then warm**, including the same battle. The
 [release notes](docs/releases/0.0.11.md) describe the comparison. Repeating all three
 pairs is not necessary while compute coverage remains zero. The next default full
-architectural review stays after 0.0.13 (allowed 0.0.12–0.0.14); see the
+architectural review is after 0.0.16 (allowed 0.0.15–0.0.17); see the
 [review ledger](docs/UBERHAR_REVIEW_CADENCE.md). Android compilation, shader, package
 and signing gates must pass before a pre-release is published. Development hands
 off Actions rather than waiting through APK compilation.
@@ -169,7 +176,7 @@ There is no complete startup generic bank yet, and first-use stalls remain.
 
 Runtime pipeline keys share already-identical host shader objects and exclude
 inactive state. Transferable records retain guest IDs and their existing layout.
-The private fragment state ABI is 108 bytes in this version.
+The private fragment state ABI is 120 bytes in 0.0.13 (108 bytes in 0.0.8–0.0.12).
 
 **Force TEV fallback for comparison** (requires hybrid mode, then restart)
 keeps supported draws on the generic fragment path even after specialization. Use it for
@@ -194,14 +201,14 @@ not served a draw, and the driver-call time of the latter. At progress snapshots
 an unused pipeline may still become useful later. Bounded build records report
 GLSL/SPIR-V byte sizes; zero means an existing fragment module was reused.
 `diagnostics=3 compact_tev=true fast_fallback=false` identifies 0.0.6.
-Version 0.0.12 uses `diagnostics=9`; see the
+Version 0.0.13 uses `diagnostics=10`; see the
 [diagnostics map](docs/UBERHAR_DIAGNOSTICS.md) for bridge/translation/cache counters,
 capability probes, limits and diagnostic-removal markers.
 
 ## Device testing
 
-For the current 0.0.12 comparison, follow the shorter cold/warm procedure in the
-[release notes](docs/releases/0.0.12.md). The original baseline procedure is below;
+For the current 0.0.13 comparison, follow the shorter cold/warm procedure in the
+[release notes](docs/releases/0.0.13.md). The original baseline procedure is below;
 keep the CPU bridge off when reproducing those initial two-switch comparisons.
 
 1. Install the Uberhar APK alongside Azahar and create an empty Uberhar folder.

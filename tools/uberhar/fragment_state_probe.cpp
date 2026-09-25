@@ -1,7 +1,7 @@
 // Copyright 2026 Uberhar contributors
 // Licensed under GPLv2 or any later version; see license.txt.
 // AstraEH: Emit complete specialized/generic fragment shaders and the production
-// uniform/108-byte transport for offscreen state, texture, color and depth tests.
+// uniform/120-byte transport for offscreen state, texture, color and depth tests.
 #include <filesystem>
 #include <fstream>
 #include <stdexcept>
@@ -43,7 +43,10 @@ int main(int argc, char** argv) {
     constexpr std::array scissor{Raster::ScissorMode::Disabled, Raster::ScissorMode::Include,
                                  Raster::ScissorMode::Exclude};
     constexpr std::array types{Texture::Texture2D, Texture::Projection2D, Texture::Disabled};
-    for (u32 i = 0; i < 192; ++i) {
+    // AstraEH: Keep the original corpus, then cross remapped/duplicate light slots,
+    // LUT controls, all eight lighting configurations and one through eight lights.
+    constexpr u32 Cases = 416;
+    for (u32 i = 0; i < Cases; ++i) {
         Pica::RegsInternal regs{};
         regs.framebuffer.output_merger.alphablend_enable.Assign(1);
         regs.lighting.disable.Assign(i < 144);
@@ -70,6 +73,60 @@ int main(int argc, char** argv) {
         if (i >= 144) {
             config.texture.tev_stages[1].sources_raw = 0x001f001f;
             config.texture.tev_stages[1].ops_raw = 0x00010001;
+        }
+        if (i >= 192) {
+            using Lighting = Pica::LightingRegs;
+            const u32 n = i - 192;
+            constexpr std::array configs{0U, 1U, 2U, 3U, 4U, 5U, 6U, 8U};
+            constexpr std::array scales{0.0f, 0.25f, 0.5f, 1.0f, 2.0f, 4.0f, 8.0f};
+            auto& lighting = config.lighting;
+            lighting.config.Assign(static_cast<Lighting::LightingConfig>(configs[n % 8]));
+            lighting.src_num.Assign(1 + (n / 7) % 8);
+            lighting.clamp_highlights.Assign(n & 1);
+            lighting.enable_primary_alpha.Assign(1);
+            lighting.enable_secondary_alpha.Assign(1);
+            lighting.bump_mode.Assign(static_cast<Lighting::LightingBumpMode>((n / 8) % 3));
+            lighting.bump_selector.Assign(n % 3);
+            lighting.bump_renorm.Assign((n / 3) % 2);
+            lighting.enable_shadow.Assign((n / 4) % 2);
+            lighting.shadow_primary.Assign(1);
+            lighting.shadow_secondary.Assign(1);
+            lighting.shadow_alpha.Assign(1);
+            lighting.shadow_invert.Assign(n & 1);
+            lighting.shadow_selector.Assign(n % 3);
+            for (u32 slot = 0; slot < 8; ++slot) {
+                auto& light = lighting.lights[slot];
+                // AstraEH: Include duplicate, reversed and cyclic physical source maps.
+                light.num.Assign(n % 3 == 0 ? n % 8 : n % 3 == 1 ? 7 - slot : (slot + n) % 8);
+                light.directional.Assign((n + slot) % 2);
+                light.two_sided_diffuse.Assign((n >> (slot % 3)) & 1);
+                light.dist_atten_enable.Assign(1);
+                light.spot_atten_enable.Assign(1);
+                light.geometric_factor_0.Assign((n + slot) % 2);
+                light.geometric_factor_1.Assign((n + slot / 2) % 2);
+                light.shadow_enable.Assign(slot % 2);
+            }
+            const std::array luts{&lighting.lut_d0, &lighting.lut_d1, &lighting.lut_sp,
+                                  &lighting.lut_fr, &lighting.lut_rr, &lighting.lut_rg,
+                                  &lighting.lut_rb};
+            for (u32 slot = 0; slot < luts.size(); ++slot) {
+                auto& lut = *luts[slot];
+                lut.enable.Assign(1);
+                lut.type.Assign(static_cast<Lighting::LightingLutInput>((n + slot) % 6));
+                lut.abs_input.Assign((n / 6 + slot) % 2);
+                lut.SetScale(scales[(n / 8 + slot) % scales.size()]);
+            }
+            // AstraEH: Isolate primary/secondary lighting without alpha rejection
+            // or fog hiding numerical differences. The earlier corpus covers their interaction.
+            config.framebuffer.alpha_test_func.Assign(Pica::FramebufferRegs::CompareFunc::Always);
+            config.framebuffer.scissor_test_mode.Assign(Raster::ScissorMode::Disabled);
+            config.texture.fog_mode.Assign(Fog::None);
+            config.texture.texture0_type.Assign(Texture::Texture2D);
+            config.texture.tev_stages[0].sources_raw = (1 + (n / 2) % 2) * 0x10001U;
+            config.texture.tev_stages[1] = {0x000f000f, 0, 0, 0};
+        }
+        if (!GLSL::SupportsDynamicTev(config, user)) {
+            throw std::runtime_error("Lighting corpus unexpectedly uses unsupported state");
         }
         const auto state = GLSL::MakeDynamicTevState(config, profile);
         const auto family = GLSL::MakeDynamicTevFamilyConfig(config, profile);
@@ -102,7 +159,27 @@ int main(int argc, char** argv) {
         uniforms.light_src[0].specular_1 = {0.3f, 0.4f, 0.5f};
         uniforms.light_src[0].spot_direction = {0.f, 0.f, -1.f};
         uniforms.light_src[0].dist_atten_scale = 1.f;
+        if (i >= 192) {
+            // AstraEH: Distinct per-source uniforms and 24 separate nonconstant LUTs
+            // make an incorrect source/table index observable, instead of aliasing table zero.
+            for (u32 table = 0; table < 24; ++table) {
+                uniforms.lighting_lut_offset[table / 4][table % 4] = table * 256;
+            }
+            uniforms.lighting_global_ambient = {0.01f, 0.02f, 0.03f};
+            for (u32 source = 0; source < 8; ++source) {
+                const float f = static_cast<float>(source + 1);
+                auto& light = uniforms.light_src[source];
+                light.position = {0.2f * f, -0.1f * f, source % 2 ? -0.8f : 0.7f};
+                light.diffuse = {0.015f * f, 0.02f, 0.08f / f};
+                light.ambient = {0.003f, 0.002f * f, 0.001f};
+                light.specular_0 = {0.008f, 0.002f * f, 0.01f / f};
+                light.specular_1 = {0.0007f * f, 0.0008f, 0.002f / f};
+                light.spot_direction = {0.1f, -0.2f, source % 2 ? 0.7f : -0.8f};
+                light.dist_atten_bias = 0.03f * f;
+                light.dist_atten_scale = 0.06f * f;
+            }
+        }
         Binary(prefix.string() + "-uniforms.bin", uniforms);
     }
-    fmt::print("Emitted 192 full fragment state comparisons\n");
+    fmt::print("Emitted {} full fragment state comparisons (224 lighting cases)\n", Cases);
 }

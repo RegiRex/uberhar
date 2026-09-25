@@ -96,7 +96,7 @@ int main(int argc, char** argv) {
         std::ofstream(prefix.string() + ".frag")
             << "#version 450\n"
             << Generator::GLSL::FragmentModule{config, user, profile}.Generate();
-        // AstraEH: Serialize the production 108-byte runtime-state transport.
+        // AstraEH: Serialize the production 120-byte runtime-state transport.
         std::ofstream constants(prefix.string() + ".bin", std::ios::binary);
         const auto state = Generator::GLSL::MakeDynamicTevState(config, profile);
         constants.write(reinterpret_cast<const char*>(&state), sizeof(state));

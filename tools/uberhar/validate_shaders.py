@@ -21,6 +21,15 @@ cases = sorted(Path(sys.argv[1]).glob("dynamic-*.frag"))
 if len(cases) != 64:
     raise AssertionError(f"Expected 64 complete fragment families, got {len(cases)}")
 
+# AstraEH: Also validate every distinct complete lighting program from the pixel
+# corpus. Deduplicate exact source, not keys, and check both frontend optimizer modes.
+if len(sys.argv) > 2:
+    fragment_cases = sorted(Path(sys.argv[2]).glob("*.frag"))
+    if len(fragment_cases) != 832:
+        raise AssertionError(f"Expected 416 specialized/generic pairs, got {len(fragment_cases)} files")
+    unique = {source.read_text(): source for source in cases + fragment_cases}
+    cases = list(unique.values())
+
 for label, option in (("unoptimized", "-Od"), ("optimized", "-Os")):
     sizes = []
     for source in cases:
@@ -29,14 +38,15 @@ for label, option in (("unoptimized", "-Od"), ("optimized", "-Os")):
                  str(source), "-o", str(binary)])
         checked(["spirv-val", "--target-env", "vulkan1.1", str(binary)])
         assembly = checked(["spirv-dis", str(binary)])
-        if not any("OpLoopMerge" in line and "DontUnroll" in line
-                   for line in assembly.splitlines()):
-            raise AssertionError(f"TEV loop hint missing: {binary}")
-        # AstraEH: Catch Vulkan push-constant ABI drift, including the two new controls.
-        for member, offset in enumerate((0, 96, 100, 104)):
-            expected = f"OpMemberDecorate %UberTev {member} Offset {offset}"
-            if expected not in assembly:
-                raise AssertionError(f"Fallback ABI mismatch: {binary}: {expected}")
+        if "specialized" not in source.name:
+            if not any("OpLoopMerge" in line and "DontUnroll" in line
+                       for line in assembly.splitlines()):
+                raise AssertionError(f"TEV loop hint missing: {binary}")
+            # AstraEH: Catch Vulkan ABI drift, including runtime lighting at bytes 108–119.
+            for member, offset in enumerate((0, 96, 100, 104, 108, 112, 116)):
+                expected = f"OpMemberDecorate %UberTev {member} Offset {offset}"
+                if expected not in assembly:
+                    raise AssertionError(f"Fallback ABI mismatch: {binary}: {expected}")
         sizes.append(binary.stat().st_size)
-    print(f"PASS: {len(cases)} {label} Vulkan modules; DontUnroll and 108-byte ABI verified; "
+    print(f"PASS: {len(cases)} {label} Vulkan modules; DontUnroll and 120-byte ABI verified; "
           f"SPIR-V size {min(sizes)}..{max(sizes)} bytes", flush=True)

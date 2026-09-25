@@ -66,13 +66,15 @@ for unit in range(3):
     tex.filter = (moderngl.LINEAR_MIPMAP_LINEAR, moderngl.LINEAR)
     tex.use(unit)
     textures.append(tex)
-lut_values = [v for i in range(256) for v in (i / 255, 1 / 255, 0.4, 0.6)]
-lut = ctx.texture((256, 1), 4, struct.pack("<1024f", *lut_values), dtype="f4")
+# AstraEH: Separate table contents reveal incorrect physical-light LUT selection.
+lut_values = [v for table in range(24) for i in range(256) for v in
+              (0.05 + (table + 1) / 32 * i / 255, (table + 1) / (32 * 255), 0.4, 0.6)]
+lut = ctx.texture((24 * 256, 1), 4, struct.pack(f"<{len(lut_values)}f", *lut_values), dtype="f4")
 for unit in range(3, 6):
     lut.use(unit)
 uniforms = ctx.buffer(reserve=0x530)
 uniforms.bind_to_uniform_block(2)
-state = ctx.buffer(reserve=112)
+state = ctx.buffer(reserve=128)
 state.bind_to_storage_buffer(1)
 color = ctx.texture((32, 32), 4, dtype="f1")
 depth = ctx.depth_texture((32, 32))
@@ -95,12 +97,12 @@ def draw(path):
 
 
 count = 0
-for i in range(192):
+for i in range(416):
     uniforms.write((cases / f"{i}-uniforms.bin").read_bytes())
     raw = (cases / f"{i}-state.bin").read_bytes()
-    if len(raw) != 108:
+    if len(raw) != 120:
         raise AssertionError(f"Unexpected runtime ABI size: {len(raw)}")
-    state.write(raw + bytes(112 - len(raw)))
+    state.write(raw + bytes(128 - len(raw)))
     expected_color, expected_depth = draw(cases / f"{i}-specialized.frag")
     actual_color, actual_depth = draw(cases / f"{i}-generic.frag")
     if expected_color != actual_color:
@@ -113,4 +115,4 @@ for i in range(192):
     count += 1024
     if i % 48 == 47:
         print(f"Compared {i + 1} full fragment states", flush=True)
-print(f"PASS: {count} exact RGBA8 pixels and {count} depth/discard comparisons across 192 states", flush=True)
+print(f"PASS: {count} exact RGBA8 pixels and {count} depth/discard comparisons across 416 states", flush=True)

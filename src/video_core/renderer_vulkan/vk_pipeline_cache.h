@@ -207,7 +207,7 @@ private:
 
     // AstraEH: Separate maps keep experimental shaders out of the transferable cache.
     // Limit growth; after the limit we wait for the accurate specialized path.
-    // AstraEH: The generator owns the versioned 108-byte transport and layout assertions.
+    // AstraEH: The generator owns the versioned 120-byte transport and layout assertions.
     using TevPushConstants = Pica::Shader::Generator::GLSL::DynamicTevState;
     TevPushConstants tev_constants{};
     std::optional<Pica::Shader::FSConfig> tev_family_config;
@@ -217,9 +217,9 @@ private:
     std::unordered_map<u64, std::unique_ptr<GraphicsPipeline>> tev_pipelines;
     // AstraEH: Renderer-thread-only, per-title observations before admission limits.
     // Dimensions: raw/canonical FS, raw/canonical pipeline, VS, GS, vertex layout,
-    // attachments, blending, rasterization and depth/stencil. Each set is bounded;
-    // a saturated census is a lower bound, not an exact coverage estimate.
-    std::array<std::unordered_set<u64>, 11> tev_candidate_keys;
+    // attachments, blending, rasterization, depth/stencil, pre-0.0.13 family,
+    // lighting and procedural shapes. A saturated set gives a lower bound only.
+    std::array<std::unordered_set<u64>, 14> tev_candidate_keys;
     bool tev_census_capped{};
     // AstraEH: Renderer-thread counters only; emit aggregates at the existing five-second cadence.
     u64 cpu_bridge_pending{};

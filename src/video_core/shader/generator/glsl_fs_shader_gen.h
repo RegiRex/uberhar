@@ -15,18 +15,28 @@ bool SupportsDynamicTev(const FSConfig& config, const UserConfig& user);
 /// Sampler and fixed-function pipeline state must still be supplied separately by the caller.
 FSConfig MakeDynamicTevFamilyConfig(const FSConfig& config, const Profile& profile);
 
-// AstraEH: Version 2 of the private Vulkan fallback ABI. Stay below Vulkan's
+// AstraEH: Version 3 of the private Vulkan fallback ABI. Stay below Vulkan's
 // 128-byte minimum push-constant limit; specialized/disk shader layouts are unchanged.
 struct DynamicTevState {
     std::array<TevStageConfigRaw, 6> stages;
     u32 buffer_mask;
     u32 framebuffer; // alpha function [0:2], scissor [3:4], W buffering [5].
     u32 texture;     // border axes [0:5], coord2 [6], fog [7], flip [8], tex0 type [10:12].
+    // AstraEH: Seven LUT controls use one byte each: input [0:2], unsigned [3],
+    // scale [4:6]. Order: D0, D1, spotlight, Fresnel, red, green, blue.
+    u32 lighting_luts_lo{};
+    u32 lighting_luts_hi{};
+    // AstraEH: Eight three-bit source selectors, then the original slot-indexed
+    // two-sided flags. Keep inherited LUT indexing distinct from diffuse indexing.
+    u32 lighting_sources{};
 };
-static_assert(sizeof(DynamicTevState) == 108);
+static_assert(sizeof(DynamicTevState) == 120);
 static_assert(offsetof(DynamicTevState, buffer_mask) == 96);
 static_assert(offsetof(DynamicTevState, framebuffer) == 100);
 static_assert(offsetof(DynamicTevState, texture) == 104);
+static_assert(offsetof(DynamicTevState, lighting_luts_lo) == 108);
+static_assert(offsetof(DynamicTevState, lighting_luts_hi) == 112);
+static_assert(offsetof(DynamicTevState, lighting_sources) == 116);
 
 /// AstraEH: Capture effective runtime state before family canonicalization removes it.
 DynamicTevState MakeDynamicTevState(const FSConfig& config, const Profile& profile);

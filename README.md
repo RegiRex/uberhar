@@ -27,14 +27,17 @@ Its [first Thor Native cold/warm test](docs/UBERHAR_LOG_ANALYSIS_0.0.12.md) at 2
 reports 99.760% warm emulation speed and a substantial user-observed improvement.
 Cold generic compilation still produces hitches; this is the current reference
 result for continued refinement, not a completed compilation-free renderer.
+**0.0.13** moves lighting lookup controls and physical-light selection into per-draw
+state to reduce fragment families, with expanded pixel/Vulkan validation and
+same-workload family-count diagnostics. Its Thor performance is not yet measured.
 Test Native cold/warm at **2x** first. Compute/Automatic still have a restricted
 solid-rectangle subset; full GPU interpretation, general compute rasterization
 and zero-wait first playthroughs remain development goals.
-See the [0.0.12 notes](docs/releases/0.0.12.md),
-[architectural review](docs/UBERHAR_ARCHITECTURE_0.0.9.md) and
+See the [0.0.13 notes](docs/releases/0.0.13.md),
+[architectural review](docs/UBERHAR_ARCHITECTURE_0.0.12.md) and
 [Actions](https://github.com/RegiRex/uberhar/actions/workflows/uberhar-alpha.yml).
 Publication requires all build/package/shader gates. The next default architectural
-review is after 0.0.13; see the [review ledger](docs/UBERHAR_REVIEW_CADENCE.md).
+review is after 0.0.16; see the [review ledger](docs/UBERHAR_REVIEW_CADENCE.md).
 
 ---
 
