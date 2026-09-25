@@ -20,6 +20,20 @@ rg -n AstraEH src CMakeModules tools/uberhar .github/workflows README.md UBERHAR
 
 ## Renderer
 
+<!-- AstraEH: 0.0.12 run/health evidence preserves the 0.0.11 rendering behavior. -->
+### Run diagnostics (0.0.12)
+
+| Files | AstraEH work |
+| --- | --- |
+| `src/core/uberhar_frame_diagnostics.h` | Fixed-size interval/work/speed counters, fast-forward ranges, pause/discontinuity boundaries and eight worst-frame retention. |
+| `src/core/perf_stats.{h,cpp}`, `src/video_core/renderer_base.cpp`, `src/core/CMakeLists.txt` | Overlay-independent frame sampling, run IDs, bounded logs and shutdown summaries. |
+| `src/core/core.cpp`, `src/android/app/src/main/jni/native.cpp` | Actual frontend/modal waits and menu savestate boundaries; no change to rendering or pause decisions. |
+| `src/android/app/src/main/java/org/citra/citra_emu/utils/UberharDeviceDiagnostics.kt`, `fragments/EmulationFragment.kt` in the same package tree | Background, lifecycle-scoped Android health sampling, unknown sensor handling and a 30-second cap. |
+| `tools/uberhar/test_frame_diagnostics.cpp`, `tools/uberhar/build_probe.sh` | Production-counter tests for pacing, speed, pause/state boundaries, histograms and late worst hitches. |
+| `.github/workflows/uberhar-alpha.yml` | Queue new alphas without cancelling an already running validation/build. |
+
+### Rendering implementation
+
 | Files | AstraEH work |
 | --- | --- |
 | `src/video_core/shader/generator/glsl_fs_shader_gen.{h,cpp}` | Optional dynamic six-stage TEV generation, support gate, register decoding, shared operation formulas, rounding/scales and delayed buffer writes. 0.0.6 replaces six expanded copies with a loop carrying DontUnroll, lazily reuses per-fragment TEV texture samples and skips unused operands. 0.0.7 adds profile-aware family canonicalization for source-equivalent states without changing transferable FSConfig layout. 0.0.8 adds the shared 108-byte runtime ABI and interprets alpha/scissor/depth mapping, fog, emulated borders and compatible 2D sampling controls; lighting/procedural structure and cube resources stay specialized. |

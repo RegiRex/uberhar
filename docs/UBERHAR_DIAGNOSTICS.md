@@ -1,5 +1,5 @@
 <!-- AstraEH: Bounded troubleshooting and removal map for the hybrid renderer. -->
-# Renderer diagnostics, schema 8
+# Renderer diagnostics, schema 9
 
 Every Uberhar renderer log call has an adjacent **`AstraEH Log Line`** comment.
 Find it with `rg -n 'AstraEH Log Line' src`. These markers identify diagnostic
@@ -9,7 +9,7 @@ logging to this fork. Android session/title/export records remain functional
 parts of log export, rather than temporary shader debugging.
 
 The startup record identifies effective switches, compiler worker count,
-`diagnostics=8`, `dynamic_fragment=true`, `bridge_policy=ready_only`,
+`diagnostics=9`, `dynamic_fragment=true`, `bridge_policy=ready_only`,
 `fallback_abi=2`, `push_bytes=108`, `host_pipeline_identity=true` and
 `bridge_assembly=isolated_lists_strips_fans`.
 `cpu_bridge` is false when hybrid is off or forced fallback is on, even if the
@@ -146,3 +146,67 @@ broader coverage before claiming a complete compilation-free first playthrough.
 Generic foreground waits and scheduler waits can overlap on different threads.
 Do not sum them as elapsed hitch time. Human absence is not identified by these
 records: elapsed windows may include loading, menus, pauses or idle gameplay.
+
+## Run pacing and Android context (0.0.12)
+
+<!-- AstraEH: Overlay-independent frame and health evidence with explicit blind spots. -->
+
+`Uberhar run` gives a process-local session number, title and settings snapshot.
+Session numbers restart with the process; combine them with existing version/date/title
+records. `bridge_requested` is a setting; renderer records establish effective use.
+`Uberhar run end` records lifetime, observed frames and pause/exclusion totals even
+for a run that exits before its first sampled interval. Lifetime includes loading
+and pauses and must not be used as active gameplay time.
+
+`Uberhar frames window` uses independent fixed counters: overlay polling cannot
+reset or disable it. There is one additional monotonic clock read per system frame,
+no per-frame text, GPU readback or unbounded history. Emit after five seconds of
+accumulated valid intervals, with up to 32 early pause-boundary summaries, a final
+partial window and session totals on normal shutdown. Final window and totals
+overlap; never sum them with prior windows as independent samples.
+
+- `frames`: observed system-frame intervals; the initial anchor is excluded.
+- `game_submissions` / `game_fps`: guest GSP submissions across those intervals,
+  not Android presentations or necessarily distinct visible images.
+- `observed_wall_ms`: sum of valid frame-end intervals, including frame limiting;
+  explicit pause intervals and their crossing frames are excluded.
+- `speed_percent`: guest-time advance / observed wall time; 100 means real time.
+- `work_ms` / `max_work_ms`: existing begin/end system-frame wall timing, excluding
+  the subsequent explicit frame limiter. Can contain GPU or compilation waiting;
+  this is not CPU utilization, arithmetic-only execution or a GPU timestamp.
+- `interval_bins`: eight disjoint bins bounded by 16.666667, 33.333334, 50, 100,
+  250, 500 and 1000 ms. Upper bounds are exclusive. No exact percentile claim.
+- `frame_limit` / `temporary_limit`, mode and resolution describe settings at
+  report time. Resolution 0 means automatic. `Uberhar frame limits` additionally
+  records sampled minimum/maximum cap and temporary-cap interval count, identifying
+  mixed fast-forward windows. In-game fast forward is not directly detected.
+- `pauses` / `paused_ms`, `excluded` and `clock_discontinuities` are cumulative run
+  counters. An ongoing pause is not yet included in `paused_ms` at its begin record.
+
+`Uberhar pause` logs the first 32 begin/end pairs of waits actually reached by the
+Android core loop, including frontend pause and modal core errors. Menu savestate
+save/load paths mark waits too; returning on an error still closes the marker.
+Counters retain all such waits. Sampling re-anchors afterward to avoid counting a
+pause as a hitch or a forward state load as excessive emulation speed. Guest-time
+reversal or a non-increasing supplied clock also re-anchors automatically. Arbitrary
+external state injection or debugger suspensions are not identified as pauses.
+
+`Uberhar worst frame` retains eight largest intervals of at least 50 ms in fixed
+storage, reported at shutdown. `frame` is the observed interval ordinal, `end_ms`
+is relative to the `PerfStats` run origin, and `work_ms` is that frame's work interval.
+Correlate these with renderer log timestamps, but do not add them to shader waits.
+`display_timing=false` excludes panel timing and screen-pair synchronization claims.
+Abnormal termination can lose final totals and retained worst-event records.
+
+`Uberhar device health` samples off the UI/render threads, at most every 30 seconds
+across activity recreation, while the game view is resumed. It records model/API,
+Android monotonic uptime, thermal status/headroom where available, battery temperature
+and level, plugged-in code, power saver, available system memory/low-memory flag and
+native allocated heap bytes. Unknown sensors remain `unknown`; status 0 can also
+occur with incomplete thermal reporting. Battery temperature is not CPU/GPU
+temperature; allocated native heap is not RSS or graphics memory. No added
+permissions, network uploads or root/debug access are needed.
+
+No log can anticipate every future optimization question. Screenshots and user
+observations remain necessary for visual correctness. Pausing when stepping away
+gives a real marker; continued rendering alone cannot establish human presence.

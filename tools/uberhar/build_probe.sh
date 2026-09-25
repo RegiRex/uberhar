@@ -84,3 +84,8 @@ c++ -std=c++20 -O2 -DMICROPROFILE_ENABLED=0 -DFMT_HEADER_ONLY -DXXH_INLINE_ALL \
   src/video_core/pica/shader_setup.cpp src/video_core/pica/shader_unit.cpp \
   -o build/uberhar-probe/test-vertex-interpreter
 timeout 30s build/uberhar-probe/test-vertex-interpreter
+
+# AstraEH: Run accounting must exclude explicit pauses and survive clock/state discontinuities.
+c++ -std=c++20 -O2 -Isrc tools/uberhar/test_frame_diagnostics.cpp \
+  -o build/uberhar-probe/test-frame-diagnostics
+build/uberhar-probe/test-frame-diagnostics

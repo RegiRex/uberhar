@@ -166,6 +166,9 @@ System::ResultStatus System::RunLoop(bool tight_loop) {
         const u32 slot = save_state_slot;
         save_state_request_status = SaveStateStatus::NONE;
         LOG_INFO(Core, "Begin load of slot {}", slot);
+        // AstraEH: Loading can move guest time forward or backward; exclude that frame interval.
+        perf_stats->BeginUberharPause("savestate_load");
+        SCOPE_EXIT({ perf_stats->EndUberharPause(); });
         try {
             System::LoadState(slot);
             LOG_INFO(Core, "Load completed");
@@ -181,6 +184,9 @@ System::ResultStatus System::RunLoop(bool tight_loop) {
         save_state_request_status = SaveStateStatus::NONE;
         const u32 slot = save_state_slot;
         LOG_INFO(Core, "Begin save to slot {}", slot);
+        // AstraEH: Account for save-state IO separately from ordinary frame pacing.
+        perf_stats->BeginUberharPause("savestate_save");
+        SCOPE_EXIT({ perf_stats->EndUberharPause(); });
         try {
             System::SaveState(slot);
             LOG_INFO(Core, "Save completed");

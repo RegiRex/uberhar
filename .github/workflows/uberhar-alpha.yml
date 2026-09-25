@@ -19,7 +19,8 @@ permissions:
 
 concurrency:
   group: uberhar-alpha
-  cancel-in-progress: true
+  # AstraEH: Queue follow-up alphas without discarding an already compiling/validating build.
+  cancel-in-progress: false
 
 jobs:
   # AstraEH: Reuse the shader gate and require its success before publishing any pre-release.

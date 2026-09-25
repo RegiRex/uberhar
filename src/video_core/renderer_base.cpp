@@ -43,7 +43,8 @@ void RendererBase::UpdateCurrentFramebufferLayout(bool is_portrait_mode) {
 void RendererBase::EndFrame() {
     current_frame++;
 
-    system.perf_stats->EndSystemFrame();
+    // AstraEH: Supply guest time for overlay-independent emulation-speed windows.
+    system.perf_stats->EndSystemFrame(system.CoreTiming().GetGlobalTimeUs());
 
     render_window.PollEvents();
 

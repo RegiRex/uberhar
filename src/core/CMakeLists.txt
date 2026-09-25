@@ -488,6 +488,7 @@ add_library(citra_core STATIC EXCLUDE_FROM_ALL
     nus_download.h
     perf_stats.cpp
     perf_stats.h
+    uberhar_frame_diagnostics.h # AstraEH: Fixed-size run/frame measurements.
     precompiled_headers.h
     savestate.cpp
     savestate.h

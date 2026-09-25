@@ -364,7 +364,11 @@ static Core::System::ResultStatus RunCitra(const std::string& filepath) {
                 if (handler) {
                     handler->DisableSensors();
                 }
-                if (!HandleCoreError(result, system.GetStatusDetails())) {
+                // AstraEH: Modal error waits must not masquerade as rendering hitches.
+                system.perf_stats->BeginUberharPause("core_error");
+                const bool continue_emulation = HandleCoreError(result, system.GetStatusDetails());
+                system.perf_stats->EndUberharPause();
+                if (!continue_emulation) {
                     // Frontend requests us to abort, return a shutdown request.
                     return Core::System::ResultStatus::ShutdownRequested;
                 }
@@ -380,7 +384,10 @@ static Core::System::ResultStatus RunCitra(const std::string& filepath) {
             Settings::values.volume = 0;
 
             std::unique_lock pause_lock{paused_mutex};
+            // AstraEH: Record the actual core-loop wait, not merely a UI pause request.
+            system.perf_stats->BeginUberharPause("frontend");
             running_cv.wait(pause_lock, [] { return !pause_emulation || stop_run; });
+            system.perf_stats->EndUberharPause();
             window->PollEvents();
         }
     }

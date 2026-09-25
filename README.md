@@ -21,10 +21,12 @@ The [0.0.10 eight-session analysis](docs/UBERHAR_LOG_ANALYSIS_0.0.10.md) identif
 high CPU vertex cost and zero compute coverage in Awakening. **0.0.11** restores
 cached CPU shader translation in the three profiles, accelerates vertex-cache
 lookup, persists generic shader modules and improves bounded diagnostics.
+**0.0.12** adds overlay-independent frame pacing, pause/fast-forward markers,
+late worst-hitch retention and bounded Android thermal/battery/memory sampling.
 Test Native cold/warm at **2x** first. Compute/Automatic still have a restricted
 solid-rectangle subset; full GPU interpretation, general compute rasterization
 and zero-wait first playthroughs remain development goals.
-See the [0.0.11 notes](docs/releases/0.0.11.md),
+See the [0.0.12 notes](docs/releases/0.0.12.md),
 [architectural review](docs/UBERHAR_ARCHITECTURE_0.0.9.md) and
 [Actions](https://github.com/RegiRex/uberhar/actions/workflows/uberhar-alpha.yml).
 Publication requires all build/package/shader gates. The next default architectural

@@ -12,6 +12,7 @@
 #include "common/bit_field.h"
 #include "common/common_types.h"
 #include "common/thread.h"
+#include "core/uberhar_frame_diagnostics.h" // AstraEH: Overlay-independent frame evidence.
 
 namespace Core {
 
@@ -84,8 +85,12 @@ public:
     void StartSwap();
     void EndSwap();
     void BeginSystemFrame();
-    void EndSystemFrame();
+    void EndSystemFrame(std::chrono::microseconds guest_time);
     void EndGameFrame();
+
+    // AstraEH: Call on the core loop around an actual pause or modal core-error wait.
+    void BeginUberharPause(const char* reason);
+    void EndUberharPause();
 
     Results GetAndResetStats(std::chrono::microseconds current_system_time_us);
 
@@ -124,6 +129,14 @@ public:
     static bool game_frames_updated;
 
 private:
+    // AstraEH: Fixed counters and bounded summaries; protected by the existing stats mutex.
+    void LogUberharFrames(const char* kind, const UberharFrameDiagnostics::Counters& data) const;
+    UberharFrameDiagnostics uberhar_frames;
+    u64 uberhar_game_frames{}, uberhar_pause_count{}, uberhar_paused_ns{};
+    const u64 uberhar_session;
+    const std::chrono::steady_clock::time_point uberhar_start = std::chrono::steady_clock::now();
+    std::chrono::steady_clock::time_point uberhar_pause_start{};
+
     mutable std::mutex object_mutex;
 
     /// Title ID for the game that is running. 0 if there is no game running yet

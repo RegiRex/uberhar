@@ -54,8 +54,12 @@ import androidx.preference.PreferenceManager
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.slider.Slider
 import java.io.File
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.citra.citra_emu.CitraApplication
 import org.citra.citra_emu.EmulationNavigationDirections
 import org.citra.citra_emu.NativeLibrary
@@ -83,6 +87,7 @@ import org.citra.citra_emu.utils.EmulationMenuSettings
 import org.citra.citra_emu.utils.GameHelper
 import org.citra.citra_emu.utils.GameIconUtils
 import org.citra.citra_emu.utils.Log
+import org.citra.citra_emu.utils.UberharDeviceDiagnostics
 import org.citra.citra_emu.utils.ViewUtils
 import org.citra.citra_emu.viewmodel.EmulationViewModel
 
@@ -239,6 +244,20 @@ class EmulationFragment :
 
         // Show/hide the "Stats" overlay
         updateShowPerformanceOverlay()
+
+        // AstraEH: Health samples do not depend on the overlay or block rendering/main-thread IO.
+        // The view lifecycle cancels this worker when the game UI is destroyed or backgrounded.
+        val diagnosticContext = requireContext().applicationContext
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                while (isActive) {
+                    withContext(Dispatchers.IO) {
+                        UberharDeviceDiagnostics.sample(diagnosticContext)
+                    }
+                    delay(30_000L)
+                }
+            }
+        }
 
         val position = IntSetting.PERFORMANCE_OVERLAY_POSITION.int
         updateStatsPosition(position)

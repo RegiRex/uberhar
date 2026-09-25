@@ -7,8 +7,19 @@ Baseline: Azahar 2126.1.2, commit
 
 ## Current status
 
+<!-- AstraEH: Owner-requested diagnostic coverage added without changing the 0.0.11 renderer. -->
+**0.0.12 adds run diagnostics to the 0.0.11 rendering changes.** Frame pacing,
+emulation speed, pause/state-load boundaries, fast-forward ranges and late worst
+hitches are captured independently of the overlay. Android health samples add
+thermal/battery/memory context with bounded frequency. See the
+[0.0.12 notes](docs/releases/0.0.12.md) and
+[diagnostic definitions](docs/UBERHAR_DIAGNOSTICS.md). Continue with one Native
+cold/warm pair at 2x; pause if called away. All earlier device tests were on Thor.
+Both new alphas still require device validation. Subsequent builds queue without
+cancelling the active alpha build; publication still requires every existing gate.
+
 <!-- AstraEH: 0.0.10 measurements and the 0.0.11 CPU/cache response. -->
-**0.0.10 device testing is analyzed; 0.0.11 is prepared for the build gates.**
+**0.0.10 device testing is analyzed; [0.0.11 is published](https://github.com/RegiRex/uberhar/releases/tag/0.0.11).**
 The [eight-session analysis](docs/UBERHAR_LOG_ANALYSIS_0.0.10.md) finds zero compute
 coverage in Awakening, high CPU vertex-stage cost, and repeated generic shader
 frontend work even with a warm driver cache. The three profiles therefore did
@@ -171,14 +182,14 @@ not served a draw, and the driver-call time of the latter. At progress snapshots
 an unused pipeline may still become useful later. Bounded build records report
 GLSL/SPIR-V byte sizes; zero means an existing fragment module was reused.
 `diagnostics=3 compact_tev=true fast_fallback=false` identifies 0.0.6.
-Version 0.0.11 uses `diagnostics=8`; see the
+Version 0.0.12 uses `diagnostics=9`; see the
 [diagnostics map](docs/UBERHAR_DIAGNOSTICS.md) for bridge/translation/cache counters,
 capability probes, limits and diagnostic-removal markers.
 
 ## Device testing
 
-For the current 0.0.11 comparison, follow the shorter cold/warm procedure in the
-[release notes](docs/releases/0.0.11.md). The original baseline procedure is below;
+For the current 0.0.12 comparison, follow the shorter cold/warm procedure in the
+[release notes](docs/releases/0.0.12.md). The original baseline procedure is below;
 keep the CPU bridge off when reproducing those initial two-switch comparisons.
 
 1. Install the Uberhar APK alongside Azahar and create an empty Uberhar folder.
@@ -235,7 +246,7 @@ presentation queues and a measurement plan for the next phase.
 ## Build workflow
 
 `UBERHAR_VERSION` contains the owner's **release.beta.alpha** version, currently
-`0.0.11`. The unnumbered failed first attempt counts as `0.0.1`. Future alpha
+`0.0.12`. The unnumbered failed first attempt counts as `0.0.1`. Future alpha
 iterations increment the third number. Beta and release milestones use the second
 and first numbers. Gradle's independent numeric `versionCode` still increases
 with build time so Android can order updates correctly.

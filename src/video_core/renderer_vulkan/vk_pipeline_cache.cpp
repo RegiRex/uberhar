@@ -109,7 +109,7 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
     LOG_INFO(
         Render_Vulkan,
         "Uberhar: hybrid_tev={} force_tev={} async_shaders={} spirv_generator={} "
-        "diagnostics=8 first_ready=true compact_tev=true canonical_tev=true dynamic_fragment=true "
+        "diagnostics=9 first_ready=true compact_tev=true canonical_tev=true dynamic_fragment=true "
         "cpu_bridge={} bridge_policy=ready_only fallback_abi=2 push_bytes=108 "
         "host_pipeline_identity=true bridge_assembly=isolated_lists_strips_fans "
         "compiler_workers={}",
