@@ -12,6 +12,7 @@
 #include "core/memory.h"
 #include "video_core/debug_utils/debug_utils.h"
 #include "video_core/pica/pica_core.h"
+#include "video_core/pica/uberhar_vertex_cache.h" // AstraEH: Exact FIFO with indexed lookup.
 #include "video_core/pica/vertex_loader.h"
 #include "video_core/rasterizer_interface.h"
 #include "video_core/shader/shader.h"
@@ -91,15 +92,31 @@ PicaCore::PicaCore(Memory::MemorySystem& memory_, std::shared_ptr<DebugContext> 
 }
 
 PicaCore::~PicaCore() {
-    if (Settings::values.uberhar_test_mode.GetValue() != Settings::UberharTestMode::Custom) {
-        // AstraEH Log Line: Includes vertex setup and memory synchronization, not just arithmetic.
-        LOG_INFO(
-            Render_Vulkan,
-            "Uberhar virtual vertices totals: batches={} input_vertices={} stage_wall_ms={:.3f} "
-            "stage_max_wall_ms={:.3f} engine=cpu_interpreter",
-            virtual_vertex_batches, virtual_vertex_inputs, virtual_vertex_ns / 1000000.0,
-            virtual_vertex_max_ns / 1000000.0);
-    }
+    if (Settings::values.uberhar_test_mode.GetValue() != Settings::UberharTestMode::Custom)
+        ReportVirtualVertices("totals", std::chrono::steady_clock::now());
+}
+
+// AstraEH: Windowed CPU work identifies sustained geometry cost despite unequal run lengths.
+// Human absence is not inferred: a game can continue rendering while its player steps away.
+void PicaCore::ReportVirtualVertices(const char* kind, std::chrono::steady_clock::time_point now) {
+    const double window_ms =
+        virtual_window_start == std::chrono::steady_clock::time_point{}
+            ? 0.0
+            : std::chrono::duration<double, std::milli>(now - virtual_window_start).count();
+    // AstraEH Log Line: At most once per five seconds plus shutdown; never per vertex.
+    LOG_INFO(Render_Vulkan,
+             "Uberhar virtual vertices {}: batches={} input_vertices={} stage_wall_ms={:.3f} "
+             "stage_max_wall_ms={:.3f} engine={} shader_invocations={} cache_hits={} "
+             "window_wall_ms={:.3f} window_stage_ms={:.3f} window_inputs={} window_invocations={}",
+             kind, virtual_vertex_batches, virtual_vertex_inputs, virtual_vertex_ns / 1e6,
+             virtual_vertex_max_ns / 1e6, shader_engine->EngineName(), virtual_vertex_invocations,
+             virtual_vertex_hits, window_ms, (virtual_vertex_ns - virtual_last_ns) / 1e6,
+             virtual_vertex_inputs - virtual_last_inputs,
+             virtual_vertex_invocations - virtual_last_invocations);
+    virtual_window_start = now;
+    virtual_last_ns = virtual_vertex_ns;
+    virtual_last_inputs = virtual_vertex_inputs;
+    virtual_last_invocations = virtual_vertex_invocations;
 }
 
 void PicaCore::InitializeRegs() {
@@ -1113,13 +1130,18 @@ void PicaCore::DrawArrays(bool is_indexed) {
     }
 
     if (virtual_test) {
-        const auto elapsed = static_cast<u64>(std::chrono::duration_cast<std::chrono::nanoseconds>(
-                                                  std::chrono::steady_clock::now() - virtual_start)
-                                                  .count());
+        const auto now = std::chrono::steady_clock::now();
+        const u64 elapsed =
+            std::chrono::duration_cast<std::chrono::nanoseconds>(now - virtual_start).count();
+        if (virtual_window_start == std::chrono::steady_clock::time_point{})
+            virtual_window_start = virtual_start;
         ++virtual_vertex_batches;
         virtual_vertex_inputs += regs.internal.pipeline.num_vertices;
         virtual_vertex_ns += elapsed;
         virtual_vertex_max_ns = std::max(virtual_vertex_max_ns, elapsed);
+        if ((virtual_vertex_batches & 4095) == 0 &&
+            now - virtual_window_start >= std::chrono::seconds{5})
+            ReportVirtualVertices("progress", now);
     }
 
     // Draw emitted triangles.
@@ -1148,12 +1170,10 @@ void PicaCore::LoadVertices(bool is_indexed) {
     const u16* index_address_16 = reinterpret_cast<const u16*>(index_address_8);
     const bool index_u16 = index_info.format != 0;
 
-    // Simple circular-replacement vertex cache
-    const std::size_t VERTEX_CACHE_SIZE = 64;
-    std::array<bool, VERTEX_CACHE_SIZE> vertex_cache_valid{};
-    std::array<u16, VERTEX_CACHE_SIZE> vertex_cache_ids;
-    std::array<AttributeBuffer, VERTEX_CACHE_SIZE> vertex_cache;
-    u32 vertex_cache_pos = 0;
+    // AstraEH: Preserve the original 64-slot FIFO, but avoid scanning every slot per index.
+    VertexCacheIndex vertex_index;
+    std::array<AttributeBuffer, VertexCacheIndex::Capacity> vertex_cache;
+    u64 invocations = 0, cache_hits = 0;
 
     // Compile the vertex shader for this batch.
     ShaderUnit shader_unit;
@@ -1178,12 +1198,10 @@ void PicaCore::LoadVertices(bool is_indexed) {
                 continue;
             }
 
-            for (u32 i = 0; i < VERTEX_CACHE_SIZE; ++i) {
-                if (vertex_cache_valid[i] && vertex == vertex_cache_ids[i]) {
-                    vs_output = vertex_cache[i];
-                    vertex_cache_hit = true;
-                    break;
-                }
+            if (const int slot = vertex_index.Find(static_cast<u16>(vertex)); slot >= 0) {
+                vs_output = vertex_cache[slot];
+                vertex_cache_hit = true;
+                ++cache_hits;
             }
         }
 
@@ -1203,17 +1221,19 @@ void PicaCore::LoadVertices(bool is_indexed) {
             shader_engine->Run(vs_setup, shader_unit);
             shader_unit.WriteOutput(regs.internal.vs, vs_output);
 
-            // Cache the vertex when doing indexed rendering.
-            if (is_indexed) {
-                vertex_cache[vertex_cache_pos] = vs_output;
-                vertex_cache_valid[vertex_cache_pos] = true;
-                vertex_cache_ids[vertex_cache_pos] = vertex;
-                vertex_cache_pos = (vertex_cache_pos + 1) % VERTEX_CACHE_SIZE;
-            }
+            ++invocations;
+            // AstraEH: Insert only on a miss; hits never move the FIFO cursor.
+            if (is_indexed)
+                vertex_cache[vertex_index.Insert(static_cast<u16>(vertex))] = vs_output;
         }
 
         // Send to geometry pipeline
         geometry_pipeline.SubmitVertex(vs_output);
+    }
+    // AstraEH: Count actual shader runs separately from indexed inputs; no per-vertex clock reads.
+    if (Settings::values.uberhar_test_mode.GetValue() != Settings::UberharTestMode::Custom) {
+        virtual_vertex_invocations += invocations;
+        virtual_vertex_hits += cache_hits;
     }
 }
 

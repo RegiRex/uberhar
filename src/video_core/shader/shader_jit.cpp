@@ -5,9 +5,11 @@
 #include "common/arch.h"
 #if CITRA_ARCH(x86_64) || CITRA_ARCH(arm64)
 
+#include <chrono>
 #include "common/assert.h"
 #include "common/hash.h"
 #include "common/microprofile.h"
+#include "common/settings.h" // AstraEH: Scope experimental compilation diagnostics.
 #include "video_core/shader/shader.h"
 #include "video_core/shader/shader_jit.h"
 #if CITRA_ARCH(arm64)
@@ -19,8 +21,18 @@
 
 namespace Pica::Shader {
 
-JitEngine::JitEngine() = default;
-JitEngine::~JitEngine() = default;
+// AstraEH: Scope compilation timing to the experimental profiles; cache hits stay untimed.
+JitEngine::JitEngine()
+    : report_virtual{Settings::values.uberhar_test_mode.GetValue() !=
+                     Settings::UberharTestMode::Custom} {}
+JitEngine::~JitEngine() {
+    if (report_virtual) {
+        // AstraEH Log Line: One total separates CPU JIT compilation from vertex execution.
+        LOG_INFO(Render_Vulkan,
+                 "Uberhar CPU JIT totals: programs={} compile_ms={:.3f} max_compile_ms={:.3f}",
+                 compiled, compile_ns / 1e6, compile_max_ns / 1e6);
+    }
+}
 
 void JitEngine::SetupBatch(ShaderSetup& setup, u32 entry_point) {
     ASSERT(entry_point < MAX_PROGRAM_CODE_LENGTH);
@@ -35,10 +47,27 @@ void JitEngine::SetupBatch(ShaderSetup& setup, u32 entry_point) {
     if (iter != cache.end()) {
         setup.cached_shader = iter->second.get();
     } else {
+        // AstraEH: Compile once per program/swizzle pair, with a bounded first-8 detail budget.
+        const auto start = report_virtual ? std::chrono::steady_clock::now()
+                                          : std::chrono::steady_clock::time_point{};
         auto shader = std::make_unique<JitShader>();
         shader->Compile(&setup.GetProgramCode(), &setup.GetSwizzleData());
         setup.cached_shader = shader.get();
         cache.emplace_hint(iter, cache_key, std::move(shader));
+        if (report_virtual) {
+            const u64 ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                               std::chrono::steady_clock::now() - start)
+                               .count();
+            ++compiled;
+            compile_ns += ns;
+            compile_max_ns = std::max(compile_max_ns, ns);
+            if (compiled <= 8) {
+                // AstraEH Log Line: First encounters only; no per-vertex diagnostic output.
+                LOG_INFO(Render_Vulkan,
+                         "Uberhar CPU JIT build: ordinal={} key={:016X} compile_ms={:.3f}",
+                         compiled, cache_key, ns / 1e6);
+            }
+        }
     }
 }
 

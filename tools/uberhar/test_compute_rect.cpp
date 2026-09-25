@@ -31,6 +31,14 @@ int main() {
     regs.texturing.tev_stage1 = regs.texturing.tev_stage2 = regs.texturing.tev_stage3 =
         regs.texturing.tev_stage4 = regs.texturing.tev_stage5 = stage;
     const auto base = regs;
+    // AstraEH: Multiple rejection reasons must remain visible for the same draw.
+    regs.framebuffer.output_merger.depth_test_enable.Assign(1);
+    regs.framebuffer.output_merger.alpha_test.enable.Assign(1);
+    Check(ComputeRectStateRejections(regs) ==
+              ((1U << static_cast<unsigned>(ComputeRectReject::DepthTest)) |
+               (1U << static_cast<unsigned>(ComputeRectReject::Alpha))),
+          "compute rejection reasons are incomplete");
+    regs = base;
     constexpr Common::Vec4f color{1.f, 0.f, 1.f, 1.f};
     const std::array<Vertex, 6> vertices{{{{-1, -1, -0.5f, 1}, color},
                                           {{1, -1, -0.5f, 1}, color},

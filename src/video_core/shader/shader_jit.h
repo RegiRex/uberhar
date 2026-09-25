@@ -21,11 +21,19 @@ public:
     JitEngine();
     ~JitEngine() override;
 
+    // AstraEH: Diagnostics must distinguish CPU translation from a GPU interpreter.
+    const char* EngineName() const override {
+        return "cpu_jit";
+    }
+
     void SetupBatch(ShaderSetup& setup, u32 entry_point) override;
     void Run(const ShaderSetup& setup, ShaderUnit& state) const override;
 
 private:
     std::unordered_map<u64, std::unique_ptr<JitShader>> cache;
+    // AstraEH: Count only actual compilation; cached SetupBatch calls do not read clocks.
+    bool report_virtual{};
+    u64 compiled{}, compile_ns{}, compile_max_ns{};
 };
 
 } // namespace Pica::Shader

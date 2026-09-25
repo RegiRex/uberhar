@@ -25,6 +25,8 @@ add_library(video_core STATIC EXCLUDE_FROM_ALL
     pica/geometry_pipeline.h
     pica/pica_core.cpp
     pica/pica_core.h
+    # AstraEH: Exact FIFO index for CPU vertex reuse.
+    pica/uberhar_vertex_cache.h
     pica/output_vertex.cpp
     pica/output_vertex.h
     pica/primitive_assembly.cpp
@@ -85,6 +87,8 @@ add_library(video_core STATIC EXCLUDE_FROM_ALL
     shader/shader.h
     shader/shader_interpreter.cpp
     shader/shader_interpreter.h
+    # AstraEH: Allocation-free reference-interpreter control stacks.
+    shader/uberhar_interpreter_stack.h
     shader/shader_jit.cpp
     shader/shader_jit.h
     shader/shader_jit_a64_compiler.cpp
@@ -163,6 +167,8 @@ if (ENABLE_VULKAN)
         # AstraEH: Startup-compiled compute subset and measured automatic routing.
         renderer_vulkan/vk_compute_rect.cpp
         renderer_vulkan/vk_compute_rect.h
+        # AstraEH: Validated persistent generic-module envelope.
+        renderer_vulkan/uberhar_spirv_cache.h
         renderer_vulkan/uberhar_compute_rect.h
         renderer_vulkan/uberhar_compute_rect_shader.h
         renderer_vulkan/vk_blit_helper.cpp

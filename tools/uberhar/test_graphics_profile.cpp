@@ -18,14 +18,15 @@ int main() {
         values.uberhar_test_mode = mode;
         values.graphics_api = GraphicsAPI::OpenGL;
         values.use_hw_shader = true;
-        values.use_shader_jit = true;
+        values.use_shader_jit = false;
         values.uberhar_hybrid_tev = false;
         values.resolution_factor = 3;
         values.use_integer_scaling = true;
         ApplyUberharTestProfile();
         Check(values.graphics_api.GetValue() == GraphicsAPI::Vulkan, "profile must select Vulkan");
-        Check(!values.use_hw_shader.GetValue() && !values.use_shader_jit.GetValue(),
-              "vertex specialization active");
+        Check(!values.use_hw_shader.GetValue() && values.use_shader_jit.GetValue(),
+              "profile must use CPU JIT with GPU vertex specialization disabled");
+        Check(values.disable_spirv_optimizer.GetValue(), "first-use optimizer still active");
         Check(values.uberhar_hybrid_tev.GetValue() && values.uberhar_force_tev.GetValue(),
               "generic fragment route disabled");
         Check(values.resolution_factor.GetValue() == 3 && values.use_integer_scaling.GetValue(),

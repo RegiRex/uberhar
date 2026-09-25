@@ -10,6 +10,7 @@
 #include "common/file_util.h"
 #include "common/logging/log.h"
 #include "common/microprofile.h"
+#include "common/scm_rev.h" // AstraEH: Fingerprint the compiler/generator cache ABI.
 #include "common/scope_exit.h"
 #include "common/settings.h"
 #include "core/core.h"
@@ -17,6 +18,7 @@
 #include "video_core/pica/shader_setup.h"
 #include "video_core/renderer_vulkan/pica_to_vk.h"
 #include "video_core/renderer_vulkan/uberhar_pipeline_policy.h" // AstraEH: Tested routing/wait policy.
+#include "video_core/renderer_vulkan/uberhar_spirv_cache.h" // AstraEH: Reuse generic SPIR-V on warm runs.
 #include "video_core/renderer_vulkan/vk_descriptor_update_queue.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_pipeline_cache.h"
@@ -107,7 +109,7 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
     LOG_INFO(
         Render_Vulkan,
         "Uberhar: hybrid_tev={} force_tev={} async_shaders={} spirv_generator={} "
-        "diagnostics=7 first_ready=true compact_tev=true canonical_tev=true dynamic_fragment=true "
+        "diagnostics=8 first_ready=true compact_tev=true canonical_tev=true dynamic_fragment=true "
         "cpu_bridge={} bridge_policy=ready_only fallback_abi=2 push_bytes=108 "
         "host_pipeline_identity=true bridge_assembly=isolated_lists_strips_fans "
         "compiler_workers={}",
@@ -931,7 +933,7 @@ GraphicsPipeline* PipelineCache::GetTevFallback(const PipelineInfo& info, bool c
             if (!shader_ptr->IsDone()) {
                 GLSL::FragmentModule module{config, user, profile, true};
                 const auto source = module.Generate();
-                const auto code = CompileGLSL(source, vk::ShaderStageFlagBits::eFragment);
+                const auto code = LoadOrCompileTevModule(source);
                 if (code.empty()) {
                     throw std::runtime_error("fallback GLSL compilation produced no SPIR-V");
                 }
@@ -986,6 +988,63 @@ GraphicsPipeline* PipelineCache::GetTevFallback(const PipelineInfo& info, bool c
         }
     });
     return pipeline_ptr;
+}
+
+// AstraEH: Persist generated generic modules, not game programs. The title-prefixed
+// files live alongside driver caches so Android's existing Vulkan-cache deletion removes
+// both. Optional I/O runs on the serial TEV worker; failure retains normal compilation.
+std::vector<u32> PipelineCache::LoadOrCompileTevModule(std::string_view source) {
+    using namespace UberharSpirvCache;
+    const std::string_view version{Common::g_shader_cache_version};
+    // AstraEH: Also separate builds so a compiler-library/submodule update cannot reuse old output.
+    const std::string_view revision{Common::g_scm_rev};
+    const Key key{Common::ComputeHash64(source.data(), source.size()),
+                  Common::HashCombine(Common::ComputeHash64(version.data(), version.size()),
+                                      Common::ComputeHash64(revision.data(), revision.size()),
+                                      Settings::values.disable_spirv_optimizer.GetValue())};
+    const bool persistent = Settings::values.use_disk_shader_cache.GetValue();
+    const auto path = fmt::format("{}{:016X}-uber-{:016X}.spv", GetPipelineCacheDir(),
+                                  GetProgramID(), Common::HashCombine(key.source, key.compiler));
+    if (persistent && FileUtil::Exists(path)) {
+        FileUtil::IOFile file(path, "rb");
+        const u64 bytes = file ? file.GetSize() : 0;
+        if (bytes >= HeaderWords * sizeof(u32) && bytes <= MaxFileBytes &&
+            bytes % sizeof(u32) == 0) {
+            std::vector<u32> words(bytes / sizeof(u32));
+            if (file.ReadBytes(words.data(), bytes) == bytes) {
+                auto code = Decode(key, words);
+                if (!code.empty()) {
+                    ++generic_module_hits;
+                    return code;
+                }
+            }
+        }
+        if (generic_module_rejected.fetch_add(1) < 4) {
+            // AstraEH Log Line: Rebuild bad/obsolete entries; never pass truncated data to Vulkan.
+            LOG_WARNING(Render_Vulkan, "Uberhar generic module cache rejected; rebuilding");
+        }
+    }
+    ++generic_module_misses;
+    auto code = CompileGLSL(source, vk::ShaderStageFlagBits::eFragment);
+    if (persistent && !code.empty()) {
+        const auto words = Encode(key, code);
+        const auto temporary = path + ".tmp";
+        FileUtil::IOFile file(temporary, "wb");
+        const bool written = !words.empty() && file &&
+                             file.WriteBytes(words.data(), words.size() * sizeof(u32)) ==
+                                 words.size() * sizeof(u32) &&
+                             file.Flush();
+        file.Close();
+        if (!written || !FileUtil::Rename(temporary, path)) {
+            FileUtil::Delete(temporary);
+            if (generic_module_write_failures.fetch_add(1) < 4) {
+                // AstraEH Log Line: Optional cache failures do not fail rendering or installation.
+                LOG_WARNING(Render_Vulkan,
+                            "Uberhar generic module cache write failed; using compiled module");
+            }
+        }
+    }
+    return code;
 }
 
 // AstraEH: Warm a shared software-vertex fallback while the demanded GPU pipeline
@@ -1064,11 +1123,21 @@ void PipelineCache::ClearTevFallbacks() {
 
 // AstraEH: These are draw observations and CPU wait durations, not GPU timings or frame counts.
 void PipelineCache::ReportUberharStats(const char* kind) {
+    if (hybrid_tev) {
+        // AstraEH Log Line: Existing bounded progress cadence; files never contain guest shader
+        // code.
+        LOG_INFO(Render_Vulkan,
+                 "Uberhar generic modules {}: hits={} misses={} rejected={} write_failures={} "
+                 "optimizer_disabled={}",
+                 kind, generic_module_hits.load(), generic_module_misses.load(),
+                 generic_module_rejected.load(), generic_module_write_failures.load(),
+                 Settings::values.disable_spirv_optimizer.GetValue());
+    }
     if (Settings::values.uberhar_test_mode.GetValue() != Settings::UberharTestMode::Custom) {
         // AstraEH Log Line: Foreground generic waits must not disappear from measured stutter.
         LOG_INFO(Render_Vulkan,
                  "Uberhar virtual native {}: generic_draws={} recovery_draws={} generic_waits={} "
-                 "generic_wait_ms={:.3f} generic_max_wait_ms={:.3f} vertex_engine=cpu_interpreter "
+                 "generic_wait_ms={:.3f} generic_max_wait_ms={:.3f} vertex_engine=cpu "
                  "complete_ready_bank=false",
                  kind, virtual_generic_draws, virtual_recovery_draws, virtual_waits,
                  virtual_wait_ns / 1000000.0, virtual_max_wait_ns / 1000000.0);

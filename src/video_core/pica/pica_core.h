@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include <chrono> // AstraEH: Bounded vertex-stage windows.
+
 #include "common/common_types.h"
 #include "core/hle/service/gsp/gsp_interrupt.h"
 #include "video_core/pica/dirty_regs.h"
@@ -142,6 +144,8 @@ private:
     void DrawArrays(bool is_indexed);
 
     void LoadVertices(bool is_indexed);
+    // AstraEH: Aggregate progress, including the engine actually in use.
+    void ReportVirtualVertices(const char* kind, std::chrono::steady_clock::time_point now);
 
 public:
     union Regs {
@@ -411,7 +415,11 @@ private:
     PrimitiveAssembler primitive_assembler;
     CommandList cmd_list;
     std::unique_ptr<ShaderEngine> shader_engine;
-    // AstraEH: Measure the full interpreted vertex stage separately from GPU pipeline waits.
+    // AstraEH: Window snapshots are host-only diagnostics and never enter save states.
+    std::chrono::steady_clock::time_point virtual_window_start{};
+    u64 virtual_vertex_invocations{}, virtual_vertex_hits{}, virtual_last_ns{},
+        virtual_last_inputs{}, virtual_last_invocations{};
+    // AstraEH: Measure the complete CPU vertex stage separately from GPU pipeline waits.
     u64 virtual_vertex_batches{}, virtual_vertex_inputs{}, virtual_vertex_ns{},
         virtual_vertex_max_ns{};
 };

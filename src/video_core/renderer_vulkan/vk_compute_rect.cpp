@@ -179,6 +179,13 @@ void ComputeRectRenderer::Poll() {
 }
 
 void ComputeRectRenderer::Report() const {
+    // AstraEH Log Line: One non-exclusive rejection summary; totals can exceed rejected draws.
+    LOG_INFO(Render_Vulkan,
+             "Uberhar compute blockers: shadow={} color_write={} depth_test={} depth_write={} "
+             "stencil={} alpha={} clip={} scissor={} cull={} fog={} blend={}",
+             rejected_state[0], rejected_state[1], rejected_state[2], rejected_state[3],
+             rejected_state[4], rejected_state[5], rejected_state[6], rejected_state[7],
+             rejected_state[8], rejected_state[9], rejected_state[10]);
     // AstraEH Log Line: One final coverage/timing report; sampled GPU times are not frame times.
     LOG_INFO(
         Render_Vulkan,

@@ -27,27 +27,58 @@ struct ComputeRectPacket {
 };
 static_assert(sizeof(ComputeRectPacket) == 32);
 
-inline bool SupportsComputeRectState(const Pica::RegsInternal& regs) {
+// AstraEH: Non-exclusive reasons explain zero coverage without logging every draw.
+// Admission is unchanged: every unsafe component still selects native rendering.
+enum class ComputeRectReject : unsigned {
+    Shadow,
+    ColorWrite,
+    DepthTest,
+    DepthWrite,
+    Stencil,
+    Alpha,
+    Clip,
+    Scissor,
+    Cull,
+    Fog,
+    Blend,
+    Count
+};
+inline u32 ComputeRectStateRejections(const Pica::RegsInternal& regs) {
     using FB = Pica::FramebufferRegs;
     using R = Pica::RasterizerRegs;
     const auto& fb = regs.framebuffer;
     const auto& om = fb.output_merger;
     const auto cull = regs.rasterizer.cull_mode.Value();
-    return !fb.IsShadowRendering() && fb.framebuffer.allow_color_write != 0 &&
-           ((om.depth_color_mask >> 8) & 15) == 15 && !om.depth_test_enable &&
-           !om.depth_write_enable && !om.stencil_test.enable && !om.alpha_test.enable &&
-           !regs.rasterizer.clip_enable &&
-           regs.rasterizer.scissor_test.mode == R::ScissorMode::Disabled &&
-           (cull == R::CullMode::KeepAll || cull == R::CullMode::KeepAll2) &&
-           regs.texturing.fog_mode == Pica::TexturingRegs::FogMode::None &&
-           (om.alphablend_enable
-                ? (om.alpha_blending.blend_equation_rgb == FB::BlendEquation::Add &&
-                   om.alpha_blending.blend_equation_a == FB::BlendEquation::Add &&
-                   om.alpha_blending.factor_source_rgb == FB::BlendFactor::One &&
-                   om.alpha_blending.factor_source_a == FB::BlendFactor::One &&
-                   om.alpha_blending.factor_dest_rgb == FB::BlendFactor::Zero &&
-                   om.alpha_blending.factor_dest_a == FB::BlendFactor::Zero)
-                : om.logic_op == FB::LogicOp::Copy);
+    u32 reasons = 0;
+    const auto reject = [&](ComputeRectReject reason, bool condition) {
+        if (condition)
+            reasons |= 1U << static_cast<unsigned>(reason);
+    };
+    reject(ComputeRectReject::Shadow, fb.IsShadowRendering());
+    reject(ComputeRectReject::ColorWrite,
+           fb.framebuffer.allow_color_write == 0 || ((om.depth_color_mask >> 8) & 15) != 15);
+    reject(ComputeRectReject::DepthTest, om.depth_test_enable != 0);
+    reject(ComputeRectReject::DepthWrite, om.depth_write_enable != 0);
+    reject(ComputeRectReject::Stencil, om.stencil_test.enable != 0);
+    reject(ComputeRectReject::Alpha, om.alpha_test.enable != 0);
+    reject(ComputeRectReject::Clip, regs.rasterizer.clip_enable != 0);
+    reject(ComputeRectReject::Scissor,
+           regs.rasterizer.scissor_test.mode != R::ScissorMode::Disabled);
+    reject(ComputeRectReject::Cull, cull != R::CullMode::KeepAll && cull != R::CullMode::KeepAll2);
+    reject(ComputeRectReject::Fog, regs.texturing.fog_mode != Pica::TexturingRegs::FogMode::None);
+    const bool replace = om.alphablend_enable
+                             ? om.alpha_blending.blend_equation_rgb == FB::BlendEquation::Add &&
+                                   om.alpha_blending.blend_equation_a == FB::BlendEquation::Add &&
+                                   om.alpha_blending.factor_source_rgb == FB::BlendFactor::One &&
+                                   om.alpha_blending.factor_source_a == FB::BlendFactor::One &&
+                                   om.alpha_blending.factor_dest_rgb == FB::BlendFactor::Zero &&
+                                   om.alpha_blending.factor_dest_a == FB::BlendFactor::Zero
+                             : om.logic_op == FB::LogicOp::Copy;
+    reject(ComputeRectReject::Blend, !replace);
+    return reasons;
+}
+inline bool SupportsComputeRectState(const Pica::RegsInternal& regs) {
+    return ComputeRectStateRejections(regs) == 0;
 }
 
 template <typename Vertex>

@@ -25,7 +25,8 @@ jobs:
             -o build/uberhar-tests/test-async-completion
           timeout 30s build/uberhar-tests/test-async-completion
       - name: Get generator dependencies
-        run: git submodule update --init --depth 1 externals/fmt externals/xxHash externals/boost externals/nihstro externals/vulkan-headers
+        # AstraEH: The production interpreter test also includes MicroProfile's disabled header.
+        run: git submodule update --init --depth 1 externals/fmt externals/xxHash externals/boost externals/nihstro externals/vulkan-headers externals/microprofile
       - name: Install validation tools
         run: |
           sudo apt-get update

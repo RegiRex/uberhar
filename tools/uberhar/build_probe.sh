@@ -67,3 +67,20 @@ c++ -std=c++20 -O2 -DENABLE_VULKAN -DFMT_HEADER_ONLY -Isrc -Ibuild/uberhar-profi
   -Iexternals/fmt/include -Iexternals/boost tools/uberhar/test_graphics_profile.cpp \
   -o build/uberhar-probe/test-graphics-profile
 build/uberhar-probe/test-graphics-profile
+
+# AstraEH: Exact CPU cache/stack behavior and safe generic-module reuse gate the next build.
+c++ -std=c++20 -O2 -Isrc -Iexternals/boost tools/uberhar/test_vertex_runtime.cpp \
+  -o build/uberhar-probe/test-vertex-runtime
+build/uberhar-probe/test-vertex-runtime
+c++ -std=c++20 -O2 -DXXH_INLINE_ALL -Isrc -Iexternals/xxHash \
+  tools/uberhar/test_spirv_cache.cpp -o build/uberhar-probe/test-spirv-cache
+build/uberhar-probe/test-spirv-cache
+
+# AstraEH: Check actual interpreter execution, not only its stack container.
+c++ -std=c++20 -O2 -DMICROPROFILE_ENABLED=0 -DFMT_HEADER_ONLY -DXXH_INLINE_ALL \
+  -Isrc -Iexternals/fmt/include -Iexternals/boost -Iexternals/xxHash \
+  -Iexternals/nihstro/include -Iexternals/microprofile \
+  tools/uberhar/test_vertex_interpreter.cpp src/video_core/shader/shader_interpreter.cpp \
+  src/video_core/pica/shader_setup.cpp src/video_core/pica/shader_unit.cpp \
+  -o build/uberhar-probe/test-vertex-interpreter
+timeout 30s build/uberhar-probe/test-vertex-interpreter

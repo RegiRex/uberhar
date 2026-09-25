@@ -107,6 +107,23 @@ development branch. Their contents are upstream code, not AstraEH implementation
 | `test_graphics_profile.cpp`, Android `UberharTestModeTest.kt` | Native setting contracts, exclusive transitions and restart rules. |
 | `build_probe.sh`, `uberhar-shaders.yml` | Mandatory new profile, compute and Vulkan/SPIR-V gates alongside existing checks. |
 
+## Vertex cost and cache reuse (0.0.11)
+
+<!-- AstraEH: New implementation attribution; inherited CPU JIT itself is not new work. -->
+
+| File or section | AstraEH work |
+| --- | --- |
+| `common/uberhar_test_profile.h`, Android `UberharGraphicsProfile.kt`, `strings.xml` | Cached CPU JIT selection, optional optimizer disabled, truthful descriptions. |
+| `pica/uberhar_vertex_cache.h`, `pica_core.*` | Fixed lookup preserving 64-slot FIFO, actual invocation/reuse counts and bounded stage windows. |
+| `shader/uberhar_interpreter_stack.h`, `shader_interpreter.cpp` | Allocation-free control stacks retaining circular overflow behavior. |
+| `shader/shader.h`, `shader_jit.*` | Actual engine name and bounded first-use CPU JIT timing; the underlying JIT is inherited. |
+| `uberhar_spirv_cache.h`, `vk_pipeline_cache.*` | Bounded generic module envelope, fingerprints/checksum, worker-side disk reuse and recovery diagnostics. |
+| `uberhar_compute_rect.h`, `vk_compute_rect.*`, `vk_rasterizer.cpp` | Non-exclusive reasons for compute-state rejection; unchanged rendering admission. |
+| `vk_shader_disk_cache.*` | Startup/live object origins and known-record misses. |
+| `test_vertex_runtime.cpp`, `test_vertex_interpreter.cpp`, `test_spirv_cache.cpp` | Reference FIFO/stack equivalence, real control-flow/allocation checks and cache corruption/boundary tests. |
+| `test_graphics_profile.cpp`, `test_compute_rect.cpp`, `build_probe.sh`, `uberhar-shaders.yml`, `video_core/CMakeLists.txt` | Updated contracts and mandatory release gates. |
+
+
 ## Documentation
 
 `README.md` has an AstraEH branch overview above the upstream README.
@@ -130,3 +147,5 @@ model-sharpening changes.
 `docs/UBERHAR_LOG_ANALYSIS_0.0.9.md` separates the owner's four sessions.
 `docs/UBERHAR_ARCHITECTURE_0.0.9.md` is the early review and records implemented
 scope, unresolved limits, test contracts and the next engineering order.
+
+`docs/UBERHAR_LOG_ANALYSIS_0.0.10.md` maps all eight sessions and the 0.0.11 response.

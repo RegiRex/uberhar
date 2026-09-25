@@ -17,15 +17,14 @@ and limits fallback compilation after the first gameplay stall report, following
 [GitHub pre-releases](https://github.com/RegiRex/uberhar/releases) after package validation.
 See [UBERHAR.md](UBERHAR.md) for status and testing instructions.
 [Published ARM64 pre-releases](https://github.com/RegiRex/uberhar/releases).
-The 0.0.9 normal cold test still records 20.821 seconds of waiting; the warm
-run has no pipeline waits. See the [four-session analysis](docs/UBERHAR_LOG_ANALYSIS_0.0.9.md).
-
-**0.0.10** introduces one-click native, compute and automatic test profiles while
-preserving custom settings. These share a CPU vertex interpreter; compute coverage
-initially includes only validated solid rectangles. The native generic path can
-still compile new families/pipelines on demand. Full GPU interpretation, general
-compute rasterization and zero-wait first playthroughs remain development goals.
-See the [0.0.10 notes](docs/releases/0.0.10.md),
+The [0.0.10 eight-session analysis](docs/UBERHAR_LOG_ANALYSIS_0.0.10.md) identifies
+high CPU vertex cost and zero compute coverage in Awakening. **0.0.11** restores
+cached CPU shader translation in the three profiles, accelerates vertex-cache
+lookup, persists generic shader modules and improves bounded diagnostics.
+Test Native cold/warm at **2x** first. Compute/Automatic still have a restricted
+solid-rectangle subset; full GPU interpretation, general compute rasterization
+and zero-wait first playthroughs remain development goals.
+See the [0.0.11 notes](docs/releases/0.0.11.md),
 [architectural review](docs/UBERHAR_ARCHITECTURE_0.0.9.md) and
 [Actions](https://github.com/RegiRex/uberhar/actions/workflows/uberhar-alpha.yml).
 Publication requires all build/package/shader gates. The next default architectural

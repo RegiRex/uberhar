@@ -16,6 +16,11 @@ class ShaderEngine {
 public:
     virtual ~ShaderEngine() = default;
 
+    // AstraEH: Report the engine actually constructed, including non-JIT host fallback.
+    virtual const char* EngineName() const {
+        return "cpu_interpreter";
+    }
+
     /**
      * Performs any shader unit setup that only needs to happen once per shader (as opposed to once
      * per vertex, which would happen within the `Run` function).

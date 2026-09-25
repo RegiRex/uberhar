@@ -10,7 +10,7 @@ import org.citra.citra_emu.features.settings.model.view.SettingsItem
 object UberharGraphicsProfile {
     private val booleans get() = mapOf(
         BooleanSetting.SPIRV_SHADER_GEN to true,
-        BooleanSetting.DISABLE_SPIRV_OPTIMIZER to false,
+        BooleanSetting.DISABLE_SPIRV_OPTIMIZER to true,
         BooleanSetting.ASYNC_SHADERS to false,
         BooleanSetting.UBERHAR_HYBRID_TEV to true,
         BooleanSetting.UBERHAR_FORCE_TEV to true,

@@ -1,5 +1,5 @@
 <!-- AstraEH: Bounded troubleshooting and removal map for the hybrid renderer. -->
-# Renderer diagnostics, schema 7
+# Renderer diagnostics, schema 8
 
 Every Uberhar renderer log call has an adjacent **`AstraEH Log Line`** comment.
 Find it with `rg -n 'AstraEH Log Line' src`. These markers identify diagnostic
@@ -9,7 +9,7 @@ logging to this fork. Android session/title/export records remain functional
 parts of log export, rather than temporary shader debugging.
 
 The startup record identifies effective switches, compiler worker count,
-`diagnostics=7`, `dynamic_fragment=true`, `bridge_policy=ready_only`,
+`diagnostics=8`, `dynamic_fragment=true`, `bridge_policy=ready_only`,
 `fallback_abi=2`, `push_bytes=108`, `host_pipeline_identity=true` and
 `bridge_assembly=isolated_lists_strips_fans`.
 `cpu_bridge` is false when hybrid is off or forced fallback is on, even if the
@@ -69,23 +69,24 @@ Existing upstream compiler diagnostics can print source after a compilation
 failure. The caps above apply to Uberhar's own records, not every upstream log
 category. Keep ordinary logging filters; verbose shader tracing is unnecessary.
 
-## Virtual PICA profiles (0.0.10)
+## Virtual PICA profiles (0.0.10 and later)
 
 <!-- AstraEH: New counters separate coverage, CPU interpretation and moved compilation waits. -->
 
 `Uberhar_TestMode` is 0 custom, 1 native, 2 compute, 3 automatic. All profiles use
-`vertex_engine=cpu_interpreter`; this is not GPU vertex interpretation. Existing
-custom-mode counters retain their meaning.
+`vertex_engine=cpu`; the vertex-stage record names the actual engine. 0.0.10
+used the reference interpreter, while 0.0.11 requests the cached CPU JIT. Neither
+is GPU vertex interpretation. Existing custom-mode counters retain their meaning.
 
 - `Uberhar virtual native`: primary generic/recovery draw counts, foreground generic
   wait count/total/maximum, and `complete_ready_bank=false`. Uses the existing
   bounded progress/final reporting cadence. These waits are distinct from the old
   scheduler wait counter; do not conclude that zero scheduler waits means zero
   shader stalls. Different thread intervals may overlap.
-- `Uberhar virtual vertices totals`: one shutdown summary of batches, submitted
+- `Uberhar virtual vertices totals`: a shutdown summary of batches, submitted
   input vertices, full vertex-stage wall time and worst batch. This includes
   setup/memory synchronization, not just shader arithmetic. Immediate-mode vertex
-  processing is outside this batch counter.
+  processing is outside this batch counter. 0.0.11 also adds bounded progress windows.
 - `Uberhar compute prepared`: one startup record with actual coverage, pipeline
   count, timing availability and mode. Initialization failures/capability rejection
   have one explicit diagnostic; native recovery remains active.
@@ -104,3 +105,44 @@ whole-frame benchmarks or a guarantee that the chosen route is always faster.
 The compute kernel has one pre-game pipeline creation and no per-draw compilation.
 The wider native route remains on demand. A later version must implement/validate
 broader coverage before claiming a complete compilation-free first playthrough.
+
+## CPU cost and module reuse (0.0.11)
+
+<!-- AstraEH: Schema-8 fields, limits and attribution boundaries. -->
+
+- `Uberhar virtual vertices progress/totals` includes cumulative `shader_invocations`
+  and indexed `cache_hits`; inputs can exceed invocations. Geometry index-input
+  paths bypass the VS count. Immediate-mode vertices remain outside these batch
+  totals. `engine=cpu_jit` identifies the actual CPU JIT; unsupported host architectures
+  can report `cpu_interpreter`. Window fields describe elapsed wall time, CPU-stage
+  wall time, submitted inputs and actual shader runs since the preceding snapshot.
+  Progress is checked once per 4,096 batches, uses the existing batch-end clock read,
+  and is emitted at most once per five seconds plus final shutdown.
+- `Uberhar CPU JIT build` records only the first eight real program/swizzle cache
+  misses; `totals` reports all program builds, compilation wall time and maximum.
+  This is CPU machine-code generation, not GPU driver compilation. Its time is
+  already inside the encompassing CPU stage: do not add it to that stage total.
+- `Uberhar generic modules` reports persistent generic SPIR-V hits, compile misses,
+  rejected entries and write failures, at the existing renderer progress cadence.
+  A hit still creates a Vulkan module and may require a driver pipeline. Misses
+  include disk-cache-disabled builds. The first four rejected entries and first
+  four failed writes get detail; totals continue. Files use the title prefix in
+  `vulkan/pipeline`, so the existing Android clear operation removes them too.
+  Each file is limited to a 40-byte header plus 1 MiB of SPIR-V. The existing
+  128-family admission cap bounds new entries per title/renderer; old compiler
+  fingerprints remain until cache clearing. Length/framing/checksum/fingerprint
+  validation detects stale or damaged cache data; it is not SPIR-V semantic validation.
+- `Uberhar compute blockers` gives non-exclusive state rejection counts once at
+  shutdown: shadow, color writes, depth test/write, stencil, alpha, clip, scissor,
+  culling, fog and blending. One draw may increment several, so never sum these
+  as a draw count. Geometry and format rejection still happen after state admission.
+  These counters explain eligibility; they do not establish which expansion is cheap.
+- `Uberhar execution origins` reports startup host objects/guest records, live new
+  host objects, live new objects for an already-known guest key, and fragment-module
+  count. Startup objects can still be building. Known-record misses flag possible
+  identity changes; new guest keys do not by themselves establish different visible
+  gameplay. Counts describe the current title and use the existing bounded cadence.
+
+Generic foreground waits and scheduler waits can overlap on different threads.
+Do not sum them as elapsed hitch time. Human absence is not identified by these
+records: elapsed windows may include loading, menus, pauses or idle gameplay.

@@ -125,6 +125,10 @@ public:
     }
 
 private:
+    // AstraEH: Only the serial TEV worker reads/writes generic modules; reports use atomics.
+    std::vector<u32> LoadOrCompileTevModule(std::string_view source);
+    std::atomic<u64> generic_module_hits{}, generic_module_misses{}, generic_module_rejected{},
+        generic_module_write_failures{};
     friend ShaderDiskCache;
 
     /// Loads the driver pipeline cache

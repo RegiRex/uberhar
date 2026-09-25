@@ -47,6 +47,9 @@ public:
     }
 
 private:
+    // AstraEH: Distinguish startup reuse from live misses for already known guest records.
+    u64 startup_host_pipelines{}, startup_guest_records{}, live_host_pipelines{},
+        live_host_known_record{};
     // AstraEH: Only newly encountered live VS configurations contribute to these timings.
     u64 live_vs_codegen_count{};
     u64 live_vs_codegen_ns{};

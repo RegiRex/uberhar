@@ -287,7 +287,7 @@
     <!-- AstraEH: One-click experiments; descriptions state the actual initial coverage. -->
     <string name="uberhar_test_modes">Virtual PICA test modes — choose one</string>
     <string name="uberhar_test_native">Virtual PICA: native rasterization</string>
-    <string name="uberhar_test_native_description">Prototype: interprets vertex shaders on the CPU and uses generic fragment processing. New fragment families and pipelines can still pause. Restart the game after changing.</string>
+    <string name="uberhar_test_native_description">Prototype: uses cached CPU shader translation and generic fragment processing. First-use CPU and GPU compilation can still pause. Restart the game after changing.</string>
     <string name="uberhar_test_compute">Virtual PICA: compute rendering</string>
     <string name="uberhar_test_compute_description">Prototype: compute rendering for supported solid rectangles; other draws use the native test path. Coverage is recorded in the log. Restart the game after changing.</string>
     <string name="uberhar_test_auto">Virtual PICA: automatic combination</string>

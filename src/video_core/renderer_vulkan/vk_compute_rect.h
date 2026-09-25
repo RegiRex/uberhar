@@ -30,6 +30,12 @@ public:
     void EndSample(int slot);
     void Poll();
     void Report() const;
+    // AstraEH: Count all blocking state components, not just the first one.
+    void RejectState(u32 reasons) {
+        ++unsupported;
+        for (unsigned i = 0; i < rejected_state.size(); ++i)
+            rejected_state[i] += (reasons >> i) & 1;
+    }
     // AstraEH: Counters describe actual route coverage, including rejected states.
     u64 considered{}, unsupported{}, geometry_rejected{}, format_rejected{}, eligible{},
         native_draws{}, compute_draws{}, compute_pixels{};
@@ -52,6 +58,7 @@ private:
     vk::UniqueQueryPool queries;
     std::array<Sample, 32> samples{};
     ComputeRectSelector selector;
+    std::array<u64, static_cast<unsigned>(ComputeRectReject::Count)> rejected_state{};
     double timestamp_period{};
     u64 timestamp_mask{}, measurement_attempts{};
     std::array<u64, 2> measured_draws{};

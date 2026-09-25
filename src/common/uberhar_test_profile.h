@@ -19,15 +19,17 @@ inline void ApplyUberharTestProfile() {
     }
     values.graphics_api = GraphicsAPI::Vulkan;
     values.spirv_shader_gen = true;
-    values.disable_spirv_optimizer = false;
+    // AstraEH: Generic first use must not spend seconds in optional frontend optimization.
+    values.disable_spirv_optimizer = true;
     values.async_shader_compilation = false;
     values.uberhar_hybrid_tev = true;
     values.uberhar_force_tev = true;
     values.uberhar_cpu_vertex_bridge = false;
-    // AstraEH: The initial native/compute comparison shares the reference CPU interpreter.
-    // No PICA vertex JIT or per-program host vertex shader is needed in these modes.
+    // AstraEH: 0.0.10's reference interpreter limited battle speed even at 1x.
+    // Reuse the established CPU JIT while the GPU interpreter is unfinished.
+    // This still compiles CPU code on first encounter; its cost is logged separately.
     values.use_hw_shader = false;
-    values.use_shader_jit = false;
+    values.use_shader_jit = true;
     values.shaders_accurate_mul = true;
     values.use_disk_shader_cache = true;
     values.texture_filter = TextureFilter::NoFilter;

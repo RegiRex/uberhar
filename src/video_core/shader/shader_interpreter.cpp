@@ -5,7 +5,6 @@
 #include <algorithm>
 #include <cmath>
 #include <numeric>
-#include <boost/circular_buffer.hpp>
 #include <boost/container/static_vector.hpp>
 #include <nihstro/shader_bytecode.h>
 #include "common/assert.h"
@@ -17,6 +16,7 @@
 #include "video_core/pica/shader_unit.h"
 #include "video_core/pica_types.h"
 #include "video_core/shader/shader_interpreter.h"
+#include "video_core/shader/uberhar_interpreter_stack.h" // AstraEH: Allocation-free control stacks.
 
 using nihstro::Instruction;
 using nihstro::OpCode;
@@ -47,9 +47,10 @@ struct LoopStackElement {
 template <bool Debug>
 static void RunInterpreter(const ShaderSetup& setup, ShaderUnit& state,
                            DebugData<Debug>& debug_data, unsigned entry_point) {
-    boost::circular_buffer<IfStackElement> if_stack(8);
-    boost::circular_buffer<CallStackElement> call_stack(4);
-    boost::circular_buffer<LoopStackElement> loop_stack(4);
+    // AstraEH: Capacities and overflow semantics match the inherited interpreter.
+    InterpreterStack<IfStackElement, 8> if_stack;
+    InterpreterStack<CallStackElement, 4> call_stack;
+    InterpreterStack<LoopStackElement, 4> loop_stack;
     u32 program_counter = entry_point;
 
     const auto do_if = [&](Instruction instr, bool condition) {

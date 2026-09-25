@@ -79,6 +79,9 @@ void ShaderDiskCache::Init(const std::atomic_bool& stop_loading,
     if (!stop_loading && !InitPLCache(stop_loading, new_callback)) {
         RecreateCache(pl_cache, CacheFileType::PL_CACHE);
     }
+    // AstraEH: Snapshot objects reconstructed at load; their builds may still be queued.
+    startup_host_pipelines = graphics_pipelines.size();
+    startup_guest_records = known_graphic_pipelines.size();
 }
 
 std::optional<std::pair<u64, Shader* const>> ShaderDiskCache::UseProgrammableVertexShader(
@@ -260,6 +263,9 @@ GraphicsPipeline* ShaderDiskCache::GetPipeline(const PipelineInfo& info) {
 
     auto [it, new_pipeline] = graphics_pipelines.try_emplace(optimized_hash);
     if (new_pipeline) {
+        // AstraEH: A known record with a new host object warrants identity investigation.
+        ++live_host_pipelines;
+        live_host_known_record += known_graphic_pipelines.contains(hash);
         it.value() = std::make_unique<GraphicsPipeline>(
             parent.instance, parent.renderpass_cache, info, *parent.driver_pipeline_cache,
             *parent.pipeline_layout, shaders, &parent.pipeline_workers,
@@ -283,6 +289,12 @@ GraphicsPipeline* ShaderDiskCache::GetPipeline(const PipelineInfo& info) {
 
 // AstraEH: No new per-draw strings or sets: existing maps provide the census.
 void ShaderDiskCache::ReportUberharStats(const char* kind) const {
+    // AstraEH Log Line: Same bounded report cadence; counts objects, not completed compiles.
+    LOG_INFO(Render_Vulkan,
+             "Uberhar execution origins {}: startup_host={} startup_guest={} live_host={} "
+             "live_host_known_record={} fragment_modules={}",
+             kind, startup_host_pipelines, startup_guest_records, live_host_pipelines,
+             live_host_known_record, fragment_shaders.size());
     // AstraEH Log Line: bounded aggregate identifying module/pipeline reuse and foreground work.
     LOG_INFO(Render_Vulkan,
              "Uberhar execution cache {}: guest_pipeline_records={} host_pipelines={} "

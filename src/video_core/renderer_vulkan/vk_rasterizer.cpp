@@ -76,7 +76,7 @@ RasterizerVulkan::RasterizerVulkan(Memory::MemorySystem& memory, Pica::PicaCore&
                         TextureBufferSize(instance)},
       async_shaders{Settings::values.async_shader_compilation.GetValue()} {
 
-    // AstraEH: All test modes share interpreted CPU vertex/geometry processing.
+    // AstraEH: All test modes share cached CPU vertex/geometry processing.
     if (Settings::values.uberhar_test_mode.GetValue() != Settings::UberharTestMode::Custom) {
         compute_rect = std::make_unique<ComputeRectRenderer>(instance, scheduler, update_queue);
     }
@@ -601,8 +601,8 @@ bool RasterizerVulkan::Draw(bool accelerate, bool is_indexed) {
     int timing_slot = -1;
     if (compute_rect && !accelerate) {
         ++compute_rect->considered;
-        if (!SupportsComputeRectState(regs)) {
-            ++compute_rect->unsupported;
+        if (const auto reasons = ComputeRectStateRejections(regs); reasons != 0) {
+            compute_rect->RejectState(reasons);
         } else if (!framebuffer->color_id || framebuffer->color_level != 0 ||
                    framebuffer->Format(SurfaceType::Color) != VideoCore::PixelFormat::RGBA8) {
             ++compute_rect->format_rejected;
