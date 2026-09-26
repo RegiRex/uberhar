@@ -31,4 +31,6 @@ new review window. Keep previous entries for comparison.
 <!-- AstraEH: The third post-review alpha supplied a successful device baseline. -->
 The [current review](UBERHAR_ARCHITECTURE_0.0.12.md) rechecks source and the Thor
 cold/warm milestone, compares architectural alternatives, and selects runtime
-lighting controls for 0.0.13. Device performance remains to be measured.
+lighting controls for 0.0.13. The subsequent [0.0.13 device analysis](UBERHAR_LOG_ANALYSIS_0.0.13.md)
+confirms reduced family counts and retained warm speed; that results analysis is
+not another full architectural review and does not reset this ledger.

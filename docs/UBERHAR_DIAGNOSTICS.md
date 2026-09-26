@@ -227,3 +227,11 @@ entries each. `capped=true` makes counts lower bounds. There are no new per-draw
 log records or timers. Actual compilation, foreground waits, frame pacing and warm
 speed remain the performance evidence. The startup record identifies schema 10 and
 the 120-byte ABI so old and new shader layouts cannot be mistaken for one another.
+
+<!-- AstraEH: Device evidence exposed an unchanged core header, not a stale APK. -->
+In 0.0.13, the separate `Uberhar run` record in `PerfStats` still says
+`diagnostics=9`; the renderer startup correctly says `diagnostics=10` and ABI 3.
+Use the build revision plus renderer ABI to identify this build. The next runtime
+alpha should distinguish the frame schema explicitly or share version metadata;
+the stale core label does not alter recorded timings. See the
+[0.0.13 device analysis](UBERHAR_LOG_ANALYSIS_0.0.13.md).

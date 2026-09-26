@@ -25,11 +25,14 @@ lookup, persists generic shader modules and improves bounded diagnostics.
 late worst-hitch retention and bounded Android thermal/battery/memory sampling.
 Its [first Thor Native cold/warm test](docs/UBERHAR_LOG_ANALYSIS_0.0.12.md) at 2x
 reports 99.760% warm emulation speed and a substantial user-observed improvement.
-Cold generic compilation still produces hitches; this is the current reference
-result for continued refinement, not a completed compilation-free renderer.
+Cold generic compilation still produced hitches; that result supplied the baseline
+for 0.0.13, not proof of a completed compilation-free renderer.
 **0.0.13** moves lighting lookup controls and physical-light selection into per-draw
 state to reduce fragment families, with expanded pixel/Vulkan validation and
-same-workload family-count diagnostics. Its Thor performance is not yet measured.
+same-workload family-count diagnostics. The [three-run Thor result](docs/UBERHAR_LOG_ANALYSIS_0.0.13.md)
+shows 37→21 cold families under the same observed state, 2.948 s of cold generic
+waiting, and 99.776% fully warm speed. This is the new Native/2x reference;
+coverage differences limit comparison with the prior 8.121 s cold result.
 Test Native cold/warm at **2x** first. Compute/Automatic still have a restricted
 solid-rectangle subset; full GPU interpretation, general compute rasterization
 and zero-wait first playthroughs remain development goals.

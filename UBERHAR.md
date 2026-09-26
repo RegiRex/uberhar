@@ -7,22 +7,25 @@ Baseline: Azahar 2126.1.2, commit
 
 ## Current status
 
-<!-- AstraEH: 0.0.13 implementation is awaiting its own device comparison. -->
+<!-- AstraEH: 0.0.13 now has three complete Thor runs with distinct cache coverage. -->
 **0.0.13 moves lighting LUT controls and light-source selection into per-draw data**
 to reduce first-use fragment families. It retains structural lighting specialization,
 adds same-workload previous/new family counts, and expands shader correctness gates.
-See the [release/test notes](docs/releases/0.0.13.md). Android publication requires
-Actions gates; runtime performance remains to be tested on Thor.
+The prerelease passed all Actions gates. Its [three-run Thor analysis](docs/UBERHAR_LOG_ANALYSIS_0.0.13.md)
+confirms 37→21 families for the cold workload under old/new rules, 2.948 s cold
+generic waiting, and 99.776% fully warm speed. The extra-attack run encounters nine
+new modules; the third run is the fully warm comparison. Preserve 0.0.13 as the
+current Native/2x reference. See the [release/test notes](docs/releases/0.0.13.md).
 
-<!-- AstraEH: Verified 0.0.12 device milestone; retain as the next comparison baseline. -->
+<!-- AstraEH: Historical 0.0.12 device milestone used to assess the 0.0.13 change. -->
 **0.0.12 Native at 2x is now tested on Thor.** The owner reports a substantial
 improvement. The warm run records 99.760% emulation speed and 89.293 ms of generic
 foreground waiting, with all 37 requested generic modules loaded from disk.
 Cold generic waiting remains 8.121 s and the worst observed frame interval is
 806.541 ms. Extra animation and differing coverage limit direct replay comparisons.
 See the [full results and next target](docs/UBERHAR_LOG_ANALYSIS_0.0.12.md).
-Preserve this rendering baseline while reducing first-use fragment-program
-variation; broader compute and GPU vertex interpretation remain unfinished.
+This result supplied the 0.0.13 comparison baseline. Broader compute and GPU
+vertex interpretation remain unfinished.
 
 <!-- AstraEH: Owner-requested diagnostic coverage added without changing the 0.0.11 renderer. -->
 **0.0.12 adds run diagnostics to the 0.0.11 rendering changes.** Frame pacing,
