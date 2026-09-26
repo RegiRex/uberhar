@@ -1,5 +1,5 @@
 <!-- AstraEH: Bounded troubleshooting and removal map for the hybrid renderer. -->
-# Renderer diagnostics, schema 10
+# Renderer diagnostics, schema 11
 
 Every Uberhar renderer log call has an adjacent **`AstraEH Log Line`** comment.
 Find it with `rg -n 'AstraEH Log Line' src`. These markers identify diagnostic
@@ -9,8 +9,9 @@ logging to this fork. Android session/title/export records remain functional
 parts of log export, rather than temporary shader debugging.
 
 The startup record identifies effective switches, compiler worker count,
-`diagnostics=10`, `dynamic_fragment=true`, `bridge_policy=ready_only`,
-`fallback_abi=3`, `push_bytes=120`, `runtime_lighting_luts=true`, `host_pipeline_identity=true` and
+`diagnostics=11`, `dynamic_fragment=true`, `bridge_policy=ready_only`,
+`fallback_abi=4`, `push_bytes=120`, `runtime_lighting_luts=true`,
+`runtime_lighting_enables=true`, `host_pipeline_identity=true` and
 `bridge_assembly=isolated_lists_strips_fans`.
 `cpu_bridge` is false when hybrid is off or forced fallback is on, even if the
 saved bridge preference is on.
@@ -29,6 +30,7 @@ saved bridge preference is on.
 | `Uberhar fallback utility` | Completed successful fallback pipelines used or unused, unused driver-call time | Same aggregate cadence; a currently unused pipeline may serve later. |
 | `Uberhar pipeline build` | One slow specialization/fallback's queue, shader dependencies and driver call | First 20 slow builds per route. |
 | `Uberhar fallback build` | Fragment frontend size/time, pipeline wall time, `cpu_vertex` route | First 20 successful fallback builds. Zero shader bytes means module reuse. |
+| `Uberhar lighting family` | Canonical lighting/slot flags, texture kind, procedural flags and module sizes | First 32 successfully built families per title, including disk hits. Pipeline variants do not consume this cap. |
 | `Uberhar slow pipeline wait` | Actual command-worker wait and selected compatible pipeline | First 20 waits of at least 50 ms. Phase 0 queued, 1 dependencies, 2 driver, 3 complete, 4 failed. |
 | `Uberhar fallback failure` | Family/key, CPU-vertex route and exception detail | First eight experimental failures; totals continue counting. Failed objects cannot be selected. |
 | `Uberhar CPU bridge mismatch` | Expected versus prepared execution key | First four mismatches. Always use the existing accurate software path instead of binding incompatible state. |
@@ -231,7 +233,44 @@ the 120-byte ABI so old and new shader layouts cannot be mistaken for one anothe
 <!-- AstraEH: Device evidence exposed an unchanged core header, not a stale APK. -->
 In 0.0.13, the separate `Uberhar run` record in `PerfStats` still says
 `diagnostics=9`; the renderer startup correctly says `diagnostics=10` and ABI 3.
-Use the build revision plus renderer ABI to identify this build. The next runtime
-alpha should distinguish the frame schema explicitly or share version metadata;
-the stale core label does not alter recorded timings. See the
+Use the build revision plus renderer ABI to identify that build. 0.0.14 fixes
+the ambiguity with `frame_diagnostics=1`; the stale 0.0.13 label does not alter
+recorded timings. See the
 [0.0.13 device analysis](UBERHAR_LOG_ANALYSIS_0.0.13.md).
+
+
+## Runtime lighting enables/configurations (0.0.14)
+
+<!-- AstraEH: Separate same-state key evidence, bounded structural detail and timing. -->
+
+`alpha13_families` reproduces 0.0.13 family keys for the current observations,
+without compiling the old variant. Compare with `canonical_families` to measure
+this alpha's reduction. `previous_lighting_families` retains its **0.0.12** meaning.
+There are now 15 title-scoped census sets, each capped at 2,048; saturation sets
+`capped=true` and makes affected counts lower bounds. The new key adds one small
+copy/hash and set lookup per generic request, with no new per-draw timer or text.
+These are key counts, not compiled-module counts or saved milliseconds.
+
+The startup renderer schema is 11. The generator owns `DynamicTevAbiVersion=4`
+and the 120-byte layout; startup/census values read that constant. LUT byte bit 7
+now includes register enable and configuration support. Private input 6 means
+constant-zero index for CP outside Config7. Source/build fingerprints prevent
+reuse of incompatible generic modules; game shader/transferable formats do not change.
+
+`Uberhar lighting family` records the first 32 successfully built families per
+title, on the serial generic worker after timing the build. `ordinal` is a detail
+counter, not a draw/frame number. `flags` is canonical `LightConfig.raw`;
+`light_flags_lo/hi` pack the eight canonical 16-bit `Light.raw` slot words in
+ascending order (four per 64-bit word, least-significant slot first).
+`light_count`, `texture0`, `proctex`, GLSL/SPIR-V byte sizes and the family hash
+help identify remaining variants. A family may be unlit. Runtime LUT/source
+values are intentionally absent; these records contain no uniforms or shader code.
+Texture/procedural fields summarize only part of a family key, not its full identity.
+The counter resets after the worker drains on title changes. Beyond 32, aggregate
+census/build/cache counters continue, but structural detail is incomplete.
+
+`Uberhar run` now uses `frame_diagnostics=1`, the independent frame-accounting
+schema. Its timing semantics and five-second/normal-shutdown reporting are unchanged.
+Use the build revision for the app version, renderer `diagnostics` for renderer
+schema, and `frame_diagnostics` for frame schema. This avoids implying that one
+subsystem's diagnostic version identifies all others.

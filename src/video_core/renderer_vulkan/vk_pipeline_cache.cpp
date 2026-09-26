@@ -109,13 +109,14 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
     LOG_INFO(
         Render_Vulkan,
         "Uberhar: hybrid_tev={} force_tev={} async_shaders={} spirv_generator={} "
-        "diagnostics=10 first_ready=true compact_tev=true canonical_tev=true dynamic_fragment=true "
-        "cpu_bridge={} bridge_policy=ready_only fallback_abi=3 push_bytes=120 "
-        "runtime_lighting_luts=true "
+        "diagnostics=11 first_ready=true compact_tev=true canonical_tev=true dynamic_fragment=true "
+        "cpu_bridge={} bridge_policy=ready_only fallback_abi={} push_bytes={} "
+        "runtime_lighting_luts=true runtime_lighting_enables=true "
         "host_pipeline_identity=true bridge_assembly=isolated_lists_strips_fans "
         "compiler_workers={}",
         hybrid_tev, force_tev, Settings::values.async_shader_compilation.GetValue(),
-        Settings::values.spirv_shader_gen.GetValue(), cpu_vertex_bridge, num_worker_threads);
+        Settings::values.spirv_shader_gen.GetValue(), cpu_vertex_bridge, GLSL::DynamicTevAbiVersion,
+        sizeof(TevPushConstants), num_worker_threads);
     // AstraEH: Allocate the isolated compiler only when the experiment is enabled.
     if (hybrid_tev) {
         tev_worker = std::make_unique<Common::ThreadWorker>(1, "Uberhar TEV");
@@ -845,7 +846,11 @@ GraphicsPipeline* PipelineCache::GetTevFallback(const PipelineInfo& info, bool c
     // lighting reduction from unequal replays. Hash only; never compile this variant.
     auto previous_family = family_config;
     previous_family.lighting = tev_family_config->lighting;
-    const std::array<u64, 14> candidate_keys{
+    // AstraEH: Also retain 0.0.13's key for an apples-to-apples enable/configuration
+    // reduction count. The existing previous_lighting_families stays at 0.0.12.
+    const auto alpha13_family = GLSL::MakeDynamicTevFamilyConfig(*tev_family_config, profile,
+                                                                 GLSL::LightingFamilyKey::Alpha13);
+    const std::array<u64, 15> candidate_keys{
         raw_family_hash,
         family_hash,
         raw_pipeline_hash,
@@ -860,6 +865,7 @@ GraphicsPipeline* PipelineCache::GetTevFallback(const PipelineInfo& info, bool c
         previous_family.Hash(),
         Common::ComputeStructHash64(family_config.lighting),
         Common::ComputeStructHash64(family_config.proctex),
+        alpha13_family.Hash(),
     };
     constexpr std::size_t MaxCensusKeys = 2048;
     for (std::size_t i = 0; i < candidate_keys.size(); ++i) {
@@ -969,6 +975,27 @@ GraphicsPipeline* PipelineCache::GetTevFallback(const PipelineInfo& info, bool c
             fallback_job_queue_ns.fetch_add(job_queue_ns, std::memory_order::relaxed);
             fallback_shader_ns.fetch_add(shader_ns, std::memory_order::relaxed);
             fallback_driver_ns.fetch_add(driver_ns, std::memory_order::relaxed);
+            // AstraEH: First 32 distinct materialized families per title, including
+            // disk hits. Pipeline variants cannot consume the family detail budget.
+            // Pack structural slot flags without exposing uniforms or guest shader code.
+            if (glsl_bytes != 0 && tev_family_details < 32) {
+                ++tev_family_details;
+                std::array<u64, 2> light_flags{};
+                for (u32 i = 0; i < config.lighting.lights.size(); ++i) {
+                    light_flags[i / 4] |= static_cast<u64>(config.lighting.lights[i].raw)
+                                          << ((i % 4) * 16);
+                }
+                // AstraEH Log Line: bounded family shapes identify remaining specialization.
+                LOG_INFO(Render_Vulkan,
+                         "Uberhar lighting family: ordinal={} limit=32 family={:016X} "
+                         "light_count={} flags={:08X} light_flags_lo={:016X} "
+                         "light_flags_hi={:016X} texture0={} proctex={:08X} "
+                         "glsl_bytes={} spirv_bytes={}",
+                         tev_family_details, family_hash, config.lighting.src_num.Value(),
+                         config.lighting.raw, light_flags[0], light_flags[1],
+                         static_cast<u32>(config.texture.texture0_type.Value()), config.proctex.raw,
+                         glsl_bytes, spirv_bytes);
+            }
             // AstraEH: Build includes waiting for VS/GS dependencies; this is wall time,
             // not pure driver CPU time. Report only the first 20 builds to bound output.
             if (builds <= 20) {
@@ -1125,6 +1152,7 @@ void PipelineCache::ClearTevFallbacks() {
         keys.clear();
     }
     tev_census_capped = false;
+    tev_family_details = 0; // AstraEH: The serial compiler is drained above.
     bound_pipeline = nullptr;
     tev_family_config.reset();
 }
@@ -1241,14 +1269,15 @@ void PipelineCache::ReportUberharStats(const char* kind) {
             "canonical_families={} raw_pipelines={} canonical_pipelines={} vertex_programs={} "
             "geometry_programs={} vertex_layouts={} attachments={} blending={} rasterization={} "
             "depth_stencil={} previous_lighting_families={} lighting_shapes={} proctex_shapes={} "
-            "lighting_abi=3 capped={} limit=2048",
+            "alpha13_families={} lighting_abi={} capped={} limit=2048",
             kind, tev_candidate_keys[0].size(), tev_candidate_keys[1].size(),
             tev_candidate_keys[2].size(), tev_candidate_keys[3].size(),
             tev_candidate_keys[4].size(), tev_candidate_keys[5].size(),
             tev_candidate_keys[6].size(), tev_candidate_keys[7].size(),
             tev_candidate_keys[8].size(), tev_candidate_keys[9].size(),
             tev_candidate_keys[10].size(), tev_candidate_keys[11].size(),
-            tev_candidate_keys[12].size(), tev_candidate_keys[13].size(), tev_census_capped);
+            tev_candidate_keys[12].size(), tev_candidate_keys[13].size(),
+            tev_candidate_keys[14].size(), GLSL::DynamicTevAbiVersion, tev_census_capped);
         // AstraEH: Unused means not selected by the scheduler as of this snapshot,
         // not permanently useless. Only completed builds contribute driver time.
         u64 used = 0;

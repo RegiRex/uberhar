@@ -97,7 +97,7 @@ def draw(path):
 
 
 count = 0
-for i in range(416):
+for i in range(928):
     uniforms.write((cases / f"{i}-uniforms.bin").read_bytes())
     raw = (cases / f"{i}-state.bin").read_bytes()
     if len(raw) != 120:
@@ -115,4 +115,4 @@ for i in range(416):
     count += 1024
     if i % 48 == 47:
         print(f"Compared {i + 1} full fragment states", flush=True)
-print(f"PASS: {count} exact RGBA8 pixels and {count} depth/discard comparisons across 416 states", flush=True)
+print(f"PASS: {count} exact RGBA8 pixels and {count} depth/discard comparisons across 928 states", flush=True)

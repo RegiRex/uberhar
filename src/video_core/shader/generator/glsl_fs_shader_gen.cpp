@@ -153,7 +153,8 @@ layout (binding = 2, std140) uniform fs_data {
 // AstraEH: Share fallback modules across raw register states that emit identical GLSL.
 // Keep this out of FSConfig's transferable representation and the specialized path.
 // Applying the profile again in FragmentModule must leave these effective choices intact.
-FSConfig MakeDynamicTevFamilyConfig(const FSConfig& original, const Profile& profile) {
+FSConfig MakeDynamicTevFamilyConfig(const FSConfig& original, const Profile& profile,
+                                    LightingFamilyKey lighting_key) {
     auto config = original;
     config.ApplyProfile(profile);
     config.texture.tev_stages = {};
@@ -203,14 +204,21 @@ FSConfig MakeDynamicTevFamilyConfig(const FSConfig& original, const Profile& pro
         config.texture.texture0_type.Assign(TextureType::Texture2D);
     }
     // AstraEH: LUT arithmetic choices and source slots are draw-uniform data.
-    // Keep enable bits, light count, bump mode and per-light operation structure
-    // specialized; sharing these controls must not add unused lighting operations.
+    // AstraEH: LUT enables/configuration support now travel in the same bytes.
+    // Keep light count, bump mode and per-light structure specialized; disabled
+    // runtime LUTs return before doing vector arithmetic or reading a table.
     auto& lighting = config.lighting;
     for (auto* lut : {&lighting.lut_d0, &lighting.lut_d1, &lighting.lut_sp, &lighting.lut_fr,
                       &lighting.lut_rr, &lighting.lut_rg, &lighting.lut_rb}) {
         lut->abs_input.Assign(0);
         lut->type.Assign(LightingRegs::LightingLutInput::NH);
         lut->SetScale(1.0f);
+        if (lighting_key == LightingFamilyKey::Current) {
+            lut->enable.Assign(1);
+        }
+    }
+    if (lighting_key == LightingFamilyKey::Current) {
+        lighting.config.Assign(LightingRegs::LightingConfig::Config7);
     }
     for (auto& light : lighting.lights) {
         light.num.Assign(0);
@@ -241,10 +249,24 @@ DynamicTevState MakeDynamicTevState(const FSConfig& original, const Profile& pro
     // AstraEH: Snapshot original lighting before family reduction. Scheduler
     // commands already own the complete push-constant value for each draw.
     const auto luts = LightingLuts(config.lighting);
+    using Sampler = LightingRegs::LightingSampler;
+    constexpr std::array samplers{Sampler::Distribution0,        Sampler::Distribution1,
+                                  Sampler::SpotlightAttenuation, Sampler::Fresnel,
+                                  Sampler::ReflectRed,           Sampler::ReflectGreen,
+                                  Sampler::ReflectBlue};
     for (u32 i = 0; i < luts.size(); ++i) {
         const auto& lut = *luts[i];
-        const u32 control = static_cast<u32>(lut.type.Value()) | (lut.abs_input.Value() << 3) |
-                            (EncodeLightingScale(lut.GetScale()) << 4);
+        // AstraEH: Spotlight has no global enable register: the inherited path
+        // uses per-light enable plus configuration support, ignoring lut_sp.enable.
+        const bool enabled = (i == 2 || lut.enable) && LightingRegs::IsLightingSamplerSupported(
+                                                           config.lighting.config, samplers[i]);
+        const u32 input = lut.type == LightingRegs::LightingLutInput::CP &&
+                                  config.lighting.config != LightingRegs::LightingConfig::Config7
+                              ? 6U
+                              : static_cast<u32>(lut.type.Value());
+        const u32 control = input | (lut.abs_input.Value() << 3) |
+                            (EncodeLightingScale(lut.GetScale()) << 4) |
+                            (static_cast<u32>(enabled) << 7);
         auto& packed = i < 4 ? state.lighting_luts_lo : state.lighting_luts_hi;
         packed |= control << ((i % 4) * 8);
     }
@@ -966,7 +988,7 @@ void FragmentModule::WriteLighting() {
     // AstraEH: Runtime selectors change data access, not the unrolled light sequence.
     const auto get_lut_value = [&](LightingRegs::LightingSampler sampler, u32 light_num,
                                    LightingRegs::LightingLutInput input, bool abs, u32 light_slot,
-                                   u32 lut_slot) {
+                                   u32 lut_slot, std::string_view disabled_value = "1.0") {
         if (dynamic_tev) {
             const auto source = fmt::format("uber_light_{}", light_slot);
             const auto sampler_id = static_cast<u32>(sampler);
@@ -975,8 +997,8 @@ void FragmentModule::WriteLighting() {
                                 : fmt::format("{}", sampler_id);
             return fmt::format("UberLightingLUT(UberLutControl({}u), {}, "
                                "((uber_tev.lighting_sources >> (24u + {})) & 1u) != 0u, "
-                               "normal, tangent, half_vector, light_vector, spot_dir)",
-                               lut_slot, sampler_expr, source);
+                               "normal, tangent, half_vector, light_vector, spot_dir, {})",
+                               lut_slot, sampler_expr, source, disabled_value);
         }
         std::string index;
         switch (input) {
@@ -1069,8 +1091,9 @@ void FragmentModule::WriteLighting() {
         // If enabled, compute spot light attenuation value
         std::string spot_atten = "1.0";
         if (light_config.spot_atten_enable &&
-            LightingRegs::IsLightingSamplerSupported(
-                lighting.config, LightingRegs::LightingSampler::SpotlightAttenuation)) {
+            (dynamic_tev ||
+             LightingRegs::IsLightingSamplerSupported(
+                 lighting.config, LightingRegs::LightingSampler::SpotlightAttenuation))) {
             const std::string value = get_lut_value(
                 LightingRegs::SpotlightAttenuationSampler(light_config.num), light_config.num,
                 lighting.lut_sp.type, lighting.lut_sp.abs_input, light_index, 2);
@@ -1100,9 +1123,9 @@ void FragmentModule::WriteLighting() {
 
         // Specular 0 component
         std::string d0_lut_value = "1.0";
-        if (lighting.lut_d0.enable &&
-            LightingRegs::IsLightingSamplerSupported(
-                lighting.config, LightingRegs::LightingSampler::Distribution0)) {
+        if (dynamic_tev || (lighting.lut_d0.enable &&
+                            LightingRegs::IsLightingSamplerSupported(
+                                lighting.config, LightingRegs::LightingSampler::Distribution0))) {
             // Lookup specular "distribution 0" LUT value
             const std::string value =
                 get_lut_value(LightingRegs::LightingSampler::Distribution0, light_config.num,
@@ -1116,9 +1139,9 @@ void FragmentModule::WriteLighting() {
         }
 
         // If enabled, lookup ReflectRed value, otherwise, 1.0 is used
-        if (lighting.lut_rr.enable &&
-            LightingRegs::IsLightingSamplerSupported(lighting.config,
-                                                     LightingRegs::LightingSampler::ReflectRed)) {
+        if (dynamic_tev || (lighting.lut_rr.enable &&
+                            LightingRegs::IsLightingSamplerSupported(
+                                lighting.config, LightingRegs::LightingSampler::ReflectRed))) {
             std::string value =
                 get_lut_value(LightingRegs::LightingSampler::ReflectRed, light_config.num,
                               lighting.lut_rr.type, lighting.lut_rr.abs_input, light_index, 4);
@@ -1130,12 +1153,12 @@ void FragmentModule::WriteLighting() {
         }
 
         // If enabled, lookup ReflectGreen value, otherwise, ReflectRed value is used
-        if (lighting.lut_rg.enable &&
-            LightingRegs::IsLightingSamplerSupported(lighting.config,
-                                                     LightingRegs::LightingSampler::ReflectGreen)) {
-            std::string value =
-                get_lut_value(LightingRegs::LightingSampler::ReflectGreen, light_config.num,
-                              lighting.lut_rg.type, lighting.lut_rg.abs_input, light_index, 5);
+        if (dynamic_tev || (lighting.lut_rg.enable &&
+                            LightingRegs::IsLightingSamplerSupported(
+                                lighting.config, LightingRegs::LightingSampler::ReflectGreen))) {
+            std::string value = get_lut_value(
+                LightingRegs::LightingSampler::ReflectGreen, light_config.num, lighting.lut_rg.type,
+                lighting.lut_rg.abs_input, light_index, 5, "refl_value.r");
             value =
                 dynamic_tev ? value : fmt::format("({:#} * {})", lighting.lut_rg.GetScale(), value);
             out += fmt::format("refl_value.g = {};\n", value);
@@ -1144,12 +1167,12 @@ void FragmentModule::WriteLighting() {
         }
 
         // If enabled, lookup ReflectBlue value, otherwise, ReflectRed value is used
-        if (lighting.lut_rb.enable &&
-            LightingRegs::IsLightingSamplerSupported(lighting.config,
-                                                     LightingRegs::LightingSampler::ReflectBlue)) {
-            std::string value =
-                get_lut_value(LightingRegs::LightingSampler::ReflectBlue, light_config.num,
-                              lighting.lut_rb.type, lighting.lut_rb.abs_input, light_index, 6);
+        if (dynamic_tev || (lighting.lut_rb.enable &&
+                            LightingRegs::IsLightingSamplerSupported(
+                                lighting.config, LightingRegs::LightingSampler::ReflectBlue))) {
+            std::string value = get_lut_value(
+                LightingRegs::LightingSampler::ReflectBlue, light_config.num, lighting.lut_rb.type,
+                lighting.lut_rb.abs_input, light_index, 6, "refl_value.r");
             value =
                 dynamic_tev ? value : fmt::format("({:#} * {})", lighting.lut_rb.GetScale(), value);
             out += fmt::format("refl_value.b = {};\n", value);
@@ -1159,9 +1182,9 @@ void FragmentModule::WriteLighting() {
 
         // Specular 1 component
         std::string d1_lut_value = "1.0";
-        if (lighting.lut_d1.enable &&
-            LightingRegs::IsLightingSamplerSupported(
-                lighting.config, LightingRegs::LightingSampler::Distribution1)) {
+        if (dynamic_tev || (lighting.lut_d1.enable &&
+                            LightingRegs::IsLightingSamplerSupported(
+                                lighting.config, LightingRegs::LightingSampler::Distribution1))) {
             // Lookup specular "distribution 1" LUT value
             const std::string value =
                 get_lut_value(LightingRegs::LightingSampler::Distribution1, light_config.num,
@@ -1177,9 +1200,12 @@ void FragmentModule::WriteLighting() {
 
         // Fresnel
         // Note: only the last entry in the light slots applies the Fresnel factor
-        if (light_index == lighting.src_num - 1 && lighting.lut_fr.enable &&
-            LightingRegs::IsLightingSamplerSupported(lighting.config,
-                                                     LightingRegs::LightingSampler::Fresnel)) {
+        // AstraEH: Disabled Fresnel preserves initial alpha=1; only the final
+        // slot applies it, before the existing shadow-alpha multiplication.
+        if (light_index == lighting.src_num - 1 &&
+            (dynamic_tev || (lighting.lut_fr.enable &&
+                             LightingRegs::IsLightingSamplerSupported(
+                                 lighting.config, LightingRegs::LightingSampler::Fresnel)))) {
             // Lookup fresnel LUT value
             std::string value =
                 get_lut_value(LightingRegs::LightingSampler::Fresnel, light_config.num,
@@ -1849,16 +1875,18 @@ float LookupLightingLUTSigned(int lut_index, float pos) {
 
     // AstraEH: Uniform material controls share one LUT evaluator. All source
     // expressions and signed/unsigned interpolation match the specialized path.
-    // CP remains configuration-7-only; do not normalize that structural choice.
+    // CP outside configuration 7 is encoded as a private constant-zero input.
     if (dynamic_tev) {
         out += R"(
 uint UberLutControl(uint slot) {
     uint lut_word = slot < 4u ? uber_tev.lighting_luts_lo : uber_tev.lighting_luts_hi;
-    return (lut_word >> ((slot & 3u) * 8u)) & 127u;
+    return (lut_word >> ((slot & 3u) * 8u)) & 255u;
 }
 float UberLightingLUT(uint control, int sampler_id, bool two_sided,
                       vec3 normal, vec3 tangent, vec3 half_vector,
-                      vec3 light_vector, vec3 spot_dir) {
+                      vec3 light_vector, vec3 spot_dir, float disabled_value) {
+    // AstraEH: Uniform early exit preserves disabled defaults without LUT work.
+    if ((control & 128u) == 0u) return disabled_value;
     float index = 0.0;
     switch (control & 7u) {
     case 0u: index = dot(normal, normalize(half_vector)); break;
@@ -1866,12 +1894,9 @@ float UberLightingLUT(uint control, int sampler_id, bool two_sided,
     case 2u: index = dot(normal, normalize(view)); break;
     case 3u: index = dot(light_vector, normal); break;
     case 4u: index = dot(light_vector, spot_dir); break;
-)";
-        if (config.lighting.config == LightingRegs::LightingConfig::Config7) {
-            out += "case 5u: index = dot(normalize(half_vector) - normal * "
-                   "dot(normal, normalize(half_vector)), tangent); break;\n";
-        }
-        out += R"(
+    case 5u: index = dot(normalize(half_vector) - normal *
+                        dot(normal, normalize(half_vector)), tangent); break;
+    // AstraEH: Private input 6 keeps index zero, as inherited non-Config7 CP does.
     }
     float value;
     if ((control & 8u) != 0u) {

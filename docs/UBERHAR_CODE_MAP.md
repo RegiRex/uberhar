@@ -81,7 +81,7 @@ All files in `tools/uberhar/` are new AstraEH work.
 | `tools/uberhar/shader_probe.cpp` | 224 reproducible TEV cases, directed edge/texture-reuse/unused-operand cases, AddSigned exclusion and 64 full fragment modules. 0.0.7 emits canonical families and checks their source against the original family. |
 | `tools/uberhar/compare_tev.py` | Compare generated specialized/interpreted combiner math on Mesa and independently verify texture fetch counts; synthetic sampling inputs do not test real texture derivatives or device drivers. |
 | `tools/uberhar/validate_shaders.py` | Compile and validate 64 baseline modules plus unique full lighting-corpus modules with frontend optimization off/on; verify the TEV loop's DontUnroll hint and all seven fallback state offsets reach SPIR-V. |
-| `tools/uberhar/fragment_state_probe.cpp` and `compare_fragment_state.py` | 416 full specialized/generic fragment comparisons, production state/uniform transport, real textured offscreen color/depth/discard checks on Mesa; GL resource-declaration adaptation is not Vulkan-driver validation. |
+| `tools/uberhar/fragment_state_probe.cpp` and `compare_fragment_state.py` | 928 full specialized/generic fragment comparisons, production state/uniform transport, real textured offscreen color/depth/discard checks on Mesa; GL resource-declaration adaptation is not Vulkan-driver validation. |
 | `tools/uberhar/test_pipeline_keys.cpp` | 36 production execution-key checks covering equivalent host modules/inactive fields and active state that must remain distinct. |
 | `tools/uberhar/test_pipeline_policy.cpp` | Production CPU admission bounds and normal/forced selection under successful, pending and failed fallback completions. |
 | `tools/uberhar/test_bridge_assembly.cpp` | 264 comparisons using the actual PICA assembler against independent topology sequences, plus persistent ordinary batches, winding restoration and exceptional exit. |
@@ -177,3 +177,17 @@ scope, unresolved limits, test contracts and the next engineering order.
 | `shader_probe.cpp`, `compare_tev.py`, `validate_shaders.py` | ABI-aware transport tests; all unique full lighting-corpus shaders join the dual-optimizer Vulkan validation gate. |
 | `.github/workflows/uberhar-shaders.yml` | Extended Vulkan corpus and 40-minute gate limit; publication still depends on success. |
 | `docs/UBERHAR_ARCHITECTURE_0.0.12.md`, review ledger, release notes | Evidence-based architectural review, device acceptance criteria and next review after 0.0.16. |
+
+
+## Runtime lighting enables/configurations (0.0.14)
+
+<!-- AstraEH: Attribute this alpha's implementation and all new diagnostics. -->
+
+| File or section | AstraEH work |
+| --- | --- |
+| `glsl_fs_shader_gen.{h,cpp}` | ABI v4 in the same 120 bytes: effective LUT enables, private zero-index CP encoding, enable/configuration family normalization, uniform disabled defaults, explicit diagnostic-only 0.0.13 key policy. Retains light counts and per-light structure. |
+| `vk_pipeline_cache.{h,cpp}` | Renderer schema 11, generator-owned ABI metadata, same-state 0.0.13 key count, first 32 materialized-family structural records on serial worker; title reset after drain. |
+| `src/core/perf_stats.cpp` | Separate `frame_diagnostics=1` label; unchanged frame accounting. |
+| `test_tev_family.cpp` | Independent support matrix across eight configurations and all 128 enable masks (including spotlight dummy), current/0.0.13 key distinctions and exact CP transport. |
+| `fragment_state_probe.cpp`, `compare_fragment_state.py`, `validate_shaders.py` | 512 additional full fragment cases, all 64 real enable masks crossed with eight configurations, stronger unsaturated reflection terms, final-light alpha/shadow/CP coverage; all 928 cases join existing pixel and dual-optimizer Vulkan gates. |
+| `README.md`, `UBERHAR.md`, `UBERHAR_VERSION`, diagnostics and release notes | 0.0.14 scope, validation, metadata meanings and Native/2x acceptance instructions; 0.0.13 remains the measured baseline. |

@@ -1,7 +1,8 @@
 // Copyright 2026 Uberhar contributors
 // Licensed under GPLv2 or any later version; see license.txt.
-// AstraEH: Emit complete specialized/generic fragment shaders and the production
-// uniform/120-byte transport for offscreen state, texture, color and depth tests.
+// AstraEH: Emit complete specialized/generic fragment shaders and the
+// production uniform/120-byte transport for offscreen state, texture, color and
+// depth tests.
 #include <filesystem>
 #include <fstream>
 #include <stdexcept>
@@ -43,9 +44,10 @@ int main(int argc, char** argv) {
     constexpr std::array scissor{Raster::ScissorMode::Disabled, Raster::ScissorMode::Include,
                                  Raster::ScissorMode::Exclude};
     constexpr std::array types{Texture::Texture2D, Texture::Projection2D, Texture::Disabled};
-    // AstraEH: Keep the original corpus, then cross remapped/duplicate light slots,
-    // LUT controls, all eight lighting configurations and one through eight lights.
-    constexpr u32 Cases = 416;
+    // AstraEH: Keep the original corpus, then cross remapped/duplicate light
+    // slots, LUT controls, all eight lighting configurations and one through
+    // eight lights.
+    constexpr u32 Cases = 928;
     for (u32 i = 0; i < Cases; ++i) {
         Pica::RegsInternal regs{};
         regs.framebuffer.output_merger.alphablend_enable.Assign(1);
@@ -65,8 +67,9 @@ int main(int argc, char** argv) {
             (axis & 1 ? wrap.t : wrap.s) =
                 (i >> axis) & 1 ? Texture::ClampToBorder : Texture::Repeat;
         }
-        // AstraEH: Select each real texture unit; final cases also exercise lighting
-        // outputs through a modulate stage without altering the lighting algorithm.
+        // AstraEH: Select each real texture unit; final cases also exercise
+        // lighting outputs through a modulate stage without altering the lighting
+        // algorithm.
         config.texture.tev_stages[0].sources_raw = (3 + i % 3) * 0x10001U;
         for (u32 stage = 1; stage < 6; ++stage)
             config.texture.tev_stages[stage].sources_raw = 0x000f000f;
@@ -117,13 +120,53 @@ int main(int argc, char** argv) {
                 lut.SetScale(scales[(n / 8 + slot) % scales.size()]);
             }
             // AstraEH: Isolate primary/secondary lighting without alpha rejection
-            // or fog hiding numerical differences. The earlier corpus covers their interaction.
+            // or fog hiding numerical differences. The earlier corpus covers their
+            // interaction.
             config.framebuffer.alpha_test_func.Assign(Pica::FramebufferRegs::CompareFunc::Always);
             config.framebuffer.scissor_test_mode.Assign(Raster::ScissorMode::Disabled);
             config.texture.fog_mode.Assign(Fog::None);
             config.texture.texture0_type.Assign(Texture::Texture2D);
             config.texture.tev_stages[0].sources_raw = (1 + (n / 2) % 2) * 0x10001U;
             config.texture.tev_stages[1] = {0x000f000f, 0, 0, 0};
+        }
+        if (i >= 416) {
+            // AstraEH: All 64 real global-enable masks crossed with all eight
+            // configurations. Keep two lights to expose last-slot Fresnel, and
+            // isolate reflection RGB plus Fresnel alpha rather than hiding them
+            // behind texture modulation. Includes disabled/unsupported RG/RB,
+            // configuration-limited CP and ignored spotlight dummy enable.
+            using Lighting = Pica::LightingRegs;
+            const u32 n = i - 416;
+            const u32 mask = n / 8;
+            auto& lighting = config.lighting;
+            lighting.src_num.Assign(2);
+            lighting.bump_mode.Assign(Lighting::LightingBumpMode::None);
+            lighting.clamp_highlights.Assign(0);
+            lighting.enable_shadow.Assign((mask >> 3) & 1);
+            lighting.shadow_selector.Assign(0);
+            lighting.shadow_invert.Assign(0);
+            for (u32 slot = 0; slot < 8; ++slot) {
+                auto& light = lighting.lights[slot];
+                light.raw = 0;
+                light.num.Assign(slot % 2 ? 5 : 3);
+                light.spot_atten_enable.Assign(1);
+                light.two_sided_diffuse.Assign(slot % 2);
+                light.shadow_enable.Assign(1);
+            }
+            const std::array luts{&lighting.lut_d0, &lighting.lut_d1, &lighting.lut_fr,
+                                  &lighting.lut_rr, &lighting.lut_rg, &lighting.lut_rb};
+            for (u32 slot = 0; slot < luts.size(); ++slot) {
+                auto& lut = *luts[slot];
+                lut.enable.Assign((mask >> slot) & 1);
+                lut.type.Assign(static_cast<Lighting::LightingLutInput>((mask + slot) % 6));
+                lut.abs_input.Assign((mask + slot / 2) % 2);
+                lut.SetScale(1.0f);
+            }
+            lighting.lut_sp.enable.Assign(mask & 1); // AstraEH: Must be ignored, as upstream does.
+            lighting.lut_sp.type.Assign(Lighting::LightingLutInput::CP);
+            lighting.lut_sp.abs_input.Assign(mask & 1);
+            lighting.lut_sp.SetScale(1.0f);
+            config.texture.tev_stages[0].sources_raw = 2U | ((1 + (mask & 1)) << 16);
         }
         if (!GLSL::SupportsDynamicTev(config, user)) {
             throw std::runtime_error("Lighting corpus unexpectedly uses unsupported state");
@@ -161,7 +204,8 @@ int main(int argc, char** argv) {
         uniforms.light_src[0].dist_atten_scale = 1.f;
         if (i >= 192) {
             // AstraEH: Distinct per-source uniforms and 24 separate nonconstant LUTs
-            // make an incorrect source/table index observable, instead of aliasing table zero.
+            // make an incorrect source/table index observable, instead of aliasing
+            // table zero.
             for (u32 table = 0; table < 24; ++table) {
                 uniforms.lighting_lut_offset[table / 4][table % 4] = table * 256;
             }
@@ -179,7 +223,15 @@ int main(int argc, char** argv) {
                 light.dist_atten_scale = 0.06f * f;
             }
         }
+        if (i >= 416) {
+            // AstraEH: Strong, unsaturated reflection terms keep wrong disabled
+            // defaults visible at RGBA8 precision instead of quantizing them away.
+            for (auto& light : uniforms.light_src) {
+                light.specular_0 = {0.09f, 0.05f, 0.12f};
+                light.specular_1 = {0.31f, 0.23f, 0.37f};
+            }
+        }
         Binary(prefix.string() + "-uniforms.bin", uniforms);
     }
-    fmt::print("Emitted {} full fragment state comparisons (224 lighting cases)\n", Cases);
+    fmt::print("Emitted {} full fragment state comparisons (736 lighting cases)\n", Cases);
 }

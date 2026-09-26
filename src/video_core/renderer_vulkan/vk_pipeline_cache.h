@@ -218,9 +218,11 @@ private:
     // AstraEH: Renderer-thread-only, per-title observations before admission limits.
     // Dimensions: raw/canonical FS, raw/canonical pipeline, VS, GS, vertex layout,
     // attachments, blending, rasterization, depth/stencil, pre-0.0.13 family,
-    // lighting and procedural shapes. A saturated set gives a lower bound only.
-    std::array<std::unordered_set<u64>, 14> tev_candidate_keys;
+    // lighting/procedural shapes, then 0.0.13 family. Saturated sets are lower bounds.
+    std::array<std::unordered_set<u64>, 15> tev_candidate_keys;
     bool tev_census_capped{};
+    // AstraEH: Serial TEV worker owns this cap; reset only after draining on title change.
+    u32 tev_family_details{};
     // AstraEH: Renderer-thread counters only; emit aggregates at the existing five-second cadence.
     u64 cpu_bridge_pending{};
     u64 cpu_bridge_selected{};

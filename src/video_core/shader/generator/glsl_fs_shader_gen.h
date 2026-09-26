@@ -13,17 +13,23 @@ bool SupportsDynamicTev(const FSConfig& config, const UserConfig& user);
 
 /// AstraEH: Canonicalize only shader-irrelevant fallback state for a fixed device profile.
 /// Sampler and fixed-function pipeline state must still be supplied separately by the caller.
-FSConfig MakeDynamicTevFamilyConfig(const FSConfig& config, const Profile& profile);
+// AstraEH: Alpha13 is a diagnostic-only counterfactual key, never a shader to compile.
+enum class LightingFamilyKey { Current, Alpha13 };
+FSConfig MakeDynamicTevFamilyConfig(const FSConfig& config, const Profile& profile,
+                                    LightingFamilyKey lighting_key = LightingFamilyKey::Current);
 
-// AstraEH: Version 3 of the private Vulkan fallback ABI. Stay below Vulkan's
+// AstraEH: Version 4 of the private Vulkan fallback ABI. Stay below Vulkan's
 // 128-byte minimum push-constant limit; specialized/disk shader layouts are unchanged.
+inline constexpr u32 DynamicTevAbiVersion = 4;
 struct DynamicTevState {
     std::array<TevStageConfigRaw, 6> stages;
     u32 buffer_mask;
     u32 framebuffer; // alpha function [0:2], scissor [3:4], W buffering [5].
     u32 texture;     // border axes [0:5], coord2 [6], fog [7], flip [8], tex0 type [10:12].
     // AstraEH: Seven LUT controls use one byte each: input [0:2], unsigned [3],
-    // scale [4:6]. Order: D0, D1, spotlight, Fresnel, red, green, blue.
+    // scale [4:6], effective enable [7]. Input 6 privately means constant-zero
+    // index (CP outside Config7); raw guest inputs 6/7 remain unsupported.
+    // Order: D0, D1, spotlight, Fresnel, red, green, blue.
     u32 lighting_luts_lo{};
     u32 lighting_luts_hi{};
     // AstraEH: Eight three-bit source selectors, then the original slot-indexed

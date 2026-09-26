@@ -33,10 +33,14 @@ same-workload family-count diagnostics. The [three-run Thor result](docs/UBERHAR
 shows 37→21 cold families under the same observed state, 2.948 s of cold generic
 waiting, and 99.776% fully warm speed. This is the new Native/2x reference;
 coverage differences limit comparison with the prior 8.121 s cold result.
+<!-- AstraEH: Next runtime upgrade is distinct from the measured 0.0.13 reference. -->
+**0.0.14** also supplies lighting enables/configuration support as runtime data,
+adds same-run 0.0.13/current family counts and bounded remaining-family details,
+and expands rendering comparisons to 928 cases. Thor performance is pending.
 Test Native cold/warm at **2x** first. Compute/Automatic still have a restricted
 solid-rectangle subset; full GPU interpretation, general compute rasterization
 and zero-wait first playthroughs remain development goals.
-See the [0.0.13 notes](docs/releases/0.0.13.md),
+See the [0.0.14 notes](docs/releases/0.0.14.md),
 [architectural review](docs/UBERHAR_ARCHITECTURE_0.0.12.md) and
 [Actions](https://github.com/RegiRex/uberhar/actions/workflows/uberhar-alpha.yml).
 Publication requires all build/package/shader gates. The next default architectural

@@ -156,9 +156,10 @@ int main() {
         variant.texture.combiner_buffer_input.Assign(255);
         CheckPair(base, variant, profile, true, "Runtime TEV data entered the family key");
     }
-    // AstraEH: Each runtime lighting dimension must alias without changing source;
-    // structural lighting changes must remain distinct. Numerical behavior is
-    // independently checked against specialized rendering by the full fragment corpus.
+    // AstraEH: Each runtime lighting dimension must alias without changing
+    // source; structural lighting changes must remain distinct. Numerical
+    // behavior is independently checked against specialized rendering by the full
+    // fragment corpus.
     for (u32 mode : {0U, 8U}) {
         using Lighting = Pica::LightingRegs;
         Profile profile{};
@@ -192,10 +193,11 @@ int main() {
                     CheckPair(base, variant, profile, true, "LUT controls split a runtime family");
                     const auto state = MakeDynamicTevState(variant, profile);
                     const u32 word = slot < 4 ? state.lighting_luts_lo : state.lighting_luts_hi;
-                    const u32 control = (word >> ((slot % 4) * 8)) & 127;
+                    const u32 control = (word >> ((slot % 4) * 8)) & 255;
                     constexpr std::array decoded{0.0f, 0.25f, 0.5f, 1.0f, 2.0f, 4.0f, 8.0f};
-                    if ((control & 7) != input || ((control >> 3) & 1) != (input & 1) ||
-                        decoded.at(control >> 4) != scale) {
+                    const u32 expected_input = input == 5 && mode != 8 ? 6 : input;
+                    if ((control & 7) != expected_input || ((control >> 3) & 1) != (input & 1) ||
+                        decoded.at((control >> 4) & 7) != scale) {
                         throw std::runtime_error("Runtime LUT transport mismatch");
                     }
                 }
@@ -211,6 +213,43 @@ int main() {
                 if (((state.lighting_sources >> (slot * 3)) & 7) != source ||
                     ((state.lighting_sources >> (24 + slot)) & 1) != 1) {
                     throw std::runtime_error("Light source/two-sided transport mismatch");
+                }
+            }
+        }
+        // AstraEH: Exhaust all global LUT enable masks and configurations. An
+        // independent support matrix checks packing, including spotlight's dummy
+        // enable and red fallback channels; the render corpus checks their values.
+        constexpr std::array modes{0U, 1U, 2U, 3U, 4U, 5U, 6U, 8U};
+        // Bits: D0, D1, SP, FR, RR, RG, RB. Do not derive this oracle from
+        // production.
+        constexpr std::array supported{0x15U, 0x1cU, 0x13U, 0x0bU, 0x77U, 0x7dU, 0x1fU, 0x7fU};
+        for (u32 c = 0; c < modes.size(); ++c) {
+            for (u32 mask = 0; mask < 128; ++mask) {
+                auto variant = base;
+                variant.lighting.config.Assign(static_cast<Lighting::LightingConfig>(modes[c]));
+                const std::array luts{&variant.lighting.lut_d0, &variant.lighting.lut_d1,
+                                      &variant.lighting.lut_sp, &variant.lighting.lut_fr,
+                                      &variant.lighting.lut_rr, &variant.lighting.lut_rg,
+                                      &variant.lighting.lut_rb};
+                for (u32 slot = 0; slot < luts.size(); ++slot) {
+                    luts[slot]->enable.Assign((mask >> slot) & 1);
+                }
+                Verify(variant, profile);
+                if (!Equal(MakeDynamicTevFamilyConfig(base, profile),
+                           MakeDynamicTevFamilyConfig(variant, profile)) ||
+                    (!Equal(base, variant) &&
+                     Equal(MakeDynamicTevFamilyConfig(base, profile, LightingFamilyKey::Alpha13),
+                           MakeDynamicTevFamilyConfig(variant, profile,
+                                                      LightingFamilyKey::Alpha13)))) {
+                    throw std::runtime_error("Lighting support/enable key reduction mismatch");
+                }
+                const auto state = MakeDynamicTevState(variant, profile);
+                const u32 expected = (mask | 4U) & supported[c];
+                for (u32 slot = 0; slot < luts.size(); ++slot) {
+                    const u32 word = slot < 4 ? state.lighting_luts_lo : state.lighting_luts_hi;
+                    if (((word >> ((slot % 4) * 8 + 7)) & 1) != ((expected >> slot) & 1)) {
+                        throw std::runtime_error("Effective LUT enable transport mismatch");
+                    }
                 }
             }
         }

@@ -36,9 +36,10 @@ bool PerfStats::game_frames_updated = true;
 static std::atomic<u64> uberhar_next_session{0};
 PerfStats::PerfStats(u64 title_id) : uberhar_session{++uberhar_next_session}, title_id(title_id) {
     // AstraEH Log Line: One effective-settings snapshot per emulation run.
+    // AstraEH: Frame-accounting schema is independent of the renderer diagnostics version.
     LOG_INFO(
         Core,
-        "Uberhar run: session={} title={:016X} diagnostics=9 mode={} api={} resolution={} "
+        "Uberhar run: session={} title={:016X} frame_diagnostics=1 mode={} api={} resolution={} "
         "cpu_jit={} hw_vertex={} hybrid={} force_tev={} bridge_requested={} disk_cache={} "
         "frame_limit={} "
         "cpu_clock_percent={}",

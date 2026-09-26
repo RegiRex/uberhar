@@ -25,8 +25,8 @@ if len(cases) != 64:
 # corpus. Deduplicate exact source, not keys, and check both frontend optimizer modes.
 if len(sys.argv) > 2:
     fragment_cases = sorted(Path(sys.argv[2]).glob("*.frag"))
-    if len(fragment_cases) != 832:
-        raise AssertionError(f"Expected 416 specialized/generic pairs, got {len(fragment_cases)} files")
+    if len(fragment_cases) != 1856:
+        raise AssertionError(f"Expected 928 specialized/generic pairs, got {len(fragment_cases)} files")
     unique = {source.read_text(): source for source in cases + fragment_cases}
     cases = list(unique.values())
 
