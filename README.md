@@ -46,17 +46,29 @@ fast-only speed at a 400% cap. The owner reports no noticeable gameplay slowdown
 **0.1.0 promotes the tested Native path to beta** and targets CPU headroom with
 prepared vertex-register transport and exact final-vertex reuse. Sparse bounded
 samples separate input, shader, conversion and submission work. It preserves the
-successful fragment path; performance of this new CPU optimization awaits Thor testing.
+successful fragment path; device results are summarized below.
 
-Next test: Native at **2x**, normal cold/warm followed by **400%-cap** cold/warm.
-Then assess 3x/4x separately. Compute/Automatic still have a restricted
-solid-rectangle subset; full GPU interpretation, general compute rasterization,
-matched dual-screen delivery and model clarity remain roadmap items.
-See the [0.1.0 notes](docs/releases/0.1.0.md),
-[full beta architecture review and goals](docs/UBERHAR_ARCHITECTURE_0.1.0.md) and
+<!-- AstraEH: Broader beta validation and a focused diagnostic iteration. -->
+The [0.1.0 six-session analysis](docs/UBERHAR_LOG_ANALYSIS_0.1.0.md) confirms full
+normal speed in Awakening, about 10% less vertex-stage work per input, and Ocarina
+at 99.912% normal / 374.628% fast-forward speed. Awakening fast-forward averages
+are lower than 0.0.15 with different workload coverage, so total headroom gains
+are not yet established. Sonic's sustained racing slowdown continues after
+compilation finishes; dense draw/vertex work is a major measured cost.
+**0.1.1** keeps the renderer intact and extends sparse diagnostics throughout long
+runs, adds startup machine context and bounds repeated friend-service warnings.
+
+Next test: Sonic Native/**2x**, one warm race; then, if practical, a separate warm
+race with only **New 3DS model off** and CPU clock still 100%. Exit/relaunch between
+model changes. Do not switch backend or resolution in that comparison. A short
+Awakening normal-speed regression check is useful; repeating all four runs is optional
+for this diagnostics-only change. Automatic per-title compatibility profiles are a
+[post-1.0 roadmap item](docs/UBERHAR_COMPATIBILITY_PROFILES.md), not an active Sonic fix.
+See the [0.1.1 notes](docs/releases/0.1.1.md),
+[full beta architecture review](docs/UBERHAR_ARCHITECTURE_0.1.0.md) and
 [Actions](https://github.com/RegiRex/uberhar/actions/workflows/uberhar-alpha.yml).
 Publication requires all build/package/shader gates. The next default architectural
-review is after 0.1.3; see the [review ledger](docs/UBERHAR_REVIEW_CADENCE.md).
+review remains after 0.1.3; see the [review ledger](docs/UBERHAR_REVIEW_CADENCE.md).
 
 ---
 

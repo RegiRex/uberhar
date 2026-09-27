@@ -85,11 +85,31 @@ private:
     bool supported{};
 };
 
+// AstraEH: Use the existing draw timestamp to admit one sample per 50 ms. Never
+// catch up after a pause or exhaust a lifetime quota before later laps/scenes.
+class NativeVertexSampleBudget {
+public:
+    using Clock = std::chrono::steady_clock;
+    static constexpr auto Period = std::chrono::milliseconds{50};
+
+    bool Admit(Clock::time_point now, u32 vertices) {
+        if (vertices == 0 || now < next)
+            return false;
+        next = now + Period;
+        return true;
+    }
+
+private:
+    Clock::time_point next{};
+};
+
 // AstraEH: Sparse CPU samples are raw, non-extrapolated durations, not GPU timings.
-// The caller admits one rotating vertex per 128 batches, at most 8192 per title.
+// One selected input partitions a sampled draw; full draw totals expose setup cost.
 struct NativeVertexSamples {
     using Clock = std::chrono::steady_clock;
     u64 misses{}, hits{}, input_ns{}, shader_ns{}, output_ns{}, submit_ns{};
+    u64 batches{}, batch_inputs{}, batch_invocations{}, setup_ns{}, vertex_ns{}, draw_ns{},
+        draw_max_ns{};
 
     static u64 Nanoseconds(Clock::time_point begin, Clock::time_point end) {
         return std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin).count();

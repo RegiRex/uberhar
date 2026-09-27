@@ -227,3 +227,21 @@ shares the existing five-second/shutdown cadence. Sampling reads clocks for one
 rotating vertex per 128 admitted batches, with an 8192-sample lifetime cap. No new
 fragment shader behavior, general compute coverage or display synchronization is
 claimed by this CPU transport optimization.
+
+
+## Sustained diagnostics and compatibility research (0.1.1)
+
+<!-- AstraEH: Small follow-up iteration after broader game coverage; no rendering algorithm change. -->
+
+| File or section | AstraEH contribution |
+| --- | --- |
+| `pica/uberhar_vertex_output.h`, `pica_core.*` | Time-based sparse sample admission using existing draw timestamps; sampled batch setup/vertex/DrawTriangles fields; schema 2 and complete-sample reporting. |
+| `tools/uberhar/test_vertex_output.cpp` | Empty/dense draws, period boundary, pause/no-catch-up and more than 8192 samples over a simulated long session. |
+| `core/core.cpp` | One tagged startup machine-context log separates model, title requests, kernel 804 metadata and CPU-clock setting. |
+| `core/hle/service/frd/frd.*` | Exact existing IPC response retained; first-four/power-of-two warning summaries and a tagged final count, outside guest serialization. |
+| `UBERHAR_LOG_ANALYSIS_0.1.0.md`, `UBERHAR_COMPATIBILITY_PROFILES.md` | Six-session analysis, qualified primary-source research, and post-1.0 compatibility-rule roadmap; no speculative Sonic override. |
+| `README.md`, `UBERHAR.md`, `UBERHAR_VERSION`, diagnostics/review ledger, `releases/0.1.1.md` | Measured beta status, diagnostic scope and controlled next-test instructions. |
+
+All added/modified diagnostic calls retain adjacent `AstraEH Log Line` markers.
+Sustained sampling uses fixed memory and one admission per 50 ms, rather than a
+per-title quota that could run out before the most useful scenes.

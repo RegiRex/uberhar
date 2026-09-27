@@ -360,3 +360,57 @@ programs, per-vertex records or new Android health polling are logged.
 Renderer schema 12, frame schema 2 and fragment ABI 5 stay unchanged because the
 fragment/transport-to-GPU path is retained. Native vertex schema 1 identifies this
 new CPU diagnostic record. The exact build revision continues to identify releases.
+
+
+## Sustained sampling and machine context (0.1.1)
+
+<!-- AstraEH: Fix sample exhaustion demonstrated by Sonic's 13-million-batch run. -->
+
+Native vertex **schema 2** replaces the schema-1 batch stride/lifetime cap with
+`sample_period_ms=50`. Admission reuses the existing draw-start timestamp; a
+nonempty, eligible no-GS draw can take one rotating-input sample per 50 ms, with
+no catch-up after a pause. Fixed counters continue for the title's lifetime.
+Ordinary batches retain the clock-free per-vertex path. This provides late-lap
+coverage instead of exhausting a budget during early high-draw-rate scenes.
+
+Existing `sample_misses/hits/input_ms/shader_ms/output_ms/submit_ms` keep their raw
+sample meanings. New fields describe those same selected **whole batches**:
+
+| Field | Meaning |
+| --- | --- |
+| `sample_batches` | Completed admitted batches; equals sample_misses + sample_hits. |
+| `sample_batch_inputs` | All inputs in those batches, not just the selected input. |
+| `sample_batch_invocations` | Actual CPU VS calls in those batches, excluding FIFO hits. |
+| `sample_setup_ms` | Draw-start through loader/JIT/geometry/map setup before the loop. |
+| `sample_vertex_ms` | Entire CPU vertex stage for sampled batches; includes setup. |
+| `sample_draw_ms` | Host DrawTriangles call after vertex work, including renderer preparation and any waits it reaches. |
+| `sample_draw_max_ms` | Largest such sampled DrawTriangles duration. |
+
+These are **overlapping, non-extrapolated CPU wall times**, not GPU timestamps.
+Do not add setup to vertex time or multiply samples into claimed whole-run savings.
+Draw time can overlap existing compilation/wait measurements. Samples are selected
+by time and then rotated within a draw, not a uniform survey of all input vertices.
+Three additional clocks are read for a sampled batch (setup boundary plus draw
+start/end), beyond existing sparse vertex clocks and existing broad stage clocks.
+The progress record moves after DrawTriangles so denominators and durations match.
+It keeps the existing 4096-batch/five-second gate plus shutdown; one clock is read
+at that reporting gate, not on every unsampled draw. No per-draw log is added.
+
+`Uberhar machine: schema=1` records one startup context in Core::System::Load:
+actual title ID, `model_new`, configured core count, independent CPU clock percent,
+system/app/New3DS memory modes, title-requested 804/L2 bits and `kernel_804_flag`.
+It appears **before** `Uberhar run`; associate it with the following matching title
+launch. The kernel flag is guest-visible metadata, not evidence of a measured
+804 MHz rate. The L2 request is not a simulation of physical L2 behavior. No model,
+clock, memory allocation or guest service return value is changed by the record.
+
+The existing FRD GetFriendKeyList warning now logs the first four requests and
+subsequent powers of two, preserving all replies. Each warning includes cumulative
+requests and suppressed count; `Uberhar friend queries totals` records final counts
+at module destruction. These host-only counters are not serialized into guest save
+states and contain no friend identifiers. In the supplied 13,141-request workload,
+this emits 15 warnings plus one total instead of 13,141 warnings. Those calls were
+outside the sustained race interval, so suppression is not claimed as its fix.
+
+Renderer schema 12, frame schema 2 and fragment ABI 5 are retained. This iteration
+adds visibility without changing shader math, model policy or graphics profiles.

@@ -144,7 +144,8 @@ private:
 
     void DrawArrays(bool is_indexed);
 
-    void LoadVertices(bool is_indexed);
+    // AstraEH: Reuse the enclosing draw timestamp for sparse diagnostic admission.
+    void LoadVertices(bool is_indexed, std::chrono::steady_clock::time_point batch_start);
     // AstraEH: Aggregate progress, including the engine actually in use.
     void ReportVirtualVertices(const char* kind, std::chrono::steady_clock::time_point now);
 
@@ -425,6 +426,9 @@ private:
         virtual_vertex_max_ns{};
     // AstraEH: Host-only beta route/sample counters; never serialized as guest state.
     NativeVertexSamples native_samples;
+    // AstraEH: Host-only admission state; ordinary batches add no diagnostic clock reads.
+    NativeVertexSampleBudget native_sample_budget;
+    bool native_batch_sampled{};
     u64 native_vertex_batches{}, native_vertex_inputs{}, native_vertex_conversions{},
         native_vertex_reuses{}, native_mapping_fallbacks{}, native_geometry_fallbacks{},
         native_debug_fallbacks{};

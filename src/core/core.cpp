@@ -420,6 +420,18 @@ System::ResultStatus System::Load(Frontend::EmuWindow& emu_window, const std::st
 
     kernel->UpdateCPUAndMemoryState(program_id, app_mem_mode, app_n3ds_hw_capabilities);
 
+    // AstraEH Log Line: One launch snapshot distinguishes model selection, title requests and
+    // kernel metadata from the independent CPU-clock setting; it does not claim physical L2 timing.
+    LOG_INFO(Core,
+             "Uberhar machine: schema=1 title={:016X} model_new={} cores={} cpu_clock_percent={} "
+             "system_memory_mode={} app_memory_mode={} title_n3ds_memory_mode={} "
+             "title_requests_804={} title_requests_l2={} kernel_804_flag={}",
+             program_id, Settings::values.is_new_3ds.GetValue(), num_cores,
+             Settings::values.cpu_clock_percentage.GetValue(), static_cast<u32>(system_mem_mode),
+             static_cast<u32>(app_mem_mode), static_cast<u32>(app_n3ds_hw_capabilities.memory_mode),
+             app_n3ds_hw_capabilities.enable_804MHz_cpu, app_n3ds_hw_capabilities.enable_l2_cache,
+             kernel->GetRunning804MHz());
+
     // Restore any parameters that should be carried through a reset.
     if (auto apt = Service::APT::GetModule(*this)) {
         if (restore_deliver_arg.has_value()) {

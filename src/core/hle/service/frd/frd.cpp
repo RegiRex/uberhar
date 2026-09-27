@@ -3,6 +3,7 @@
 // Refer to the license.txt file included.
 
 #include <array>
+#include <bit> // AstraEH: Bound repeated stub warnings with logarithmic reporting.
 #include <cstring>
 #include <vector>
 #include "common/archives.h"
@@ -53,7 +54,15 @@ void Module::Interface::GetFriendKeyList(Kernel::HLERequestContext& ctx) {
     rb.Push<u32>(0); // 0 friends
     rb.PushStaticBuffer(std::move(buffer), 0);
 
-    LOG_WARNING(Service_FRD, "(STUBBED) called, unknown={}, frd_count={}", unknown, frd_count);
+    // AstraEH: Preserve the IPC reply exactly; count repeated requests without logging each one.
+    const u64 requests = ++frd->friend_key_queries;
+    if (requests <= 4 || std::has_single_bit(requests)) {
+        ++frd->friend_key_query_logs;
+        // AstraEH Log Line: First four requests, then powers of two; no friend identifiers logged.
+        LOG_WARNING(Service_FRD,
+                    "(STUBBED) GetFriendKeyList unknown={} frd_count={} requests={} suppressed={}",
+                    unknown, frd_count, requests, requests - frd->friend_key_query_logs);
+    }
 }
 
 void Module::Interface::GetFriendProfile(Kernel::HLERequestContext& ctx) {
@@ -282,7 +291,14 @@ void Module::Interface::GetLastResponseResult(Kernel::HLERequestContext& ctx) {
 }
 
 Module::Module(Core::System& system) : system(system) {};
-Module::~Module() = default;
+Module::~Module() {
+    if (friend_key_queries != 0) {
+        // AstraEH Log Line: One shutdown aggregate retains the complete request count.
+        LOG_INFO(Service_FRD, "Uberhar friend queries totals: requests={} logged={} suppressed={}",
+                 friend_key_queries, friend_key_query_logs,
+                 friend_key_queries - friend_key_query_logs);
+    }
+}
 
 void InstallInterfaces(Core::System& system) {
     auto& service_manager = system.ServiceManager();

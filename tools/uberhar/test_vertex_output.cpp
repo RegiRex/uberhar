@@ -229,9 +229,27 @@ u64 CheckBatches() {
 }
 
 int main() {
+    // AstraEH: Time-based sampling must cover late gameplay, reject empty draws and
+    // avoid catch-up bursts after a pause, without reading a clock in this policy.
+    NativeVertexSampleBudget budget;
+    using Clock = NativeVertexSampleBudget::Clock;
+    using namespace std::chrono_literals;
+    const auto epoch = Clock::time_point{} + 1s;
+    Check(!budget.Admit(epoch, 0), "Empty draw consumed sample budget");
+    Check(budget.Admit(epoch, 1), "First nonempty draw was not sampled");
+    Check(!budget.Admit(epoch, 1), "Repeated timestamp admitted another sample");
+    Check(!budget.Admit(epoch + 49ms, 1), "Sample admitted before period");
+    Check(budget.Admit(epoch + 50ms, 1), "Period boundary did not admit sample");
+    Check(budget.Admit(epoch + 1h, 1), "Pause prevented resumed sampling");
+    Check(!budget.Admit(epoch + 1h, 1), "Pause caused a catch-up burst");
+    for (u32 sample = 1; sample <= 10000; ++sample) {
+        const auto now = epoch + 1h + 50ms * sample;
+        Check(budget.Admit(now, 100), "Lifetime quota starved late samples");
+        Check(!budget.Admit(now + 1ms, 100), "Dense draws escaped time budget");
+    }
     const auto plans = CheckPlans();
     const auto batches = CheckBatches();
     std::printf("PASS: %llu bitwise production vertex conversions; %llu FIFO/assembly batches; "
-                "all 65536 masks, both banks, input mapping and sparse sample admission\n",
+                "all 65536 masks, both banks, input mapping and sustained sample admission\n",
                 static_cast<unsigned long long>(plans), static_cast<unsigned long long>(batches));
 }

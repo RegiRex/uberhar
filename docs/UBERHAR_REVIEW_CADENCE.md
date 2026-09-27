@@ -53,3 +53,12 @@ the compact fragment path. Count 0.1.0 as successor build one, 0.1.1 as two,
 0.1.2 as three, 0.1.3 as four and 0.1.4 as five. Thus the default next review is
 after 0.1.3, allowed after 0.1.2–0.1.4, before starting 0.1.5. The earlier
 0.0.16 default above is historical and superseded by this completed review.
+
+
+<!-- AstraEH: Broader beta evidence and a diagnostics follow-up do not reset the cadence. -->
+The [0.1.0 device analysis](UBERHAR_LOG_ANALYSIS_0.1.0.md) adds Ocarina and Sonic,
+confirms reduced vertex work per input, and identifies draw-heavy steady-state
+costs plus sample exhaustion. 0.1.1 is a focused diagnostics iteration. This is
+not another full architecture review: the next default remains after 0.1.3,
+allowed after 0.1.2–0.1.4, before 0.1.5. The owner's requested automatic
+compatibility profiles are recorded as post-1.0 scope.

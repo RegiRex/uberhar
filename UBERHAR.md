@@ -21,13 +21,31 @@ Geometry/debugger/incomplete-map draws retain their established path. Sparse,
 bounded CPU-stage samples guide further headroom work. The compact fragment
 interpreter, ABI 5/128-byte state, native pipeline keys and driver workarounds
 stay intact. The app label becomes Uberhar Beta; package/data/signing continuity
-is retained. Source correctness is host-tested; 0.1.0 device performance is pending.
+is retained. The six-session device results are summarized below.
 
 See the [0.1.0 release/test notes](docs/releases/0.1.0.md) and
 [full architectural review and goals](docs/UBERHAR_ARCHITECTURE_0.1.0.md).
-Next test remains Native/2x, normal cold/warm then 400%-cap cold/warm. Higher
-resolution, broader virtual-PICA coverage, dual-screen matching and model clarity
-follow in that order as evidence permits. Preserve 0.0.15 as the measured baseline.
+The four-run Native/2x test is complete; the focused next comparison is below.
+Higher resolution, broader virtual-PICA coverage, dual-screen matching and model
+clarity follow as evidence permits. Preserve 0.0.15 as the measured baseline.
+
+<!-- AstraEH: Device validation distinguishes CPU savings from whole-emulator throughput. -->
+**0.1.0 is published and tested across three games.** Awakening stays near full
+normal speed; vertex-stage time per input falls 9.3–9.8%, while unequal fast-forward
+runs average less than 0.0.15. Ocarina runs at 99.912% normally and 374.628% during
+the tested fast segment. Sonic uses supported generic shaders throughout but has
+large sustained draw/vertex costs after shader creation ends. See the
+[full analysis](docs/UBERHAR_LOG_ANALYSIS_0.1.0.md), including research on Luma L2
+behavior and why it is distinct from Azahar's New 3DS model selection.
+
+**0.1.1 is a focused diagnostics update:** ongoing samples bounded to one per 50 ms,
+sampled batch setup/vertex/DrawTriangles timing, one startup machine snapshot and
+bounded FRD warnings. Shader math, vertex results, model selection, guest IPC
+responses, Android permissions and package/signing policy remain intact. No Sonic
+speed fix or automatic console-mode override is claimed. The owner's
+[compatibility-profile request](docs/UBERHAR_COMPATIBILITY_PROFILES.md) is recorded
+for after 1.0.0; that release remains focused on the shader-system upgrade.
+See the [0.1.1 notes](docs/releases/0.1.1.md) for a controlled Sonic comparison.
 
 <!-- AstraEH: Historical implementation and observations precede the current beta. -->
 **0.0.14 is published and tested.** Its [two-run analysis](docs/UBERHAR_LOG_ANALYSIS_0.0.14.md)

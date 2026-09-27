@@ -115,15 +115,21 @@ void PicaCore::ReportVirtualVertices(const char* kind, std::chrono::steady_clock
              virtual_vertex_invocations - virtual_last_invocations);
     // AstraEH Log Line: Same five-second cadence/shutdown as the existing vertex summary.
     LOG_INFO(Render_Vulkan,
-             "Uberhar native vertices {}: schema=1 batches={} inputs={} conversions={} "
+             "Uberhar native vertices {}: schema=2 batches={} inputs={} conversions={} "
              "conversion_reuses={} mapping_fallbacks={} geometry_fallbacks={} debug_fallbacks={} "
              "sample_misses={} sample_hits={} sample_input_ms={:.6f} sample_shader_ms={:.6f} "
-             "sample_output_ms={:.6f} sample_submit_ms={:.6f} sample_stride=128 sample_cap=8192",
+             "sample_output_ms={:.6f} sample_submit_ms={:.6f} sample_period_ms=50 "
+             "sample_batches={} sample_batch_inputs={} sample_batch_invocations={} "
+             "sample_setup_ms={:.6f} sample_vertex_ms={:.6f} sample_draw_ms={:.6f} "
+             "sample_draw_max_ms={:.6f}",
              kind, native_vertex_batches, native_vertex_inputs, native_vertex_conversions,
              native_vertex_reuses, native_mapping_fallbacks, native_geometry_fallbacks,
              native_debug_fallbacks, native_samples.misses, native_samples.hits,
              native_samples.input_ns / 1e6, native_samples.shader_ns / 1e6,
-             native_samples.output_ns / 1e6, native_samples.submit_ns / 1e6);
+             native_samples.output_ns / 1e6, native_samples.submit_ns / 1e6, native_samples.batches,
+             native_samples.batch_inputs, native_samples.batch_invocations,
+             native_samples.setup_ns / 1e6, native_samples.vertex_ns / 1e6,
+             native_samples.draw_ns / 1e6, native_samples.draw_max_ns / 1e6);
     virtual_window_start = now;
     virtual_last_ns = virtual_vertex_ns;
     virtual_last_inputs = virtual_vertex_inputs;
@@ -1127,6 +1133,8 @@ void PicaCore::DrawArrays(bool is_indexed) {
         Settings::values.uberhar_test_mode.GetValue() != Settings::UberharTestMode::Custom;
     const auto virtual_start =
         virtual_test ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+    // AstraEH: Only an admitted no-GS batch enables the sparse post-vertex draw measurement.
+    native_batch_sampled = false;
 
     // AstraEH: A bridge replaces a draw that already met the hardware path's
     // empty-assembler/no-GS contract. Isolate strip/fan expansion to preserve that
@@ -1134,10 +1142,10 @@ void PicaCore::DrawArrays(bool is_indexed) {
     // This does not fix upstream's documented cross-draw strip/fan limitation.
     if (accelerate_draw && rasterizer->HasPreparedCpuVertexBridge()) {
         ASSERT(regs.internal.pipeline.use_gs == PipelineRegs::UseGS::No);
-        primitive_assembler.RunIsolatedBatch([&] { LoadVertices(is_indexed); });
+        primitive_assembler.RunIsolatedBatch([&] { LoadVertices(is_indexed, virtual_start); });
     } else {
         // Ordinary CPU rendering retains persistent assembly and partial primitives.
-        LoadVertices(is_indexed);
+        LoadVertices(is_indexed, virtual_start);
     }
 
     if (virtual_test) {
@@ -1150,20 +1158,37 @@ void PicaCore::DrawArrays(bool is_indexed) {
         virtual_vertex_inputs += regs.internal.pipeline.num_vertices;
         virtual_vertex_ns += elapsed;
         virtual_vertex_max_ns = std::max(virtual_vertex_max_ns, elapsed);
-        if ((virtual_vertex_batches & 4095) == 0 &&
-            now - virtual_window_start >= std::chrono::seconds{5})
-            ReportVirtualVertices("progress", now);
+        if (native_batch_sampled)
+            native_samples.vertex_ns += elapsed;
     }
 
     // Draw emitted triangles.
-    rasterizer->DrawTriangles();
+    if (native_batch_sampled) {
+        // AstraEH: Includes CPU renderer preparation and any waits reached by DrawTriangles;
+        // this is not GPU execution time. Ordinary draws retain the untimed call below.
+        const auto start = std::chrono::steady_clock::now();
+        rasterizer->DrawTriangles();
+        const u64 ns = NativeVertexSamples::Nanoseconds(start, std::chrono::steady_clock::now());
+        native_samples.draw_ns += ns;
+        native_samples.draw_max_ns = std::max(native_samples.draw_max_ns, ns);
+    } else {
+        rasterizer->DrawTriangles();
+    }
+
+    // AstraEH: Report only after the sampled draw is complete, so all sample denominators
+    // match. Reuse the existing 4096-batch/five-second gate; no extra per-draw clock read.
+    if (virtual_test && (virtual_vertex_batches & 4095) == 0) {
+        const auto now = std::chrono::steady_clock::now();
+        if (now - virtual_window_start >= std::chrono::seconds{5})
+            ReportVirtualVertices("progress", now);
+    }
 
     if (debug_context) {
         debug_context->OnEvent(DebugContext::Event::FinishedPrimitiveBatch, nullptr);
     }
 }
 
-void PicaCore::LoadVertices(bool is_indexed) {
+void PicaCore::LoadVertices(bool is_indexed, std::chrono::steady_clock::time_point batch_start) {
     // Read and validate vertex information from the loaders
     const auto& pipeline = regs.internal.pipeline;
     const PAddr base_address = pipeline.vertex_attributes.GetPhysicalBaseAddress();
@@ -1236,12 +1261,19 @@ void PicaCore::LoadVertices(bool is_indexed) {
             };
             NativeVertexCounts counts;
             const u64 samples = native_samples.misses + native_samples.hits;
-            if (pipeline.num_vertices && (native_vertex_batches & 127) == 0 && samples < 8192) {
+            native_batch_sampled = native_sample_budget.Admit(batch_start, pipeline.num_vertices);
+            if (native_batch_sampled) {
+                // AstraEH: Include loader/JIT/map setup before the loop without timing every draw.
+                native_samples.setup_ns +=
+                    NativeVertexSamples::Nanoseconds(batch_start, std::chrono::steady_clock::now());
                 // AstraEH: Rotate the selected input; never time only the first cache miss.
                 const u32 sample_index =
                     (static_cast<u32>(samples + 1) * 2654435761U) % pipeline.num_vertices;
                 counts = RunNativeVertexBatch<true>(pipeline.num_vertices, is_indexed, vertex_at,
                                                     shade, submit, native_samples, sample_index);
+                ++native_samples.batches;
+                native_samples.batch_inputs += pipeline.num_vertices;
+                native_samples.batch_invocations += counts.invocations;
             } else {
                 counts = RunNativeVertexBatch<false>(pipeline.num_vertices, is_indexed, vertex_at,
                                                      shade, submit, native_samples);

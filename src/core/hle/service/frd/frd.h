@@ -265,6 +265,8 @@ private:
     FriendKey my_friend_key = {0, 0, 0ull};
     MyPresence my_presence = {};
     bool logged_in = false;
+    // AstraEH: Host diagnostic counters only; preserve the guest service/save-state format.
+    u64 friend_key_queries{}, friend_key_query_logs{};
     std::shared_ptr<Kernel::Event> login_event;
     Core::TimingEventType* login_delay_event;
     Core::System& system;
