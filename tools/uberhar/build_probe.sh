@@ -72,6 +72,13 @@ build/uberhar-probe/test-graphics-profile
 c++ -std=c++20 -O2 -Isrc -Iexternals/boost tools/uberhar/test_vertex_runtime.cpp \
   -o build/uberhar-probe/test-vertex-runtime
 build/uberhar-probe/test-vertex-runtime
+# AstraEH: Prepared native transport and final-vertex reuse must be bitwise identical
+# to the inherited output path and retain FIFO, winding and cross-draw assembly.
+c++ -std=c++20 -O2 -DFMT_HEADER_ONLY -Isrc -Iexternals/fmt/include -Iexternals/boost \
+  tools/uberhar/test_vertex_output.cpp src/video_core/pica/output_vertex.cpp \
+  src/video_core/pica/shader_unit.cpp src/video_core/pica/primitive_assembly.cpp \
+  -o build/uberhar-probe/test-vertex-output
+build/uberhar-probe/test-vertex-output
 c++ -std=c++20 -O2 -DXXH_INLINE_ALL -Isrc -Iexternals/xxHash \
   tools/uberhar/test_spirv_cache.cpp -o build/uberhar-probe/test-spirv-cache
 build/uberhar-probe/test-spirv-cache

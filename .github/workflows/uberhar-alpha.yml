@@ -1,5 +1,6 @@
 # AstraEH: Build, verify and publish the isolated ARM64 experimental app.
-name: Uberhar ARM64 experimental alpha
+# AstraEH: The same gated workflow now also publishes the Native beta milestone.
+name: Uberhar ARM64 prerelease
 
 on:
   workflow_dispatch:
@@ -124,7 +125,8 @@ jobs:
           APK="$(find artifacts -name '*.apk' -print -quit)"
           "$ANDROID_SDK_ROOT/build-tools/35.0.0/aapt" dump badging "$APK" > artifacts/package.txt
           grep "package: name='org.uberhar.uberhar_emu'" artifacts/package.txt
-          grep -F "application-label:'Uberhar Alpha'" artifacts/package.txt
+          # AstraEH: Verify beta launcher branding without changing the install identity.
+          grep -F "application-label:'Uberhar Beta'" artifacts/package.txt
           # AstraEH: Signatures can verify even when Android refuses normal installation.
           # aapt emits this marker only for test-only apps; reject before publishing.
           if grep -q '^testOnly=' artifacts/package.txt; then

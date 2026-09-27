@@ -13,6 +13,7 @@ Review early for correctness regressions or a changed architectural assumption.
 | 2026-09-24 | 0.0.6 | After 0.0.10 | After 0.0.9 through 0.0.11; before 0.0.12 work |
 | 2026-09-24 | 0.0.9 | After 0.0.13 | After 0.0.12 through 0.0.14; before 0.0.15 work |
 | 2026-09-25 | 0.0.12 | After 0.0.16 | After 0.0.15 through 0.0.17; before 0.0.18 work |
+| 2026-09-27 | 0.0.15 | After 0.1.3 | After 0.1.2 through 0.1.4; before 0.1.5 work |
 
 The [0.0.6 review](UBERHAR_ARCHITECTURE_2026-09-24.md) established the earlier
 roadmap. 0.0.7 implemented family consolidation; 0.0.8 added broader runtime state,
@@ -29,7 +30,7 @@ accepted/rejected alternatives, validation gates, implementation order and the
 new review window. Keep previous entries for comparison.
 
 <!-- AstraEH: The third post-review alpha supplied a successful device baseline. -->
-The [current review](UBERHAR_ARCHITECTURE_0.0.12.md) rechecks source and the Thor
+The [0.0.12 review](UBERHAR_ARCHITECTURE_0.0.12.md) rechecks source and the Thor
 cold/warm milestone, compares architectural alternatives, and selects runtime
 lighting controls for 0.0.13. The subsequent [0.0.13 device analysis](UBERHAR_LOG_ANALYSIS_0.0.13.md)
 confirms reduced family counts and retained warm speed; that results analysis is
@@ -42,3 +43,13 @@ higher cold driver cost, motivating compact runtime lighting in 0.0.15. This is 
 results analysis, not another full review. The default review remains after 0.0.16;
 a proposed 0.1.0 promotion should include the final-alpha architectural assessment
 within the existing three-to-five-alpha window.
+
+
+<!-- AstraEH: Beta promotion follows the third post-review alpha and does not hide a build. -->
+The [current full review](UBERHAR_ARCHITECTURE_0.1.0.md) audits 0.0.15 source and
+all four Thor sessions before promoting Native to beta. It selects final-vertex
+reuse, prepared register transport and sparse CPU-stage samples while preserving
+the compact fragment path. Count 0.1.0 as successor build one, 0.1.1 as two,
+0.1.2 as three, 0.1.3 as four and 0.1.4 as five. Thus the default next review is
+after 0.1.3, allowed after 0.1.2–0.1.4, before starting 0.1.5. The earlier
+0.0.16 default above is historical and superseded by this completed review.

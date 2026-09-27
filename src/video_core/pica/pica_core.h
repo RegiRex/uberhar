@@ -17,6 +17,7 @@
 #include "video_core/pica/regs_lcd.h"
 #include "video_core/pica/shader_setup.h"
 #include "video_core/pica/shader_unit.h"
+#include "video_core/pica/uberhar_vertex_output.h" // AstraEH: Prepared native output and sparse samples.
 
 namespace Memory {
 class MemorySystem;
@@ -422,6 +423,11 @@ private:
     // AstraEH: Measure the complete CPU vertex stage separately from GPU pipeline waits.
     u64 virtual_vertex_batches{}, virtual_vertex_inputs{}, virtual_vertex_ns{},
         virtual_vertex_max_ns{};
+    // AstraEH: Host-only beta route/sample counters; never serialized as guest state.
+    NativeVertexSamples native_samples;
+    u64 native_vertex_batches{}, native_vertex_inputs{}, native_vertex_conversions{},
+        native_vertex_reuses{}, native_mapping_fallbacks{}, native_geometry_fallbacks{},
+        native_debug_fallbacks{};
 };
 
 #define GPU_REG_INDEX(field_name) (offsetof(Pica::PicaCore::Regs, field_name) / sizeof(u32))

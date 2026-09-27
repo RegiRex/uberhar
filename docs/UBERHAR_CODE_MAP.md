@@ -206,3 +206,24 @@ scope, unresolved limits, test contracts and the next engineering order.
 | `compare_fragment_state.py`, `shader_probe.cpp`, `validate_shaders.py` | 128-byte transport, 1056 full-render cases and nine SPIR-V offset checks; lit generic modules require both loop no-unroll hints with each optimizer mode. |
 | `test_frame_diagnostics.cpp` | Mixed cap transitions, achieved speed versus 400% request, uncapped throughput, reset persistence and explicit sleep exclusion. |
 | `docs/UBERHAR_LOG_ANALYSIS_0.0.14.md`, release notes, overview/status docs, version | Measured regression and successful warm result, compact-loop scope, beta acceptance and 400%-cap device test plan. |
+
+
+## Native beta vertex transport (0.1.0)
+
+<!-- AstraEH: This section identifies each beta implementation and review artifact. -->
+
+| File or section | AstraEH contribution |
+| --- | --- |
+| `pica/uberhar_vertex_output.h` | Prepared input mapping and composed output-mask/semantic mapping; exact defaults/last-write/color clamp; 96-byte final-vertex FIFO; sampled/unsampled batch variants. |
+| `pica/pica_core.*` | Experimental no-GS/debugger-free admission, incomplete-map recovery, same persistent assembler, fixed route counts and sparse input/execution/output/submission samples. |
+| `video_core/CMakeLists.txt` | Register the new header with the existing core target. |
+| `tools/uberhar/test_vertex_output.cpp`, `build_probe.sh` | All output masks/banks versus inherited production conversion; FIFO/assembly continuity and sample parity gate. |
+| `UBERHAR_VERSION`, Android `uberhar/res/values/strings.xml`, `uberhar-alpha.yml` | 0.1.0 beta name and matching package-label check; original package/signature gates retained. |
+| `UBERHAR_LOG_ANALYSIS_0.0.15.md`, `UBERHAR_ARCHITECTURE_0.1.0.md`, review ledger | Four-run evidence, complete architecture/alternatives review, scoped beta acceptance, next review window. |
+| `UBERHAR_DIAGNOSTICS.md`, `README.md`, `UBERHAR.md`, `releases/0.1.0.md` | Sample meanings/bounds, current status, owner goals and repeatable test instructions. |
+
+The additional native-vertex diagnostic call is tagged `AstraEH Log Line` and
+shares the existing five-second/shutdown cadence. Sampling reads clocks for one
+rotating vertex per 128 admitted batches, with an 8192-sample lifetime cap. No new
+fragment shader behavior, general compute coverage or display synchronization is
+claimed by this CPU transport optimization.

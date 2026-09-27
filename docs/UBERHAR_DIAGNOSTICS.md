@@ -319,3 +319,44 @@ counts those intervals once (the same total appears in each band line). Thus ban
 frames plus transition intervals equal overall observed frames. No band log is
 written per frame or per limit change. Band totals do not reset with five-second
 windows. Neither work nor frame intervals are pure GPU execution/display timing.
+
+
+## Native vertex transport (0.1.0)
+
+<!-- AstraEH: Fixed-size route counts and sparse samples accompany final-vertex reuse. -->
+
+`Uberhar native vertices progress/totals: schema=1` accompanies each existing
+vertex-stage report (at most once per five seconds plus normal shutdown). Counts
+are cumulative per PicaCore/title lifetime and are host-only, outside save states:
+
+- `batches/inputs`: draws/inputs admitted to prepared no-GS transport.
+- `conversions/conversion_reuses`: actual output conversions and final-vertex FIFO
+  hits. Their sum equals admitted inputs. Reuse does not omit assembly or triangles.
+- `mapping_fallbacks`: insufficient packed VS outputs for the semantic map;
+  `geometry_fallbacks`: GS/other non-No mode; `debug_fallbacks`: debugger attached.
+  These count batches routed to the established path, not compilation failures.
+  A draw with both debugger and GS counts under debugger, not twice. Custom is
+  excluded. Invalid index addresses return before these counters, as before.
+- `sample_misses/sample_hits`: selected vertices measured on misses/hits. One
+  rotating index is chosen per 128 eligible batches, at most 8192 samples per title.
+  Empty batches do not produce samples. The deterministic rotation is not a random,
+  vertex-weighted survey and may miss rare states; there is no implicit extrapolation.
+- `sample_input_ms`: loader plus prepared input-register transport, on sampled misses.
+  `sample_shader_ms`: CPU shader engine Run only. `sample_output_ms`: prepared
+  semantic conversion/color clamping. All three have `sample_misses` as denominator.
+- `sample_submit_ms`: primitive assembly/triangle sink on every sampled hit or miss;
+  the denominator is both sample counts combined. Includes CPU work reached through
+  AddTriangle, not GPU execution. Timing boundaries add small clock costs; substage
+  nanoseconds must not be presented as exact isolated machine instruction costs.
+
+Ordinary batches compile without per-vertex clocks. A sampled miss uses six clock
+reads (four partition boundaries plus two submission boundaries); a sampled hit
+uses two. Cache lookup/insertion, batch setup, plan construction and loop overhead
+are outside these sparse samples. Existing `stage_wall_ms` measures the broader
+CPU vertex stage and remains the main performance comparison. Samples stop at the
+cap; later broad frame/stage windows still continue. No uniforms, guest shader
+programs, per-vertex records or new Android health polling are logged.
+
+Renderer schema 12, frame schema 2 and fragment ABI 5 stay unchanged because the
+fragment/transport-to-GPU path is retained. Native vertex schema 1 identifies this
+new CPU diagnostic record. The exact build revision continues to identify releases.

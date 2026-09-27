@@ -27,6 +27,7 @@ add_library(video_core STATIC EXCLUDE_FROM_ALL
     pica/pica_core.h
     # AstraEH: Exact FIFO index for CPU vertex reuse.
     pica/uberhar_vertex_cache.h
+    pica/uberhar_vertex_output.h # AstraEH: Prepared native output and bounded CPU samples.
     pica/output_vertex.cpp
     pica/output_vertex.h
     pica/primitive_assembly.cpp

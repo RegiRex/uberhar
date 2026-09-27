@@ -7,8 +7,7 @@ Vulkan TEV fallback, known limitations, and testing instructions. A full
 ubershader renderer and screen-synchronization changes are not implemented yet.
 
 The upstream project information and download links below describe Azahar.
-Uberhar builds are produced by this repository's **Uberhar ARM64 experimental
-alpha** workflow.
+Uberhar builds are produced by this repository's **Uberhar ARM64 prerelease** workflow.
 
 **The initial APK was withdrawn:** an unintended Android `testOnly` flag
 blocked normal installation. Packaging was fixed in **0.0.2**; **0.0.3** isolates
@@ -39,17 +38,25 @@ adds same-run 0.0.13/current family counts and bounded remaining-family details,
 and expands rendering comparisons to 928 cases. The [two-run Thor result](docs/UBERHAR_LOG_ANALYSIS_0.0.14.md)
 confirms correct sleep exclusion, 21→16 same-workload families and 99.757% warm
 speed, but cold generic wait rises to 3.298 seconds as individual programs get larger.
-**0.0.15** replaces repeated per-light code with a compact ordered runtime loop and
-adds bounded speed-band summaries for the next 400%-cap tests. Device performance
-is pending; 0.1.0 remains a future beta milestone, with 3x/4x assessment afterward.
-Next test: Native at **2x**, cold then warm with a **400% emulator fast-forward cap**. Compute/Automatic still have a restricted
-solid-rectangle subset; full GPU interpretation, general compute rasterization
-and zero-wait first playthroughs remain development goals.
-See the [0.0.15 notes](docs/releases/0.0.15.md),
-[architectural review](docs/UBERHAR_ARCHITECTURE_0.0.12.md) and
+<!-- AstraEH: Four-run beta evidence and the CPU headroom step. -->
+**0.0.15** replaces repeated per-light code with a compact ordered runtime loop.
+Its [four-run Thor analysis](docs/UBERHAR_LOG_ANALYSIS_0.0.15.md) reports about **80%
+less cold generic waiting**, 99.795% normal warm speed and 283.379/292.518% cold/warm
+fast-only speed at a 400% cap. The owner reports no noticeable gameplay slowdown.
+**0.1.0 promotes the tested Native path to beta** and targets CPU headroom with
+prepared vertex-register transport and exact final-vertex reuse. Sparse bounded
+samples separate input, shader, conversion and submission work. It preserves the
+successful fragment path; performance of this new CPU optimization awaits Thor testing.
+
+Next test: Native at **2x**, normal cold/warm followed by **400%-cap** cold/warm.
+Then assess 3x/4x separately. Compute/Automatic still have a restricted
+solid-rectangle subset; full GPU interpretation, general compute rasterization,
+matched dual-screen delivery and model clarity remain roadmap items.
+See the [0.1.0 notes](docs/releases/0.1.0.md),
+[full beta architecture review and goals](docs/UBERHAR_ARCHITECTURE_0.1.0.md) and
 [Actions](https://github.com/RegiRex/uberhar/actions/workflows/uberhar-alpha.yml).
 Publication requires all build/package/shader gates. The next default architectural
-review is after 0.0.16; see the [review ledger](docs/UBERHAR_REVIEW_CADENCE.md).
+review is after 0.1.3; see the [review ledger](docs/UBERHAR_REVIEW_CADENCE.md).
 
 ---
 

@@ -113,6 +113,17 @@ void PicaCore::ReportVirtualVertices(const char* kind, std::chrono::steady_clock
              virtual_vertex_hits, window_ms, (virtual_vertex_ns - virtual_last_ns) / 1e6,
              virtual_vertex_inputs - virtual_last_inputs,
              virtual_vertex_invocations - virtual_last_invocations);
+    // AstraEH Log Line: Same five-second cadence/shutdown as the existing vertex summary.
+    LOG_INFO(Render_Vulkan,
+             "Uberhar native vertices {}: schema=1 batches={} inputs={} conversions={} "
+             "conversion_reuses={} mapping_fallbacks={} geometry_fallbacks={} debug_fallbacks={} "
+             "sample_misses={} sample_hits={} sample_input_ms={:.6f} sample_shader_ms={:.6f} "
+             "sample_output_ms={:.6f} sample_submit_ms={:.6f} sample_stride=128 sample_cap=8192",
+             kind, native_vertex_batches, native_vertex_inputs, native_vertex_conversions,
+             native_vertex_reuses, native_mapping_fallbacks, native_geometry_fallbacks,
+             native_debug_fallbacks, native_samples.misses, native_samples.hits,
+             native_samples.input_ns / 1e6, native_samples.shader_ns / 1e6,
+             native_samples.output_ns / 1e6, native_samples.submit_ns / 1e6);
     virtual_window_start = now;
     virtual_last_ns = virtual_vertex_ns;
     virtual_last_inputs = virtual_vertex_inputs;
@@ -1170,20 +1181,92 @@ void PicaCore::LoadVertices(bool is_indexed) {
     const u16* index_address_16 = reinterpret_cast<const u16*>(index_address_8);
     const bool index_u16 = index_info.format != 0;
 
-    // AstraEH: Preserve the original 64-slot FIFO, but avoid scanning every slot per index.
-    VertexCacheIndex vertex_index;
-    std::array<AttributeBuffer, VertexCacheIndex::Capacity> vertex_cache;
-    u64 invocations = 0, cache_hits = 0;
-
     // Compile the vertex shader for this batch.
     ShaderUnit shader_unit;
-    AttributeBuffer vs_output;
     shader_engine->SetupBatch(vs_setup, regs.internal.vs.main_offset);
 
     // Setup geometry pipeline in case we are using a geometry shader.
     geometry_pipeline.Reconfigure();
     geometry_pipeline.Setup(shader_engine.get());
     ASSERT(!geometry_pipeline.NeedIndexInput() || is_indexed);
+
+    // AstraEH: Experimental no-GS draws can reuse final rasterizer vertices. Keep
+    // Custom, debugger and geometry-shader execution on their established path.
+    const bool virtual_test =
+        Settings::values.uberhar_test_mode.GetValue() != Settings::UberharTestMode::Custom;
+    if (virtual_test && !debug_context && pipeline.use_gs == PipelineRegs::UseGS::No) {
+        const NativeVertexPlan plan{regs.internal.vs, regs.internal.rasterizer};
+        if (plan.Supported()) {
+            const auto vertex_at = [&](u32 index) -> u32 {
+                return is_indexed ? (index_u16 ? index_address_16[index] : index_address_8[index])
+                                  : index + pipeline.vertex_offset;
+            };
+            // AstraEH: Compile out per-vertex clocks from ordinary batches. A sampled
+            // vertex partitions input loading, shader execution and output conversion.
+            const auto shade = [&]<bool Sample>(u32 vertex, u32 index) {
+                using Clock = NativeVertexSamples::Clock;
+                Clock::time_point start, loaded, shaded;
+                if constexpr (Sample)
+                    start = Clock::now();
+                AttributeBuffer input;
+                loader.LoadVertex(base_address, index, vertex, input, input_default_attributes);
+                plan.LoadInput(shader_unit, input);
+                if constexpr (Sample)
+                    loaded = Clock::now();
+                shader_engine->Run(vs_setup, shader_unit);
+                if constexpr (Sample)
+                    shaded = Clock::now();
+                auto output = plan.Convert(shader_unit);
+                if constexpr (Sample) {
+                    const auto converted = Clock::now();
+                    native_samples.input_ns += NativeVertexSamples::Nanoseconds(start, loaded);
+                    native_samples.shader_ns += NativeVertexSamples::Nanoseconds(loaded, shaded);
+                    native_samples.output_ns += NativeVertexSamples::Nanoseconds(shaded, converted);
+                }
+                return output;
+            };
+            // AstraEH: Construct the callback once per draw, retaining the same assembler
+            // and triangle sink used by geometry output, including cross-draw tails.
+            const PrimitiveAssembler::TriangleHandler triangle =
+                [this](const OutputVertex& a, const OutputVertex& b, const OutputVertex& c) {
+                    rasterizer->AddTriangle(a, b, c);
+                };
+            const auto submit = [&](const OutputVertex& output) {
+                primitive_assembler.SubmitVertex(output, triangle);
+            };
+            NativeVertexCounts counts;
+            const u64 samples = native_samples.misses + native_samples.hits;
+            if (pipeline.num_vertices && (native_vertex_batches & 127) == 0 && samples < 8192) {
+                // AstraEH: Rotate the selected input; never time only the first cache miss.
+                const u32 sample_index =
+                    (static_cast<u32>(samples + 1) * 2654435761U) % pipeline.num_vertices;
+                counts = RunNativeVertexBatch<true>(pipeline.num_vertices, is_indexed, vertex_at,
+                                                    shade, submit, native_samples, sample_index);
+            } else {
+                counts = RunNativeVertexBatch<false>(pipeline.num_vertices, is_indexed, vertex_at,
+                                                     shade, submit, native_samples);
+            }
+            ++native_vertex_batches;
+            native_vertex_inputs += pipeline.num_vertices;
+            native_vertex_conversions += counts.invocations;
+            native_vertex_reuses += counts.hits;
+            virtual_vertex_invocations += counts.invocations;
+            virtual_vertex_hits += counts.hits;
+            return;
+        }
+        ++native_mapping_fallbacks;
+    } else if (virtual_test) {
+        if (debug_context)
+            ++native_debug_fallbacks;
+        else
+            ++native_geometry_fallbacks;
+    }
+
+    // AstraEH: Preserve the original attribute cache and geometry pipeline for recovery.
+    VertexCacheIndex vertex_index;
+    std::array<AttributeBuffer, VertexCacheIndex::Capacity> vertex_cache;
+    AttributeBuffer vs_output;
+    u64 invocations = 0, cache_hits = 0;
 
     for (u32 index = 0; index < pipeline.num_vertices; ++index) {
         // Indexed rendering doesn't use the start offset
@@ -1231,7 +1314,7 @@ void PicaCore::LoadVertices(bool is_indexed) {
         geometry_pipeline.SubmitVertex(vs_output);
     }
     // AstraEH: Count actual shader runs separately from indexed inputs; no per-vertex clock reads.
-    if (Settings::values.uberhar_test_mode.GetValue() != Settings::UberharTestMode::Custom) {
+    if (virtual_test) {
         virtual_vertex_invocations += invocations;
         virtual_vertex_hits += cache_hits;
     }

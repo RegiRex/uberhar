@@ -7,21 +7,35 @@ Baseline: Azahar 2126.1.2, commit
 
 ## Current status
 
-<!-- AstraEH: Respond to measured cold compiler cost, preserving the warm reference. -->
-**0.0.15 uses a compact ordered lighting loop**, with light count and per-slot
-operation flags in runtime data (ABI 5, 128 bytes). It targets repeated compiler input
-as well as family count. New bounded normal/fast/uncapped summaries support the
-owner's next Native/2x tests with emulator fast-forward capped at 400%.
-See the [0.0.15 release/test notes](docs/releases/0.0.15.md); Thor performance is
-pending. 0.1.0 remains a later beta milestone after repeatable cold/warm smoothness
-and stable rendering, with 3x/4x testing following separately.
+<!-- AstraEH: Scoped beta milestone and evidence-based vertex transport optimization. -->
+**0.1.0 is the Native beta update.** The owner's four 0.0.15 Thor runs show no
+noticeable normal-speed gameplay slowdown. [Measured results](docs/UBERHAR_LOG_ANALYSIS_0.0.15.md)
+record 98.858/99.795% normal cold/warm speed, 283.379/292.518% fast-only speed under
+a 400% cap, and about 80% less cold generic waiting than 0.0.14. Brief early cold
+hitches remain. This is a Native/2x/Awakening milestone, not universal zero lag.
 
+The beta prepares input/output register maps once per no-GS draw and reuses final
+96-byte rasterizer vertices in the existing FIFO. This removes repeated transport
+and conversion on cache hits while retaining all vertices and primitive order.
+Geometry/debugger/incomplete-map draws retain their established path. Sparse,
+bounded CPU-stage samples guide further headroom work. The compact fragment
+interpreter, ABI 5/128-byte state, native pipeline keys and driver workarounds
+stay intact. The app label becomes Uberhar Beta; package/data/signing continuity
+is retained. Source correctness is host-tested; 0.1.0 device performance is pending.
+
+See the [0.1.0 release/test notes](docs/releases/0.1.0.md) and
+[full architectural review and goals](docs/UBERHAR_ARCHITECTURE_0.1.0.md).
+Next test remains Native/2x, normal cold/warm then 400%-cap cold/warm. Higher
+resolution, broader virtual-PICA coverage, dual-screen matching and model clarity
+follow in that order as evidence permits. Preserve 0.0.15 as the measured baseline.
+
+<!-- AstraEH: Historical implementation and observations precede the current beta. -->
 **0.0.14 is published and tested.** Its [two-run analysis](docs/UBERHAR_LOG_ANALYSIS_0.0.14.md)
 shows that the 577.234-second sleep pause was properly excluded. Same-workload
 families fall 21→16 and warm speed stays 99.757%, but cold generic waiting rises
 2.948→3.298 seconds and the worst cold frame rises 496→582 ms. Larger unrolled
 lighting programs compile more slowly, motivating the compact loop. This is not
-a uniform timing improvement; keep 0.0.13 as the cold-performance reference.
+a uniform timing improvement; 0.0.15 subsequently supersedes this cold-performance reference.
 
 <!-- AstraEH: Historical 0.0.14 implementation; measured results are recorded above. -->
 **0.0.14 consolidates lighting enable/configuration variants** into runtime data,
@@ -31,7 +45,7 @@ The log compares current families with both 0.0.12 and 0.0.13 rules for the same
 observed draws, and records at most 32 remaining family shapes per title. The core
 header now labels its frame schema separately from renderer diagnostics 11.
 See the [0.0.14 release/test notes](docs/releases/0.0.14.md) and the measured results above.
-Publication passed the Actions gates. 0.0.13 remains the cold-performance reference.
+Publication passed the Actions gates. These historical results motivated 0.0.15.
 
 <!-- AstraEH: 0.0.13 now has three complete Thor runs with distinct cache coverage. -->
 **0.0.13 moves lighting LUT controls and light-source selection into per-draw data**
@@ -40,8 +54,7 @@ adds same-workload previous/new family counts, and expands shader correctness ga
 The prerelease passed all Actions gates. Its [three-run Thor analysis](docs/UBERHAR_LOG_ANALYSIS_0.0.13.md)
 confirms 37→21 families for the cold workload under old/new rules, 2.948 s cold
 generic waiting, and 99.776% fully warm speed. The extra-attack run encounters nine
-new modules; the third run is the fully warm comparison. Preserve 0.0.13 as the
-current Native/2x reference. See the [release/test notes](docs/releases/0.0.13.md).
+new modules; the third run is the fully warm comparison. This supplied the next Native/2x reference at that time. See the [release/test notes](docs/releases/0.0.13.md).
 
 <!-- AstraEH: Historical 0.0.12 device milestone used to assess the 0.0.13 change. -->
 **0.0.12 Native at 2x is now tested on Thor.** The owner reports a substantial
@@ -91,7 +104,7 @@ changes; they do not isolate the speedup from each individual optimization.
 Start with **Native at 2x, cold then warm**, including the same battle. The
 [release notes](docs/releases/0.0.11.md) describe the comparison. Repeating all three
 pairs is not necessary while compute coverage remains zero. The next default full
-architectural review is after 0.0.16 (allowed 0.0.15–0.0.17); see the
+architectural review is after 0.1.3 (allowed 0.1.2–0.1.4); see the
 [review ledger](docs/UBERHAR_REVIEW_CADENCE.md). Android compilation, shader, package
 and signing gates must pass before a pre-release is published. Development hands
 off Actions rather than waiting through APK compilation.
