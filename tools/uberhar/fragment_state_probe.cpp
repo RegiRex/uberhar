@@ -1,7 +1,7 @@
 // Copyright 2026 Uberhar contributors
 // Licensed under GPLv2 or any later version; see license.txt.
 // AstraEH: Emit complete specialized/generic fragment shaders and the
-// production uniform/120-byte transport for offscreen state, texture, color and
+// production uniform/128-byte transport for offscreen state, texture, color and
 // depth tests.
 #include <filesystem>
 #include <fstream>
@@ -47,7 +47,7 @@ int main(int argc, char** argv) {
     // AstraEH: Keep the original corpus, then cross remapped/duplicate light
     // slots, LUT controls, all eight lighting configurations and one through
     // eight lights.
-    constexpr u32 Cases = 928;
+    constexpr u32 Cases = 1056;
     for (u32 i = 0; i < Cases; ++i) {
         Pica::RegsInternal regs{};
         regs.framebuffer.output_merger.alphablend_enable.Assign(1);
@@ -168,6 +168,27 @@ int main(int argc, char** argv) {
             lighting.lut_sp.SetScale(1.0f);
             config.texture.tev_stages[0].sources_raw = 2U | ((1 + (mask & 1)) << 16);
         }
+        if (i >= 928) {
+            // AstraEH: Exercise every seven-bit operation pattern across ordered,
+            // remapped/duplicate slots and zero through eight active lights. The
+            // full reference renderer is still unrolled, independent of the new loop.
+            using Lighting = Pica::LightingRegs;
+            const u32 mask = i - 928;
+            auto& lighting = config.lighting;
+            lighting.src_num.Assign(mask == 0 ? 0 : 1 + mask % 8);
+            lighting.config.Assign(Lighting::LightingConfig::Config7);
+            lighting.enable_shadow.Assign(1);
+            lighting.clamp_highlights.Assign(mask & 1);
+            for (u32 slot = 0; slot < 8; ++slot) {
+                auto& light = lighting.lights[slot];
+                light.raw = static_cast<u16>(((mask + slot * 17) % 128) << 3);
+                light.num.Assign(mask & 1 ? (slot * 3 + mask) % 8 : (mask / 2) % 8);
+            }
+            for (auto* lut : {&lighting.lut_d0, &lighting.lut_d1, &lighting.lut_fr,
+                              &lighting.lut_rr, &lighting.lut_rg, &lighting.lut_rb}) {
+                lut->enable.Assign(1);
+            }
+        }
         if (!GLSL::SupportsDynamicTev(config, user)) {
             throw std::runtime_error("Lighting corpus unexpectedly uses unsupported state");
         }
@@ -233,5 +254,5 @@ int main(int argc, char** argv) {
         }
         Binary(prefix.string() + "-uniforms.bin", uniforms);
     }
-    fmt::print("Emitted {} full fragment state comparisons (736 lighting cases)\n", Cases);
+    fmt::print("Emitted {} full fragment state comparisons (864 lighting cases)\n", Cases);
 }

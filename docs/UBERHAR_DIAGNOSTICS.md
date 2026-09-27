@@ -1,5 +1,5 @@
 <!-- AstraEH: Bounded troubleshooting and removal map for the hybrid renderer. -->
-# Renderer diagnostics, schema 11
+# Renderer diagnostics, schema 12
 
 Every Uberhar renderer log call has an adjacent **`AstraEH Log Line`** comment.
 Find it with `rg -n 'AstraEH Log Line' src`. These markers identify diagnostic
@@ -9,9 +9,9 @@ logging to this fork. Android session/title/export records remain functional
 parts of log export, rather than temporary shader debugging.
 
 The startup record identifies effective switches, compiler worker count,
-`diagnostics=11`, `dynamic_fragment=true`, `bridge_policy=ready_only`,
-`fallback_abi=4`, `push_bytes=120`, `runtime_lighting_luts=true`,
-`runtime_lighting_enables=true`, `host_pipeline_identity=true` and
+`diagnostics=12`, `dynamic_fragment=true`, `bridge_policy=ready_only`,
+`fallback_abi=5`, `push_bytes=128`, `runtime_lighting_luts=true`,
+`runtime_lighting_enables=true`, `runtime_light_loop=true`, `host_pipeline_identity=true` and
 `bridge_assembly=isolated_lists_strips_fans`.
 `cpu_bridge` is false when hybrid is off or forced fallback is on, even if the
 saved bridge preference is on.
@@ -30,7 +30,7 @@ saved bridge preference is on.
 | `Uberhar fallback utility` | Completed successful fallback pipelines used or unused, unused driver-call time | Same aggregate cadence; a currently unused pipeline may serve later. |
 | `Uberhar pipeline build` | One slow specialization/fallback's queue, shader dependencies and driver call | First 20 slow builds per route. |
 | `Uberhar fallback build` | Fragment frontend size/time, pipeline wall time, `cpu_vertex` route | First 20 successful fallback builds. Zero shader bytes means module reuse. |
-| `Uberhar lighting family` | Canonical lighting/slot flags, texture kind, procedural flags and module sizes | First 32 successfully built families per title, including disk hits. Pipeline variants do not consume this cap. |
+| `Uberhar lighting family` | Canonical global lighting flags, texture kind, procedural flags and module sizes; count/slot operations are runtime in 0.0.15 | First 32 successfully built families per title, including disk hits. Pipeline variants do not consume this cap. |
 | `Uberhar slow pipeline wait` | Actual command-worker wait and selected compatible pipeline | First 20 waits of at least 50 ms. Phase 0 queued, 1 dependencies, 2 driver, 3 complete, 4 failed. |
 | `Uberhar fallback failure` | Family/key, CPU-vertex route and exception detail | First eight experimental failures; totals continue counting. Failed objects cannot be selected. |
 | `Uberhar CPU bridge mismatch` | Expected versus prepared execution key | First four mismatches. Always use the existing accurate software path instead of binding incompatible state. |
@@ -274,3 +274,48 @@ schema. Its timing semantics and five-second/normal-shutdown reporting are uncha
 Use the build revision for the app version, renderer `diagnostics` for renderer
 schema, and `frame_diagnostics` for frame schema. This avoids implying that one
 subsystem's diagnostic version identifies all others.
+
+
+## Compact lighting and fast-forward evidence (0.0.15)
+
+<!-- AstraEH: Bounded runtime-loop coverage and fixed-memory throughput attribution. -->
+
+Renderer schema 12 identifies ABI 5/128 bytes and `runtime_light_loop=true`. Two
+additional uint words at offsets 120/124 hold four 7-bit per-slot operation controls
+each. Bits 0–6 are directional, two-sided diffuse, distance attenuation, spotlight,
+geometry0, geometry1 and shadow enable. The low word's high nibble holds the active
+count 0–8; out-of-range counts use specialized recovery. The light-source/two-sided
+LUT word is retained separately to preserve the inherited physical/slot indexing
+convention. Both generic lighting and TEV loops carry `DontUnroll` in tested SPIR-V;
+this is a compiler-input hint, not a guarantee about every driver's final machine code.
+
+The census adds `alpha14_families`, applying 0.0.14 rules to the same observations;
+compare it with `canonical_families`. `alpha13_families` and
+`previous_lighting_families` retain 0.0.13 and 0.0.12 meanings. Sixteen sets are each
+capped at 2048 and reset with title maps. `seen_light_counts` is a hexadecimal
+bitmask: bitN means a lighting-enabled candidate with N active slots was seen,
+including zero. It does not count draws or measure GPU cost. It adds one OR at a
+generic request, without a timer or log line per draw.
+
+Family details retain their 32-per-title cap. They now report `lighting_enabled`,
+`light_count_mode=runtime`, `key_flags`, texture/procedural summaries and module
+sizes. The old 0.0.14 `light_count`/`light_flags_lo/hi` fields are no longer appropriate
+because they are not static shader choices. Runtime control values and guest code
+remain absent from these diagnostics.
+
+Frame schema 2 adds `Uberhar speed band` at normal shutdown, at most three lines:
+`normal` (positive cap at or below 100%), `fast` (above 100%) and `uncapped` (zero).
+Each records its own active interval duration, frames/submissions, achieved guest
+speed, FPS, work, worst interval, cap min/max and temporary-limit frame count.
+400% is a requested ceiling; `speed_percent` is the measured guest/host-time ratio.
+Different fast caps can share a band, so compare only matching `limit_min/max`;
+existing five-second windows still identify scene changes and mixed limits.
+
+The new counters occupy fixed memory and reuse the frame timestamps already
+collected. Explicit pauses/clock/state discontinuities retain their exclusion
+rules. When sampled cap or temporary-limit status changes, the crossing interval
+remains in overall totals but is omitted from speed bands; `transition_intervals`
+counts those intervals once (the same total appears in each band line). Thus band
+frames plus transition intervals equal overall observed frames. No band log is
+written per frame or per limit change. Band totals do not reset with five-second
+windows. Neither work nor frame intervals are pure GPU execution/display timing.

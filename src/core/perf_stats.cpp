@@ -39,7 +39,7 @@ PerfStats::PerfStats(u64 title_id) : uberhar_session{++uberhar_next_session}, ti
     // AstraEH: Frame-accounting schema is independent of the renderer diagnostics version.
     LOG_INFO(
         Core,
-        "Uberhar run: session={} title={:016X} frame_diagnostics=1 mode={} api={} resolution={} "
+        "Uberhar run: session={} title={:016X} frame_diagnostics=2 mode={} api={} resolution={} "
         "cpu_jit={} hw_vertex={} hybrid={} force_tev={} bridge_requested={} disk_cache={} "
         "frame_limit={} "
         "cpu_clock_percent={}",
@@ -58,6 +58,27 @@ PerfStats::~PerfStats() {
     EndUberharPause();
     LogUberharFrames("final_window", uberhar_frames.Window());
     LogUberharFrames("totals", uberhar_frames.Total());
+    // AstraEH: At most three summaries; a 400% request is distinct from achieved
+    // guest speed, and changing the speed limit does not mix the normal/fast totals.
+    constexpr std::array band_names{"normal", "fast", "uncapped"};
+    for (std::size_t i = 0; i < band_names.size(); ++i) {
+        const auto& band = uberhar_frames.Bands()[i];
+        if (band.frames == 0) {
+            continue;
+        }
+        const double seconds = band.wall_ns / 1e9;
+        // AstraEH Log Line: Fixed-size lifetime speed bands, emitted only on normal shutdown.
+        LOG_INFO(Core,
+                 "Uberhar speed band: session={} band={} frames={} game_submissions={} "
+                 "observed_wall_ms={:.3f} speed_percent={:.3f} system_fps={:.3f} "
+                 "game_fps={:.3f} work_ms={:.3f} max_interval_ms={:.3f} "
+                 "limit_min={} limit_max={} temporary_frames={} transition_intervals={}",
+                 uberhar_session, band_names[i], band.frames, band.game_frames, band.wall_ns / 1e6,
+                 band.guest_us / (seconds * 10000.0), band.frames / seconds,
+                 band.game_frames / seconds, band.work_ns / 1e6, band.max_interval_ns / 1e6,
+                 band.limit_min, band.limit_max, band.temporary_limit_frames,
+                 uberhar_frames.LimitTransitions());
+    }
     for (const auto& frame : uberhar_frames.Worst()) {
         if (frame.interval_ns == 0)
             break;

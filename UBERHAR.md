@@ -7,15 +7,31 @@ Baseline: Azahar 2126.1.2, commit
 
 ## Current status
 
-<!-- AstraEH: Keep the measured baseline distinct from this untested runtime upgrade. -->
+<!-- AstraEH: Respond to measured cold compiler cost, preserving the warm reference. -->
+**0.0.15 uses a compact ordered lighting loop**, with light count and per-slot
+operation flags in runtime data (ABI 5, 128 bytes). It targets repeated compiler input
+as well as family count. New bounded normal/fast/uncapped summaries support the
+owner's next Native/2x tests with emulator fast-forward capped at 400%.
+See the [0.0.15 release/test notes](docs/releases/0.0.15.md); Thor performance is
+pending. 0.1.0 remains a later beta milestone after repeatable cold/warm smoothness
+and stable rendering, with 3x/4x testing following separately.
+
+**0.0.14 is published and tested.** Its [two-run analysis](docs/UBERHAR_LOG_ANALYSIS_0.0.14.md)
+shows that the 577.234-second sleep pause was properly excluded. Same-workload
+families fall 21→16 and warm speed stays 99.757%, but cold generic waiting rises
+2.948→3.298 seconds and the worst cold frame rises 496→582 ms. Larger unrolled
+lighting programs compile more slowly, motivating the compact loop. This is not
+a uniform timing improvement; keep 0.0.13 as the cold-performance reference.
+
+<!-- AstraEH: Historical 0.0.14 implementation; measured results are recorded above. -->
 **0.0.14 consolidates lighting enable/configuration variants** into runtime data,
 using the existing 120-byte push constants (semantic ABI v4). Disabled LUTs return
 before table work, retaining red-channel fallback and final-light Fresnel behavior.
 The log compares current families with both 0.0.12 and 0.0.13 rules for the same
 observed draws, and records at most 32 remaining family shapes per title. The core
 header now labels its frame schema separately from renderer diagnostics 11.
-See the [0.0.14 release/test notes](docs/releases/0.0.14.md). Publication requires
-Actions gates; **Thor performance is pending**. 0.0.13 remains the measured baseline.
+See the [0.0.14 release/test notes](docs/releases/0.0.14.md) and the measured results above.
+Publication passed the Actions gates. 0.0.13 remains the cold-performance reference.
 
 <!-- AstraEH: 0.0.13 now has three complete Thor runs with distinct cache coverage. -->
 **0.0.13 moves lighting LUT controls and light-source selection into per-draw data**
@@ -190,7 +206,8 @@ There is no complete startup generic bank yet, and first-use stalls remain.
 Runtime pipeline keys share already-identical host shader objects and exclude
 inactive state. Transferable records retain guest IDs and their existing layout.
 The private fragment state ABI is 120 bytes in 0.0.13–0.0.14 (108 bytes in 0.0.8–0.0.12).
-0.0.14 changes its meaning to v4 without growing its size.
+0.0.14 changes its meaning to v4 without growing its size. 0.0.15 uses 128 bytes
+(v5) for the additional runtime light count/operation words.
 
 **Force TEV fallback for comparison** (requires hybrid mode, then restart)
 keeps supported draws on the generic fragment path even after specialization. Use it for
@@ -215,7 +232,7 @@ not served a draw, and the driver-call time of the latter. At progress snapshots
 an unused pipeline may still become useful later. Bounded build records report
 GLSL/SPIR-V byte sizes; zero means an existing fragment module was reused.
 `diagnostics=3 compact_tev=true fast_fallback=false` identifies 0.0.6.
-Version 0.0.14 uses `diagnostics=11` and separate `frame_diagnostics=1`; see the
+Version 0.0.15 uses `diagnostics=12` and separate `frame_diagnostics=2`; see the
 [diagnostics map](docs/UBERHAR_DIAGNOSTICS.md) for bridge/translation/cache counters,
 capability probes, limits and diagnostic-removal markers.
 

@@ -25,8 +25,8 @@ if len(cases) != 64:
 # corpus. Deduplicate exact source, not keys, and check both frontend optimizer modes.
 if len(sys.argv) > 2:
     fragment_cases = sorted(Path(sys.argv[2]).glob("*.frag"))
-    if len(fragment_cases) != 1856:
-        raise AssertionError(f"Expected 928 specialized/generic pairs, got {len(fragment_cases)} files")
+    if len(fragment_cases) != 2112:
+        raise AssertionError(f"Expected 1056 specialized/generic pairs, got {len(fragment_cases)} files")
     unique = {source.read_text(): source for source in cases + fragment_cases}
     cases = list(unique.values())
 
@@ -39,14 +39,17 @@ for label, option in (("unoptimized", "-Od"), ("optimized", "-Os")):
         checked(["spirv-val", "--target-env", "vulkan1.1", str(binary)])
         assembly = checked(["spirv-dis", str(binary)])
         if "specialized" not in source.name:
-            if not any("OpLoopMerge" in line and "DontUnroll" in line
-                       for line in assembly.splitlines()):
-                raise AssertionError(f"TEV loop hint missing: {binary}")
+            # AstraEH: Lit generic shaders need both lighting and TEV loops kept compact.
+            required_loops = 2 if "uber_light_count" in source.read_text() else 1
+            loop_hints = sum("OpLoopMerge" in line and "DontUnroll" in line
+                             for line in assembly.splitlines())
+            if loop_hints < required_loops:
+                raise AssertionError(f"Compact loop hint missing: {binary}: {loop_hints}")
             # AstraEH: Catch Vulkan ABI drift, including runtime lighting at bytes 108–119.
-            for member, offset in enumerate((0, 96, 100, 104, 108, 112, 116)):
+            for member, offset in enumerate((0, 96, 100, 104, 108, 112, 116, 120, 124)):
                 expected = f"OpMemberDecorate %UberTev {member} Offset {offset}"
                 if expected not in assembly:
                     raise AssertionError(f"Fallback ABI mismatch: {binary}: {expected}")
         sizes.append(binary.stat().st_size)
-    print(f"PASS: {len(cases)} {label} Vulkan modules; DontUnroll and 120-byte ABI verified; "
+    print(f"PASS: {len(cases)} {label} Vulkan modules; DontUnroll and 128-byte ABI verified; "
           f"SPIR-V size {min(sizes)}..{max(sizes)} bytes", flush=True)

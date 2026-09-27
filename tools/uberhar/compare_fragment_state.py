@@ -97,10 +97,10 @@ def draw(path):
 
 
 count = 0
-for i in range(928):
+for i in range(1056):
     uniforms.write((cases / f"{i}-uniforms.bin").read_bytes())
     raw = (cases / f"{i}-state.bin").read_bytes()
-    if len(raw) != 120:
+    if len(raw) != 128:
         raise AssertionError(f"Unexpected runtime ABI size: {len(raw)}")
     state.write(raw + bytes(128 - len(raw)))
     expected_color, expected_depth = draw(cases / f"{i}-specialized.frag")
@@ -115,4 +115,4 @@ for i in range(928):
     count += 1024
     if i % 48 == 47:
         print(f"Compared {i + 1} full fragment states", flush=True)
-print(f"PASS: {count} exact RGBA8 pixels and {count} depth/discard comparisons across 928 states", flush=True)
+print(f"PASS: {count} exact RGBA8 pixels and {count} depth/discard comparisons across 1056 states", flush=True)

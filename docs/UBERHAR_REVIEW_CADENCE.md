@@ -34,3 +34,11 @@ cold/warm milestone, compares architectural alternatives, and selects runtime
 lighting controls for 0.0.13. The subsequent [0.0.13 device analysis](UBERHAR_LOG_ANALYSIS_0.0.13.md)
 confirms reduced family counts and retained warm speed; that results analysis is
 not another full architectural review and does not reset this ledger.
+
+
+<!-- AstraEH: Results analysis and beta planning do not restart the review interval. -->
+The [0.0.14 analysis](UBERHAR_LOG_ANALYSIS_0.0.14.md) finds smaller family counts but
+higher cold driver cost, motivating compact runtime lighting in 0.0.15. This is a
+results analysis, not another full review. The default review remains after 0.0.16;
+a proposed 0.1.0 promotion should include the final-alpha architectural assessment
+within the existing three-to-five-alpha window.

@@ -255,10 +255,43 @@ int main() {
         }
         auto variant = base;
         variant.lighting.src_num.Assign(2);
-        CheckPair(base, variant, profile, false, "Unrolled light count was collapsed");
+        CheckPair(base, variant, profile, true, "Runtime light count split a family");
         variant = base;
         variant.lighting.lights[0].directional.Assign(1);
-        CheckPair(base, variant, profile, false, "Directional operation was collapsed");
+        CheckPair(base, variant, profile, true, "Runtime directional flag split a family");
+        // AstraEH: Cover both transport words and every slot bit independently;
+        // compact/current keys merge these states while the 0.0.14 census does not.
+        for (u32 count = 0; count <= 8; ++count) {
+            for (u32 slot = 0; slot < 8; ++slot) {
+                for (u32 bit = 0; bit < 7; ++bit) {
+                    variant = base;
+                    variant.lighting.src_num.Assign(count);
+                    variant.lighting.lights[slot].raw = static_cast<u16>(1U << (bit + 3));
+                    CheckPair(base, variant, profile, true,
+                              "Runtime slot operation split a family");
+                    const auto state = MakeDynamicTevState(variant, profile);
+                    const u32 word = slot < 4 ? state.lighting_ops_lo : state.lighting_ops_hi;
+                    if ((state.lighting_ops_lo >> 28) != count ||
+                        ((word >> ((slot % 4) * 7)) & 127U) != (1U << bit) ||
+                        Equal(MakeDynamicTevFamilyConfig(base, profile, LightingFamilyKey::Alpha14),
+                              MakeDynamicTevFamilyConfig(variant, profile,
+                                                         LightingFamilyKey::Alpha14))) {
+                        throw std::runtime_error("Runtime slot transport/previous key mismatch");
+                    }
+                }
+            }
+        }
+        variant = base;
+        variant.lighting.src_num.Assign(9);
+        if (SupportsDynamicTev(variant, UserConfig{})) {
+            throw std::runtime_error("Out-of-range light count bypassed recovery");
+        }
+        variant = base;
+        variant.lighting.bump_mode.Assign(Lighting::LightingBumpMode::NormalMap);
+        CheckPair(base, variant, profile, false, "Bump structure was collapsed");
+        variant = base;
+        variant.lighting.enable_shadow.Assign(1);
+        CheckPair(base, variant, profile, false, "Global shadow structure was collapsed");
         variant = base;
         variant.lighting.lut_d0.SetScale(1.5f);
         if (SupportsDynamicTev(variant, UserConfig{})) {

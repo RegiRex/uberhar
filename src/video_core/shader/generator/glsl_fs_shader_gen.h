@@ -13,14 +13,14 @@ bool SupportsDynamicTev(const FSConfig& config, const UserConfig& user);
 
 /// AstraEH: Canonicalize only shader-irrelevant fallback state for a fixed device profile.
 /// Sampler and fixed-function pipeline state must still be supplied separately by the caller.
-// AstraEH: Alpha13 is a diagnostic-only counterfactual key, never a shader to compile.
-enum class LightingFamilyKey { Current, Alpha13 };
+// AstraEH: Alpha13/Alpha14 are diagnostic-only counterfactual keys, never a shader to compile.
+enum class LightingFamilyKey { Current, Alpha13, Alpha14 };
 FSConfig MakeDynamicTevFamilyConfig(const FSConfig& config, const Profile& profile,
                                     LightingFamilyKey lighting_key = LightingFamilyKey::Current);
 
-// AstraEH: Version 4 of the private Vulkan fallback ABI. Stay below Vulkan's
+// AstraEH: Version 5 of the private Vulkan fallback ABI. Fit Vulkan's
 // 128-byte minimum push-constant limit; specialized/disk shader layouts are unchanged.
-inline constexpr u32 DynamicTevAbiVersion = 4;
+inline constexpr u32 DynamicTevAbiVersion = 5;
 struct DynamicTevState {
     std::array<TevStageConfigRaw, 6> stages;
     u32 buffer_mask;
@@ -35,14 +35,21 @@ struct DynamicTevState {
     // AstraEH: Eight three-bit source selectors, then the original slot-indexed
     // two-sided flags. Keep inherited LUT indexing distinct from diffuse indexing.
     u32 lighting_sources{};
+    // AstraEH: Four 7-bit slot controls per word: directional, two-sided diffuse,
+    // distance, spotlight, geometry0/1, shadow. Low word bits [28:31] hold count.
+    // Physical sources and inherited LUT two-sided indexing remain separate above.
+    u32 lighting_ops_lo{};
+    u32 lighting_ops_hi{};
 };
-static_assert(sizeof(DynamicTevState) == 120);
+static_assert(sizeof(DynamicTevState) == 128);
 static_assert(offsetof(DynamicTevState, buffer_mask) == 96);
 static_assert(offsetof(DynamicTevState, framebuffer) == 100);
 static_assert(offsetof(DynamicTevState, texture) == 104);
 static_assert(offsetof(DynamicTevState, lighting_luts_lo) == 108);
 static_assert(offsetof(DynamicTevState, lighting_luts_hi) == 112);
 static_assert(offsetof(DynamicTevState, lighting_sources) == 116);
+static_assert(offsetof(DynamicTevState, lighting_ops_lo) == 120);
+static_assert(offsetof(DynamicTevState, lighting_ops_hi) == 124);
 
 /// AstraEH: Capture effective runtime state before family canonicalization removes it.
 DynamicTevState MakeDynamicTevState(const FSConfig& config, const Profile& profile);

@@ -34,6 +34,11 @@ int main() {
           "Incorrect pacing histogram");
     Check(first.limit_min == 100 && first.limit_max == 300 && first.temporary_limit_frames == 150,
           "Fast-forward window lost");
+    // AstraEH: The transition interval stays in the overall sample, but does not
+    // contaminate either band. Window reset must not erase lifetime band evidence.
+    Check(stats.Bands()[0].frames == 100 && stats.Bands()[1].frames == 149 &&
+              stats.LimitTransitions() == 1,
+          "Speed bands mixed transition data");
     stats.ResetWindow();
     Check(stats.Window().frames == 0 && stats.Total().frames == 250,
           "Window reset corrupted totals");
@@ -83,6 +88,25 @@ int main() {
         Check(worst[i].interval_ns == 1'000'000'040 - i && worst[i].work_ns == 40 - i,
               "Late worst-frame retention/order failed");
     Check(stats.Worst().front().interval_ns == 0, "Explicit pause became a worst-frame hitch");
+    // AstraEH: Real 400% advancement, capped slowdown, uncapped mode, and sleep
+    // exercise measured throughput independently of the chosen cap/temporary toggle.
+    Core::UberharFrameDiagnostics speed;
+    speed.Observe(0, 0, 0, 0, 400, true);
+    speed.Observe(10'000'000, 40'000, 2, 8'000'000, 400, true);
+    speed.Observe(30'000'000, 80'000, 4, 18'000'000, 400, true);
+    speed.Observe(40'000'000, 120'000, 6, 8'000'000, 0, true);
+    speed.Observe(50'000'000, 180'000, 9, 8'000'000, 0, true);
+    speed.BreakInterval();
+    speed.Observe(650'000'000'000, 180'000, 9, 1, 400, true);
+    speed.Observe(650'010'000'000, 220'000, 11, 8'000'000, 400, true);
+    Check(speed.Bands()[1].wall_ns == 40'000'000 && speed.Bands()[1].guest_us == 120'000 &&
+              speed.Bands()[1].limit_min == 400 && speed.Bands()[1].limit_max == 400 &&
+              speed.Bands()[1].temporary_limit_frames == 3,
+          "400% cap confused with actual speed or pause contaminated fast band");
+    Check(speed.Bands()[2].wall_ns == 10'000'000 && speed.Bands()[2].guest_us == 60'000 &&
+              speed.Bands()[2].limit_max == 0 && speed.LimitTransitions() == 1 &&
+              speed.Total().frames == 5,
+          "Uncapped/transition accounting changed total evidence");
     std::puts(
         "PASS: pacing, speed, fast-forward, pause, clock/state boundaries and late worst frames");
 }

@@ -81,7 +81,7 @@ All files in `tools/uberhar/` are new AstraEH work.
 | `tools/uberhar/shader_probe.cpp` | 224 reproducible TEV cases, directed edge/texture-reuse/unused-operand cases, AddSigned exclusion and 64 full fragment modules. 0.0.7 emits canonical families and checks their source against the original family. |
 | `tools/uberhar/compare_tev.py` | Compare generated specialized/interpreted combiner math on Mesa and independently verify texture fetch counts; synthetic sampling inputs do not test real texture derivatives or device drivers. |
 | `tools/uberhar/validate_shaders.py` | Compile and validate 64 baseline modules plus unique full lighting-corpus modules with frontend optimization off/on; verify the TEV loop's DontUnroll hint and all seven fallback state offsets reach SPIR-V. |
-| `tools/uberhar/fragment_state_probe.cpp` and `compare_fragment_state.py` | 928 full specialized/generic fragment comparisons, production state/uniform transport, real textured offscreen color/depth/discard checks on Mesa; GL resource-declaration adaptation is not Vulkan-driver validation. |
+| `tools/uberhar/fragment_state_probe.cpp` and `compare_fragment_state.py` | 1056 full specialized/generic fragment comparisons, production state/uniform transport, real textured offscreen color/depth/discard checks on Mesa; GL resource-declaration adaptation is not Vulkan-driver validation. |
 | `tools/uberhar/test_pipeline_keys.cpp` | 36 production execution-key checks covering equivalent host modules/inactive fields and active state that must remain distinct. |
 | `tools/uberhar/test_pipeline_policy.cpp` | Production CPU admission bounds and normal/forced selection under successful, pending and failed fallback completions. |
 | `tools/uberhar/test_bridge_assembly.cpp` | 264 comparisons using the actual PICA assembler against independent topology sequences, plus persistent ordinary batches, winding restoration and exceptional exit. |
@@ -191,3 +191,18 @@ scope, unresolved limits, test contracts and the next engineering order.
 | `test_tev_family.cpp` | Independent support matrix across eight configurations and all 128 enable masks (including spotlight dummy), current/0.0.13 key distinctions and exact CP transport. |
 | `fragment_state_probe.cpp`, `compare_fragment_state.py`, `validate_shaders.py` | 512 additional full fragment cases, all 64 real enable masks crossed with eight configurations, stronger unsaturated reflection terms, final-light alpha/shadow/CP coverage; all 928 cases join existing pixel and dual-optimizer Vulkan gates. |
 | `README.md`, `UBERHAR.md`, `UBERHAR_VERSION`, diagnostics and release notes | 0.0.14 scope, validation, metadata meanings and Native/2x acceptance instructions; 0.0.13 remains the measured baseline. |
+
+
+## Compact lighting and speed bands (0.0.15)
+
+<!-- AstraEH: Changes addressing 0.0.14's larger per-family driver cost. -->
+
+| File or section | AstraEH work |
+| --- | --- |
+| `glsl_fs_shader_gen.{h,cpp}` | ABI v5 (128 bytes), eight packed seven-bit operation slots plus runtime light count; canonical loop key and diagnostic-only Alpha14 key. One ordered DontUnroll lighting body preserves source mapping, optional operations, final-slot Fresnel and shadow rules. Global bump/shadow structure and typed resources stay specialized. |
+| `vk_pipeline_cache.{h,cpp}` | Renderer schema 12, same-observation Alpha14 census, bounded light-count mask, current static-family detail schema; exact generator-owned push size and ABI. |
+| `src/core/uberhar_frame_diagnostics.h`, `perf_stats.cpp` | Frame schema 2; fixed normal/fast/uncapped lifetime buckets, transition interval exclusion from buckets only, up to three shutdown summaries, unchanged pause/overall accounting. |
+| `test_tev_family.cpp`, `fragment_state_probe.cpp` | All slot/control bits, zero through eight lights, independent old-key distinction, retained bump/global-shadow distinctions; 128 additional full-render cases with operation permutations and ordered/remapped/duplicate lights. |
+| `compare_fragment_state.py`, `shader_probe.cpp`, `validate_shaders.py` | 128-byte transport, 1056 full-render cases and nine SPIR-V offset checks; lit generic modules require both loop no-unroll hints with each optimizer mode. |
+| `test_frame_diagnostics.cpp` | Mixed cap transitions, achieved speed versus 400% request, uncapped throughput, reset persistence and explicit sleep exclusion. |
+| `docs/UBERHAR_LOG_ANALYSIS_0.0.14.md`, release notes, overview/status docs, version | Measured regression and successful warm result, compact-loop scope, beta acceptance and 400%-cap device test plan. |

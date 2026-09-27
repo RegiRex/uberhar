@@ -35,6 +35,16 @@ public:
             const u64 games = game_frames - last_game_frames;
             Add(window, elapsed, guest_elapsed, games, work_ns, frame_limit, temporary_limit);
             Add(total, elapsed, guest_elapsed, games, work_ns, frame_limit, temporary_limit);
+            // AstraEH: Separate normal, fast-forward and uncapped throughput without
+            // per-frame logging. A limit transition remains in overall timing, but
+            // cannot be assigned wholly to either band, so exclude it from bands.
+            if (frame_limit == last_limit && temporary_limit == last_temporary) {
+                const std::size_t band = frame_limit == 0 ? 2 : frame_limit > 100 ? 1 : 0;
+                Add(bands[band], elapsed, guest_elapsed, games, work_ns, frame_limit,
+                    temporary_limit);
+            } else {
+                ++limit_transitions;
+            }
             // AstraEH: Retain late severe hitches without per-frame output or an unbounded trace.
             if (elapsed >= 50'000'000 && elapsed > worst.back().interval_ns) {
                 std::size_t slot = worst.size() - 1;
@@ -49,6 +59,8 @@ public:
         last_ns = now_ns;
         last_guest_us = guest_us;
         last_game_frames = game_frames;
+        last_limit = frame_limit;
+        last_temporary = temporary_limit;
     }
 
     // AstraEH: Discard the interval crossing an explicit pause; retain all completed samples.
@@ -69,6 +81,13 @@ public:
     }
     u64 Discontinuities() const {
         return discontinuities;
+    }
+    // AstraEH: Three fixed, lifetime bands; explicit pauses never enter them.
+    const std::array<Counters, 3>& Bands() const {
+        return bands;
+    }
+    u64 LimitTransitions() const {
+        return limit_transitions;
     }
     const std::array<SlowFrame, 8>& Worst() const {
         return worst;
@@ -97,6 +116,10 @@ private:
         ++out.intervals[bucket];
     }
     Counters window, total;
+    std::array<Counters, 3> bands{};
+    double last_limit{};
+    bool last_temporary{};
+    u64 limit_transitions{};
     std::array<SlowFrame, 8> worst{};
     bool anchored{};
     u64 last_ns{}, last_game_frames{}, excluded_intervals{}, discontinuities{};

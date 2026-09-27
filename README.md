@@ -36,11 +36,16 @@ coverage differences limit comparison with the prior 8.121 s cold result.
 <!-- AstraEH: Next runtime upgrade is distinct from the measured 0.0.13 reference. -->
 **0.0.14** also supplies lighting enables/configuration support as runtime data,
 adds same-run 0.0.13/current family counts and bounded remaining-family details,
-and expands rendering comparisons to 928 cases. Thor performance is pending.
-Test Native cold/warm at **2x** first. Compute/Automatic still have a restricted
+and expands rendering comparisons to 928 cases. The [two-run Thor result](docs/UBERHAR_LOG_ANALYSIS_0.0.14.md)
+confirms correct sleep exclusion, 21→16 same-workload families and 99.757% warm
+speed, but cold generic wait rises to 3.298 seconds as individual programs get larger.
+**0.0.15** replaces repeated per-light code with a compact ordered runtime loop and
+adds bounded speed-band summaries for the next 400%-cap tests. Device performance
+is pending; 0.1.0 remains a future beta milestone, with 3x/4x assessment afterward.
+Next test: Native at **2x**, cold then warm with a **400% emulator fast-forward cap**. Compute/Automatic still have a restricted
 solid-rectangle subset; full GPU interpretation, general compute rasterization
 and zero-wait first playthroughs remain development goals.
-See the [0.0.14 notes](docs/releases/0.0.14.md),
+See the [0.0.15 notes](docs/releases/0.0.15.md),
 [architectural review](docs/UBERHAR_ARCHITECTURE_0.0.12.md) and
 [Actions](https://github.com/RegiRex/uberhar/actions/workflows/uberhar-alpha.yml).
 Publication requires all build/package/shader gates. The next default architectural
