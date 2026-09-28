@@ -35,11 +35,12 @@ bool PerfStats::game_frames_updated = true;
 // AstraEH: Process-local run numbers join all new performance records within one log.
 static std::atomic<u64> uberhar_next_session{0};
 PerfStats::PerfStats(u64 title_id) : uberhar_session{++uberhar_next_session}, title_id(title_id) {
+    Common::UberharActivity::Reset(uberhar_session); // AstraEH: No cross-game annotations.
     // AstraEH Log Line: One effective-settings snapshot per emulation run.
     // AstraEH: Frame-accounting schema is independent of the renderer diagnostics version.
     LOG_INFO(
         Core,
-        "Uberhar run: session={} title={:016X} frame_diagnostics=2 mode={} api={} resolution={} "
+        "Uberhar run: session={} title={:016X} frame_diagnostics=3 mode={} api={} resolution={} "
         "cpu_jit={} hw_vertex={} hybrid={} force_tev={} bridge_requested={} disk_cache={} "
         "frame_limit={} "
         "cpu_clock_percent={}",
@@ -79,15 +80,48 @@ PerfStats::~PerfStats() {
                  band.limit_min, band.limit_max, band.temporary_limit_frames,
                  uberhar_frames.LimitTransitions());
     }
+    // AstraEH: Five fixed summaries separate confirmed loading from unknown/mixed time.
+    for (std::size_t i = 0; i < uberhar_frames.Phases().size(); ++i) {
+        const auto& data = uberhar_frames.Phases()[i];
+        if (!data.frames)
+            continue;
+        // AstraEH Log Line: At most five lifetime phase records per normal shutdown.
+        LOG_INFO(Core,
+                 "Uberhar phase totals: session={} phase={} frames={} wall_ms={:.3f} "
+                 "speed_percent={:.3f} max_interval_ms={:.3f} reads={} requested_bytes={}",
+                 uberhar_session, Common::UberharActivity::Names[i], data.frames,
+                 data.wall_ns / 1e6, data.guest_us * 100000.0 / data.wall_ns,
+                 data.max_interval_ns / 1e6, data.read_requests, data.requested_bytes);
+    }
     for (const auto& frame : uberhar_frames.Worst()) {
         if (frame.interval_ns == 0)
             break;
         // AstraEH Log Line: At most eight frame hitches at shutdown, including late-session stalls.
         LOG_INFO(Core,
                  "Uberhar worst frame: session={} frame={} end_ms={:.3f} interval_ms={:.3f} "
-                 "work_ms={:.3f} display_timing=false",
+                 "work_ms={:.3f} phase={} evidence={} reads={} requested_bytes={} "
+                 "submissions={} display_timing=false",
                  uberhar_session, frame.frame, frame.end_ns / 1e6, frame.interval_ns / 1e6,
-                 frame.work_ns / 1e6);
+                 frame.work_ns / 1e6, Common::UberharActivity::Name(frame.phase),
+                 Common::UberharActivity::Evidence(frame.reads, frame.bytes, frame.submissions,
+                                                   frame.interval_ns),
+                 frame.reads, frame.bytes, frame.submissions);
+    }
+    // AstraEH: These overlap global worst records; never sum them as additional hitches.
+    for (const auto& bank : uberhar_frames.PhaseWorst()) {
+        for (const auto& frame : bank) {
+            if (!frame.interval_ns)
+                break;
+            // AstraEH Log Line: At most four events per phase, preserving gameplay after long
+            // loads.
+            LOG_INFO(Core,
+                     "Uberhar phase worst: session={} phase={} frame={} end_ms={:.3f} "
+                     "interval_ms={:.3f} evidence={} display_timing=false",
+                     uberhar_session, Common::UberharActivity::Name(frame.phase), frame.frame,
+                     frame.end_ns / 1e6, frame.interval_ns / 1e6,
+                     Common::UberharActivity::Evidence(frame.reads, frame.bytes, frame.submissions,
+                                                       frame.interval_ns));
+        }
     }
     // AstraEH Log Line: Always close the run, including an exit before the first sampled frame.
     LOG_INFO(
@@ -176,8 +210,18 @@ void PerfStats::EndSystemFrame(std::chrono::microseconds guest_time) {
     const u64 now_ns = duration_cast<std::chrono::nanoseconds>(now - uberhar_start).count();
     const u64 work_ns =
         std::max<s64>(0, duration_cast<std::chrono::nanoseconds>(frame_time).count());
+    const auto activity = Common::UberharActivity::Capture();
+    if (activity.token != uberhar_phase_token) {
+        uberhar_phase_token = activity.token;
+        if (++uberhar_phase_details <= 64) {
+            // AstraEH Log Line: Bound transitions; all intervals still enter lifetime phase totals.
+            LOG_INFO(Core, "Uberhar phase: session={} phase={} generation={} observed_at_ms={:.3f}",
+                     uberhar_session, Common::UberharActivity::Name(activity.GetPhase()),
+                     activity.token >> 3, now_ns / 1e6);
+        }
+    }
     uberhar_frames.Observe(now_ns, guest_time.count(), uberhar_game_frames, work_ns,
-                           Settings::GetFrameLimit(), Settings::is_temporary_frame_limit);
+                           Settings::GetFrameLimit(), Settings::is_temporary_frame_limit, activity);
     if (uberhar_frames.Window().wall_ns >= 5'000'000'000ULL) {
         LogUberharFrames("window", uberhar_frames.Window());
         uberhar_frames.ResetWindow();
@@ -189,6 +233,7 @@ void PerfStats::EndGameFrame() {
 
     game_frames += 1;
     ++uberhar_game_frames; // AstraEH: Not reset by overlay polling.
+    Common::UberharActivity::submissions.fetch_add(1, std::memory_order_relaxed);
     PerfStats::game_frames_updated = true;
 }
 
@@ -246,6 +291,16 @@ void PerfStats::LogUberharFrames(const char* kind,
         data.work_ns / 1e6, data.max_work_ns / 1e6, data.max_interval_ns / 1e6, h[0], h[1], h[2],
         h[3], h[4], h[5], h[6], h[7], uberhar_pause_count, uberhar_paused_ns / 1e6,
         uberhar_frames.ExcludedIntervals(), uberhar_frames.Discontinuities());
+    // AstraEH Log Line: Same bounded cadence; I/O is evidence, never confirmation of
+    // non-interactivity.
+    const auto& phases = data.phase_frames;
+    LOG_INFO(Core,
+             "Uberhar activity {}: session={} phase_frames=[{},{},{},{},{}] "
+             "reads={} requested_bytes={} evidence={} automatic_confirmed=false",
+             kind, uberhar_session, phases[0], phases[1], phases[2], phases[3], phases[4],
+             data.read_requests, data.requested_bytes,
+             Common::UberharActivity::Evidence(data.read_requests, data.requested_bytes,
+                                               data.game_frames, data.wall_ns));
     // AstraEH Log Line: Same report cadence; identifies windows that include fast-forward changes.
     LOG_INFO(Core, "Uberhar frame limits {}: session={} min={} max={} temporary_frames={}", kind,
              uberhar_session, data.limit_min, data.limit_max, data.temporary_limit_frames);

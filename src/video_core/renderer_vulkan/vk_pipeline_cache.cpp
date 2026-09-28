@@ -2,6 +2,7 @@
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
 
+#include <bit>       // AstraEH: Count per-draw active TEV stages without fragment-side decoding.
 #include <chrono>    // AstraEH: Measure actual scheduler waits for pipeline compilation.
 #include <stdexcept> // AstraEH: Recover experimental compilation failures through specialization.
 #include <boost/container/static_vector.hpp>
@@ -109,10 +110,11 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
     LOG_INFO(
         Render_Vulkan,
         "Uberhar: hybrid_tev={} force_tev={} async_shaders={} spirv_generator={} "
-        "diagnostics=12 first_ready=true compact_tev=true canonical_tev=true dynamic_fragment=true "
+        "diagnostics=13 first_ready=true compact_tev=true canonical_tev=true dynamic_fragment=true "
         "cpu_bridge={} bridge_policy=ready_only fallback_abi={} push_bytes={} "
         "runtime_lighting_luts=true runtime_lighting_enables=true runtime_light_loop=true "
-        "host_pipeline_identity=true bridge_assembly=isolated_lists_strips_fans "
+        "runtime_tev_plan=true phase_diagnostics=1 host_pipeline_identity=true "
+        "bridge_assembly=isolated_lists_strips_fans "
         "compiler_workers={}",
         hybrid_tev, force_tev, Settings::values.async_shader_compilation.GetValue(),
         Settings::values.spirv_shader_gen.GetValue(), cpu_vertex_bridge, GLSL::DynamicTevAbiVersion,
@@ -449,6 +451,7 @@ bool PipelineCache::BindPipeline(PipelineInfo& info, bool wait_built,
         // Until the ready bank is complete this wait is real, separately measured work.
         auto* generic = GetTevFallback(info, true);
         if (generic && !generic->IsDone()) {
+            const auto activity_start = Common::UberharActivity::Capture();
             const auto start = std::chrono::steady_clock::now();
             generic->WaitDone();
             const auto ns = static_cast<u64>(std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -457,11 +460,31 @@ bool PipelineCache::BindPipeline(PipelineInfo& info, bool wait_built,
             ++virtual_waits;
             virtual_wait_ns += ns;
             virtual_max_wait_ns = std::max(virtual_max_wait_ns, ns);
+            const auto activity_end = Common::UberharActivity::Capture();
+            const auto phase = Common::UberharActivity::Between(activity_start, activity_end);
+            auto& bucket = phase_waits[static_cast<std::size_t>(phase)];
+            ++bucket.count;
+            bucket.ns += ns;
+            bucket.maximum = std::max(bucket.maximum, ns);
+            if (ns >= 16'666'667 && phase_wait_details < 64) {
+                ++phase_wait_details;
+                // AstraEH Log Line: First 64 significant waits; all waits retain phase totals.
+                LOG_INFO(Render_Vulkan,
+                         "Uberhar generic wait: session={} phase={} wait_ms={:.3f} "
+                         "reads={} requested_bytes={} submissions={} limit=64",
+                         activity_start.run, Common::UberharActivity::Name(phase), ns / 1e6,
+                         activity_end.reads - activity_start.reads,
+                         activity_end.bytes - activity_start.bytes,
+                         activity_end.presents - activity_start.presents);
+            }
         }
         if (generic && !generic->HasFailed()) {
             pipeline = generic;
             virtual_generic = true;
             ++virtual_generic_draws;
+            // AstraEH: Draw-weighted coverage only, not fragment/pixel-weighted savings.
+            ++tev_loop_histogram[(tev_constants.buffer_mask >> 8) & 7U];
+            ++tev_active_histogram[std::popcount((tev_constants.buffer_mask >> 16) & 63U)];
         } else {
             // AstraEH: Recover before submission, so a failed/unsupported generic never drops a
             // draw.
@@ -947,6 +970,7 @@ GraphicsPipeline* PipelineCache::GetTevFallback(const PipelineInfo& info, bool c
                 throw std::runtime_error("fallback fragment family previously failed");
             }
             const auto start = std::chrono::steady_clock::now();
+            const auto activity_start = Common::UberharActivity::Capture();
             // AstraEH: Size diagnostics let device logs confirm the compact module
             // reached the driver. Zero means this family reused an existing module.
             std::size_t glsl_bytes = 0;
@@ -978,6 +1002,11 @@ GraphicsPipeline* PipelineCache::GetTevFallback(const PipelineInfo& info, bool c
                     .count();
             const u64 job_queue_ns =
                 std::chrono::duration_cast<std::chrono::nanoseconds>(start - queued).count();
+            const auto activity_end = Common::UberharActivity::Capture();
+            const auto phase = Common::UberharActivity::Between(activity_start, activity_end);
+            const auto phase_index = static_cast<std::size_t>(phase);
+            phase_builds[phase_index].fetch_add(1, std::memory_order_relaxed);
+            phase_build_ns[phase_index].fetch_add(shader_ns + driver_ns, std::memory_order_relaxed);
             const auto builds = fallback_compile_jobs.fetch_add(1, std::memory_order::relaxed) + 1;
             fallback_job_queue_ns.fetch_add(job_queue_ns, std::memory_order::relaxed);
             fallback_shader_ns.fetch_add(shader_ns, std::memory_order::relaxed);
@@ -1004,10 +1033,10 @@ GraphicsPipeline* PipelineCache::GetTevFallback(const PipelineInfo& info, bool c
                 LOG_INFO(Render_Vulkan,
                          "Uberhar fallback build: family={:016X} key={:016X} queue_ms={:.3f} "
                          "shader_ms={:.3f} pipeline_ms={:.3f} glsl_bytes={} spirv_bytes={} "
-                         "cpu_vertex={}",
+                         "cpu_vertex={} phase={} session={}",
                          family_hash, pipeline_ptr->Key(), job_queue_ns / 1000000.0,
                          shader_ns / 1000000.0, driver_ns / 1000000.0, glsl_bytes, spirv_bytes,
-                         cpu_vertex);
+                         cpu_vertex, Common::UberharActivity::Name(phase), activity_start.run);
             }
         } catch (const std::exception& error) {
             if (!shader_ptr->IsDone()) {
@@ -1179,6 +1208,31 @@ void PipelineCache::ReportUberharStats(const char* kind) {
                  "complete_ready_bank=false",
                  kind, virtual_generic_draws, virtual_recovery_draws, virtual_waits,
                  virtual_wait_ns / 1000000.0, virtual_max_wait_ns / 1000000.0);
+    }
+    // AstraEH: Cumulative buckets at the existing cadence; build time and wait time overlap.
+    if (hybrid_tev) {
+        for (std::size_t i = 0; i < phase_waits.size(); ++i) {
+            const auto& wait = phase_waits[i];
+            const auto builds = phase_builds[i].load(std::memory_order_relaxed);
+            if (!wait.count && !builds)
+                continue;
+            // AstraEH Log Line: At most five phase summaries per normal progress/final report.
+            LOG_INFO(Render_Vulkan,
+                     "Uberhar compile phase {}: phase={} generic_waits={} "
+                     "generic_wait_ms={:.3f} generic_max_ms={:.3f} "
+                     "generic_builds={} build_wall_ms={:.3f}",
+                     kind, Common::UberharActivity::Names[i], wait.count, wait.ns / 1e6,
+                     wait.maximum / 1e6, builds,
+                     phase_build_ns[i].load(std::memory_order_relaxed) / 1e6);
+        }
+        const auto& loop = tev_loop_histogram;
+        const auto& active = tev_active_histogram;
+        // AstraEH Log Line: Seven fixed bins each (0..6), all selected Native generic draws.
+        LOG_INFO(Render_Vulkan,
+                 "Uberhar TEV plan {}: loop_stages=[{},{},{},{},{},{},{}] "
+                 "active_stages=[{},{},{},{},{},{},{}] weighting=draws",
+                 kind, loop[0], loop[1], loop[2], loop[3], loop[4], loop[5], loop[6], active[0],
+                 active[1], active[2], active[3], active[4], active[5], active[6]);
     }
     // AstraEH Log Line: bounded renderer diagnostics; see docs/UBERHAR_DIAGNOSTICS.md.
     LOG_INFO(

@@ -245,3 +245,19 @@ claimed by this CPU transport optimization.
 All added/modified diagnostic calls retain adjacent `AstraEH Log Line` markers.
 Sustained sampling uses fixed memory and one admission per 50 ms, rather than a
 per-title quota that could run out before the most useful scenes.
+
+
+## 0.1.2: prepared TEV stages and loading context
+
+<!-- AstraEH: Current additions are mapped separately from inherited emulation code. -->
+
+| Files | AstraEH purpose |
+| --- | --- |
+| `src/common/uberhar_activity.h` | Fixed atomic phase/generation/session and guest read/submission evidence; startup override, mixed-boundary attribution and conservative candidate helper. No rendering policy. |
+| `src/core/uberhar_frame_diagnostics.h`, `src/core/perf_stats.{h,cpp}` | Preserve phase bands, read evidence and worst-frame context; bounded transitions and five-second summaries with pauses excluded. |
+| `src/core/hle/service/fs/file.cpp` | Count each guest read request once before synchronous/asynchronous dispatch; no path/data logging, no service behavior changes. |
+| `src/android/app/src/main/jni/native.cpp`, `NativeLibrary.kt`, `fragments/EmulationFragment.kt`, `res/menu/menu_in_game.xml`, `res/values/strings.xml` (Kotlin/resources under Android main) | Confirm frontend cache-loading boundaries; optional session-only Test phase chooser for Loading, Gameplay or automatic unconfirmed evidence. |
+| `src/video_core/renderer_vulkan/vk_pipeline_cache.{h,cpp}`, `src/video_core/shader/shader_jit.cpp` | Phase context for compilation and generic waits; bounded phase summaries and draw-weighted stage-plan histograms. |
+| `src/video_core/shader/generator/glsl_fs_shader_gen.{h,cpp}` | ABI 6 in the existing 128 bytes; compute activity/loop end once per draw, preserving intermediate buffer updates and one shared shader family. |
+| `tools/uberhar/test_activity.cpp`, `test_frame_diagnostics.cpp`, `build_probe.sh` | Explicit/unknown/mixed phases, restart/reset, startup override, concurrency, streaming ambiguity and pause-safe exact reconciliation. |
+| `tools/uberhar/shader_probe.cpp`, `compare_tev.py` | 736 programs including all 64 stage activity masks, two scale-one encodings and four buffer-write patterns; compare production shader output and fetch behavior against specialization. |

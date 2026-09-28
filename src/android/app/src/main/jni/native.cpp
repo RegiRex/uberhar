@@ -6,6 +6,7 @@
 #include <codecvt>
 #include <thread>
 #include <dlfcn.h>
+#include "common/uberhar_activity.h" // AstraEH: Explicit loading and user phase boundaries.
 
 #include <android/api-level.h>
 #include <android/native_window_jni.h>
@@ -336,6 +337,12 @@ static Core::System::ResultStatus RunCitra(const std::string& filepath) {
     stop_run = false;
     pause_emulation = false;
 
+    // AstraEH: This frontend progress screen is known non-interactive loading.
+    Common::UberharActivity::SetStartup(true);
+    const auto loading_start = std::chrono::steady_clock::now();
+    // AstraEH Log Line: Exactly two startup markers per successful launch.
+    LOG_INFO(Frontend, "Uberhar loading: session={} event=begin source=frontend_cache",
+             Common::UberharActivity::Capture().run);
     LoadDiskCacheProgress(VideoCore::LoadCallbackStage::Prepare, 0, 0, "");
 
     system.GPU().ApplyPerProgramSettings(program_id);
@@ -345,6 +352,13 @@ static Core::System::ResultStatus RunCitra(const std::string& filepath) {
                                                                    &LoadDiskCacheProgress);
 
     LoadDiskCacheProgress(VideoCore::LoadCallbackStage::Complete, 0, 0, "");
+    // AstraEH Log Line: Startup cache work is distinct from unclassified in-game screens.
+    LOG_INFO(
+        Frontend, "Uberhar loading: session={} event=end source=frontend_cache wall_ms={:.3f}",
+        Common::UberharActivity::Capture().run,
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - loading_start)
+            .count());
+    Common::UberharActivity::SetStartup(false);
 
     SCOPE_EXIT({ TryShutdown(); });
 
@@ -853,6 +867,14 @@ void Java_org_citra_citra_1emu_NativeLibrary_unPauseEmulation([[maybe_unused]] J
     if (handler) {
         handler->EnableSensors();
     }
+}
+
+// AstraEH: Session-only annotation. It cannot change emulation, cache or draw policy.
+jint Java_org_citra_citra_1emu_NativeLibrary_getTestPhase(JNIEnv*, jobject) {
+    return Common::UberharActivity::ManualPhase();
+}
+void Java_org_citra_citra_1emu_NativeLibrary_setTestPhase(JNIEnv*, jobject, jint phase) {
+    Common::UberharActivity::SetManualPhase(static_cast<u32>(phase));
 }
 
 void Java_org_citra_citra_1emu_NativeLibrary_pauseEmulation([[maybe_unused]] JNIEnv* env,

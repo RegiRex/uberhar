@@ -188,6 +188,10 @@ object NativeLibrary {
      */
     external fun unPauseEmulation()
 
+    // AstraEH: Optional test annotation; reset with each emulation run.
+    external fun getTestPhase(): Int
+    external fun setTestPhase(phase: Int)
+
     /**
      * Pauses emulation.
      */

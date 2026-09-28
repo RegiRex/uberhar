@@ -57,6 +57,12 @@
         android:icon="@drawable/ic_code"
         android:title="@string/cheats" />
 
+    <!-- AstraEH: Optional annotations distinguish loading from active play in exported logs. -->
+    <item
+        android:id="@+id/menu_test_phase"
+        android:icon="@drawable/ic_code"
+        android:title="@string/uberhar_test_phase" />
+
     <item
         android:id="@+id/menu_settings"
         android:icon="@drawable/ic_settings"

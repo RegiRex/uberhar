@@ -1,5 +1,5 @@
 <!-- AstraEH: Bounded troubleshooting and removal map for the hybrid renderer. -->
-# Renderer diagnostics, schema 12
+# Renderer diagnostics, schema 13
 
 Every Uberhar renderer log call has an adjacent **`AstraEH Log Line`** comment.
 Find it with `rg -n 'AstraEH Log Line' src`. These markers identify diagnostic
@@ -9,8 +9,8 @@ logging to this fork. Android session/title/export records remain functional
 parts of log export, rather than temporary shader debugging.
 
 The startup record identifies effective switches, compiler worker count,
-`diagnostics=12`, `dynamic_fragment=true`, `bridge_policy=ready_only`,
-`fallback_abi=5`, `push_bytes=128`, `runtime_lighting_luts=true`,
+`diagnostics=13`, `dynamic_fragment=true`, `bridge_policy=ready_only`,
+`fallback_abi=6`, `push_bytes=128`, `runtime_lighting_luts=true`,
 `runtime_lighting_enables=true`, `runtime_light_loop=true`, `host_pipeline_identity=true` and
 `bridge_assembly=isolated_lists_strips_fans`.
 `cpu_bridge` is false when hybrid is off or forced fallback is on, even if the
@@ -414,3 +414,78 @@ outside the sustained race interval, so suppression is not claimed as its fix.
 
 Renderer schema 12, frame schema 2 and fragment ABI 5 are retained. This iteration
 adds visibility without changing shader math, model policy or graphics profiles.
+
+
+## Loading evidence and prepared TEV stages (0.1.2)
+
+<!-- AstraEH: Phase labels must never transform uncertain gameplay stalls into loading successes. -->
+
+Frame schema **3**, renderer schema **13**, fragment ABI **6**. The 128-byte
+transport is retained. Existing caches are fingerprinted by shader source and
+build revision, so old module instructions cannot interpret the new plan bits.
+The actual preset, model, API and CPU clocks retain their existing semantics.
+
+- **Confirmed frontend startup:** `Uberhar loading` has begin/end records around
+  Android's non-interactive cache progress screen, with session and elapsed wall
+  time. It does not claim that later game loading has ended. This measures existing
+  startup work; the release does not introduce speculative precompilation.
+- **Explicit phase:** the Android in-game **Test phase** chooser sets Automatic
+  (unknown), Loading or Gameplay, session-only. User Loading/Gameplay is a supplied
+  annotation, not emulator-verified ground truth. Switch back when the screen
+  changes. New runs reset the marker. It changes no rendering, scheduling, cache,
+  pause, settings-file or guest behavior. Frontend startup temporarily overrides it.
+- **Automatic evidence:** aggregate guest file-read request count and requested
+  bytes (including cache hits and failed requests) plus game submissions. No
+  filenames, contents or screenshots are captured. At least 1 MiB requested and
+  at most 10 submissions/s gives `loading_candidate`; other reads give
+  `guest_read_activity`; otherwise `presenting_unknown` or `no_submissions`.
+  These are clues only. Games can stream while playing, load in memory without
+  file reads or animate loading at full speed. `automatic_confirmed=false` is
+  always explicit. Low FPS, lack of input, shader stalls and static pictures
+  alone never confirm loading. No stall is removed from overall totals.
+- **Frame bands:** five fixed lifetime buckets: `unknown`, `startup_loading`,
+  `user_loading`, `user_gameplay`, `mixed`. They sum to all valid observed frame
+  intervals. Generation checks mark an interval crossing a phase change as mixed,
+  even if phases change away and back between observations. Explicit pauses still
+  break/re-anchor timing. No phase duration is an Android display measurement.
+- **Frame records:** `Uberhar activity` accompanies existing window/pause/final
+  records, with counts in that fixed phase order, reads/bytes and evidence.
+  `Uberhar worst frame` retains the same eight events plus phase, read and
+  submission context. An additional `Uberhar phase worst` bank retains four
+  events per phase, so long loading stalls cannot evict all gameplay evidence.
+  These overlap global worst events; they are not additional intervals.
+  Read evidence is for the complete frame-end interval, not
+  a screenshot or physical storage-time measurement. Final partial windows overlap
+  totals as before. Up to 64 sampled `Uberhar phase` transition details are logged;
+  all intervals still reach lifetime bands after that cap.
+- **Generic waits:** `Uberhar generic wait` records the first 64 foreground waits
+  at least 16.666667 ms, with phase, session and guest-read/submission changes
+  during the wait. Five `Uberhar compile phase` buckets at the normal progress
+  cadence retain all generic waits (count/total/max), successful generic builds
+  and build wall time. Compiler counters are atomic and progress snapshots can
+  straddle completion; shutdown after drain is authoritative. Build and wait
+  time overlap and must not be added. Renderer buckets are renderer-lifetime,
+  like existing virtual-native totals. Unknown and mixed waits remain explicit.
+- **Build details:** existing first-20 generic build records and first-eight CPU
+  JIT build records gain actual-build phase and session context. Phase at worker
+  execution is used, rather than at queue admission. This is not a new complete
+  trace of every specialized pipeline or CPU shader. Original specialized wait
+  totals remain and can be correlated by timestamp with activity records.
+- **TEV plan:** `Uberhar TEV plan` has seven bins (0..6) each for loop length and
+  active stage count on selected primary-generic draws. Histograms sum to generic
+  draw count. They measure draw coverage, not pixel-weighted speedup. Buffer-mask
+  bits 0..7 retain delayed writes; bits 8..10 give loop end; bits 16..21 mark
+  non-passthrough stages. Intermediate pass stages still advance the combiner
+  buffer; only trailing pass stages whose buffer has no consumer disappear.
+
+Counters are fixed-size. Each guest read adds two relaxed atomic increments;
+GSP submissions add one. Frame reporting uses existing frame timestamps. No
+per-fragment, per-vertex or per-read text, GPU readback, screenshot capture or
+network upload is introduced. A pause/read/phase boundary may produce mixed or
+unknown evidence; never promote it to confirmed gameplay or loading. Logs do not
+identify a particular move, stage transition or exact button-to-panel latency.
+
+The next prewarming step requires actual reusable pipeline descriptions and a
+safe time budget. First-run unknown game shaders cannot be reconstructed merely
+from recognizing a loading screen. Phase estimates in this release must not
+trigger speculative compilation or silently permit dropped draws.

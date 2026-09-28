@@ -38,6 +38,16 @@ large sustained draw/vertex costs after shader creation ends. See the
 [full analysis](docs/UBERHAR_LOG_ANALYSIS_0.1.0.md), including research on Luma L2
 behavior and why it is distinct from Azahar's New 3DS model selection.
 
+<!-- AstraEH: General fragment efficiency and honest loading attribution. -->
+**0.1.2 prepares the generic TEV stage plan once per draw.** Runtime activity
+bits and the last useful stage replace per-fragment passthrough decoding and
+trailing no-op stages, while intermediate delayed buffer writes stay ordered.
+It retains one generic family per existing key (128-byte ABI 6). Diagnostics
+separate known frontend loading, user-marked Loading/Gameplay, Unknown and Mixed
+intervals. File-read/submission activity is explicitly uncertain evidence.
+The in-game **Test phase** menu optionally confirms the current phase; it never
+changes emulation or compilation policy. See [0.1.2 notes](docs/releases/0.1.2.md).
+
 **0.1.1 is a focused diagnostics update:** ongoing samples bounded to one per 50 ms,
 sampled batch setup/vertex/DrawTriangles timing, one startup machine snapshot and
 bounded FRD warnings. Shader math, vertex results, model selection, guest IPC

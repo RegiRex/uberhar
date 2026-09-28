@@ -1153,4 +1153,9 @@
     <string name="update_check_channel_stable">Stable</string>
     <string name="update_check_channel_prerelease">Prerelease</string>
 
+    <!-- AstraEH: These are user-confirmed annotations, not automatic scene recognition. -->
+    <string name="uberhar_test_phase">Test phase</string>
+    <string name="uberhar_phase_automatic">Automatic evidence (unconfirmed)</string>
+    <string name="uberhar_phase_loading">Loading — waiting for the game</string>
+    <string name="uberhar_phase_gameplay">Gameplay — playing or in menus</string>
 </resources>

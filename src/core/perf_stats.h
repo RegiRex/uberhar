@@ -133,6 +133,7 @@ private:
     void LogUberharFrames(const char* kind, const UberharFrameDiagnostics::Counters& data) const;
     UberharFrameDiagnostics uberhar_frames;
     u64 uberhar_game_frames{}, uberhar_pause_count{}, uberhar_paused_ns{};
+    u64 uberhar_phase_token{}, uberhar_phase_details{}; // AstraEH: Bounded transition logging.
     const u64 uberhar_session;
     const std::chrono::steady_clock::time_point uberhar_start = std::chrono::steady_clock::now();
     std::chrono::steady_clock::time_point uberhar_pause_start{};

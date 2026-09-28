@@ -7,6 +7,7 @@
 #include <bitset>
 #include <unordered_map> // AstraEH: Separate in-memory caches for experimental TEV fallbacks.
 #include <unordered_set> // AstraEH: Bounded census of candidate fallback state dimensions.
+#include "common/uberhar_activity.h" // AstraEH: Bounded phase-aware compilation accounting.
 
 #include "video_core/rasterizer_interface.h"
 #include "video_core/renderer_vulkan/uberhar_pipeline_policy.h" // AstraEH: Admission reason counters.
@@ -246,6 +247,15 @@ private:
     std::optional<Pica::Shader::FSConfig> virtual_fs_config;
     u64 virtual_generic_draws{}, virtual_recovery_draws{}, virtual_waits{}, virtual_wait_ns{},
         virtual_max_wait_ns{};
+    // AstraEH: Render-thread wait buckets; compiler buckets are atomic for progress snapshots.
+    struct PhaseWait {
+        u64 count{}, ns{}, maximum{};
+    };
+    std::array<PhaseWait, Common::UberharActivity::PhaseCount> phase_waits{};
+    std::array<std::atomic<u64>, Common::UberharActivity::PhaseCount> phase_builds{},
+        phase_build_ns{};
+    u32 phase_wait_details{};
+    std::array<u64, 7> tev_loop_histogram{}, tev_active_histogram{};
     const bool hybrid_tev;
     const bool force_tev;
     // AstraEH: A/B switch captured at startup, effective only in normal hybrid mode.

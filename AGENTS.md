@@ -10,6 +10,13 @@
   removing diagnostics. Document each feature's counters and their limits.
 - Use release.beta.alpha versions. Publish Android ARM64 tests as GitHub
   pre-releases through the existing build, correctness, package and signing gates.
+- AstraEH: Standing owner authorization (2026-09-28): publish project source to
+  the public `RegiRex/uberhar` repository on `uberhar/hybrid-shaders` and start the
+  gated Android prerelease workflow as development progresses. Normally advance
+  the work and start a build on each development turn unless the owner says to
+  hold off or skip building. A question-only turn can be an exception when no
+  build is useful. Always state when a build is skipped and why. This standing
+  authorization covers routine project publication without renewed permission.
 - Perform a full architectural review every **3–5 alpha builds**, targeting four.
   Read `docs/UBERHAR_REVIEW_CADENCE.md` before planning a release and update it when
   a review is completed. Review sooner after a material correctness regression or

@@ -243,6 +243,17 @@ DynamicTevState MakeDynamicTevState(const FSConfig& original, const Profile& pro
     auto config = original;
     config.ApplyProfile(profile);
     DynamicTevState state{config.texture.tev_stages, config.texture.combiner_buffer_input.Value()};
+    // AstraEH: Hoist invariant passthrough decoding out of every fragment. Keep
+    // intermediate stages (and delayed buffer writes) in order, but no output
+    // consumes the combiner buffer after the last non-passthrough stage.
+    u32 stage_end = 0;
+    for (u32 i = 0; i < state.stages.size(); ++i) {
+        if (!IsPassThroughTevStage(state.stages[i])) {
+            state.buffer_mask |= 1U << (16 + i);
+            stage_end = i + 1;
+        }
+    }
+    state.buffer_mask |= stage_end << 8;
     state.framebuffer =
         static_cast<u32>(config.framebuffer.alpha_test_func.Value()) |
         (static_cast<u32>(config.framebuffer.scissor_test_mode.Value()) << 3) |
@@ -818,7 +829,10 @@ float uber_alpha_modifier(vec4 value, uint modifier) {
 void FragmentModule::WriteDynamicTevLoop() {
     using Operation = TexturingRegs::TevStageConfig::Operation;
     out += R"(
-[[dont_unroll]] for (uint tev_index = 0u; tev_index < 6u; ++tev_index) {
+// AstraEH: Draw-uniform loop bound and activity mask retain one shared program.
+uint stage_end = (uber_tev.buffer_mask >> 8u) & 7u;
+[[dont_unroll]] for (uint tev_index = 0u; tev_index < stage_end; ++tev_index) {
+if ((uber_tev.buffer_mask & (1u << (16u + tev_index))) != 0u) {
 uvec4 instruction = uber_tev.stages[tev_index];
 uint color_op = instruction.z & 15u;
 uint alpha_op = (instruction.z >> 16u) & 15u;
@@ -826,12 +840,6 @@ uint color_scale = instruction.w & 3u;
 uint alpha_scale = (instruction.w >> 16u) & 3u;
 float color_multiplier = float(color_scale < 3u ? 1u << color_scale : 1u);
 float alpha_multiplier = float(alpha_scale < 3u ? 1u << alpha_scale : 1u);
-// AstraEH: Match the specialized generator's passthrough optimization, including stage 0.
-bool passthrough = color_op == 0u && alpha_op == 0u &&
-    (instruction.x & 0x000f000fu) == 0x000f000fu &&
-    (instruction.y & 0x0000700fu) == 0u &&
-    color_multiplier == 1.0 && alpha_multiplier == 1.0;
-if (!passthrough) {
 )";
     for (u32 input = 0; input < 3; ++input) {
         // AstraEH: Replace consumes one operand; only Lerp, MultiplyThenAdd and

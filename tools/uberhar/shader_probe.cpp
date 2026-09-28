@@ -55,7 +55,7 @@ int main(int argc, char** argv) {
     }
     // AstraEH: Deterministic random programs make combiner regressions
     // reproducible.
-    for (u32 test = 0; test < 224; ++test) {
+    for (u32 test = 0; test < 736; ++test) {
         auto config = base;
         config.texture.combiner_buffer_input.Assign(test < 16 ? test : random() & 255);
         for (auto& stage : config.texture.tev_stages) {
@@ -70,8 +70,9 @@ int main(int argc, char** argv) {
                             (alpha_ops[random() % alpha_ops.size()] << 16);
             stage.scales_raw = random() % 4 | ((random() % 4) << 16);
         }
-        // AstraEH: Directed coverage: stage-0 Previous redirection and passthrough,
-        // scale=3 meaning 1, DOT3_RGBA alpha, and all buffer-mask combinations.
+        // AstraEH: Directed coverage: stage-0 Previous redirection and
+        // passthrough, scale=3 meaning 1, DOT3_RGBA alpha, and all buffer-mask
+        // combinations.
         if (test < 16) {
             config.texture.tev_stages[0] = {0x000f000f, 0, 0, test & 1 ? 0x00030003U : 0U};
             config.texture.tev_stages[1].ops_raw = 7;
@@ -79,7 +80,7 @@ int main(int argc, char** argv) {
         }
         // AstraEH: Repeated references must sample each unit only once per
         // fragment; texture operands discarded by Replace must not be fetched.
-        if (test >= 192) {
+        if (test >= 192 && test < 224) {
             for (auto& stage : config.texture.tev_stages) {
                 if (test < 208) {
                     const u32 source = 3 + test % 4;
@@ -88,6 +89,30 @@ int main(int argc, char** argv) {
                     stage = {(3U << 4) | (4U << 8) | (5U << 20) | (6U << 24), 0, 0, 0};
                 }
             }
+        }
+        // AstraEH: Every active-stage subset, both scale-one encodings and four
+        // delayed buffer masks exercise holes, zero stages and trailing removal.
+        if (test >= 224) {
+            const u32 n = test - 224;
+            const u32 mask = n & 63U;
+            constexpr std::array<u32, 4> buffers{0, 0x0f, 0xf0, 0xff};
+            config.texture.combiner_buffer_input.Assign(buffers[(n >> 6) & 3U]);
+            for (u32 i = 0; i < 6; ++i) {
+                auto& stage = config.texture.tev_stages[i];
+                stage = {0x000f000f, 0, 0, (n & 256U) ? 0x00030003U : 0U};
+                if (mask & (1U << i)) {
+                    // Previous/combiner-buffer/constant, with stage-0 redirection.
+                    stage = {0x00ed00df, 0, 0x00010004, 0};
+                }
+            }
+            const auto plan = Generator::GLSL::MakeDynamicTevState(config, profile);
+            u32 end = 0;
+            for (u32 i = 0; i < 6; ++i)
+                if (mask & (1U << i))
+                    end = i + 1;
+            if (((plan.buffer_mask >> 8) & 7U) != end || ((plan.buffer_mask >> 16) & 63U) != mask ||
+                (plan.buffer_mask & 255U) != buffers[(n >> 6) & 3U])
+                throw std::runtime_error("Prepared TEV plan differs from active stage corpus");
         }
         if (!Generator::GLSL::SupportsDynamicTev(config, user)) {
             throw std::runtime_error("Generated case unexpectedly unsupported");
@@ -132,5 +157,5 @@ int main(int argc, char** argv) {
         }
         std::ofstream(output / fmt::format("dynamic-{}.frag", test)) << "#version 450\n" << source;
     }
-    fmt::print("Emitted 224 TEV cases and 64 dynamic fragment families\n");
+    fmt::print("Emitted 736 TEV cases and 64 dynamic fragment families\n");
 }

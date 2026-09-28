@@ -422,6 +422,30 @@ class EmulationFragment :
                     true
                 }
 
+                // AstraEH: Mark only the current run. The annotation itself never
+                // changes timing, pauses the core or skips rendering.
+                R.id.menu_test_phase -> {
+                    val phases = intArrayOf(0, 2, 3)
+                    val labels = arrayOf(
+                        getString(R.string.uberhar_phase_automatic),
+                        getString(R.string.uberhar_phase_loading),
+                        getString(R.string.uberhar_phase_gameplay)
+                    )
+                    MaterialAlertDialogBuilder(requireContext())
+                        .setTitle(R.string.uberhar_test_phase)
+                        .setSingleChoiceItems(
+                            labels,
+                            phases.indexOf(NativeLibrary.getTestPhase())
+                        ) { dialog, which ->
+                            NativeLibrary.setTestPhase(phases[which])
+                            dialog.dismiss()
+                            binding.drawerLayout.closeDrawers()
+                        }
+                        .setNegativeButton(android.R.string.cancel, null)
+                        .show()
+                    true
+                }
+
                 R.id.menu_settings -> {
                     SettingsActivity.launch(
                         requireContext(),

@@ -5,6 +5,7 @@
 #include <boost/serialization/unique_ptr.hpp>
 #include "common/archives.h"
 #include "common/logging/log.h"
+#include "common/uberhar_activity.h" // AstraEH: Aggregate guest-read evidence only.
 #include "core/core.h"
 #include "core/file_sys/errors.h"
 #include "core/file_sys/file_backend.h"
@@ -74,6 +75,9 @@ void File::Read(Kernel::HLERequestContext& ctx) {
                   "Reading from out of bounds offset=0x{:x} length=0x{:08X} file_size=0x{:x}",
                   offset, length, backend->GetSize());
     }
+
+    // AstraEH: Count once before sync/async dispatch, without filenames or read tracing.
+    Common::UberharActivity::NoteRead(length);
 
     const bool allows_cache_reads = backend->AllowsCachedReads();
 

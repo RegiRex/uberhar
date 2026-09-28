@@ -96,3 +96,8 @@ timeout 30s build/uberhar-probe/test-vertex-interpreter
 c++ -std=c++20 -O2 -Isrc tools/uberhar/test_frame_diagnostics.cpp \
   -o build/uberhar-probe/test-frame-diagnostics
 build/uberhar-probe/test-frame-diagnostics
+
+# AstraEH: Phase evidence never hides a gameplay stall or treats streaming as confirmed loading.
+c++ -std=c++20 -O2 -pthread -Isrc tools/uberhar/test_activity.cpp \
+  -o build/uberhar-probe/test-activity
+build/uberhar-probe/test-activity

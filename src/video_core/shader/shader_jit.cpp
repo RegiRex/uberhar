@@ -3,6 +3,7 @@
 // Refer to the license.txt file included.
 
 #include "common/arch.h"
+#include "common/uberhar_activity.h" // AstraEH: Context only on real CPU compile misses.
 #if CITRA_ARCH(x86_64) || CITRA_ARCH(arm64)
 
 #include <chrono>
@@ -50,6 +51,7 @@ void JitEngine::SetupBatch(ShaderSetup& setup, u32 entry_point) {
         // AstraEH: Compile once per program/swizzle pair, with a bounded first-8 detail budget.
         const auto start = report_virtual ? std::chrono::steady_clock::now()
                                           : std::chrono::steady_clock::time_point{};
+        const auto activity_start = Common::UberharActivity::Capture();
         auto shader = std::make_unique<JitShader>();
         shader->Compile(&setup.GetProgramCode(), &setup.GetSwizzleData());
         setup.cached_shader = shader.get();
@@ -64,8 +66,12 @@ void JitEngine::SetupBatch(ShaderSetup& setup, u32 entry_point) {
             if (compiled <= 8) {
                 // AstraEH Log Line: First encounters only; no per-vertex diagnostic output.
                 LOG_INFO(Render_Vulkan,
-                         "Uberhar CPU JIT build: ordinal={} key={:016X} compile_ms={:.3f}",
-                         compiled, cache_key, ns / 1e6);
+                         "Uberhar CPU JIT build: ordinal={} key={:016X} compile_ms={:.3f} phase={} "
+                         "session={}",
+                         compiled, cache_key, ns / 1e6,
+                         Common::UberharActivity::Name(Common::UberharActivity::Between(
+                             activity_start, Common::UberharActivity::Capture())),
+                         activity_start.run);
             }
         }
     }
