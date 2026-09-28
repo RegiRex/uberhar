@@ -24,6 +24,14 @@
 - Reviews must recheck source, device evidence, architectural alternatives,
   correctness constraints, measurable goals and the next implementation order.
   Distinguish measured results from proposals and host tests from device tests.
+- AstraEH: Keep the visible progress tracker current at the start of substantial
+  work, at meaningful milestone changes and at handoff; name the current version
+  and distinguish implemented, building and device-tested work. Maintain the
+  owner's `Uberhar_Roadmap.html` review document with milestone gates, trajectory,
+  evidence, risks and a ledger separating owner scope requests from proposals.
+  Refresh that same document at every full architectural review, retain its change
+  history and update it earlier when scope or release status materially changes.
+  A roadmap refresh alone does not reset the architecture-review build count.
 - Preserve exact rendering and draw order. Missing compilation must not silently
   omit a draw. Do not remove driver workarounds without specific validation.
 - Finish source changes and useful local validation, start Actions, then hand off
