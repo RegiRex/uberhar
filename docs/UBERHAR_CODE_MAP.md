@@ -272,3 +272,15 @@ per-title quota that could run out before the most useful scenes.
 | `src/video_core/renderer_vulkan/vk_pipeline_cache.cpp` | Schema 14 and `prepared_tev_operands=true` startup identification; existing adjacent AstraEH Log Line attribution retained. |
 | `tools/uberhar/shader_probe.cpp`, `compare_tev.py` | Expand to 816 TEV programs, cross all legal modifier pairs, emit original effective registers separately for independent texture-fetch expectations, reject an incomplete corpus. |
 | `UBERHAR_VERSION`, `UBERHAR.md`, `docs/releases/0.1.3.md`, diagnostics reference | Version, implementation scope, validation results, per-draw CPU tradeoff and unchanged review cadence. |
+
+## 0.1.4: automatic settings/cache context and full review
+
+<!-- AstraEH: Read-only evidence and review maintenance; no rendering algorithm change. -->
+
+| Files | AstraEH purpose |
+| --- | --- |
+| `src/core/perf_stats.{h,cpp}` | Human-readable settings at startup, sampled changes/resume and shutdown; 32-change cap, exact build/session, explicit Auto resolution and instantaneous sampling limit. |
+| `src/video_core/renderer_vulkan/uberhar_cache_diagnostics.h` | Read-only bounded file inventory, active/bypassed layer distinction and independent observed generic-reuse labels. Missing, partial/error, disabled and unobserved states remain separate. |
+| `src/video_core/renderer_vulkan/vk_pipeline_cache.{h,cpp}` | Translate Android paths, snapshot before load/write, record scan time and driver-load outcome, per-title-load reuse baselines, schema 15 and bounded tagged output. Existing compilation/cache recovery is unchanged. |
+| `tools/uberhar/test_cache_diagnostics.cpp`, `build_probe.sh` | Real temporary filesystem cases for namespace filtering, no mutation, empty/zero/stale files, errors, unmapped paths, capped scans, bypassed/disabled layers and independent reuse classification. |
+| `AGENTS.md`, `UBERHAR.md`, version/release/diagnostic/review docs | Owner's normal-speed filtering preference, 0.1.4 scope and completed 0.1.3 architecture review; next default full review after 0.1.7. |

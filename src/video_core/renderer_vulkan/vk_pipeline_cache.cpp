@@ -4,10 +4,14 @@
 
 #include <bit>       // AstraEH: Count per-draw active TEV stages without fragment-side decoding.
 #include <chrono>    // AstraEH: Measure actual scheduler waits for pipeline compilation.
+#include <optional>  // AstraEH: Android path-query declarations use optional strings.
 #include <stdexcept> // AstraEH: Recover experimental compilation failures through specialization.
 #include <boost/container/static_vector.hpp>
 
 #include "common/common_paths.h"
+#ifdef ANDROID
+#include "common/android_utils.h" // AstraEH: Match the platform's cache path translation.
+#endif
 #include "common/file_util.h"
 #include "common/logging/log.h"
 #include "common/microprofile.h"
@@ -110,7 +114,7 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
     LOG_INFO(
         Render_Vulkan,
         "Uberhar: hybrid_tev={} force_tev={} async_shaders={} spirv_generator={} "
-        "diagnostics=14 first_ready=true compact_tev=true canonical_tev=true dynamic_fragment=true "
+        "diagnostics=15 first_ready=true compact_tev=true canonical_tev=true dynamic_fragment=true "
         "cpu_bridge={} bridge_policy=ready_only fallback_abi={} push_bytes={} "
         "runtime_lighting_luts=true runtime_lighting_enables=true runtime_light_loop=true "
         "runtime_tev_plan=true prepared_tev_operands=true phase_diagnostics=1 "
@@ -241,6 +245,51 @@ void PipelineCache::LoadDriverPipelineDiskCache(
     const std::atomic_bool& stop_loading, const VideoCore::DiskResourceLoadCallback& callback) {
     vk::PipelineCacheCreateInfo cache_info{};
 
+    // AstraEH: Inventory the actual title namespaces before EnsureDirectories, loading
+    // or generated-module writes. Non-Custom profiles bypass specialized disk records.
+    const auto cache_dir = GetPipelineCacheDir();
+    const u64 program_id = GetProgramID();
+    const auto cache_file_path = fmt::format("{}{:016X}-{:X}{:X}.bin", cache_dir, program_id,
+                                             instance.GetVendorID(), instance.GetDeviceID());
+    const auto inventory_start = std::chrono::steady_clock::now();
+    // AstraEH: Android's user-relative FileUtil paths require the same mapping as
+    // actual cache I/O. Unsupported virtual filesystems stay Unknown, never empty.
+    const auto inventory_path = [](const std::string& path) -> std::string {
+#if defined(HAVE_LIBRETRO_VFS)
+        return {};
+#elif defined(ANDROID)
+        return AndroidUtils::CanUseRawFS() ? AndroidUtils::TranslateFilePath(path) : "";
+#else
+        return path;
+#endif
+    };
+    cache_start = UberharCacheDiagnostics::Inspect(
+        inventory_path(cache_dir), inventory_path(cache_file_path),
+        inventory_path(GetTransferableDir()), fmt::format("{:016X}", program_id),
+        Settings::values.use_disk_shader_cache.GetValue(),
+        Settings::values.uberhar_test_mode.GetValue() == Settings::UberharTestMode::Custom);
+    driver_cache_load = "not_attempted";
+    // AstraEH: Existing module totals are renderer-lifetime; reuse classification
+    // uses a per-title-load baseline after the preceding compiler work is drained.
+    cache_start_hits = generic_module_hits.load();
+    cache_start_misses = generic_module_misses.load();
+    cache_session = Common::UberharActivity::session.load();
+    // AstraEH Log Line: One bounded, read-only inventory per load/title switch; no paths or data.
+    LOG_INFO(Render_Vulkan,
+             "Uberhar cache start: schema=1 session={} title={:016X} scope=application_vulkan "
+             "state={} generic_files={} generic_bytes={} generic_complete={} generic_capped={} "
+             "driver_files={} driver_bytes={} driver_complete={} specialized_files={} "
+             "specialized_bytes={} specialized_complete={} specialized_active={} "
+             "inventory_ms={:.3f} compatible_contents=unverified driver_internal=unknown",
+             cache_session, program_id, cache_start.State(), cache_start.generic.files,
+             cache_start.generic.bytes, cache_start.generic.complete, cache_start.generic.capped,
+             cache_start.driver.files, cache_start.driver.bytes, cache_start.driver.complete,
+             cache_start.specialized.files, cache_start.specialized.bytes,
+             cache_start.specialized.complete, cache_start.specialized_active,
+             std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() -
+                                                       inventory_start)
+                 .count());
+
     if (callback) {
         callback(VideoCore::LoadCallbackStage::Build, 0, 1, "Driver Pipeline Cache");
     }
@@ -250,6 +299,7 @@ void PipelineCache::LoadDriverPipelineDiskCache(
         try {
             driver_pipeline_cache = device.createPipelineCacheUnique(cache_info);
         } catch (const vk::SystemError& err) {
+            driver_cache_load = "create_failed"; // AstraEH: Preserve failure after fallback.
             LOG_ERROR(Render_Vulkan, "Failed to create pipeline cache: {}", err.what());
             if (allow_fallback) {
                 // Fall back to empty cache
@@ -257,6 +307,7 @@ void PipelineCache::LoadDriverPipelineDiskCache(
                 cache_info.pInitialData = nullptr;
                 try {
                     driver_pipeline_cache = device.createPipelineCacheUnique(cache_info);
+                    driver_cache_load = "rejected_empty_fallback"; // AstraEH: Not warm reuse.
                 } catch (const vk::SystemError& err) {
                     LOG_ERROR(Render_Vulkan, "Failed to create fallback pipeline cache: {}",
                               err.what());
@@ -269,23 +320,25 @@ void PipelineCache::LoadDriverPipelineDiskCache(
     };
 
     // Try to load existing pipeline cache if disk cache is enabled and directories exist
-    if (!Settings::values.use_disk_shader_cache || !EnsureDirectories()) {
+    if (!Settings::values.use_disk_shader_cache) {
+        driver_cache_load = "disabled"; // AstraEH: Deliberate bypass is not a cold-cache claim.
+        load_cache(false);
+        return;
+    }
+    if (!EnsureDirectories()) {
+        driver_cache_load = "directory_error";
         load_cache(false);
         return;
     }
 
     // Try to load existing pipeline cache for this game/device combination
-    const auto cache_dir = GetPipelineCacheDir();
-    const u32 vendor_id = instance.GetVendorID();
-    const u32 device_id = instance.GetDeviceID();
-    const u64 program_id = GetProgramID();
-    const auto cache_file_path =
-        fmt::format("{}{:016X}-{:X}{:X}.bin", cache_dir, program_id, vendor_id, device_id);
-
     std::vector<u8> cache_data;
     FileUtil::IOFile cache_file{cache_file_path, "rb"};
 
     if (!cache_file.IsOpen()) {
+        driver_cache_load = cache_start.driver.complete && cache_start.driver.files == 0
+                                ? "missing"
+                                : "open_failed";
         LOG_INFO(Render_Vulkan, "No pipeline cache found for title_id={:016X}", program_id);
         load_cache(false);
         return;
@@ -295,12 +348,14 @@ void PipelineCache::LoadDriverPipelineDiskCache(
     cache_data.resize(cache_file_size);
 
     if (cache_file.ReadBytes(cache_data.data(), cache_file_size) != cache_file_size) {
+        driver_cache_load = "read_failed";
         LOG_ERROR(Render_Vulkan, "Error reading pipeline cache");
         load_cache(false);
         return;
     }
 
     if (!IsCacheValid(cache_data)) {
+        driver_cache_load = "invalid";
         LOG_WARNING(Render_Vulkan, "Pipeline cache invalid, removing");
         cache_file.Close();
         FileUtil::Delete(cache_file_path);
@@ -313,6 +368,7 @@ void PipelineCache::LoadDriverPipelineDiskCache(
 
     cache_info.initialDataSize = cache_file_size;
     cache_info.pInitialData = cache_data.data();
+    driver_cache_load = "provided_to_driver"; // AstraEH: Vulkan exposes no cache-hit guarantee.
     load_cache(true);
 }
 
@@ -1191,6 +1247,19 @@ void PipelineCache::ClearTevFallbacks() {
 
 // AstraEH: These are draw observations and CPU wait durations, not GPU timings or frame counts.
 void PipelineCache::ReportUberharStats(const char* kind) {
+    // AstraEH: File presence at load and observed compatible reuse answer different
+    // questions. Fingerprint changes can produce present_files + cold_encountered.
+    const u64 observed_hits = generic_module_hits.load() - cache_start_hits;
+    const u64 observed_misses = generic_module_misses.load() - cache_start_misses;
+    const bool disk_enabled = Settings::values.use_disk_shader_cache.GetValue();
+    // AstraEH Log Line: Existing progress cadence and final report, not per lookup.
+    LOG_INFO(Render_Vulkan,
+             "Uberhar cache use {}: schema=1 session={} title={:016X} start_state={} "
+             "generic_reuse={} observed_hits={} observed_misses={} driver_load={} "
+             "disk_enabled_start={} disk_enabled_now={} driver_internal=unknown",
+             kind, cache_session, GetProgramID(), cache_start.State(),
+             UberharCacheDiagnostics::ReuseState(disk_enabled, observed_hits, observed_misses),
+             observed_hits, observed_misses, driver_cache_load, cache_start.enabled, disk_enabled);
     if (hybrid_tev) {
         // AstraEH Log Line: Existing bounded progress cadence; files never contain guest shader
         // code.

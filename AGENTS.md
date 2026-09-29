@@ -39,3 +39,9 @@
   an APK ready until the publication gates have passed.
 - Keep display synchronization and model clarity on the roadmap, after the
   first-playthrough shader architecture is working well enough to assess.
+- AstraEH: Owner test-analysis preference (2026-09-28): exclude temporary
+  fast-forward and mixed speed-transition intervals from normal-performance
+  comparisons unless the owner explicitly requests a speed/headroom test.
+  Fast-forward usually skips menus/loading or is accidental; it does not by
+  itself prove a loading phase. Derive resolution/settings and scoped cache
+  reuse from logs; ask for manual notes only when they add unseen scene context.

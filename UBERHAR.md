@@ -38,6 +38,14 @@ large sustained draw/vertex costs after shader creation ends. See the
 [full analysis](docs/UBERHAR_LOG_ANALYSIS_0.1.0.md), including research on Luma L2
 behavior and why it is distinct from Azahar's New 3DS model selection.
 
+<!-- AstraEH: Automatic test context reduces manual notes without inventing warm-cache status. -->
+**0.1.4 records readable settings and cache context automatically.** Per-run and
+observed-change snapshots identify resolution, mode/API and relevant controls.
+Startup file inventory and actual compatible generic-module reuse are separate;
+disabled, incomplete and opaque driver state stay explicit. Rendering/ABI are
+unchanged. See [0.1.4 notes](docs/releases/0.1.4.md) and the
+[completed architecture review](docs/UBERHAR_ARCHITECTURE_0.1.3.md).
+
 <!-- AstraEH: Continue moving draw-constant interpretation out of fragment execution. -->
 **0.1.3 prepares TEV operand selection once per draw.** Stage-zero Previous
 redirection, modifier component/inversion selection and literal scales join the
@@ -140,7 +148,7 @@ changes; they do not isolate the speedup from each individual optimization.
 Start with **Native at 2x, cold then warm**, including the same battle. The
 [release notes](docs/releases/0.0.11.md) describe the comparison. Repeating all three
 pairs is not necessary while compute coverage remains zero. The next default full
-architectural review is after 0.1.3 (allowed 0.1.2–0.1.4); see the
+architectural review is after 0.1.7 (allowed 0.1.6–0.1.8); see the
 [review ledger](docs/UBERHAR_REVIEW_CADENCE.md). Android compilation, shader, package
 and signing gates must pass before a pre-release is published. Development hands
 off Actions rather than waiting through APK compilation.

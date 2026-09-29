@@ -8,11 +8,13 @@
 #include <mutex>
 #include <numeric>
 #include <sstream>
+#include <string_view> // AstraEH: Settings snapshot event labels.
 #include <thread>
 #include <fmt/chrono.h>
 #include <fmt/format.h>
 #include "common/file_util.h"
 #include "common/logging/log.h" // AstraEH: Bounded run/frame diagnostics.
+#include "common/scm_rev.h" // AstraEH: Identify the exact build in each run snapshot.
 #include "common/settings.h"
 #include "core/core_timing.h"
 #include "core/perf_stats.h"
@@ -52,11 +54,13 @@ PerfStats::PerfStats(u64 title_id) : uberhar_session{++uberhar_next_session}, ti
         Settings::values.uberhar_cpu_vertex_bridge.GetValue(),
         Settings::values.use_disk_shader_cache.GetValue(), Settings::GetFrameLimit(),
         Settings::values.cpu_clock_percentage.GetValue());
+    LogUberharSettings("start"); // AstraEH: Human-readable context after the run header.
 }
 
 PerfStats::~PerfStats() {
     // AstraEH: Final completed-frame evidence survives even when CSV/overlay options are off.
     EndUberharPause();
+    LogUberharSettings("final"); // AstraEH: Final settings survive incomplete change detail.
     LogUberharFrames("final_window", uberhar_frames.Window());
     LogUberharFrames("totals", uberhar_frames.Total());
     // AstraEH: At most three summaries; a 400% request is distinct from achieved
@@ -223,6 +227,7 @@ void PerfStats::EndSystemFrame(std::chrono::microseconds guest_time) {
     uberhar_frames.Observe(now_ns, guest_time.count(), uberhar_game_frames, work_ns,
                            Settings::GetFrameLimit(), Settings::is_temporary_frame_limit, activity);
     if (uberhar_frames.Window().wall_ns >= 5'000'000'000ULL) {
+        LogUberharSettings("sample"); // AstraEH: No additional per-frame settings work.
         LogUberharFrames("window", uberhar_frames.Window());
         uberhar_frames.ResetWindow();
     }
@@ -263,11 +268,59 @@ void PerfStats::EndUberharPause() {
                        .count();
     uberhar_paused_ns += ns;
     uberhar_pause_start = {};
+    LogUberharSettings("resume"); // AstraEH: Catch changes made in the paused settings menu.
     if (uberhar_pause_count <= 32) {
         // AstraEH Log Line: End of the observed wait, which can also end because of shutdown.
         LOG_INFO(Core, "Uberhar pause: session={} event=end ordinal={} duration_ms={:.3f}",
                  uberhar_session, uberhar_pause_count, ns / 1e6);
     }
+}
+
+// AstraEH: Record effective settings values, not a claim that every setting is
+// hot-reloaded by its backend. Between-sample changes may be missed. Existing
+// per-frame limit accounting remains authoritative for fast-forward transitions.
+void PerfStats::LogUberharSettings(const char* event) {
+    const auto& values = Settings::values;
+    const auto mode = values.uberhar_test_mode.GetValue();
+    const auto api = Settings::GetWorkingGraphicsAPI();
+    const std::array mode_names{"Custom", "Native", "Compute", "Automatic"};
+    const std::array api_names{"Software", "OpenGL", "Vulkan"};
+    const auto mode_index = static_cast<std::size_t>(mode);
+    const auto api_index = static_cast<std::size_t>(api);
+    const auto text = fmt::format(
+        "mode={} api={} resolution_setting={} resolution_mode={} cpu_clock_percent={} "
+        "cpu_jit={} hw_vertex={} hybrid={} force_tev={} bridge_requested={} disk_cache={} "
+        "base_frame_limit={} turbo_limit={} async_shaders={} async_presentation={} "
+        "vsync_setting={} accurate_mul={} spirv_generator={} optimizer_disabled={} "
+        "texture_filter={} texture_sampling={} custom_textures={} preload_textures={} "
+        "skip_duplicate_frames={} render_thread_delay_us={} simulate_gpu_timings={}",
+        mode_index < mode_names.size() ? mode_names[mode_index] : "Unknown",
+        api_index < api_names.size() ? api_names[api_index] : "Unknown",
+        values.resolution_factor.GetValue(), values.resolution_factor.GetValue() ? "fixed" : "auto",
+        values.cpu_clock_percentage.GetValue(), values.use_shader_jit.GetValue(),
+        values.use_hw_shader.GetValue(), values.uberhar_hybrid_tev.GetValue(),
+        values.uberhar_force_tev.GetValue(), values.uberhar_cpu_vertex_bridge.GetValue(),
+        values.use_disk_shader_cache.GetValue(), values.frame_limit.GetValue(),
+        values.turbo_limit.GetValue(), values.async_shader_compilation.GetValue(),
+        values.async_presentation.GetValue(), values.use_vsync.GetValue(),
+        values.shaders_accurate_mul.GetValue(), values.spirv_shader_gen.GetValue(),
+        values.disable_spirv_optimizer.GetValue(),
+        static_cast<u32>(values.texture_filter.GetValue()),
+        static_cast<u32>(values.texture_sampling.GetValue()), values.custom_textures.GetValue(),
+        values.preload_textures.GetValue(), values.use_skip_duplicate_frames.GetValue(),
+        values.delay_game_render_thread_us.GetValue(), values.simulate_3ds_gpu_timings.GetValue());
+    const bool changed = text != uberhar_settings;
+    if (changed && !uberhar_settings.empty())
+        ++uberhar_settings_changes;
+    uberhar_settings = text;
+    const bool final = std::string_view{event} == "final";
+    if (!final && (!changed || uberhar_settings_changes > 32))
+        return;
+    // AstraEH Log Line: Startup, first 32 observed changes and final; no per-frame text.
+    LOG_INFO(Core,
+             "Uberhar settings: schema=1 session={} title={:016X} event={} "
+             "observed_changes={} build={} sample_scope=instant {}",
+             uberhar_session, title_id, event, uberhar_settings_changes, Common::g_scm_rev, text);
 }
 
 void PerfStats::LogUberharFrames(const char* kind,

@@ -9,6 +9,7 @@
 #include <chrono>
 #include <cstddef>
 #include <mutex>
+#include <string> // AstraEH: Bounded, infrequent settings snapshots.
 #include "common/bit_field.h"
 #include "common/common_types.h"
 #include "common/thread.h"
@@ -131,6 +132,10 @@ public:
 private:
     // AstraEH: Fixed counters and bounded summaries; protected by the existing stats mutex.
     void LogUberharFrames(const char* kind, const UberharFrameDiagnostics::Counters& data) const;
+    // AstraEH: Sample at startup, five-second boundaries, resume and final shutdown.
+    void LogUberharSettings(const char* event);
+    std::string uberhar_settings;
+    u64 uberhar_settings_changes{};
     UberharFrameDiagnostics uberhar_frames;
     u64 uberhar_game_frames{}, uberhar_pause_count{}, uberhar_paused_ns{};
     u64 uberhar_phase_token{}, uberhar_phase_details{}; // AstraEH: Bounded transition logging.

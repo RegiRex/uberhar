@@ -101,3 +101,8 @@ build/uberhar-probe/test-frame-diagnostics
 c++ -std=c++20 -O2 -pthread -Isrc tools/uberhar/test_activity.cpp \
   -o build/uberhar-probe/test-activity
 build/uberhar-probe/test-activity
+
+# AstraEH: Startup cache evidence must distinguish empty files from unverified reuse.
+c++ -std=c++20 -O2 -Isrc tools/uberhar/test_cache_diagnostics.cpp \
+  -o build/uberhar-probe/test-cache-diagnostics
+build/uberhar-probe/test-cache-diagnostics

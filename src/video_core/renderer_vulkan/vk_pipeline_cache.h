@@ -10,6 +10,7 @@
 #include "common/uberhar_activity.h" // AstraEH: Bounded phase-aware compilation accounting.
 
 #include "video_core/rasterizer_interface.h"
+#include "video_core/renderer_vulkan/uberhar_cache_diagnostics.h" // AstraEH: Startup inventory.
 #include "video_core/renderer_vulkan/uberhar_pipeline_policy.h" // AstraEH: Admission reason counters.
 #include "video_core/renderer_vulkan/uberhar_wait_diagnostics.h" // AstraEH: Bounded worst waits.
 #include "video_core/renderer_vulkan/vk_graphics_pipeline.h"
@@ -211,6 +212,10 @@ private:
     // AstraEH: The generator owns the versioned 128-byte transport and layout assertions.
     using TevPushConstants = Pica::Shader::Generator::GLSL::DynamicTevState;
     TevPushConstants tev_constants{};
+    // AstraEH: Snapshot before application-cache loading; never infer opaque driver hits.
+    UberharCacheDiagnostics::Snapshot cache_start;
+    const char* driver_cache_load{"not_attempted"};
+    u64 cache_start_hits{}, cache_start_misses{}, cache_session{};
     std::optional<Pica::Shader::FSConfig> tev_family_config;
     Pica::Shader::UserConfig tev_user{};
     bool tev_supported{};

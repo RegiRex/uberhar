@@ -1,5 +1,5 @@
 <!-- AstraEH: Bounded troubleshooting and removal map for the hybrid renderer. -->
-# Renderer diagnostics, schema 14
+# Renderer diagnostics, schema 15
 
 Every Uberhar renderer log call has an adjacent **`AstraEH Log Line`** comment.
 Find it with `rg -n 'AstraEH Log Line' src`. These markers identify diagnostic
@@ -513,3 +513,53 @@ Prepared operands add per-draw CPU work while reducing per-fragment decoding.
 Draw histograms are not pixel-weighted savings, host call time is not GPU time,
 and successful host validation is not a device performance claim. ABI/source
 fingerprinting prevents old module instructions from interpreting new selectors.
+
+## Automatic run settings and cache context (0.1.4)
+
+<!-- AstraEH: Separate sampled settings, disk presence and observed compatible reuse. -->
+
+Renderer schema **15**, settings/cache schema **1**; frame schema 3 and fragment
+ABI 7 are unchanged. Existing resolution and speed-band fields keep their meanings.
+
+- `Uberhar settings` identifies session, title, exact build, named mode/API,
+  resolution setting (zero explicitly means Auto), CPU clock/JIT, shader/cache
+  controls, base/turbo limits, presentation settings, texture controls and render
+  timing settings. It logs launch, the first 32 observed changes and final shutdown.
+  Comparison occurs at existing five-second frame windows and on resume, never per
+  draw. `sample_scope=instant` means the settings at that observation: changes
+  between samples can be missed, and a setting may require a renderer restart.
+  It does not report the physical scanout rate or pretend Auto is a fixed scale.
+- `Uberhar cache start` inventories the current title's application Vulkan files
+  before loading or writing, separately counting generic SPIR-V, device-specific
+  driver data and specialized records. `inventory_ms` measures added metadata work.
+  Directory scans stop at 8192 entries; no source or shader contents are logged.
+  Android paths use the same native translation as FileUtil. Unsupported virtual
+  filesystem mappings remain Unknown rather than falsely empty.
+- `state=empty_files` means no nonzero bytes were found in the active application
+  namespaces under a complete scan. `present_files` means bytes exist, with
+  compatibility unverified. `disabled`, `unknown` and `not_observed` are distinct.
+  A header-only driver file can still be present. Bypassed specialized records are
+  shown but do not affect the Native active-cache label. This never inventories
+  or certifies a GPU driver's private internal cache.
+- `Uberhar cache use` follows the existing renderer progress cadence and shutdown.
+  Per-title-load baselines separate actual generic module hits/misses from the
+  existing renderer-lifetime totals. `cold_encountered` means misses and no hits;
+  `warm_encountered` means hits and no misses; `mixed` means both; `not_observed`
+  means no lookup yet. Disabled disk caching is explicit. These labels apply only
+  to encountered generic modules, not all possible shaders or pipelines.
+- `driver_load` distinguishes missing/open/read/directory errors, invalid data,
+  data provided to the driver, failed creation and empty-cache fallback. Existing
+  recovery/deletion behavior is unchanged. `provided_to_driver` is not a verified
+  driver hit. Startup and current disk-enable settings are both preserved.
+
+A build revision participates in generic-module fingerprints. Consequently an
+upgrade can report present files and cold encountered modules even when fragment
+math is unchanged. Do not equate module misses with a confirmed manual cache clear.
+Do not add file-inventory time, compile duration and foreground waits together;
+some intervals overlap. No cache is cleared or warmed by these diagnostics.
+
+Normal-performance analysis excludes temporary fast-forward and mixed speed-limit
+transition intervals unless the owner explicitly requested a speed test. Preserve
+raw totals/bands; do not relabel fast-forward as loading automatically. Game-scene
+notes remain useful because neither settings nor cache records identify a partner
+attack, tutorial, respawn or physical input latency.
