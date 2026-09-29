@@ -19,6 +19,8 @@ enum class StateFlags {
     AllDirty = 0,
     Pipeline = 1 << 0,
     DescriptorSets = 1 << 1,
+    // AstraEH: Foreign fragment push writes invalidate rasterizer value reuse.
+    FragmentConstants = 1 << 2,
 };
 DECLARE_ENUM_FLAG_OPERATORS(StateFlags)
 

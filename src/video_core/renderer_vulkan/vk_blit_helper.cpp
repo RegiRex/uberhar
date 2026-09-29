@@ -395,7 +395,8 @@ bool BlitHelper::BlitDepthStencil(Surface& source, Surface& dest,
         BindBlitState(cmdbuf, layout, blit, dest);
         cmdbuf.draw(3, 1, 0, 0);
     });
-    scheduler.MakeDirty(StateFlags::Pipeline);
+    // AstraEH: This graphics utility wrote a foreign fragment push-constant range.
+    scheduler.MakeDirty(StateFlags::Pipeline | StateFlags::FragmentConstants);
     return true;
 }
 
@@ -813,7 +814,8 @@ void BlitHelper::FilterPass(Surface& surface, vk::Pipeline pipeline, vk::Pipelin
         cmdbuf.setScissor(0, scissor);
         cmdbuf.draw(3, 1, 0, 0);
     });
-    scheduler.MakeDirty(StateFlags::Pipeline);
+    // AstraEH: This graphics utility wrote a foreign fragment push-constant range.
+    scheduler.MakeDirty(StateFlags::Pipeline | StateFlags::FragmentConstants);
 }
 
 void BlitHelper::FilterPassThreeTextures(Surface& surface, vk::Pipeline pipeline,
@@ -898,7 +900,8 @@ void BlitHelper::FilterPassThreeTextures(Surface& surface, vk::Pipeline pipeline
         cmdbuf.setScissor(0, scissor);
         cmdbuf.draw(3, 1, 0, 0);
     });
-    scheduler.MakeDirty(StateFlags::Pipeline);
+    // AstraEH: This graphics utility wrote a foreign fragment push-constant range.
+    scheduler.MakeDirty(StateFlags::Pipeline | StateFlags::FragmentConstants);
 }
 
 } // namespace Vulkan

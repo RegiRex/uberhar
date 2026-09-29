@@ -12,6 +12,7 @@
 #include "video_core/rasterizer_interface.h"
 #include "video_core/renderer_vulkan/uberhar_cache_diagnostics.h" // AstraEH: Startup inventory.
 #include "video_core/renderer_vulkan/uberhar_pipeline_policy.h" // AstraEH: Admission reason counters.
+#include "video_core/renderer_vulkan/uberhar_push_constants.h" // AstraEH: Exact worker-side uploads.
 #include "video_core/renderer_vulkan/uberhar_tev_preparation.h" // AstraEH: Exact preparation reuse.
 #include "video_core/renderer_vulkan/uberhar_wait_diagnostics.h" // AstraEH: Bounded worst waits.
 #include "video_core/renderer_vulkan/vk_graphics_pipeline.h"
@@ -169,6 +170,8 @@ private:
     GraphicsPipeline* GetTevFallback(const PipelineInfo& info, bool cpu_vertex = false);
     void ClearTevFallbacks();
     void ReportUberharStats(const char* kind = "totals");
+    // AstraEH: Read on the command worker, or only after the worker has drained.
+    void ReportTevPushStats(const char* kind);
     PipelineBuildOptions SpecializedBuildOptions() {
         return hybrid_tev
                    ? PipelineBuildOptions{&pipeline_completion, &specialized_build_stats, false}
@@ -211,6 +214,8 @@ private:
     // AstraEH: The generator owns the versioned 128-byte transport and layout assertions.
     using TevPushConstants = Pica::Shader::Generator::GLSL::DynamicTevState;
     TevPushConstants tev_constants{};
+    // AstraEH: This state belongs to ordered command execution, not draw preparation.
+    ExactPushConstants<TevPushConstants> tev_push_constants;
     // AstraEH: Snapshot before application-cache loading; never infer opaque driver hits.
     UberharCacheDiagnostics::Snapshot cache_start;
     const char* driver_cache_load{"not_attempted"};

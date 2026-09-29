@@ -4,6 +4,7 @@
 
 #include <bit>       // AstraEH: Count per-draw active TEV stages without fragment-side decoding.
 #include <chrono>    // AstraEH: Measure actual scheduler waits for pipeline compilation.
+#include <cstring>   // AstraEH: Select the already-drained final statistics path.
 #include <optional>  // AstraEH: Android path-query declarations use optional strings.
 #include <stdexcept> // AstraEH: Recover experimental compilation failures through specialization.
 #include <boost/container/static_vector.hpp>
@@ -114,7 +115,7 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
     LOG_INFO(
         Render_Vulkan,
         "Uberhar: hybrid_tev={} force_tev={} async_shaders={} spirv_generator={} "
-        "diagnostics=16 first_ready=true compact_tev=true canonical_tev=true dynamic_fragment=true "
+        "diagnostics=17 first_ready=true compact_tev=true canonical_tev=true dynamic_fragment=true "
         "cpu_bridge={} bridge_policy=ready_only fallback_abi={} push_bytes={} "
         "runtime_lighting_luts=true runtime_lighting_enables=true runtime_light_loop=true "
         "runtime_tev_plan=true prepared_tev_operands=true phase_diagnostics=1 "
@@ -607,8 +608,11 @@ bool PipelineCache::BindPipeline(PipelineInfo& info, bool wait_built,
     }
 
     const bool is_dirty = scheduler.IsStateDirty(StateFlags::Pipeline);
+    // AstraEH: Capture invalidation in enqueue order; utility/presentation writes
+    // may execute after this thread has already prepared later draw constants.
+    const bool constants_dirty = is_dirty || scheduler.IsStateDirty(StateFlags::FragmentConstants);
     // AstraEH: Copy TEV registers into the queued command; later draws may change them.
-    scheduler.Record([this, is_dirty, pipeline, using_fallback, alternative,
+    scheduler.Record([this, is_dirty, constants_dirty, pipeline, using_fallback, alternative,
                       draw_id = draw_requests, alternative_was_pending, constants = tev_constants,
                       current_dynamic = current_info.dynamic_info, dynamic = info.dynamic_info,
                       descriptor_sets = bound_descriptor_sets, offsets = offsets,
@@ -789,15 +793,24 @@ bool PipelineCache::BindPipeline(PipelineInfo& info, bool wait_built,
 
         cmdbuf.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *pipeline_layout, 0,
                                   descriptor_sets, offsets);
-        // AstraEH: Upload all six stages for every interpreted draw, even on pipeline reuse.
+        // AstraEH: Invalidate even when specialization wins this command. Otherwise
+        // the following generic draw could reuse values overwritten by utility work.
+        if (constants_dirty) {
+            tev_push_constants.Invalidate();
+        }
+        // AstraEH: Compare after actual pipeline selection, against the last executed
+        // generic upload. All rasterizer pipelines share this immutable layout/range.
         if (selected_fallback) {
-            cmdbuf.pushConstants(*pipeline_layout, vk::ShaderStageFlagBits::eFragment, 0,
-                                 sizeof(constants), &constants);
+            tev_push_constants.UploadIfChanged(constants, [&](const auto& value) {
+                cmdbuf.pushConstants(*pipeline_layout, vk::ShaderStageFlagBits::eFragment, 0,
+                                     sizeof(value), &value);
+            });
         }
     });
 
     current_info = info;
-    scheduler.MarkStateNonDirty(StateFlags::Pipeline | StateFlags::DescriptorSets);
+    scheduler.MarkStateNonDirty(StateFlags::Pipeline | StateFlags::DescriptorSets |
+                                StateFlags::FragmentConstants);
 
     return true;
 }
@@ -1223,6 +1236,7 @@ void PipelineCache::ClearTevFallbacks() {
     for (auto& keys : tev_candidate_keys) {
         keys.clear();
     }
+    tev_push_constants.Reset(); // AstraEH: Scheduler was drained above; no cross-title reuse.
     tev_preparation.Reset(); // AstraEH: Match census/title lifetime; retain no old observation.
     tev_prepare_hit_samples = tev_prepare_miss_samples = 0;
     tev_prepare_hit_ns = tev_prepare_miss_ns = 0;
@@ -1231,6 +1245,19 @@ void PipelineCache::ClearTevFallbacks() {
     tev_family_details = 0;    // AstraEH: The serial compiler is drained above.
     bound_pipeline = nullptr;
     tev_family_config.reset();
+}
+
+// AstraEH: Ordered worker snapshots avoid per-draw atomics or a reporting stall.
+// Progress is queued; the destructor reads directly only after WaitWorker().
+void PipelineCache::ReportTevPushStats(const char* kind) {
+    const auto& stats = tev_push_constants.Stats();
+    // AstraEH Log Line: Same five-second/final cadence; completed worker commands only.
+    LOG_INFO(Render_Vulkan,
+             "Uberhar push constants {}: schema=1 scope=current_title requests={} uploads={} "
+             "reuses={} invalidations={} bytes_per_upload={} saved_bytes={} "
+             "observation=command_worker timing=not_measured",
+             kind, stats.requests, stats.uploads, stats.reuses, stats.invalidations,
+             sizeof(TevPushConstants), stats.reuses * sizeof(TevPushConstants));
 }
 
 // AstraEH: These are draw observations and CPU wait durations, not GPU timings or frame counts.
@@ -1249,6 +1276,13 @@ void PipelineCache::ReportUberharStats(const char* kind) {
              UberharCacheDiagnostics::ReuseState(disk_enabled, observed_hits, observed_misses),
              observed_hits, observed_misses, driver_cache_load, cache_start.enabled, disk_enabled);
     if (hybrid_tev) {
+        // AstraEH: Final reporting already drains this worker. Progress runs in
+        // queue order and may describe fewer draws than renderer-thread records.
+        if (std::strcmp(kind, "totals") == 0) {
+            ReportTevPushStats(kind);
+        } else {
+            scheduler.Record([this](vk::CommandBuffer) { ReportTevPushStats("progress"); });
+        }
         const auto& preparation = tev_preparation.Stats();
         // AstraEH Log Line: Aggregate at the existing five-second/final cadence only.
         LOG_INFO(Render_Vulkan,

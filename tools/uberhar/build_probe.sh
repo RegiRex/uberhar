@@ -116,3 +116,9 @@ c++ -std=c++20 -O2 -DFMT_HEADER_ONLY -DXXH_INLINE_ALL \
   src/video_core/shader/generator/pica_fs_config.cpp \
   -o build/uberhar-probe/test-tev-preparation
 build/uberhar-probe/test-tev-preparation
+
+# AstraEH: Suppress uploads only when ordered command state retains every required ABI byte.
+c++ -std=c++20 -O2 -DFMT_HEADER_ONLY -Isrc -Iexternals/fmt/include \
+  -Iexternals/boost -Iexternals/xxHash -Iexternals/nihstro/include \
+  tools/uberhar/test_push_constants.cpp -o build/uberhar-probe/test-push-constants
+build/uberhar-probe/test-push-constants

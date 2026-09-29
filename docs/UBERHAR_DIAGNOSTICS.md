@@ -1,5 +1,5 @@
 <!-- AstraEH: Bounded troubleshooting and removal map for the hybrid renderer. -->
-# Renderer diagnostics, schema 16
+# Renderer diagnostics, schema 17
 
 Every Uberhar renderer log call has an adjacent **`AstraEH Log Line`** comment.
 Find it with `rg -n 'AstraEH Log Line' src`. These markers identify diagnostic
@@ -9,7 +9,7 @@ logging to this fork. Android session/title/export records remain functional
 parts of log export, rather than temporary shader debugging.
 
 The startup record identifies effective switches, compiler worker count,
-`diagnostics=16`, `dynamic_fragment=true`, `bridge_policy=ready_only`,
+`diagnostics=17`, `dynamic_fragment=true`, `bridge_policy=ready_only`,
 `fallback_abi=7`, `push_bytes=128`, `runtime_lighting_luts=true`,
 `runtime_lighting_enables=true`, `runtime_light_loop=true`, `host_pipeline_identity=true` and
 `bridge_assembly=isolated_lists_strips_fans`.
@@ -598,3 +598,44 @@ order retain their existing paths. Profile configuration is captured at renderer
 construction and refreshed by `SetAccurateMul`, the only later profile mutator.
 A future profile mutator must call `Configure` too. No new persistent cache format,
 loading classifier, prewarming policy or owner setting is introduced.
+
+
+## Exact fragment push-constant reuse (0.1.6)
+
+<!-- AstraEH: Measure commands actually recorded by the selected worker path. -->
+
+`Uberhar push constants progress/totals` uses schema 1 and `scope=current_title`.
+It counts selected generic draws on the command worker, after pending/failed
+pipeline selection is resolved. `requests` equals `uploads + reuses` during
+normal completed execution. `uploads` counts full 128-byte fragment pushes;
+`reuses` counts calls omitted after complete byte equality with valid prior state.
+`invalidations` counts dirty-state notifications, including initially undefined
+state; it need not equal uploads. `saved_bytes = reuses * bytes_per_upload` is
+logical API payload avoided, not measured GPU/bus traffic or time saved.
+
+Progress reports are queued at the existing renderer five-second cadence. They
+read worker-owned counters in command order, without per-draw atomics, mutexes,
+clock reads or waits for reporting. They may lag neighboring renderer-thread
+records. Final reporting reads directly after the existing worker drain. Title
+reset also drains before clearing values/counters. `timing=not_measured` is
+intentional: command reduction does not by itself quantify performance gain.
+
+The shadow value belongs to the command worker and one immutable rasterizer
+layout/range. Each command retains its own 128-byte value copy. Compare only
+after the actual generic/specialized winner is selected. New command buffers
+invalidate through existing AllDirty handling. Graphics blits/filters and both
+presentation paths explicitly dirty fragment constants; compute-only writes use
+separate shader stages. Existing compute-rectangle Pipeline invalidation also
+forces a conservative refresh. A dirty command invalidates the shadow even if
+specialization wins, so a later generic draw cannot use utility-written bytes.
+
+The production `ExactPushConstants` helper commits its shadow only after issuing
+the upload. No partial update, family-based approximation, descriptor suppression,
+draw omission or shader arithmetic change is introduced. A future foreign fragment
+push writer must mark `FragmentConstants` dirty when enqueuing its work.
+
+Vulkan begins each command buffer with undefined push values, and requires the
+last pushed ranges to be compatible with the consuming pipeline. Pipeline and
+descriptor binds alone do not overwrite those values. See the official
+[push-constant command reference](https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdPushConstants.html)
+and [lifetime examples](https://docs.vulkan.org/guide/latest/push_constants.html).

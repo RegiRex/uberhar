@@ -297,3 +297,18 @@ per-title quota that could run out before the most useful scenes.
 | `tools/uberhar/test_tev_preparation.cpp` | Released-path differential oracle, complete input-byte mutations, forced slot collisions, eviction, title/profile/feature changes, census saturation and dynamic-state exclusion; optional host-only benchmark including low reuse. |
 | `tools/uberhar/build_probe.sh` | Run preparation correctness in the existing required host/Actions gate. Benchmarks are opt-in and impose no unstable timing threshold. |
 | `docs/releases/0.1.5.md`, `docs/UBERHAR_DIAGNOSTICS.md`, `UBERHAR.md`, `UBERHAR_VERSION` | Release scope, evidence limits, log semantics and current version. Full architecture review cadence remains after 0.1.7 by default. |
+
+
+## 0.1.6 exact fragment upload reuse
+
+<!-- AstraEH: Worker ownership and all foreign-writer boundaries are part of correctness. -->
+
+| Files | Purpose and limit |
+| --- | --- |
+| `src/video_core/renderer_vulkan/uberhar_push_constants.h` | Fixed-size, complete-byte shadow for one layout/range; upload callback completes before commit; invalidation and drained reset; worker-owned plain counters. |
+| `src/video_core/renderer_vulkan/vk_pipeline_cache.{h,cpp}` | Capture dirty flags and per-draw values, then compare after real worker pipeline selection. Invalidate on specialized winners too. Queue progress snapshots, read final after drain, reset with title. Schema 17; shader ABI unchanged. |
+| `src/video_core/renderer_vulkan/vk_scheduler.h` | Add FragmentConstants dirty bit; existing AllDirty submission boundary covers it. Command ordering and threading are unchanged. |
+| `src/video_core/renderer_vulkan/vk_blit_helper.cpp` | Mark foreign fragment writes in depth/stencil blits and both filter helpers. Compute-only pushes remain stage-separated. |
+| `src/video_core/renderer_vulkan/renderer_vulkan.cpp` | Mark both presentation push paths dirty because they share the scheduler and overwrite fragment values. No display behavior changes. |
+| `tools/uberhar/test_push_constants.cpp`, `tools/uberhar/build_probe.sh` | Production helper versus independent queued command-state model: all 128 ABI bytes, failed-upload retry, real value snapshots, specialized/generic alternation, foreign writes, new buffers, title reset and ordered counters. Required host gate; not a driver-speed test. |
+| `docs/releases/0.1.6.md`, `docs/UBERHAR_DIAGNOSTICS.md`, `UBERHAR.md`, `UBERHAR_VERSION` | Scope, evidence limits, exact invalidation contract and updated version. Next default architecture review remains after 0.1.7. |

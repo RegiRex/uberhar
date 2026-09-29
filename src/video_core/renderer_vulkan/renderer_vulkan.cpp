@@ -813,6 +813,8 @@ void RendererVulkan::DrawSingleScreen(u32 screen_id, float x, float y, float w, 
         cmdbuf.bindVertexBuffers(0, vertex_buffer.Handle(), {0});
         cmdbuf.draw(4, 1, first_vertex, 0);
     });
+    // AstraEH: Presentation shares this scheduler and overwrites fragment constants.
+    scheduler.MakeDirty(StateFlags::FragmentConstants);
 }
 
 void RendererVulkan::DrawSingleScreenStereo(u32 screen_id_l, u32 screen_id_r, float x, float y,
@@ -886,6 +888,8 @@ void RendererVulkan::DrawSingleScreenStereo(u32 screen_id_l, u32 screen_id_r, fl
         cmdbuf.bindVertexBuffers(0, vertex_buffer.Handle(), {0});
         cmdbuf.draw(4, 1, first_vertex, 0);
     });
+    // AstraEH: Presentation shares this scheduler and overwrites fragment constants.
+    scheduler.MakeDirty(StateFlags::FragmentConstants);
 }
 
 void RendererVulkan::ApplySecondLayerOpacity(float alpha) {
