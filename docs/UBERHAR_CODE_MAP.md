@@ -261,3 +261,14 @@ per-title quota that could run out before the most useful scenes.
 | `src/video_core/shader/generator/glsl_fs_shader_gen.{h,cpp}` | ABI 6 in the existing 128 bytes; compute activity/loop end once per draw, preserving intermediate buffer updates and one shared shader family. |
 | `tools/uberhar/test_activity.cpp`, `test_frame_diagnostics.cpp`, `build_probe.sh` | Explicit/unknown/mixed phases, restart/reset, startup override, concurrency, streaming ambiguity and pause-safe exact reconciliation. |
 | `tools/uberhar/shader_probe.cpp`, `compare_tev.py` | 736 programs including all 64 stage activity masks, two scale-one encodings and four buffer-write patterns; compare production shader output and fetch behavior against specialization. |
+
+## 0.1.3: prepared TEV operands
+
+<!-- AstraEH: Attribute operand transport, shader changes and independent validation. -->
+
+| Files | AstraEH purpose |
+| --- | --- |
+| `src/video_core/shader/generator/glsl_fs_shader_gen.{h,cpp}` | Distinct prepared stage type, ABI 7 in 128 bytes; original-register stage activity, nonrecursive stage-zero source normalization, component/inversion selectors and literal scales. Shader consumes prepared operands with exact inherited math and buffer order. |
+| `src/video_core/renderer_vulkan/vk_pipeline_cache.cpp` | Schema 14 and `prepared_tev_operands=true` startup identification; existing adjacent AstraEH Log Line attribution retained. |
+| `tools/uberhar/shader_probe.cpp`, `compare_tev.py` | Expand to 816 TEV programs, cross all legal modifier pairs, emit original effective registers separately for independent texture-fetch expectations, reject an incomplete corpus. |
+| `UBERHAR_VERSION`, `UBERHAR.md`, `docs/releases/0.1.3.md`, diagnostics reference | Version, implementation scope, validation results, per-draw CPU tradeoff and unchanged review cadence. |

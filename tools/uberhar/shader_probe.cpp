@@ -55,7 +55,7 @@ int main(int argc, char** argv) {
     }
     // AstraEH: Deterministic random programs make combiner regressions
     // reproducible.
-    for (u32 test = 0; test < 736; ++test) {
+    for (u32 test = 0; test < 816; ++test) {
         auto config = base;
         config.texture.combiner_buffer_input.Assign(test < 16 ? test : random() & 255);
         for (auto& stage : config.texture.tev_stages) {
@@ -92,7 +92,7 @@ int main(int argc, char** argv) {
         }
         // AstraEH: Every active-stage subset, both scale-one encodings and four
         // delayed buffer masks exercise holes, zero stages and trailing removal.
-        if (test >= 224) {
+        if (test >= 224 && test < 736) {
             const u32 n = test - 224;
             const u32 mask = n & 63U;
             constexpr std::array<u32, 4> buffers{0, 0x0f, 0xf0, 0xff};
@@ -114,6 +114,19 @@ int main(int argc, char** argv) {
                 (plan.buffer_mask & 255U) != buffers[(n >> 6) & 3U])
                 throw std::runtime_error("Prepared TEV plan differs from active stage corpus");
         }
+        // AstraEH: Cross every legal color/alpha modifier pair through all six
+        // stages, scale encodings, operation arities and stage-0 Previous rules.
+        if (test >= 736) {
+            const u32 n = test - 736;
+            constexpr std::array<u32, 6> ops{0, 1, 4, 8, 9, 7};
+            for (u32 i = 0; i < 6; ++i) {
+                const u32 color_modifier = modifiers[n / 8];
+                const u32 alpha_modifier = n % 8;
+                config.texture.tev_stages[i] = {
+                    0x045f034f, color_modifier * 0x111U | alpha_modifier * 0x111000U,
+                    ops[i] | (alpha_ops[i] << 16), ((n + i) % 4) | (((n + i + 1) % 4) << 16)};
+            }
+        }
         if (!Generator::GLSL::SupportsDynamicTev(config, user)) {
             throw std::runtime_error("Generated case unexpectedly unsupported");
         }
@@ -125,6 +138,13 @@ int main(int argc, char** argv) {
         std::ofstream constants(prefix.string() + ".bin", std::ios::binary);
         const auto state = Generator::GLSL::MakeDynamicTevState(config, profile);
         constants.write(reinterpret_cast<const char*>(&state), sizeof(state));
+        // AstraEH: Keep independent guest-register evidence for fetch expectations.
+        // Reading the prepared transport as raw PICA would mask normalization bugs.
+        auto effective = config;
+        effective.ApplyProfile(profile);
+        std::ofstream raw(prefix.string() + ".raw", std::ios::binary);
+        raw.write(reinterpret_cast<const char*>(effective.texture.tev_stages.data()),
+                  sizeof(effective.texture.tev_stages));
     }
     // AstraEH: Full fragment modules exercise Vulkan bindings and code outside
     // TEV too.
@@ -157,5 +177,5 @@ int main(int argc, char** argv) {
         }
         std::ofstream(output / fmt::format("dynamic-{}.frag", test)) << "#version 450\n" << source;
     }
-    fmt::print("Emitted 736 TEV cases and 64 dynamic fragment families\n");
+    fmt::print("Emitted 816 TEV cases and 64 dynamic fragment families\n");
 }

@@ -38,6 +38,14 @@ large sustained draw/vertex costs after shader creation ends. See the
 [full analysis](docs/UBERHAR_LOG_ANALYSIS_0.1.0.md), including research on Luma L2
 behavior and why it is distinct from Azahar's New 3DS model selection.
 
+<!-- AstraEH: Continue moving draw-constant interpretation out of fragment execution. -->
+**0.1.3 prepares TEV operand selection once per draw.** Stage-zero Previous
+redirection, modifier component/inversion selection and literal scales join the
+existing stage plan. The shared shader keeps exact arithmetic, rounding, texture
+reuse and delayed buffer ordering. ABI 7 remains 128 bytes; shader family keys
+are unchanged. Host correctness is validated; device speed remains unmeasured.
+See [0.1.3 notes](docs/releases/0.1.3.md) for tests and comparison instructions.
+
 <!-- AstraEH: General fragment efficiency and honest loading attribution. -->
 **0.1.2 prepares the generic TEV stage plan once per draw.** Runtime activity
 bits and the last useful stage replace per-fragment passthrough decoding and

@@ -1,5 +1,5 @@
 <!-- AstraEH: Bounded troubleshooting and removal map for the hybrid renderer. -->
-# Renderer diagnostics, schema 13
+# Renderer diagnostics, schema 14
 
 Every Uberhar renderer log call has an adjacent **`AstraEH Log Line`** comment.
 Find it with `rg -n 'AstraEH Log Line' src`. These markers identify diagnostic
@@ -489,3 +489,27 @@ The next prewarming step requires actual reusable pipeline descriptions and a
 safe time budget. First-run unknown game shaders cannot be reconstructed merely
 from recognizing a loading screen. Phase estimates in this release must not
 trigger speculative compilation or silently permit dropped draws.
+
+## Prepared TEV operands (0.1.3)
+
+<!-- AstraEH: Identify changed instruction semantics without changing timing attribution. -->
+
+Renderer schema **14** reports `prepared_tev_operands=true` and fragment ABI **7**,
+still 128 bytes. Each prepared stage carries the existing source field positions,
+with stage-zero Previous resolved once from the original third operand. Color
+selectors encode `(component << 1) | invert`: RGBA components 0..3, RGB 4 and
+constant zero 5. Alpha uses components 0..3; scales carry literal 1/2/4 values.
+Original guest-register storage and specialized shader generation are unchanged.
+
+The existing TEV plan histograms retain their exact meanings and bounds.
+Frame schema 3, native vertex schema 2, phase fields and speed bands are unchanged.
+No additional periodic record or counter is added. All unmarked in-game phases
+remain Unknown. A sleep/resume surface-recreation hitch can remain in active
+frame timing after the explicit pause boundary; do not attribute it to shader
+compilation solely because it appears among worst frames. Temporary 400%-cap
+segments must be separated using speed bands when assessing normal performance.
+
+Prepared operands add per-draw CPU work while reducing per-fragment decoding.
+Draw histograms are not pixel-weighted savings, host call time is not GPU time,
+and successful host validation is not a device performance claim. ABI/source
+fingerprinting prevents old module instructions from interpreting new selectors.

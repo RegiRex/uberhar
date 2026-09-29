@@ -18,11 +18,19 @@ enum class LightingFamilyKey { Current, Alpha13, Alpha14 };
 FSConfig MakeDynamicTevFamilyConfig(const FSConfig& config, const Profile& profile,
                                     LightingFamilyKey lighting_key = LightingFamilyKey::Current);
 
-// AstraEH: Version 6 of the private Vulkan fallback ABI. Fit Vulkan's
+// AstraEH: Version 7 of the private Vulkan fallback ABI. Fit Vulkan's
 // 128-byte minimum push-constant limit; specialized/disk shader layouts are unchanged.
-inline constexpr u32 DynamicTevAbiVersion = 6;
+inline constexpr u32 DynamicTevAbiVersion = 7;
+// AstraEH: Prepared instructions are deliberately distinct from guest registers.
+// Source fields retain their nibble positions, with stage-0 Previous resolved once.
+// Color modifiers encode (component << 1) | invert: RGBA=0..3, RGB=4, zero=5.
+// Alpha modifiers use RGBA=0..3. Multipliers are literal 1/2/4 at bits 0 and 16.
+struct DynamicTevStage {
+    u32 sources{}, modifiers{}, operations{}, multipliers{};
+};
+static_assert(sizeof(DynamicTevStage) == 16);
 struct DynamicTevState {
-    std::array<TevStageConfigRaw, 6> stages;
+    std::array<DynamicTevStage, 6> stages;
     // AstraEH: Buffer writes [0:7], loop end [8:10], active stages [16:21].
     u32 buffer_mask;
     u32 framebuffer; // alpha function [0:2], scissor [3:4], W buffering [5].

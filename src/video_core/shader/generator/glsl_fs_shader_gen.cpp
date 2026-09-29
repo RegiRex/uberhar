@@ -242,15 +242,48 @@ FSConfig MakeDynamicTevFamilyConfig(const FSConfig& original, const Profile& pro
 DynamicTevState MakeDynamicTevState(const FSConfig& original, const Profile& profile) {
     auto config = original;
     config.ApplyProfile(profile);
-    DynamicTevState state{config.texture.tev_stages, config.texture.combiner_buffer_input.Value()};
+    DynamicTevState state{};
+    state.buffer_mask = config.texture.combiner_buffer_input.Value();
     // AstraEH: Hoist invariant passthrough decoding out of every fragment. Keep
     // intermediate stages (and delayed buffer writes) in order, but no output
     // consumes the combiner buffer after the last non-passthrough stage.
     u32 stage_end = 0;
     for (u32 i = 0; i < state.stages.size(); ++i) {
-        if (!IsPassThroughTevStage(state.stages[i])) {
+        const auto& raw = config.texture.tev_stages[i];
+        const TexturingRegs::TevStageConfig stage = raw;
+        // AstraEH: Determine passthrough from original registers before normalizing
+        // operands. Stage 0 has the same inherited passthrough rule as later stages.
+        if (!IsPassThroughTevStage(stage)) {
             state.buffer_mask |= 1U << (16 + i);
             stage_end = i + 1;
+        }
+        auto& prepared = state.stages[i];
+        prepared.sources = raw.sources_raw;
+        prepared.operations = raw.ops_raw;
+        prepared.multipliers = stage.GetColorMultiplier() | (stage.GetAlphaMultiplier() << 16);
+        // AstraEH: Decode draw-constant swizzles once. Reserved color modifiers
+        // preserve the inherited constant-zero result, with no inversion applied.
+        constexpr std::array<u32, 16> color_selectors{8, 9, 6,  7,  0, 1, 10, 10,
+                                                      2, 3, 10, 10, 4, 5, 10, 10};
+        constexpr std::array<u32, 8> alpha_selectors{6, 7, 0, 1, 2, 3, 4, 5};
+        for (u32 input = 0; input < 3; ++input) {
+            const u32 color_shift = input * 4;
+            const u32 alpha_shift = 12 + input * 4;
+            prepared.modifiers |= color_selectors[(raw.modifiers_raw >> color_shift) & 15U]
+                                  << color_shift;
+            prepared.modifiers |= alpha_selectors[(raw.modifiers_raw >> alpha_shift) & 7U]
+                                  << alpha_shift;
+            if (i == 0) {
+                // AstraEH: Read replacements from the original third operands.
+                // Previous -> Previous stays Previous; never redirect recursively.
+                for (const u32 channel : {0U, 16U}) {
+                    const u32 shift = channel + input * 4;
+                    if (((raw.sources_raw >> shift) & 15U) == 15U) {
+                        prepared.sources = (prepared.sources & ~(15U << shift)) |
+                                           (((raw.sources_raw >> (channel + 8)) & 15U) << shift);
+                    }
+                }
+            }
         }
     }
     state.buffer_mask |= stage_end << 8;
@@ -743,7 +776,7 @@ void FragmentModule::DefineDynamicState() {
     // AstraEH: std430 uvec4 array stride is 16 bytes; the mask follows at byte 96.
     // All branches depend on draw-uniform state, including texture selection.
     out += R"(
-// AstraEH: Runtime source/modifier decoding uses PICA register enum values.
+// AstraEH: ABI 7 carries prepared selectors and literal scale multipliers.
 layout(push_constant) uniform UberTev {
     uvec4 stages[6];
     uint buffer_mask;
@@ -793,33 +826,18 @@ vec4 uber_source(uint source, vec4 primary, vec4 lit, vec4 secondary,
 }
 
 vec3 uber_color_modifier(vec4 value, uint modifier) {
-    switch (modifier) {
-    case 0u: return value.rgb;
-    case 1u: return vec3(1.0) - value.rgb;
-    case 2u: return value.aaa;
-    case 3u: return vec3(1.0) - value.aaa;
-    case 4u: return value.rrr;
-    case 5u: return vec3(1.0) - value.rrr;
-    case 8u: return value.ggg;
-    case 9u: return vec3(1.0) - value.ggg;
-    case 12u: return value.bbb;
-    case 13u: return vec3(1.0) - value.bbb;
-    default: return vec3(0.0);
-    }
+    // AstraEH: Prepared components replace ten-way raw modifier decoding.
+    uint component = modifier >> 1u;
+    if (component > 4u) return vec3(0.0);
+    vec3 selected;
+    if (component == 4u) selected = value.rgb;
+    else selected = vec3(value[component]);
+    return (modifier & 1u) == 0u ? selected : vec3(1.0) - selected;
 }
 
 float uber_alpha_modifier(vec4 value, uint modifier) {
-    switch (modifier) {
-    case 0u: return value.a;
-    case 1u: return 1.0 - value.a;
-    case 2u: return value.r;
-    case 3u: return 1.0 - value.r;
-    case 4u: return value.g;
-    case 5u: return 1.0 - value.g;
-    case 6u: return value.b;
-    case 7u: return 1.0 - value.b;
-    default: return 0.0;
-    }
+    float selected = value[modifier >> 1u];
+    return (modifier & 1u) == 0u ? selected : 1.0 - selected;
 }
 )";
 }
@@ -836,10 +854,8 @@ if ((uber_tev.buffer_mask & (1u << (16u + tev_index))) != 0u) {
 uvec4 instruction = uber_tev.stages[tev_index];
 uint color_op = instruction.z & 15u;
 uint alpha_op = (instruction.z >> 16u) & 15u;
-uint color_scale = instruction.w & 3u;
-uint alpha_scale = (instruction.w >> 16u) & 3u;
-float color_multiplier = float(color_scale < 3u ? 1u << color_scale : 1u);
-float alpha_multiplier = float(alpha_scale < 3u ? 1u << alpha_scale : 1u);
+float color_multiplier = float(instruction.w & 7u);
+float alpha_multiplier = float((instruction.w >> 16u) & 7u);
 )";
     for (u32 input = 0; input < 3; ++input) {
         // AstraEH: Replace consumes one operand; only Lerp, MultiplyThenAdd and
@@ -850,8 +866,7 @@ float alpha_multiplier = float(alpha_scale < 3u ? 1u << alpha_scale : 1u);
             out += "if (color_op == 4u || color_op == 8u || color_op == 9u) {\n";
         }
         out += fmt::format("{{ uint source = (instruction.x >> {}u) & 15u;\n", input * 4);
-        // AstraEH: Stage 0 redirects Previous to source 3 exactly once, not recursively.
-        out += "if (tev_index == 0u && source == 15u) source = (instruction.x >> 8u) & 15u;\n";
+        // AstraEH: Stage-0 Previous was resolved in the per-draw prepared instruction.
         out += fmt::format(
             "color_results_{} = uber_color_modifier(uber_source(source, rounded_primary_color, "
             "primary_fragment_color, secondary_fragment_color, combiner_buffer, combiner_output, "
@@ -879,7 +894,6 @@ float alpha_multiplier = float(alpha_scale < 3u ? 1u << alpha_scale : 1u);
             out += "if (alpha_op == 4u || alpha_op == 8u || alpha_op == 9u) {\n";
         }
         out += fmt::format("{{ uint source = (instruction.x >> {}u) & 15u;\n", 16 + input * 4);
-        out += "if (tev_index == 0u && source == 15u) source = (instruction.x >> 24u) & 15u;\n";
         out += fmt::format(
             "alpha_results_{} = uber_alpha_modifier(uber_source(source, rounded_primary_color, "
             "primary_fragment_color, secondary_fragment_color, combiner_buffer, combiner_output, "

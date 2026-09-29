@@ -72,11 +72,11 @@ void main() {
 """
 
 
-def expected_fetches(constants):
+def expected_fetches(raw_registers):
     """AstraEH: Independently enumerate live texture operands, ignoring dead ones."""
     used = set()
     for stage, (sources, modifiers, ops, scales) in enumerate(
-        struct.iter_unpack("<4I", constants[:96])
+        struct.iter_unpack("<4I", raw_registers)
     ):
         color_op, alpha_op = ops & 15, (ops >> 16) & 15
         if (color_op == alpha_op == 0 and sources & 0x000f000f == 0x000f000f
@@ -117,7 +117,11 @@ count = 0
 mismatches = 0
 maximum_delta = 0
 # AstraEH: Evaluate both paths on identical inputs and require exact quantized RGBA agreement.
-for file in sorted(cases.glob("*.bin"), key=lambda p: int(p.stem)):
+files = sorted(cases.glob("*.bin"), key=lambda p: int(p.stem))
+# AstraEH: A missing corpus must not turn into a successful zero-comparison gate.
+if [int(file.stem) for file in files] != list(range(816)):
+    raise AssertionError("Expected all 816 TEV cases exactly once")
+for file in files:
     specialized = file.with_suffix(".frag").read_text()
     source = (
         header + rounding + helpers
@@ -126,8 +130,11 @@ for file in sorted(cases.glob("*.bin"), key=lambda p: int(p.stem)):
     )
     shader = ctx.compute_shader(source)
     constants = file.read_bytes()
-    instructions.write(constants + bytes(128 - len(constants)))
-    fetches = expected_fetches(constants)
+    raw_registers = file.with_suffix(".raw").read_bytes()
+    if len(constants) != 128 or len(raw_registers) != 96:
+        raise AssertionError(f"case {file.stem}: invalid prepared/raw transport size")
+    instructions.write(constants)
+    fetches = expected_fetches(raw_registers)
     shader.run(group_x=samples // 64)
     ctx.memory_barrier()
     result = list(struct.iter_unpack("<4I", outputs.read()))
