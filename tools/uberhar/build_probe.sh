@@ -106,3 +106,13 @@ build/uberhar-probe/test-activity
 c++ -std=c++20 -O2 -Isrc tools/uberhar/test_cache_diagnostics.cpp \
   -o build/uberhar-probe/test-cache-diagnostics
 build/uberhar-probe/test-cache-diagnostics
+
+# AstraEH: Exact preparation/census reuse must survive collision, eviction and title/profile changes.
+c++ -std=c++20 -O2 -DFMT_HEADER_ONLY -DXXH_INLINE_ALL \
+  -Isrc -Iexternals/fmt/include -Iexternals/boost -Iexternals/xxHash \
+  -Iexternals/nihstro/include -Iexternals/vulkan-headers/include \
+  tools/uberhar/test_tev_preparation.cpp \
+  src/video_core/shader/generator/glsl_fs_shader_gen.cpp \
+  src/video_core/shader/generator/pica_fs_config.cpp \
+  -o build/uberhar-probe/test-tev-preparation
+build/uberhar-probe/test-tev-preparation

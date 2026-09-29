@@ -284,3 +284,16 @@ per-title quota that could run out before the most useful scenes.
 | `src/video_core/renderer_vulkan/vk_pipeline_cache.{h,cpp}` | Translate Android paths, snapshot before load/write, record scan time and driver-load outcome, per-title-load reuse baselines, schema 15 and bounded tagged output. Existing compilation/cache recovery is unchanged. |
 | `tools/uberhar/test_cache_diagnostics.cpp`, `build_probe.sh` | Real temporary filesystem cases for namespace filtering, no mutation, empty/zero/stale files, errors, unmapped paths, capped scans, bypassed/disabled layers and independent reuse classification. |
 | `AGENTS.md`, `UBERHAR.md`, version/release/diagnostic/review docs | Owner's normal-speed filtering preference, 0.1.4 scope and completed 0.1.3 architecture review; next default full review after 0.1.7. |
+
+
+## 0.1.5 renderer preparation reuse
+
+<!-- AstraEH: Keep the new optimization, measurements and ownership reviewable. -->
+
+| Files | Purpose and limit |
+| --- | --- |
+| `src/video_core/renderer_vulkan/uberhar_tev_preparation.h` | Pure current/historical family and sixteen-dimension census preparation; 256 owned-value entries, full input equality after slot hashing, last-entry fast path, profile configuration and title reset. No Vulkan handles or dynamic draw state cached. |
+| `src/video_core/renderer_vulkan/vk_pipeline_cache.{h,cpp}` | Use prepared values before existing fallback lookup/admission; preserve first observations and caps; reset with title and reconfigure at the profile setter. Schema 16 adds aggregate reuse/eviction/storage and one-in-1024 host timing samples. |
+| `tools/uberhar/test_tev_preparation.cpp` | Released-path differential oracle, complete input-byte mutations, forced slot collisions, eviction, title/profile/feature changes, census saturation and dynamic-state exclusion; optional host-only benchmark including low reuse. |
+| `tools/uberhar/build_probe.sh` | Run preparation correctness in the existing required host/Actions gate. Benchmarks are opt-in and impose no unstable timing threshold. |
+| `docs/releases/0.1.5.md`, `docs/UBERHAR_DIAGNOSTICS.md`, `UBERHAR.md`, `UBERHAR_VERSION` | Release scope, evidence limits, log semantics and current version. Full architecture review cadence remains after 0.1.7 by default. |

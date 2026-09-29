@@ -114,7 +114,7 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
     LOG_INFO(
         Render_Vulkan,
         "Uberhar: hybrid_tev={} force_tev={} async_shaders={} spirv_generator={} "
-        "diagnostics=15 first_ready=true compact_tev=true canonical_tev=true dynamic_fragment=true "
+        "diagnostics=16 first_ready=true compact_tev=true canonical_tev=true dynamic_fragment=true "
         "cpu_bridge={} bridge_policy=ready_only fallback_abi={} push_bytes={} "
         "runtime_lighting_luts=true runtime_lighting_enables=true runtime_light_loop=true "
         "runtime_tev_plan=true prepared_tev_operands=true phase_diagnostics=1 "
@@ -160,7 +160,15 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
         ++i;
     }
 
+    // AstraEH: Freeze preparation inputs until the explicit profile setter changes them.
+    tev_preparation.Configure(profile, instance.IsExtendedDynamicStateSupported());
     BuildLayout();
+}
+
+// AstraEH: Every mutable profile update also invalidates pure preparation when needed.
+void PipelineCache::SetAccurateMul(bool accurate_mul) {
+    profile.enable_accurate_mul = accurate_mul;
+    tev_preparation.Configure(profile, instance.IsExtendedDynamicStateSupported());
 }
 
 void PipelineCache::BuildLayout() {
@@ -906,63 +914,40 @@ GraphicsPipeline* PipelineCache::GetTevFallback(const PipelineInfo& info, bool c
     }
     constexpr std::size_t MaxFamilies = 128;
     constexpr std::size_t MaxPipelines = 1024;
-    // AstraEH: Canonicalize only on a fallback request, so ready specialized draws
-    // do not pay for the additional copies/hashes or candidate diagnostics.
-    const auto family_config = GLSL::MakeDynamicTevFamilyConfig(*tev_family_config, profile);
-    const u64 raw_family_hash = tev_family_config->Hash();
-    const u64 family_hash = family_config.Hash();
-
-    // AstraEH: Look up ready/pending entries before applying the admission limit.
-    // A long warm-up must not prevent reuse of a different, already compiled fallback.
-    PipelineInfo fallback_info = info;
-    fallback_info.state.shader_ids[ProgramType::FS] = raw_family_hash;
-    const u64 raw_pipeline_hash = fallback_info.state.OptimizedHash(instance);
-    fallback_info.state.shader_ids[ProgramType::FS] = family_hash;
-    const u64 candidate_pipeline_hash = fallback_info.state.OptimizedHash(instance);
-    // AstraEH: Count eligible candidates even when the serial admission limit
-    // defers their build. These are independent dimensions, not a Cartesian
-    // product or counts of actual compilations. No guest shader contents are logged.
-    // AstraEH: Counterfactual 0.0.12 key for this same workload isolates the new
-    // lighting reduction from unequal replays. Hash only; never compile this variant.
-    auto previous_family = family_config;
-    previous_family.lighting = tev_family_config->lighting;
-    // AstraEH: Also retain 0.0.13's key for an apples-to-apples enable/configuration
-    // reduction count. The existing previous_lighting_families stays at 0.0.12.
-    const auto alpha13_family = GLSL::MakeDynamicTevFamilyConfig(*tev_family_config, profile,
-                                                                 GLSL::LightingFamilyKey::Alpha13);
-    // AstraEH: Isolate compact-loop sharing against the same observed 0.0.14 keys.
-    const auto alpha14_family = GLSL::MakeDynamicTevFamilyConfig(*tev_family_config, profile,
-                                                                 GLSL::LightingFamilyKey::Alpha14);
-    if (tev_family_config->lighting.enable) {
-        tev_light_counts_mask |= 1U << tev_family_config->lighting.src_num.Value();
-    }
-    const std::array<u64, 16> candidate_keys{
-        raw_family_hash,
-        family_hash,
-        raw_pipeline_hash,
-        candidate_pipeline_hash,
-        info.state.shader_ids[ProgramType::VS],
-        info.state.shader_ids[ProgramType::GS],
-        Common::ComputeStructHash64(info.state.vertex_layout),
-        Common::ComputeStructHash64(info.state.attachments),
-        Common::ComputeStructHash64(info.state.blending),
-        Common::ComputeStructHash64(info.state.rasterization),
-        Common::ComputeStructHash64(info.state.depth_stencil),
-        previous_family.Hash(),
-        Common::ComputeStructHash64(family_config.lighting),
-        Common::ComputeStructHash64(family_config.proctex),
-        alpha13_family.Hash(),
-        alpha14_family.Hash(),
-    };
-    constexpr std::size_t MaxCensusKeys = 2048;
-    for (std::size_t i = 0; i < candidate_keys.size(); ++i) {
-        auto& keys = tev_candidate_keys[i];
-        if (keys.size() < MaxCensusKeys) {
-            keys.insert(candidate_keys[i]);
-        } else if (!keys.contains(candidate_keys[i])) {
-            tev_census_capped = true;
+    // AstraEH: Reuse pure preparation only after complete raw/native input equality.
+    // A miss still observes every census dimension before pipeline admission.
+    const bool sample = (tev_preparation.Stats().requests & 1023U) == 0;
+    const auto sample_start =
+        sample ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+    const auto prepared = tev_preparation.Get(*tev_family_config, info);
+    const auto& family_config = prepared.prepared.family;
+    const u64 family_hash = prepared.prepared.candidates[1];
+    if (!prepared.reused) {
+        tev_light_counts_mask |= prepared.prepared.light_counts;
+        constexpr std::size_t MaxCensusKeys = 2048;
+        for (std::size_t i = 0; i < prepared.prepared.candidates.size(); ++i) {
+            auto& keys = tev_candidate_keys[i];
+            const auto key = prepared.prepared.candidates[i];
+            if (keys.size() < MaxCensusKeys) {
+                keys.insert(key);
+            } else if (!keys.contains(key)) {
+                tev_census_capped = true;
+            }
         }
     }
+    // AstraEH: Two clock reads per 1024 requests measure preparation plus census,
+    // excluding actual pipeline lookup/compilation. Separate hit/miss populations.
+    if (sample) {
+        const auto ns = static_cast<u64>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                            std::chrono::steady_clock::now() - sample_start)
+                                            .count());
+        auto& count = prepared.reused ? tev_prepare_hit_samples : tev_prepare_miss_samples;
+        auto& total = prepared.reused ? tev_prepare_hit_ns : tev_prepare_miss_ns;
+        ++count;
+        total += ns;
+    }
+    PipelineInfo fallback_info = info;
+    fallback_info.state.shader_ids[ProgramType::FS] = family_hash;
     // AstraEH: Look up runtime identity before admission. Configurations that
     // share host VS/GS modules should also share their ready generic pipelines.
     auto shader_it = tev_shaders.find(family_hash);
@@ -1238,6 +1223,9 @@ void PipelineCache::ClearTevFallbacks() {
     for (auto& keys : tev_candidate_keys) {
         keys.clear();
     }
+    tev_preparation.Reset(); // AstraEH: Match census/title lifetime; retain no old observation.
+    tev_prepare_hit_samples = tev_prepare_miss_samples = 0;
+    tev_prepare_hit_ns = tev_prepare_miss_ns = 0;
     tev_census_capped = false;
     tev_light_counts_mask = 0; // AstraEH: Runtime count coverage belongs to this title.
     tev_family_details = 0;    // AstraEH: The serial compiler is drained above.
@@ -1261,6 +1249,17 @@ void PipelineCache::ReportUberharStats(const char* kind) {
              UberharCacheDiagnostics::ReuseState(disk_enabled, observed_hits, observed_misses),
              observed_hits, observed_misses, driver_cache_load, cache_start.enabled, disk_enabled);
     if (hybrid_tev) {
+        const auto& preparation = tev_preparation.Stats();
+        // AstraEH Log Line: Aggregate at the existing five-second/final cadence only.
+        LOG_INFO(Render_Vulkan,
+                 "Uberhar preparation {}: schema=1 scope=current_title requests={} hits={} "
+                 "misses={} evictions={} invalidations={} capacity={} storage_bytes={} "
+                 "sample_period_requests=1024 hit_samples={} hit_sample_ns={} miss_samples={} "
+                 "miss_sample_ns={} timing=host_preparation_and_census",
+                 kind, preparation.requests, preparation.hits, preparation.misses,
+                 preparation.evictions, preparation.invalidations, TevPreparationCache<>::Entries,
+                 sizeof(tev_preparation), tev_prepare_hit_samples, tev_prepare_hit_ns,
+                 tev_prepare_miss_samples, tev_prepare_miss_ns);
         // AstraEH Log Line: Existing bounded progress cadence; files never contain guest shader
         // code.
         LOG_INFO(Render_Vulkan,

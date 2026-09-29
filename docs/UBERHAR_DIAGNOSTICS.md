@@ -1,5 +1,5 @@
 <!-- AstraEH: Bounded troubleshooting and removal map for the hybrid renderer. -->
-# Renderer diagnostics, schema 15
+# Renderer diagnostics, schema 16
 
 Every Uberhar renderer log call has an adjacent **`AstraEH Log Line`** comment.
 Find it with `rg -n 'AstraEH Log Line' src`. These markers identify diagnostic
@@ -9,8 +9,8 @@ logging to this fork. Android session/title/export records remain functional
 parts of log export, rather than temporary shader debugging.
 
 The startup record identifies effective switches, compiler worker count,
-`diagnostics=13`, `dynamic_fragment=true`, `bridge_policy=ready_only`,
-`fallback_abi=6`, `push_bytes=128`, `runtime_lighting_luts=true`,
+`diagnostics=16`, `dynamic_fragment=true`, `bridge_policy=ready_only`,
+`fallback_abi=7`, `push_bytes=128`, `runtime_lighting_luts=true`,
 `runtime_lighting_enables=true`, `runtime_light_loop=true`, `host_pipeline_identity=true` and
 `bridge_assembly=isolated_lists_strips_fans`.
 `cpu_bridge` is false when hybrid is off or forced fallback is on, even if the
@@ -563,3 +563,38 @@ transition intervals unless the owner explicitly requested a speed test. Preserv
 raw totals/bands; do not relabel fast-forward as loading automatically. Game-scene
 notes remain useful because neither settings nor cache records identify a partner
 attack, tutorial, respawn or physical input latency.
+
+
+## Exact fallback preparation reuse (0.1.5)
+
+<!-- AstraEH: Expose the optimization's work and cost without per-draw logging. -->
+
+`Uberhar preparation progress/totals` uses schema 1, scoped to the current title.
+`requests = hits + misses`; hits reuse a complete family/census result after
+byte-exact raw FS and full static pipeline equality. A 256-entry direct-mapped
+cache bounds memory; `evictions` count occupied-slot replacements, never skipped
+rendering. `invalidations` count actual profile/extended-dynamic configuration
+changes after initial configuration. Title resets clear entries and these counters
+with the census sets. `capacity` and `storage_bytes` report actual compiled storage
+(213392 bytes on the tested 64-bit host).
+
+On a hit, skip three family canonicalizations, historical/dimension hashing and
+sixteen census-set updates. On a miss, observe the same candidate dimensions
+before admission limits, exactly as before. Evictions can cause repeat census
+work; they cannot discard a required pipeline or prevent a new observation.
+The existing 2048-key census cap and lower-bound flag keep their meaning.
+
+Timing samples one request in 1024, starting with the first. Two host-clock reads
+cover cache lookup/miss preparation plus census, excluding real pipeline-map
+lookup, shader compilation, queued commands and GPU execution. `hit_samples`,
+`hit_sample_ns`, `miss_samples`, `miss_sample_ns` retain separate populations.
+Zero samples are unknown, not zero cost. Deterministic sampling can align with
+repeating draw patterns; do not extrapolate it as an unbiased total or treat it
+as shader compilation time. Text uses the existing five-second/final cadence.
+
+Only pure preparation is cached. Per-draw push constants, dynamic state, shader
+module identities, completion/failure, cache admission, rendering keys and draw
+order retain their existing paths. Profile configuration is captured at renderer
+construction and refreshed by `SetAccurateMul`, the only later profile mutator.
+A future profile mutator must call `Configure` too. No new persistent cache format,
+loading classifier, prewarming policy or owner setting is introduced.

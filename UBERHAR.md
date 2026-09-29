@@ -39,6 +39,15 @@ large sustained draw/vertex costs after shader creation ends. See the
 behavior and why it is distinct from Azahar's New 3DS model selection.
 
 <!-- AstraEH: Automatic test context reduces manual notes without inventing warm-cache status. -->
+<!-- AstraEH: Measured host-path optimization follows the completed 0.1.3 review. -->
+**0.1.5 reuses exact fallback preparation across repeated draw states.** A bounded
+256-entry cache removes repeated family/census calculations while preserving the
+same keys, candidate coverage, draw constants and pipeline readiness/recovery.
+New aggregate counters and sparse timings measure actual device reuse. Host
+microbenchmarks measure this preparation block only; Thor speed acceptance is
+pending. See [0.1.5 notes](docs/releases/0.1.5.md). The next default full review
+remains after 0.1.7 device evidence.
+
 **0.1.4 records readable settings and cache context automatically.** Per-run and
 observed-change snapshots identify resolution, mode/API and relevant controls.
 Startup file inventory and actual compatible generic-module reuse are separate;

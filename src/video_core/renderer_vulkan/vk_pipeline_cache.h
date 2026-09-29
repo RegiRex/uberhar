@@ -12,6 +12,7 @@
 #include "video_core/rasterizer_interface.h"
 #include "video_core/renderer_vulkan/uberhar_cache_diagnostics.h" // AstraEH: Startup inventory.
 #include "video_core/renderer_vulkan/uberhar_pipeline_policy.h" // AstraEH: Admission reason counters.
+#include "video_core/renderer_vulkan/uberhar_tev_preparation.h" // AstraEH: Exact preparation reuse.
 #include "video_core/renderer_vulkan/uberhar_wait_diagnostics.h" // AstraEH: Bounded worst waits.
 #include "video_core/renderer_vulkan/vk_graphics_pipeline.h"
 #include "video_core/renderer_vulkan/vk_resource_pool.h"
@@ -122,9 +123,7 @@ public:
         current_program_id = program_id;
     }
 
-    void SetAccurateMul(bool _accurate_mul) {
-        profile.enable_accurate_mul = _accurate_mul;
-    }
+    void SetAccurateMul(bool accurate_mul);
 
 private:
     // AstraEH: Only the serial TEV worker reads/writes generic modules; reports use atomics.
@@ -226,6 +225,10 @@ private:
     // attachments, blending, rasterization, depth/stencil, pre-0.0.13 family,
     // lighting/procedural shapes, then 0.0.13/0.0.14 families. Saturated sets are lower bounds.
     std::array<std::unordered_set<u64>, 16> tev_candidate_keys;
+    // AstraEH: Owned values only; reset with the title and reconfigure on profile changes.
+    TevPreparationCache<> tev_preparation;
+    u64 tev_prepare_hit_samples{}, tev_prepare_miss_samples{};
+    u64 tev_prepare_hit_ns{}, tev_prepare_miss_ns{};
     bool tev_census_capped{};
     u32 tev_light_counts_mask{}; // AstraEH: Bits 0..8 mark counts seen on enabled-light draws.
     // AstraEH: Serial TEV worker owns this cap; reset only after draining on title change.
