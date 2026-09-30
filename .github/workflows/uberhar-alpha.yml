@@ -1,35 +1,72 @@
-# AstraEH: Audit-only branch helper; no APK build, signing or publication.
-# This workflow is not merged into uberhar/hybrid-shaders.
-name: Uberhar pinned source audit snapshot
+# AstraEH: Isolated source-staging helper, never merged into the development branch.
+# Normal Android/shader/package/signing gates are untouched in the resulting commit.
+name: Uberhar reviewed source staging
 on:
   push:
     branches: [uberhar/audit-0.1.6-snapshot]
 permissions:
-  contents: read
+  contents: write
 jobs:
-  snapshot:
+  stage:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
         with:
           ref: f97f67b416cdd369638dd9486b08aac793ba5c6a
-          persist-credentials: false
-      - name: Materialize pinned test dependencies
-        run: git submodule update --init --depth 1 externals/fmt externals/xxHash externals/boost externals/nihstro externals/vulkan-headers externals/microprofile
-      - name: Archive public source without Git metadata or credentials
+      - name: Retrieve and validate exact reviewed patch
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
           test "$(git rev-parse HEAD)" = f97f67b416cdd369638dd9486b08aac793ba5c6a
-          git rev-parse HEAD > "$RUNNER_TEMP/source-commit.txt"
-          git submodule status --recursive > "$RUNNER_TEMP/source-submodules.txt"
-          tar --exclude=.git -czf "$RUNNER_TEMP/uberhar-source-f97f67b.tar.gz" .
-          sha256sum "$RUNNER_TEMP/uberhar-source-f97f67b.tar.gz" > "$RUNNER_TEMP/source-sha256.txt"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: uberhar-source-f97f67b
-          path: |
-            ${{ runner.temp }}/uberhar-source-f97f67b.tar.gz
-            ${{ runner.temp }}/source-commit.txt
-            ${{ runner.temp }}/source-submodules.txt
-            ${{ runner.temp }}/source-sha256.txt
-          retention-days: 1
+          for blob in 48ab7e9cacb4d0a98a88ef62d21400057fbc0e61 91966dbd085a399f4bce621d036fc283b866a597; do
+            gh api "repos/RegiRex/uberhar/git/blobs/$blob" --jq .content | base64 --decode >> "$RUNNER_TEMP/reviewed.patch.gz"
+          done
+          gzip --decompress --stdout "$RUNNER_TEMP/reviewed.patch.gz" > "$RUNNER_TEMP/reviewed.patch"
+          echo "d0d3326721fd8ab1e9f894e3be2e8189685b26a6db7fcf5a3808f66dbdc67a43  $RUNNER_TEMP/reviewed.patch" | sha256sum --check
+          git apply --check --index "$RUNNER_TEMP/reviewed.patch"
+          git apply --index "$RUNNER_TEMP/reviewed.patch"
+          git diff --cached --check
+      - name: Verify exact changed paths and blob identities
+        run: |
+          python3 - <<'PY'
+          import json, pathlib, subprocess
+          expected = {
+            "UBERHAR_VERSION": "11808190d4b90b20fe074a2dad43af6c0c1427ee",
+            "docs/UBERHAR_ARCHITECTURE_0.1.6.md": "2ac775c5f6076e31644505614781f97e4193912c",
+            "docs/UBERHAR_CODE_MAP.md": "3fe95227015127f33a7aa9914034864c76b8d479",
+            "docs/UBERHAR_DIAGNOSTICS.md": "f8444dbe15edba686e8ff7ad5b8cdeaf69e4db6d",
+            "docs/UBERHAR_REVIEW_CADENCE.md": "2f59125729236206183f80b0f3cdc63531783854",
+            "docs/releases/0.1.7.md": "9387a48fb98d1604839a621a2eabf3398a739ae0",
+            "src/video_core/pica/pica_core.cpp": "6d68568ae79025187794c1170fd34fdb601d7927",
+            "src/video_core/pica/pica_core.h": "0c54905d949644a64d8e92722ec67de8afc36bae",
+            "src/video_core/pica/uberhar_vertex_input.h": "af540f30970152decb8e4c780177c5b207c000d9",
+            "src/video_core/pica/vertex_loader.h": "5596291ca9227ef1cbac5c75c79486b46a8bff69",
+            "src/video_core/renderer_vulkan/vk_pipeline_cache.cpp": "bdbd1a29354236eac2adea40b1d740ac0c071a9c",
+            "src/video_core/renderer_vulkan/vk_pipeline_cache.h": "691f4fa5d3e375c824d69f1303a8bb00a65fc2b8",
+            "src/video_core/shader/generator/glsl_fs_shader_gen.cpp": "f027376c636c26ca05d2265295fab37c5a2d3033",
+            "src/video_core/shader/generator/glsl_fs_shader_gen.h": "3a49a266f28ef9c68452defd65466737dc462ba9",
+            "tools/uberhar/build_probe.sh": "af51b440351ba9b3e069f01d31d8ea1f5cfa3ce5",
+            "tools/uberhar/test_tev_family.cpp": "4208500a865ded779c55523bf4873bf4346ac966",
+            "tools/uberhar/test_vertex_input.cpp": "be0d0a71b13cc09273eb6de7fb3262b8dcc1046e"
+          }
+          paths = subprocess.check_output(['git','diff','--cached','--name-only'], text=True).splitlines()
+          assert set(paths) == set(expected), 'Unexpected changed path'
+          for path, sha in expected.items():
+              actual = subprocess.check_output(['git','hash-object',path], text=True).strip()
+              assert actual == sha, (path, actual, sha)
+          assert pathlib.Path('UBERHAR_VERSION').read_text().strip() == '0.1.7'
+          print(json.dumps(expected, indent=2))
+          print('PASS: reviewed patch and all 17 resulting blobs match local validation')
+          PY
+      - name: Commit only reviewed source to isolated result branch
+        run: |
+          set -euo pipefail
+          git config user.name AstraEH
+          git config user.email 83982867+RegiRex@users.noreply.github.com
+          git commit -m "AstraEH: 0.1.7 fused vertex input, exact recovery telemetry and architecture review"
+          test "$(git rev-parse HEAD^)" = f97f67b416cdd369638dd9486b08aac793ba5c6a
+          git push origin HEAD:refs/heads/uberhar/stage-0.1.7-reviewed
+          echo "Reviewed source commit: $(git rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Source only; Android release gate is not run by this helper." >> "$GITHUB_STEP_SUMMARY"
