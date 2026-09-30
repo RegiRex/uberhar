@@ -1,0 +1,30 @@
+# AstraPro: Read-only public dependencies; no release, secrets or production ref changes.
+name: Uberhar pinned syntax headers
+on:
+  push:
+    branches: [uberhar/validation-toolkit-0.1.8]
+    paths: [.github/workflows/uberhar-validation-headers.yml]
+permissions:
+  contents: read
+jobs:
+  headers:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: e8b53b12db77b7b8f0345cbcb81038947782baf7
+          persist-credentials: false
+      - name: Get pinned module headers
+        run: git submodule update --init --recursive --depth 1 externals/sirit/sirit externals/spirv-headers
+      - name: Archive public headers without Git metadata
+        run: |
+          tar --exclude=.git -czf "$RUNNER_TEMP/uberhar-syntax-headers.tar.gz" externals/sirit/sirit externals/spirv-headers
+          git submodule status --recursive > "$RUNNER_TEMP/headers-provenance.txt"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: uberhar-syntax-headers-018
+          path: |
+            ${{ runner.temp }}/uberhar-syntax-headers.tar.gz
+            ${{ runner.temp }}/headers-provenance.txt
+          retention-days: 1
