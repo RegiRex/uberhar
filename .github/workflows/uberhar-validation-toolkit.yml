@@ -15,20 +15,18 @@ jobs:
         with:
           ref: e8b53b12db77b7b8f0345cbcb81038947782baf7
           persist-credentials: false
-      - name: Fetch pinned headers
-        run: git submodule update --init --depth 1 externals/robin-map externals/vulkan-headers
-      - name: Install shader validators
+      - name: Install shader validators and host syntax headers
         run: |
           sudo apt-get update
-          sudo apt-get install -y glslang-tools spirv-tools
+          sudo apt-get install -y glslang-tools spirv-tools robin-map-dev python3-pip
       - name: Package public tools and source headers
         run: |
-          mkdir -p "$RUNNER_TEMP/toolkit/bin" "$RUNNER_TEMP/toolkit/include"
+          mkdir -p "$RUNNER_TEMP/toolkit/bin" "$RUNNER_TEMP/toolkit/include" "$RUNNER_TEMP/toolkit/wheels"
           cp /usr/bin/glslangValidator /usr/bin/spirv-val /usr/bin/spirv-opt "$RUNNER_TEMP/toolkit/bin/"
-          cp -R externals/robin-map/include/tsl "$RUNNER_TEMP/toolkit/include/"
-          git submodule status > "$RUNNER_TEMP/toolkit/submodules.txt"
+          cp -R /usr/include/tsl "$RUNNER_TEMP/toolkit/include/"
+          python3 -m pip download --only-binary=:all: --platform manylinux2014_x86_64 --python-version 313 --implementation cp --abi cp313 -d "$RUNNER_TEMP/toolkit/wheels" moderngl==5.12.0 glcontext==3.0.0
           git rev-parse HEAD > "$RUNNER_TEMP/toolkit/source-commit.txt"
-          dpkg-query -W glslang-tools spirv-tools > "$RUNNER_TEMP/toolkit/tool-versions.txt"
+          dpkg-query -W glslang-tools spirv-tools robin-map-dev > "$RUNNER_TEMP/toolkit/tool-versions.txt"
           ldd /usr/bin/glslangValidator /usr/bin/spirv-val /usr/bin/spirv-opt > "$RUNNER_TEMP/toolkit/dependencies.txt"
           tar -czf "$RUNNER_TEMP/uberhar-validation-toolkit.tar.gz" -C "$RUNNER_TEMP" toolkit
       - uses: actions/upload-artifact@v4
