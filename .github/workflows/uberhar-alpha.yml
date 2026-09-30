@@ -1,217 +1,35 @@
-# AstraEH: Build, verify and publish the isolated ARM64 experimental app.
-# AstraEH: The same gated workflow now also publishes the Native beta milestone.
-name: Uberhar ARM64 prerelease
-
+# AstraEH: Audit-only branch helper; no APK build, signing or publication.
+# This workflow is not merged into uberhar/hybrid-shaders.
+name: Uberhar pinned source audit snapshot
 on:
-  workflow_dispatch:
   push:
-    branches: [uberhar/hybrid-shaders]
-    paths:
-      - src/**
-      - CMakeModules/**
-      - .github/workflows/uberhar-alpha.yml
-      - .github/workflows/uberhar-shaders.yml
-      - tools/uberhar/**
-      - UBERHAR_VERSION
-      - docs/releases/**
-
+    branches: [uberhar/audit-0.1.6-snapshot]
 permissions:
   contents: read
-
-concurrency:
-  group: uberhar-alpha
-  # AstraEH: Queue follow-up alphas without discarding an already compiling/validating build.
-  cancel-in-progress: false
-
 jobs:
-  # AstraEH: Reuse the shader gate and require its success before publishing any pre-release.
-  shaders:
-    uses: ./.github/workflows/uberhar-shaders.yml
-
-  android:
+  snapshot:
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
-    outputs:
-      version: ${{ steps.version.outputs.value }}
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
         with:
-          fetch-depth: 0
-          submodules: recursive
+          ref: f97f67b416cdd369638dd9486b08aac793ba5c6a
           persist-credentials: false
-
-      # AstraEH: Share one numeric release.beta.alpha version across Gradle, assets and publication.
-      - name: Read release version
-        id: version
+      - name: Materialize pinned test dependencies
+        run: git submodule update --init --depth 1 externals/fmt externals/xxHash externals/boost externals/nihstro externals/vulkan-headers externals/microprofile
+      - name: Archive public source without Git metadata or credentials
         run: |
-          UBERHAR_VERSION="$(cat UBERHAR_VERSION)"
-          [[ "$UBERHAR_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
-          test -f "docs/releases/$UBERHAR_VERSION.md"
-          echo "value=$UBERHAR_VERSION" >> "$GITHUB_OUTPUT"
-          echo "UBERHAR_VERSION=$UBERHAR_VERSION" >> "$GITHUB_ENV"
-          python3 tools/uberhar/test_manifest.py
-
-      - name: Cache compilation dependencies
-        uses: actions/cache/restore@v5
+          test "$(git rev-parse HEAD)" = f97f67b416cdd369638dd9486b08aac793ba5c6a
+          git rev-parse HEAD > "$RUNNER_TEMP/source-commit.txt"
+          git submodule status --recursive > "$RUNNER_TEMP/source-submodules.txt"
+          tar --exclude=.git -czf "$RUNNER_TEMP/uberhar-source-f97f67b.tar.gz" .
+          sha256sum "$RUNNER_TEMP/uberhar-source-f97f67b.tar.gz" > "$RUNNER_TEMP/source-sha256.txt"
+      - uses: actions/upload-artifact@v4
         with:
+          name: uberhar-source-f97f67b
           path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-            ~/.cache/ccache
-          key: uberhar-android-v1-${{ github.run_id }}
-          restore-keys: |
-            uberhar-android-v1-
-            baseline-android-v1-
-
-      - name: Reuse development signing key when available
-        uses: actions/cache@v5
-        with:
-          path: ~/.android/debug.keystore
-          key: uberhar-development-signing-v1
-
-      # AstraEH: Use an explicit key path; AGP's implicit debug-key location was not cached.
-      # This development key is not a durable release-signing setup; see UBERHAR.md.
-      - name: Prepare development signing key
-        run: |
-          mkdir -p "$HOME/.android"
-          if [ ! -f "$HOME/.android/debug.keystore" ]; then
-            "$JAVA_HOME_17_X64/bin/keytool" -genkeypair -noprompt \
-              -keystore "$HOME/.android/debug.keystore" -storepass android \
-              -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 \
-              -validity 10000 -dname "CN=Uberhar Development,O=Uberhar,C=US"
-          fi
-
-      - name: Install build tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ccache ninja-build
-          "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" \
-            "platforms;android-35" "build-tools;35.0.0" \
-            "ndk;27.3.13750724" "cmake;3.30.3"
-
-      - name: Build Android ARM64
-        working-directory: src/android
-        run: |
-          set -o pipefail
-          export JAVA_HOME="$JAVA_HOME_17_X64"
-          export PATH="$JAVA_HOME/bin:$PATH"
-          export NDK_CCACHE="$(command -v ccache)"
-          # AstraEH: Make release-flavor signing use the exact key restored/generated above.
-          export ANDROID_KEYSTORE_FILE="$HOME/.android/debug.keystore"
-          export ANDROID_KEYSTORE_PASS=android
-          export ANDROID_KEY_ALIAS=androiddebugkey
-          # AstraEH: IDE ABI injection implicitly marks APKs test-only in AGP 8.13.2.
-          # Use our ndk.abiFilters property and explicitly allow ordinary tap-to-install.
-          bash ./gradlew --no-daemon --max-workers=2 \
-            -PuberharArm64Only=true \
-            -Pandroid.injected.testOnly=false \
-            assembleUberharRelease 2>&1 | tee "$GITHUB_WORKSPACE/uberhar-build.log"
-
-      # AstraEH: Exercise production naming/parser logic before publishing any download UI.
-      - name: Test Android log export names
-        working-directory: src/android
-        run: |
-          export JAVA_HOME="$JAVA_HOME_17_X64"
-          export PATH="$JAVA_HOME/bin:$PATH"
-          bash ./gradlew --no-daemon --max-workers=2 -PuberharArm64Only=true \
-            -Pandroid.injected.testOnly=false testUberharReleaseUnitTest
-
-      # AstraEH: Publish only an intact ARM64 app with the separate ID, label and valid signature.
-      - name: Validate package and record provenance
-        run: |
-          set -o pipefail
-          mkdir -p artifacts
-          python3 tools/uberhar/validate_apk.py src/android/app/build artifacts | tee artifacts/native-validation.txt
-          APK="$(find artifacts -name '*.apk' -print -quit)"
-          "$ANDROID_SDK_ROOT/build-tools/35.0.0/aapt" dump badging "$APK" > artifacts/package.txt
-          grep "package: name='org.uberhar.uberhar_emu'" artifacts/package.txt
-          # AstraEH: Verify beta launcher branding without changing the install identity.
-          grep -F "application-label:'Uberhar Beta'" artifacts/package.txt
-          # AstraEH: Signatures can verify even when Android refuses normal installation.
-          # aapt emits this marker only for test-only apps; reject before publishing.
-          if grep -q '^testOnly=' artifacts/package.txt; then
-            echo 'Refusing to publish a test-only APK: normal Android installation would fail' >&2
-            exit 1
-          fi
-          # AstraEH: Inspect the final merged manifest, including third-party dependency declarations.
-          export JAVA_HOME="$JAVA_HOME_17_X64"
-          "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/apkanalyzer" manifest print "$APK" > artifacts/AndroidManifest.xml
-          python3 tools/uberhar/validate_manifest.py artifacts/AndroidManifest.xml "$UBERHAR_VERSION" > artifacts/install-validation.txt
-          "$ANDROID_SDK_ROOT/build-tools/35.0.0/zipalign" -c -P 16 -v 4 "$APK" > artifacts/alignment.txt
-          "$ANDROID_SDK_ROOT/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK" > artifacts/signature.txt
-          # AstraEH: Reject a changed signing key instead of releasing an APK that cannot update.
-          grep -F "Signer #1 certificate SHA-256 digest: $(cat tools/uberhar/development-certificate.sha256)" artifacts/signature.txt
-          git rev-parse HEAD > artifacts/uberhar-commit.txt
-          git submodule status --recursive > artifacts/submodules.txt
-          cp UBERHAR.md artifacts/
-          cp "docs/releases/$UBERHAR_VERSION.md" artifacts/release-notes.md
-          python3 -m zipfile -c "artifacts/uberhar-$UBERHAR_VERSION-validation.zip" \
-            artifacts/package.txt artifacts/AndroidManifest.xml artifacts/install-validation.txt \
-            artifacts/native-validation.txt artifacts/alignment.txt artifacts/signature.txt \
-            artifacts/uberhar-commit.txt artifacts/submodules.txt artifacts/UBERHAR.md
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: uberhar-${{ steps.version.outputs.value }}-arm64
-          path: artifacts/
-          if-no-files-found: error
-          retention-days: 30
-
-      - name: Upload build log
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: uberhar-build-log-${{ github.run_number }}
-          path: uberhar-build.log
-          if-no-files-found: ignore
-          retention-days: 14
-
-      - name: Preserve compilation cache even if packaging validation fails
-        if: always()
-        uses: actions/cache/save@v5
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-            ~/.cache/ccache
-          key: uberhar-android-v1-${{ github.run_id }}
-
-  # AstraEH: Only the publishing job can write releases; compilation keeps read-only permissions.
-  publish:
-    needs: [android, shaders]
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    permissions:
-      contents: write
-      actions: read
-    env:
-      GH_TOKEN: ${{ github.token }}
-      UBERHAR_VERSION: ${{ needs.android.outputs.version }}
-    steps:
-      - name: Fetch the validated APK from this build
-        run: |
-          gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" \
-            --name "uberhar-$UBERHAR_VERSION-arm64" --dir artifacts
-          test "$(cat artifacts/uberhar-commit.txt)" = "$GITHUB_SHA"
-          cd artifacts
-          sha256sum --check apk-sha256.txt
-
-      # AstraEH: Attach assets to a draft first; publish only when all uploads succeed.
-      # Existing versions are never overwritten: increment UBERHAR_VERSION for the next iteration.
-      - name: Publish GitHub pre-release
-        run: |
-          if gh release view "$UBERHAR_VERSION" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
-            echo 'This version already exists; increment UBERHAR_VERSION before publishing again' >&2
-            exit 1
-          fi
-          # AstraEH: An inherited tag must never redirect this release to unrelated upstream code.
-          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$UBERHAR_VERSION" > existing-tag.json 2>/dev/null; then
-            test "$(jq -r '.object.sha' existing-tag.json)" = "$GITHUB_SHA"
-          fi
-          gh release create "$UBERHAR_VERSION" --repo "$GITHUB_REPOSITORY" \
-            --target "$GITHUB_SHA" --title "Uberhar $UBERHAR_VERSION" \
-            --draft --prerelease --latest=false --notes-file artifacts/release-notes.md \
-            "artifacts/uberhar-$UBERHAR_VERSION-arm64.apk" artifacts/apk-sha256.txt \
-            "artifacts/uberhar-$UBERHAR_VERSION-validation.zip"
-          gh release edit "$UBERHAR_VERSION" --repo "$GITHUB_REPOSITORY" \
-            --draft=false --prerelease --latest=false
+            ${{ runner.temp }}/uberhar-source-f97f67b.tar.gz
+            ${{ runner.temp }}/source-commit.txt
+            ${{ runner.temp }}/source-submodules.txt
+            ${{ runner.temp }}/source-sha256.txt
+          retention-days: 1
