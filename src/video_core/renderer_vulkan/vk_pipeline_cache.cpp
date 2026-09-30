@@ -115,7 +115,7 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
     LOG_INFO(
         Render_Vulkan,
         "Uberhar: hybrid_tev={} force_tev={} async_shaders={} spirv_generator={} "
-        "diagnostics=17 first_ready=true compact_tev=true canonical_tev=true dynamic_fragment=true "
+        "diagnostics=18 first_ready=true compact_tev=true canonical_tev=true dynamic_fragment=true "
         "cpu_bridge={} bridge_policy=ready_only fallback_abi={} push_bytes={} "
         "runtime_lighting_luts=true runtime_lighting_enables=true runtime_light_loop=true "
         "runtime_tev_plan=true prepared_tev_operands=true phase_diagnostics=1 "
@@ -555,6 +555,7 @@ bool PipelineCache::BindPipeline(PipelineInfo& info, bool wait_built,
             // AstraEH: Recover before submission, so a failed/unsupported generic never drops a
             // draw.
             ++virtual_recovery_draws;
+            ++virtual_recovery_reasons[generic ? 8 : 9];
             auto specialized = curr_disk_cache->UseFragmentShader(*virtual_fs_config, tev_user);
             if (!specialized)
                 throw std::runtime_error("Uberhar native recovery shader unavailable");
@@ -564,6 +565,8 @@ bool PipelineCache::BindPipeline(PipelineInfo& info, bool wait_built,
         }
     } else if (Settings::values.uberhar_test_mode.GetValue() != Settings::UberharTestMode::Custom) {
         ++virtual_recovery_draws;
+        const auto reason = static_cast<std::size_t>(tev_support_reason);
+        ++virtual_recovery_reasons[hybrid_tev && reason > 0 && reason < 8 ? reason : 10];
     }
     if (!pipeline) {
         pipeline = curr_disk_cache->GetPipeline(info);
@@ -895,8 +898,17 @@ void PipelineCache::UseFragmentShader(const Pica::RegsInternal& regs,
     // structure and typed cube resources remain specialized; LUT controls/source slots are runtime.
     if (hybrid_tev) {
         tev_family_config.emplace(regs);
-        tev_constants = GLSL::MakeDynamicTevState(*tev_family_config, profile);
-        tev_supported = GLSL::SupportsDynamicTev(*tev_family_config, user);
+        // AstraEH: Unsupported draws cannot select a generic/CPU-bridge pipeline.
+        // Do not decode 128 bytes of runtime TEV state that their specialized shader
+        // will never consume. Every supported draw still takes its own full snapshot.
+        tev_support_reason = GLSL::CheckDynamicTevSupport(*tev_family_config, user);
+        tev_supported = tev_support_reason == GLSL::DynamicTevSupport::Ready;
+        if (tev_supported) {
+            tev_constants = GLSL::MakeDynamicTevState(*tev_family_config, profile);
+            ++tev_transport_prepared;
+        } else {
+            ++tev_transport_skipped;
+        }
         tev_family_config->texture.tev_stages = {};
         tev_family_config->texture.combiner_buffer_input.Assign(0);
         tev_user = user;
@@ -1311,6 +1323,21 @@ void PipelineCache::ReportUberharStats(const char* kind) {
                  "complete_ready_bank=false",
                  kind, virtual_generic_draws, virtual_recovery_draws, virtual_waits,
                  virtual_wait_ns / 1000000.0, virtual_max_wait_ns / 1000000.0);
+    }
+    // AstraEH Log Line: One exclusive route-reason summary at the existing cadence.
+    // Counts describe draw-path choices, never GPU cost or lost visuals.
+    if (Settings::values.uberhar_test_mode.GetValue() != Settings::UberharTestMode::Custom) {
+        LOG_INFO(Render_Vulkan,
+                 "Uberhar recovery reasons {}: schema=1 spirv_incompatible={} shadow2d={} "
+                 "gas_fog={} custom_user={} light_count={} lighting_lut={} add_signed={} "
+                 "generic_failed={} generic_unavailable={} disabled_or_other={} "
+                 "transport_prepared={} transport_skipped={} weighting=draws exclusive=true",
+                 kind, virtual_recovery_reasons[1], virtual_recovery_reasons[2],
+                 virtual_recovery_reasons[3], virtual_recovery_reasons[4],
+                 virtual_recovery_reasons[5], virtual_recovery_reasons[6],
+                 virtual_recovery_reasons[7], virtual_recovery_reasons[8],
+                 virtual_recovery_reasons[9], virtual_recovery_reasons[10],
+                 tev_transport_prepared, tev_transport_skipped);
     }
     // AstraEH: Cumulative buckets at the existing cadence; build time and wait time overlap.
     if (hybrid_tev) {

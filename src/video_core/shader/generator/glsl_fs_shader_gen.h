@@ -8,7 +8,13 @@
 
 namespace Pica::Shader::Generator::GLSL {
 
-/// AstraEH: Conservative support gate for the initial Vulkan TEV experiment.
+// AstraEH: First blocking reason in the existing conservative admission order.
+// This adds observability, not newly supported shader arithmetic or resources.
+enum class DynamicTevSupport : u32 {
+    Ready, SpirvIncompatible, Shadow2D, GasFog, CustomUser, LightCount, LightingLut, AddSigned, Count
+};
+DynamicTevSupport CheckDynamicTevSupport(const FSConfig& config, const UserConfig& user);
+/// AstraEH: Compatibility wrapper retained for existing generators/tests.
 bool SupportsDynamicTev(const FSConfig& config, const UserConfig& user);
 
 /// AstraEH: Canonicalize only shader-irrelevant fallback state for a fixed device profile.

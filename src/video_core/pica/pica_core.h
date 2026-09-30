@@ -425,6 +425,9 @@ private:
     u64 virtual_vertex_batches{}, virtual_vertex_inputs{}, virtual_vertex_ns{},
         virtual_vertex_max_ns{};
     // AstraEH: Host-only beta route/sample counters; never serialized as guest state.
+    // AstraEH: Fused-input admission/results, reset with the PICA instance at title start.
+    std::array<u64, 5> native_input_results{};
+    u64 native_input_maps{}, native_input_fused_vertices{}, native_input_legacy_vertices{};
     NativeVertexSamples native_samples;
     // AstraEH: Host-only admission state; ordinary batches add no diagnostic clock reads.
     NativeVertexSampleBudget native_sample_budget;

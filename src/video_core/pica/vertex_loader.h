@@ -7,6 +7,7 @@
 #include "core/memory.h"
 #include "video_core/pica/output_vertex.h"
 #include "video_core/pica/regs_pipeline.h"
+#include "video_core/pica/uberhar_vertex_input.h" // AstraEH: Fused transport description.
 
 namespace Memory {
 class MemorySystem;
@@ -28,6 +29,15 @@ public:
         for (u32 comp = 0; comp < vertex_attribute_elements[attrib]; ++comp) {
             out[attrib][comp] = f24::FromFloat32(data[comp]);
         }
+    }
+
+    // AstraEH: Expose only initialized values from the authoritative loader layout.
+    NativeInputAttribute DescribeNativeInput(u32 attribute) const {
+        const bool fixed = vertex_attribute_is_default[attribute];
+        const u32 elements = vertex_attribute_elements[attribute];
+        return {vertex_attribute_sources[attribute], vertex_attribute_strides[attribute], elements,
+                !fixed && elements ? vertex_attribute_formats[attribute]
+                                   : PipelineRegs::VertexAttributeFormat::BYTE, fixed};
     }
 
     int GetNumTotalAttributes() const {

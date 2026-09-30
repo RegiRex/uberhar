@@ -130,6 +130,15 @@ void PicaCore::ReportVirtualVertices(const char* kind, std::chrono::steady_clock
              native_samples.batch_inputs, native_samples.batch_invocations,
              native_samples.setup_ns / 1e6, native_samples.vertex_ns / 1e6,
              native_samples.draw_ns / 1e6, native_samples.draw_max_ns / 1e6);
+    // AstraEH Log Line: Reuse the existing five-second/shutdown cadence; no per-vertex logs.
+    LOG_INFO(Render_Vulkan,
+             "Uberhar vertex input {}: schema=1 ready_batches={} missing_attribute={} "
+             "unconfigured={} address_wrap={} short_mapping={} mapped_attributes={} "
+             "fused_vertices={} legacy_vertices={} scope=no_gs_native_transport "
+             "memory_reuse=within_batch_only",
+             kind, native_input_results[0], native_input_results[1], native_input_results[2],
+             native_input_results[3], native_input_results[4], native_input_maps,
+             native_input_fused_vertices, native_input_legacy_vertices);
     virtual_window_start = now;
     virtual_last_ns = virtual_vertex_ns;
     virtual_last_inputs = virtual_vertex_inputs;
@@ -1222,6 +1231,26 @@ void PicaCore::LoadVertices(bool is_indexed, std::chrono::steady_clock::time_poi
     if (virtual_test && !debug_context && pipeline.use_gs == PipelineRegs::UseGS::No) {
         const NativeVertexPlan plan{regs.internal.vs, regs.internal.rasterizer};
         if (plan.Supported()) {
+            // AstraEH: A conservative index-domain bound avoids a second index scan.
+            // Pin each guest span for this draw only; range uncertainty retains the
+            // original loader. Defaults, geometry draws and partial assembly keep
+            // their existing semantics. No transformed vertices persist across draws.
+            NativeVertexInputPlan input_plan;
+            std::array<MemoryRef, 16> input_refs;
+            u32 input_ref_count = 0;
+            const u64 maximum_vertex = is_indexed ? (index_u16 ? 65535 : 255)
+                : static_cast<u64>(pipeline.vertex_offset) +
+                    (pipeline.num_vertices ? pipeline.num_vertices - 1 : 0);
+            const auto input_result = input_plan.Prepare(
+                regs.internal.vs, loader.GetNumTotalAttributes(), base_address, maximum_vertex,
+                [&](u32 attribute) { return loader.DescribeNativeInput(attribute); },
+                [&](PAddr address) -> std::span<const u8> {
+                    auto& ref = input_refs[input_ref_count++];
+                    ref = memory.GetPhysicalRef(address);
+                    return {ref.GetPtr(), ref.GetSize()};
+                });
+            ++native_input_results[static_cast<std::size_t>(input_result)];
+            native_input_maps += input_plan.MappedAttributes();
             const auto vertex_at = [&](u32 index) -> u32 {
                 return is_indexed ? (index_u16 ? index_address_16[index] : index_address_8[index])
                                   : index + pipeline.vertex_offset;
@@ -1233,9 +1262,13 @@ void PicaCore::LoadVertices(bool is_indexed, std::chrono::steady_clock::time_poi
                 Clock::time_point start, loaded, shaded;
                 if constexpr (Sample)
                     start = Clock::now();
-                AttributeBuffer input;
-                loader.LoadVertex(base_address, index, vertex, input, input_default_attributes);
-                plan.LoadInput(shader_unit, input);
+                if (input_plan.Ready()) {
+                    input_plan.Load(shader_unit, input_default_attributes, vertex);
+                } else {
+                    AttributeBuffer input;
+                    loader.LoadVertex(base_address, index, vertex, input, input_default_attributes);
+                    plan.LoadInput(shader_unit, input);
+                }
                 if constexpr (Sample)
                     loaded = Clock::now();
                 shader_engine->Run(vs_setup, shader_unit);
@@ -1278,6 +1311,11 @@ void PicaCore::LoadVertices(bool is_indexed, std::chrono::steady_clock::time_poi
                 counts = RunNativeVertexBatch<false>(pipeline.num_vertices, is_indexed, vertex_at,
                                                      shade, submit, native_samples);
             }
+            // AstraEH: Count actual misses using each transport, not all submitted indices.
+            if (input_plan.Ready())
+                native_input_fused_vertices += counts.invocations;
+            else
+                native_input_legacy_vertices += counts.invocations;
             ++native_vertex_batches;
             native_vertex_inputs += pipeline.num_vertices;
             native_vertex_conversions += counts.invocations;

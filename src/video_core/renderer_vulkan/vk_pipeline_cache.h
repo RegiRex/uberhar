@@ -260,6 +260,13 @@ private:
     std::optional<Pica::Shader::FSConfig> virtual_fs_config;
     u64 virtual_generic_draws{}, virtual_recovery_draws{}, virtual_waits{}, virtual_wait_ns{},
         virtual_max_wait_ns{};
+    // AstraEH: Exclusive per-draw recovery reasons; indices 1..7 match support enum,
+    // then failed generic, unavailable generic, and disabled/unclassified recovery.
+    Pica::Shader::Generator::GLSL::DynamicTevSupport tev_support_reason{};
+    static_assert(static_cast<std::size_t>(
+                      Pica::Shader::Generator::GLSL::DynamicTevSupport::Count) == 8);
+    std::array<u64, 11> virtual_recovery_reasons{};
+    u64 tev_transport_prepared{}, tev_transport_skipped{};
     // AstraEH: Render-thread wait buckets; compiler buckets are atomic for progress snapshots.
     struct PhaseWait {
         u64 count{}, ns{}, maximum{};

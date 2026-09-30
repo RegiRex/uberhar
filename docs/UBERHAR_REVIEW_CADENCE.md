@@ -15,6 +15,7 @@ Review early for correctness regressions or a changed architectural assumption.
 | 2026-09-25 | 0.0.12 | After 0.0.16 | After 0.0.15 through 0.0.17; before 0.0.18 work |
 | 2026-09-27 | 0.0.15 | After 0.1.3 | After 0.1.2 through 0.1.4; before 0.1.5 work |
 | 2026-09-28 | 0.1.3 | After 0.1.7 | After 0.1.6 through 0.1.8; before 0.1.9 work |
+| 2026-09-29 | 0.1.6 | After four successor builds | After three through five; before beginning six |
 
 The [0.0.6 review](UBERHAR_ARCHITECTURE_2026-09-24.md) established the earlier
 roadmap. 0.0.7 implemented family consolidation; 0.0.8 added broader runtime state,
@@ -71,3 +72,14 @@ It retains Native and selects settings/cache context for 0.1.4, then measured
 per-draw bookkeeping reduction. Count 0.1.4 as one, 0.1.5 as two, 0.1.6 as three,
 0.1.7 as four and 0.1.8 as five. Next default after 0.1.7 evidence, allowed after
 0.1.6–0.1.8 and required before 0.1.9. Earlier windows remain historical.
+
+<!-- AstraEH: The requested early full review is within the three-to-five build window. -->
+The [0.1.6 full review](UBERHAR_ARCHITECTURE_0.1.6.md) examines twelve deduplicated
+Thor sessions, the exact released source, zero compute coverage and MH4U's
+specialized recovery. It selects fused vertex input plus support/recovery
+instrumentation for 0.1.7 and revises the owner roadmap without dropping its
+scope ledger or prior history. This is a completed full review, not only a log
+analysis. Count 0.1.7 as successor one; default next review after four successors,
+allowed after three to five, before starting six. If the beta number stays 0.1,
+that is after 0.1.10, allowed after 0.1.9-0.1.11, before 0.1.12. A minor promotion
+retains the successor count rather than resetting it.

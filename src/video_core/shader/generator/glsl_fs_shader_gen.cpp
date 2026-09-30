@@ -34,22 +34,25 @@ static auto LightingLuts(const LightConfig& lighting) {
 }
 
 // AstraEH: Route unvalidated shadow/custom-normal paths through the existing specialized renderer.
-bool SupportsDynamicTev(const FSConfig& config, const UserConfig& user) {
-    if (config.UsesSpirvIncompatibleConfig() ||
-        config.texture.texture0_type == TexturingRegs::TextureConfig::Shadow2D ||
-        config.texture.fog_mode == TexturingRegs::FogMode::Gas || !user.IsCacheable()) {
-        return false;
-    }
+DynamicTevSupport CheckDynamicTevSupport(const FSConfig& config, const UserConfig& user) {
+    if (config.UsesSpirvIncompatibleConfig())
+        return DynamicTevSupport::SpirvIncompatible;
+    if (config.texture.texture0_type == TexturingRegs::TextureConfig::Shadow2D)
+        return DynamicTevSupport::Shadow2D;
+    if (config.texture.fog_mode == TexturingRegs::FogMode::Gas)
+        return DynamicTevSupport::GasFog;
+    if (!user.IsCacheable())
+        return DynamicTevSupport::CustomUser;
     // AstraEH: Do not reinterpret unknown LUT inputs or non-hardware scale values.
     if (config.lighting.enable) {
         // AstraEH: The runtime loop supports exactly the eight physical slots.
         if (config.lighting.src_num > 8) {
-            return false;
+            return DynamicTevSupport::LightCount;
         }
         for (const auto* lut : LightingLuts(config.lighting)) {
             if (lut->enable && (static_cast<u32>(lut->type.Value()) > 5 ||
                                 EncodeLightingScale(lut->GetScale()) == 7)) {
-                return false;
+                return DynamicTevSupport::LightingLut;
             }
         }
     }
@@ -61,10 +64,16 @@ bool SupportsDynamicTev(const FSConfig& config, const UserConfig& user) {
         using Operation = TexturingRegs::TevStageConfig::Operation;
         if (stage.color_op == Operation::AddSigned ||
             (stage.color_op != Operation::Dot3_RGBA && stage.alpha_op == Operation::AddSigned)) {
-            return false;
+            return DynamicTevSupport::AddSigned;
         }
     }
-    return true;
+    return DynamicTevSupport::Ready;
+}
+
+// AstraEH: Preserve the public boolean contract exactly; production obtains the
+// same decision plus one reason without traversing the configuration twice.
+bool SupportsDynamicTev(const FSConfig& config, const UserConfig& user) {
+    return CheckDynamicTevSupport(config, user) == DynamicTevSupport::Ready;
 }
 
 enum class Semantic : u32 {

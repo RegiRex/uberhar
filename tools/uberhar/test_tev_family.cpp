@@ -63,9 +63,112 @@ void CheckPair(const FSConfig& a, const FSConfig& b, const Profile& profile, boo
     }
     same ? ++aliases : ++distinctions;
 }
+
+// AstraEH: Keep an independent copy of the pre-0.1.7 admission predicate. Reason
+// diagnostics must not widen coverage or silently alter the established fallback.
+bool LegacySupport(const FSConfig& c, const UserConfig& u) {
+    if (c.UsesSpirvIncompatibleConfig() || c.texture.texture0_type == Texture::Shadow2D ||
+        c.texture.fog_mode == Fog::Gas || !u.IsCacheable()) return false;
+    if (c.lighting.enable) {
+        if (c.lighting.src_num > 8) return false;
+        for (const auto* lut : std::array{&c.lighting.lut_d0, &c.lighting.lut_d1,
+                 &c.lighting.lut_sp, &c.lighting.lut_fr, &c.lighting.lut_rr,
+                 &c.lighting.lut_rg, &c.lighting.lut_rb}) {
+            const auto scale = lut->GetScale();
+            if (lut->enable && (static_cast<u32>(lut->type.Value()) > 5 ||
+                !(scale == 0 || scale == .25f || scale == .5f || scale == 1 ||
+                  scale == 2 || scale == 4 || scale == 8))) return false;
+        }
+    }
+    using Op = Pica::TexturingRegs::TevStageConfig::Operation;
+    for (const Pica::TexturingRegs::TevStageConfig stage : c.texture.tev_stages)
+        if (stage.color_op == Op::AddSigned ||
+            (stage.color_op != Op::Dot3_RGBA && stage.alpha_op == Op::AddSigned)) return false;
+    return true;
+}
+
+void CheckSupportReasons() {
+    using Reason = DynamicTevSupport;
+    using Op = Pica::TexturingRegs::TevStageConfig::Operation;
+    static_assert(static_cast<u32>(Reason::Count) == 8);
+    Pica::RegsInternal regs{};
+    regs.lighting.disable.Assign(1);
+    const FSConfig base{regs};
+    u32 checked = 0;
+    const auto verify = [&](const FSConfig& c, const UserConfig& u, Reason expected) {
+        if (CheckDynamicTevSupport(c, u) != expected ||
+            SupportsDynamicTev(c, u) != LegacySupport(c, u))
+            throw std::runtime_error("Recovery classification changed admission");
+        ++checked;
+    };
+    verify(base, {}, Reason::Ready);
+    auto c = base;
+    c.framebuffer.shadow_rendering.Assign(1);
+    verify(c, {}, Reason::SpirvIncompatible);
+    c = base; c.texture.texture0_type.Assign(Texture::ShadowCube);
+    verify(c, {}, Reason::SpirvIncompatible);
+    c = base; c.texture.texture0_type.Assign(Texture::Shadow2D);
+    verify(c, {}, Reason::Shadow2D);
+    c = base; c.texture.fog_mode.Assign(Fog::Gas);
+    verify(c, {}, Reason::GasFog);
+    UserConfig custom{}; custom.use_custom_normal.Assign(1);
+    verify(base, custom, Reason::CustomUser);
+    c = base; c.lighting.enable.Assign(1); c.lighting.src_num.Assign(9);
+    verify(c, {}, Reason::LightCount);
+    c = base; c.lighting.enable.Assign(1); c.lighting.lut_d0.enable.Assign(1);
+    c.lighting.lut_d0.type.Assign(static_cast<Pica::LightingRegs::LightingLutInput>(6));
+    verify(c, {}, Reason::LightingLut);
+    c.lighting.lut_d0.enable.Assign(0);
+    verify(c, {}, Reason::Ready);
+    c.lighting.lut_d0.enable.Assign(1); c.lighting.lut_d0.type.Assign(
+        static_cast<Pica::LightingRegs::LightingLutInput>(0));
+    c.lighting.lut_d0.SetScale(1.5f);
+    verify(c, {}, Reason::LightingLut);
+    c.lighting.enable.Assign(0);
+    verify(c, {}, Reason::Ready);
+    // AstraEH: Alpha AddSigned is ignored under Dot3_RGBA. Test every TEV slot.
+    for (u32 slot = 0; slot < 6; ++slot) {
+        c = base;
+        Pica::TexturingRegs::TevStageConfig stage = c.texture.tev_stages[slot];
+        stage.color_op.Assign(Op::AddSigned);
+        c.texture.tev_stages[slot].ops_raw = stage.ops_raw;
+        verify(c, {}, Reason::AddSigned);
+        stage.color_op.Assign(Op::Replace); stage.alpha_op.Assign(Op::AddSigned);
+        c.texture.tev_stages[slot].ops_raw = stage.ops_raw;
+        verify(c, {}, Reason::AddSigned);
+        stage.color_op.Assign(Op::Dot3_RGBA); c.texture.tev_stages[slot].ops_raw = stage.ops_raw;
+        verify(c, {}, Reason::Ready);
+    }
+    // AstraEH: Mixed-invalid cases verify first-reason precedence against the
+    // original boolean gate without constructing or executing invalid shaders.
+    for (u32 bits = 0; bits < 1024; ++bits) {
+        c = base;
+        c.framebuffer.shadow_rendering.Assign((bits >> 0) & 1);
+        c.texture.texture0_type.Assign((bits & 2) ? Texture::Shadow2D : Texture::Texture2D);
+        c.texture.fog_mode.Assign((bits & 4) ? Fog::Gas : Fog::None);
+        UserConfig u{}; u.use_custom_normal.Assign((bits >> 3) & 1);
+        c.lighting.enable.Assign((bits >> 4) & 1);
+        c.lighting.src_num.Assign((bits & 32) ? 9 : 0);
+        c.lighting.lut_d0.enable.Assign((bits >> 6) & 1);
+        c.lighting.lut_d0.SetScale((bits & 128) ? 1.5f : 1.0f);
+        Pica::TexturingRegs::TevStageConfig stage = c.texture.tev_stages[0];
+        stage.color_op.Assign((bits & 256) ? Op::AddSigned : Op::Replace);
+        stage.alpha_op.Assign((bits & 512) ? Op::AddSigned : Op::Replace);
+        c.texture.tev_stages[0].ops_raw = stage.ops_raw;
+        const Reason expected = (bits & 1) ? Reason::SpirvIncompatible :
+            (bits & 2) ? Reason::Shadow2D : (bits & 4) ? Reason::GasFog :
+            (bits & 8) ? Reason::CustomUser :
+            ((bits & 16) && (bits & 32)) ? Reason::LightCount :
+            ((bits & 16) && (bits & 64) && (bits & 128)) ? Reason::LightingLut :
+            (bits & 768) ? Reason::AddSigned : Reason::Ready;
+        verify(c, u, expected);
+    }
+    fmt::print("PASS: {} recovery reason/legacy-admission checks\n", checked);
+}
 } // namespace
 
 int main() {
+    CheckSupportReasons();
     // AstraEH: Cross device profiles and live fog/lighting/blending choices so
     // aliases are checked in both simple and more expensive fragment families.
     for (u32 flags = 0; flags < 32; ++flags) {

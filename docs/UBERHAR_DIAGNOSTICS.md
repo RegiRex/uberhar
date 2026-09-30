@@ -639,3 +639,27 @@ last pushed ranges to be compatible with the consuming pipeline. Pipeline and
 descriptor binds alone do not overwrite those values. See the official
 [push-constant command reference](https://docs.vulkan.org/refpages/latest/refpages/source/vkCmdPushConstants.html)
 and [lifetime examples](https://docs.vulkan.org/guide/latest/push_constants.html).
+
+## 0.1.7 / diagnostics 18 (AstraEH)
+
+`Uberhar vertex input {progress|totals}` reports one Prepare result per entered
+validated no-GS Native batch: ready, missing_attribute, unconfigured, address_wrap,
+short_mapping. `mapped_attributes` counts attempted bounded span maps, including
+failed preparations. `fused_vertices` / `legacy_vertices` count actual shader
+invocations in that branch, not FIFO hits and not geometry/debug fallback work.
+All maps are retained only within a batch; no cross-draw memory cache is implied.
+
+`Uberhar recovery reasons {progress|totals}` assigns each specialized experimental
+route exactly one first reason: spirv_incompatible, shadow2d, gas_fog, custom_user,
+light_count, lighting_lut, add_signed, generic_failed, generic_unavailable,
+disabled_or_other. Reasons follow the existing conservative support order.
+Their sum must equal `virtual native ... recovery_draws` at a final snapshot.
+These are draw-weighted counts, not pixel coverage or GPU-time shares.
+`transport_prepared` / `transport_skipped` count support checks that did/did not
+construct generic runtime state. They are not byte-upload counts and need not
+equal command-worker requests when state is reused between draws.
+
+Both logs reuse the existing five-second/final report cadence; no per-vertex
+clock, atomic update, shader dump or unbounded per-draw logging is added. Existing
+frame schema3, ABI7, per-speed bands, app-cache inventory and unknown driver-cache
+state are unchanged. GPU sample count zero means unmeasured, not zero GPU cost.

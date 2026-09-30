@@ -122,3 +122,9 @@ c++ -std=c++20 -O2 -DFMT_HEADER_ONLY -Isrc -Iexternals/fmt/include \
   -Iexternals/boost -Iexternals/xxHash -Iexternals/nihstro/include \
   tools/uberhar/test_push_constants.cpp -o build/uberhar-probe/test-push-constants
 build/uberhar-probe/test-push-constants
+
+# AstraEH: Fused input must preserve exact scalar conversion/register semantics and safe fallback.
+c++ -std=c++20 -O2 -DFMT_HEADER_ONLY -Isrc -Iexternals/fmt/include -Iexternals/boost \
+  tools/uberhar/test_vertex_input.cpp src/video_core/pica/shader_unit.cpp \
+  -o build/uberhar-probe/test-vertex-input
+build/uberhar-probe/test-vertex-input

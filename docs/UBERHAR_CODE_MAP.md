@@ -312,3 +312,21 @@ per-title quota that could run out before the most useful scenes.
 | `src/video_core/renderer_vulkan/renderer_vulkan.cpp` | Mark both presentation push paths dirty because they share the scheduler and overwrite fragment values. No display behavior changes. |
 | `tools/uberhar/test_push_constants.cpp`, `tools/uberhar/build_probe.sh` | Production helper versus independent queued command-state model: all 128 ABI bytes, failed-upload retry, real value snapshots, specialized/generic alternation, foreign writes, new buffers, title reset and ordered counters. Required host gate; not a driver-speed test. |
 | `docs/releases/0.1.6.md`, `docs/UBERHAR_DIAGNOSTICS.md`, `UBERHAR.md`, `UBERHAR_VERSION` | Scope, evidence limits, exact invalidation contract and updated version. Next default architecture review remains after 0.1.7. |
+
+## 0.1.7 — fused input and explicit recovery (AstraEH)
+
+- `src/video_core/pica/uberhar_vertex_input.h`: conservative within-batch memory
+  admission, scalar-format decoder selection and direct shader-register loads.
+- `vertex_loader.h`: exposes value-only initialized attribute layout from the
+  inherited decoder; its legacy LoadVertex implementation is not rewritten.
+- `pica_core.cpp/.h`: pins spans for admitted no-GS batches, falls back before
+  invocation on uncertainty, retains FIFO/output/assembly and reports route counts.
+- `glsl_fs_shader_gen.cpp/.h`: first blocking support reason, with exactly the
+  existing boolean support predicate retained. No new fragment arithmetic support.
+- `vk_pipeline_cache.cpp/.h`: skips unused dynamic transport on specialized-only
+  configurations and reports exclusive recovery reasons at the existing cadence.
+- `tools/uberhar/test_vertex_input.cpp`, `test_tev_family.cpp`, `build_probe.sh`:
+  differential input transport/range tests and legacy support/reason checks,
+  wired into the existing mandatory host/shader gate.
+- `docs/UBERHAR_ARCHITECTURE_0.1.6.md`: full source/evidence/alternative review,
+  reconciled mode semantics, overlapping milestone gates and outstanding limits.
