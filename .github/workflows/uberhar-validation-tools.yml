@@ -1,0 +1,26 @@
+# AstraPro: Isolated read-only validation tools, not a renderer build or release.
+name: Uberhar complete shader tools
+on:
+  push:
+    branches: [uberhar/validation-toolkit-0.1.8]
+    paths: [.github/workflows/uberhar-validation-tools.yml]
+permissions:
+  contents: read
+jobs:
+  tools:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Collect the complete validator and disassembler toolset
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y spirv-tools glslang-tools
+          mkdir -p "$RUNNER_TEMP/bin"
+          cp /usr/bin/spirv-* /usr/bin/glslangValidator "$RUNNER_TEMP/bin/"
+          dpkg-query -W spirv-tools glslang-tools > "$RUNNER_TEMP/bin/provenance.txt"
+          tar -czf "$RUNNER_TEMP/uberhar-tools.tar.gz" -C "$RUNNER_TEMP" bin
+      - uses: actions/upload-artifact@v4
+        with:
+          name: uberhar-complete-tools-018
+          path: ${{ runner.temp }}/uberhar-tools.tar.gz
+          retention-days: 1
