@@ -121,6 +121,13 @@ u64 GraphicsPipeline::Key() const noexcept {
                                     HostShaderIds(stages));
 }
 
+// AstraPro: Module object identity is stable until the owning queues are drained.
+bool GraphicsPipeline::MatchesExecution(
+    const PipelineInfo& candidate, const std::array<u64, MAX_SHADER_STAGES>& shaders) const {
+    return HostShaderIds(stages) == shaders &&
+           info.state.ExecutionEquals(candidate.state, instance.IsExtendedDynamicStateSupported());
+}
+
 bool GraphicsPipeline::Build(bool fail_on_compile_required) {
     MICROPROFILE_SCOPE(Vulkan_Pipeline);
     // AstraEH: Timers run once per build, not once per draw. Shader waits are distinct

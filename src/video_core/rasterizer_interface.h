@@ -76,6 +76,12 @@ public:
         return false;
     }
 
+    // AstraPro: Optional ready-only acceleration. False means CPU must draw the
+    // entire batch; implementations must not partially submit it before returning.
+    virtual bool AccelerateDrawBatchReady([[maybe_unused]] bool is_indexed) {
+        return false;
+    }
+
     // AstraEH: A failed acceleration attempt may have prepared a complete generic
     // pipeline for CPU vertices. Only that explicit route uses batch-local assembly;
     // ordinary software rendering must keep its cross-draw primitive state.

@@ -663,3 +663,49 @@ Both logs reuse the existing five-second/final report cadence; no per-vertex
 clock, atomic update, shader dump or unbounded per-draw logging is added. Existing
 frame schema3, ABI7, per-speed bands, app-cache inventory and unknown driver-cache
 state are unchanged. GPU sample count zero means unmeasured, not zero GPU cost.
+
+
+## AstraPro: diagnostics 19 / 0.1.8
+
+<!-- AstraPro: These counters describe actual work and bounded observations, not GPU time or model settings. -->
+
+- `Uberhar index bounds`: retries, scanned indices, rescued batches/invocations,
+  and live-index escapes. One scan only after ShortMapping/AddressWrap, maximum
+  262144 indices. Existing five-second/final PICA reporting gate; no per-index
+  clocks or atomics. `vertex input` fused/legacy counters reflect the actual
+  transport, including live-index escape fallback.
+- `Uberhar PICA routes`: CPU batches, accepted GPU batches/input indices,
+  eligible attempts and Automatic topology census [list,strip,fan,shader,other].
+  Same cadence. GPU input indices are NOT GPU shader invocation count. The
+  existing `virtual vertices` stage measures only CPU-handled work; do not use
+  its decreasing input denominator to claim the game itself became simpler.
+- `Uberhar ready GPU vertices`: renderer-lifetime attempts, accepted pipeline
+  selections, dependency misses, deferred/capped/failed attempts, key mismatches,
+  resident pipelines and actual driver build totals. Pipeline residency belongs
+  to the current cache; counters can span a cache switch. Five-second/final
+  existing renderer cadence. 256 pipeline slots, one pending driver build.
+- `Uberhar GPU shader admission`: optional VS deferral/cap, GS cap, failed
+  shader completions. At most 128 configs per optional VS and fixed GS cache;
+  one optional VS compile pending. First eight shader failure details per title.
+  Cached failed translation suppresses per-draw reattempt/logging. These are
+  admission limits, not proof a game fits within the budget.
+- Settings add `ready_gpu_vertex_policy` independently of `hw_vertex`. The latter
+  remains the inherited user hardware-shader setting; Automatic can promote
+  eligible draws with it false. Actual PICA/bind counters establish use.
+- Speculative `UseFragmentShader` may prepare state before returning to CPU. Thus
+  transport-prepared/skipped counts can include abandoned preparation. Actual
+  generic/recovery draw counts are updated at binding and must not be inferred
+  from preparation count alone. Specialized recovery reasons remain exclusive
+  first-failing checks, not a complete inventory of every feature on that draw.
+- Device health schema 2 retains the 30-second IO-worker cap and reads at most
+  32 fixed sysfs nodes, each up to 24 characters. `elapsed_ms` includes deep sleep;
+  `uptime_ms` now uses true uptime (the previous label held elapsed realtime).
+  CPU frequencies are instant current/max kHz readings, or unknown. Vendor mode
+  is explicitly unobserved, GPU clock unknown; zero/unavailable heap is unknown.
+  Battery temperature is not SoC temperature. Thermal NONE with unknown headroom
+  cannot rule out throttling. No root, new permissions, fan/power/clock writes.
+
+No per-frame string/clock sampling is added to the renderer. The optional GPU
+shader compilation worker shares the existing driver cache: absence of an
+explicit wait is not absence of driver/compiler contention. First-use CPU
+pipeline waits and existing route limitations remain visible and unchanged.

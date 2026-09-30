@@ -2,10 +2,13 @@
 
 <!-- AstraEH: Owner-requested continuity rules for this experimental fork. -->
 
-- Attribute new logical implementation sections and their purpose with `AstraEH`
-  comments. Keep the file-level map in `docs/UBERHAR_CODE_MAP.md` current. Do not
-  imply that inherited Azahar code is AstraEH work.
-- Mark each experimental/debug log call with an adjacent `AstraEH Log Line`
+- AstraPro: Owner attribution update (2026-09-30): use `AstraPro` for new
+  logical sections and their purpose in the current development context. Preserve
+  historical `AstraEH` comments and all inherited Azahar authorship; never relabel
+  old work. Keep `docs/UBERHAR_CODE_MAP.md` current. Future attribution changes
+  follow an explicit owner instruction when product model selection is not
+  reliably available; the marker does not assert automatic selector detection.
+- Mark each new experimental/debug log call with an adjacent `AstraPro Log Line`
   comment. Bound record counts or reporting frequency; retain error recovery when
   removing diagnostics. Document each feature's counters and their limits.
 - Use release.beta.alpha versions. Publish Android ARM64 tests as GitHub

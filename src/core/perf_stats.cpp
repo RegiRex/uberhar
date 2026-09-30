@@ -279,6 +279,7 @@ void PerfStats::EndUberharPause() {
 // AstraEH: Record effective settings values, not a claim that every setting is
 // hot-reloaded by its backend. Between-sample changes may be missed. Existing
 // per-frame limit accounting remains authoritative for fast-forward transitions.
+// AstraPro: The ready-GPU policy is independent of the legacy hw_vertex setting.
 void PerfStats::LogUberharSettings(const char* event) {
     const auto& values = Settings::values;
     const auto mode = values.uberhar_test_mode.GetValue();
@@ -293,7 +294,8 @@ void PerfStats::LogUberharSettings(const char* event) {
         "base_frame_limit={} turbo_limit={} async_shaders={} async_presentation={} "
         "vsync_setting={} accurate_mul={} spirv_generator={} optimizer_disabled={} "
         "texture_filter={} texture_sampling={} custom_textures={} preload_textures={} "
-        "skip_duplicate_frames={} render_thread_delay_us={} simulate_gpu_timings={}",
+        "skip_duplicate_frames={} render_thread_delay_us={} simulate_gpu_timings={} "
+        "ready_gpu_vertex_policy={}",
         mode_index < mode_names.size() ? mode_names[mode_index] : "Unknown",
         api_index < api_names.size() ? api_names[api_index] : "Unknown",
         values.resolution_factor.GetValue(), values.resolution_factor.GetValue() ? "fixed" : "auto",
@@ -308,7 +310,8 @@ void PerfStats::LogUberharSettings(const char* event) {
         static_cast<u32>(values.texture_filter.GetValue()),
         static_cast<u32>(values.texture_sampling.GetValue()), values.custom_textures.GetValue(),
         values.preload_textures.GetValue(), values.use_skip_duplicate_frames.GetValue(),
-        values.delay_game_render_thread_us.GetValue(), values.simulate_3ds_gpu_timings.GetValue());
+        values.delay_game_render_thread_us.GetValue(), values.simulate_3ds_gpu_timings.GetValue(),
+        mode == Settings::UberharTestMode::Automatic ? "eligible_lists" : "disabled");
     const bool changed = text != uberhar_settings;
     if (changed && !uberhar_settings.empty())
         ++uberhar_settings_changes;

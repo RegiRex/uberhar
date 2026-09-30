@@ -68,11 +68,15 @@ public:
             op.read = Reader(desc.format, desc.elements);
         }
         count = requested;
+        // AstraPro: Retain the validated bound for live-index checks after a retry.
+        admitted_maximum = static_cast<u32>(last_vertex);
         ready = true;
         return Result::Ready;
     }
 
     bool Ready() const { return ready; }
+    // AstraPro: Index memory is live, not frozen by a preceding maximum scan.
+    bool CanLoad(u32 vertex) const { return ready && vertex <= admitted_maximum; }
     u32 MappedAttributes() const { return mapped_attributes; }
     u32 AttributeCount() const { return count; }
 
@@ -130,7 +134,7 @@ private:
         return nullptr; // Prepare rejected every out-of-range format above.
     }
     std::array<Op, 16> ops{};
-    u32 count{}, mapped_attributes{};
+    u32 count{}, mapped_attributes{}, admitted_maximum{};
     bool ready{};
 };
 } // namespace Pica

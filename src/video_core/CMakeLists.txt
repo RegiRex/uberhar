@@ -26,6 +26,9 @@ add_library(video_core STATIC EXCLUDE_FROM_ALL
     pica/pica_core.cpp
     pica/pica_core.h
     # AstraEH: Exact FIFO index for CPU vertex reuse.
+    # AstraPro: Bounded actual-index retry for fused input transport.
+    pica/uberhar_index_bounds.h
+    pica/uberhar_vertex_input.h
     pica/uberhar_vertex_cache.h
     pica/uberhar_vertex_output.h # AstraEH: Prepared native output and bounded CPU samples.
     pica/output_vertex.cpp
@@ -184,6 +187,7 @@ if (ENABLE_VULKAN)
         renderer_vulkan/vk_master_semaphore.h
         renderer_vulkan/vk_memory_util.cpp
         renderer_vulkan/vk_memory_util.h
+        renderer_vulkan/uberhar_gpu_vertex_policy.h # AstraPro: Ready-only GPU admission.
         renderer_vulkan/vk_rasterizer.cpp
         renderer_vulkan/vk_rasterizer.h
         renderer_vulkan/vk_rasterizer_cache.cpp

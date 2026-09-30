@@ -128,3 +128,9 @@ c++ -std=c++20 -O2 -DFMT_HEADER_ONLY -Isrc -Iexternals/fmt/include -Iexternals/b
   tools/uberhar/test_vertex_input.cpp src/video_core/pica/shader_unit.cpp \
   -o build/uberhar-probe/test-vertex-input
 build/uberhar-probe/test-vertex-input
+
+# AstraPro: Optional GPU eligibility and speculative framebuffer ownership must be exact.
+c++ -std=c++20 -O2 -DFMT_HEADER_ONLY -DXXH_INLINE_ALL \
+  -Isrc -Iexternals/fmt/include -Iexternals/boost -Iexternals/xxHash \
+  tools/uberhar/test_ready_gpu_vertices.cpp -o build/uberhar-probe/test-ready-gpu-vertices
+build/uberhar-probe/test-ready-gpu-vertices

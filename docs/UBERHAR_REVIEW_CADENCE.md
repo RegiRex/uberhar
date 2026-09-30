@@ -83,3 +83,14 @@ analysis. Count 0.1.7 as successor one; default next review after four successor
 allowed after three to five, before starting six. If the beta number stays 0.1,
 that is after 0.1.10, allowed after 0.1.9-0.1.11, before 0.1.12. A minor promotion
 retains the successor count rather than resetting it.
+
+
+<!-- AstraPro: Expanded evidence and a focused ready-GPU design do not erase the previous review ledger. -->
+The [0.1.7 evidence/0.1.8 decision](UBERHAR_LOG_ANALYSIS_0.1.7.md) reviews seven
+sessions, host-mode/thermal uncertainty, index-range rejection and sustained CPU
+vertex work. It adds index rescue and an opt-in bounded ready-GPU Combo route.
+This is a focused extension, not a claimed reset of the full-review cadence.
+0.1.7 is successor one and 0.1.8 successor two after the full 0.1.6 review.
+Default review remains after 0.1.10 evidence; allowed after 0.1.9–0.1.11, before
+0.1.12 if the beta number remains 0.1. Review earlier if GPU visual correctness
+regresses or measured route coverage invalidates the selected architecture.

@@ -12,6 +12,7 @@ import android.os.Build
 import android.os.Debug
 import android.os.PowerManager
 import android.os.SystemClock
+import java.io.File // AstraPro: Read-only, bounded CPU frequency context.
 
 // AstraEH: Read-only, permission-free device context. Called on an IO worker while the
 // game view is resumed; no network, debug bridge, per-frame binder calls or GPU waits.
@@ -50,15 +51,31 @@ object UberharDeviceDiagnostics {
             ActivityManager.MemoryInfo().also { manager.getMemoryInfo(it) }
         }.getOrNull()
         val nativeHeap = runCatching { Debug.getNativeHeapAllocatedSize() }.getOrNull()
+        // AstraPro: Read only fixed sysfs nodes, at most 24 characters each. No root,
+        // permission changes, network, performance-mode writes or unbounded file reads.
+        val cpuFrequencies = UberharHealthValues.cpuSnapshot { core, node ->
+            runCatching {
+                File("/sys/devices/system/cpu/cpu$core/cpufreq/$node").reader().use { reader ->
+                    val chars = CharArray(24)
+                    val count = reader.read(chars)
+                    if (count in 1..23) String(chars, 0, count) else null
+                }
+            }.getOrNull()
+        }
 
-        // AstraEH Log Line: At most one record per 30 seconds; battery temperature is not GPU/CPU temperature.
+        // AstraPro Log Line: Same 30-second IO-worker cadence. Schema 2 separates elapsed
+        // realtime from actual uptime and distinguishes zero/unavailable heap samples.
+        // Android status NONE with unknown headroom does not establish thermal safety.
         Log.info(
-            "Uberhar device health: uptime_ms=$now model=${Build.MODEL} api=${Build.VERSION.SDK_INT} " +
+            "Uberhar device health: schema=2 elapsed_ms=$now uptime_ms=${SystemClock.uptimeMillis()} model=${Build.MODEL} api=${Build.VERSION.SDK_INT} " +
                 "thermal_status=${thermal ?: "unknown"} thermal_headroom=${headroom ?: "unknown"} " +
                 "power_save=${powerSave ?: "unknown"} battery_percent=${batteryPercent ?: "unknown"} " +
                 "plugged=${plugged ?: "unknown"} battery_c=${temperature ?: "unknown"} " +
                 "available_mem_mib=${memory?.availMem?.div(1_048_576) ?: "unknown"} " +
-                "low_memory=${memory?.lowMemory ?: "unknown"} native_heap_bytes=${nativeHeap ?: "unknown"}"
+                "low_memory=${memory?.lowMemory ?: "unknown"} " +
+                "native_heap_bytes=${UberharHealthValues.positive(nativeHeap)} " +
+                "cpu_freq_khz=$cpuFrequencies frequency_scope=instant_cur_max " +
+                "host_performance_mode=unobserved gpu_clock=unknown thermal_source=android_api"
         )
     }
 }

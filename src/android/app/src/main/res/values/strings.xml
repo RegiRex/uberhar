@@ -291,7 +291,8 @@
     <string name="uberhar_test_compute">Virtual PICA: compute rendering</string>
     <string name="uberhar_test_compute_description">Prototype: compute rendering for supported solid rectangles; other draws use the native test path. Coverage is recorded in the log. Restart the game after changing.</string>
     <string name="uberhar_test_auto">Virtual PICA: automatic combination</string>
-    <string name="uberhar_test_auto_description">Prototype: samples GPU time and selects the faster measured route for supported rectangles. Other draws use the native test path. Restart the game after changing.</string>
+    <!-- AstraPro: Combo now opts into ready-only GPU vertices; not full compute. -->
+    <string name="uberhar_test_auto_description">Experimental Vulkan mode: promotes eligible triangle lists to GPU vertex shaders only after compilation finishes, with full CPU fallback. Also selects a measured route for supported solid rectangles. Not a full compute renderer. Restart the game after changing.</string>
     <string name="uberhar_test_locked">Turn off the active Virtual PICA test mode to edit custom graphics settings. Your saved custom values are preserved.</string>
     <string name="uberhar_hybrid_tev">Uberhar hybrid TEV (experimental)</string>
     <string name="uberhar_separate_folder_title">Use an empty folder for Uberhar</string>

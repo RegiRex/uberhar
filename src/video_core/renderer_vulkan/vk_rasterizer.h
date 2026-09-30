@@ -63,6 +63,8 @@ public:
     bool AccelerateDisplay(const Pica::FramebufferConfig& config, PAddr framebuffer_addr,
                            u32 pixel_stride, ScreenInfo& screen_info);
     bool AccelerateDrawBatch(bool is_indexed) override;
+    // AstraPro: Opt-in Combo route; no partial draws on a false return.
+    bool AccelerateDrawBatchReady(bool is_indexed) override;
 
     // AstraEH: PicaCore uses this only immediately after the unsubmitted GPU attempt.
     bool HasPreparedCpuVertexBridge() const override {
@@ -140,6 +142,9 @@ private:
     PipelineInfo pipeline_info{};
     // AstraEH: One draw's pre-submission CPU routing decision, consumed by DrawTriangles.
     PipelineCache::CpuBridgePreparation cpu_bridge{};
+    // AstraPro: Scoped to one call; no ready handle survives a draw or title switch.
+    bool ready_vertex_attempt{};
+    GraphicsPipeline* ready_vertex_pipeline{};
     std::chrono::steady_clock::time_point cpu_bridge_start{};
 
     StreamBuffer stream_buffer;     ///< Vertex+Index buffer

@@ -330,3 +330,23 @@ per-title quota that could run out before the most useful scenes.
   wired into the existing mandatory host/shader gate.
 - `docs/UBERHAR_ARCHITECTURE_0.1.6.md`: full source/evidence/alternative review,
   reconciled mode semantics, overlapping milestone gates and outstanding limits.
+
+
+## AstraPro: 0.1.8 ready GPU vertex and input-bound coverage
+
+<!-- AstraPro: Prospective attribution; inherited and earlier AstraEH work is not renamed. -->
+
+| Files | New work and invariant |
+| --- | --- |
+| `pica/uberhar_index_bounds.h`, `uberhar_vertex_input.h`, `pica_core.*` | Bounded actual-index scan only after conservative range rejection; reprepare pinned spans; live escapes retain legacy input; sampled route/rescue counts and conservative no-GS complete-list GPU admission. |
+| `renderer_vulkan/uberhar_gpu_vertex_policy.h`, `vk_rasterizer.*`, `rasterizer_interface.h` | Automatic-only ready GPU experiment, count/upload/range admission, complete CPU fallback and RAII speculative-state cleanup. |
+| `rasterizer_cache/framebuffer_base.h` | Explicit cancellation of ownership invalidation when speculative preparation emitted no draw; normal invalidation retained. |
+| `vk_pipeline_cache.*`, `vk_graphics_pipeline.*`, `vk_shader_disk_cache.*` | Exact consumed-state/module matching, bounded optional VS/GS/GPU pipeline creation, failed-completion publication, serial pipeline worker, full lifecycle drains and bounded route/admission records. Shader math and ABI7 unchanged. |
+| `core/perf_stats.cpp`, Android graphics strings | Expose configured ready GPU policy separately from inherited hardware-shader flag; truthful Combo UI description. |
+| Android `UberharDeviceDiagnostics.kt`, `UberharHealthValues.kt` | Thirty-second, fixed 32-node read-only CPU-frequency context; true uptime versus elapsed; zero heap unknown; no host-mode detection or hardware settings writes. |
+| `test_vertex_input.cpp`, `test_pipeline_keys.cpp`, `test_ready_gpu_vertices.cpp`, `build_probe.sh` | Actual-index/rescue bitwise tests, complete-key equality, ordered decisions and production framebuffer cancellation/retry tests included in required host gate. |
+| Android `UberharHealthValuesTest.kt` | Value normalization and fixed node-read budget regression tests, plus local pure Kotlin smoke coverage. |
+| `UBERHAR_VERSION`, release/evidence/diagnostics docs, `AGENTS.md` | 0.1.8 version, measured 0.1.7 scope, new annotations and explicit validation/device limitations. |
+
+Paths in the renderer rows are relative to `src/video_core/`. New GPU execution
+reuses inherited translation, not an AstraPro-authored GPU vertex interpreter.

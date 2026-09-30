@@ -38,6 +38,11 @@ int main() {
         if ((a.state.ExecutionHash(dynamic, modules) == b.state.ExecutionHash(dynamic, modules)) !=
             same)
             throw std::runtime_error(label);
+        // AstraPro: The collision-safe predicate must preserve the same active
+        // state distinctions as the production execution key.
+        if (a.state.ExecutionEquals(b.state, dynamic) != same ||
+            b.state.ExecutionEquals(a.state, dynamic) != same)
+            throw std::runtime_error("Execution equality disagrees with state contract");
         ++checked;
     };
     for (bool dynamic : {false, true}) {

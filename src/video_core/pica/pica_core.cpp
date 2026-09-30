@@ -2,6 +2,7 @@
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
 
+#include <limits> // AstraPro: Checked index address arithmetic.
 #include <chrono> // AstraEH: Bounded virtual-PICA stage timing.
 #include "common/arch.h"
 #include "common/archives.h"
@@ -14,6 +15,8 @@
 #include "video_core/pica/pica_core.h"
 #include "video_core/pica/uberhar_vertex_cache.h" // AstraEH: Exact FIFO with indexed lookup.
 #include "video_core/pica/vertex_loader.h"
+#include "video_core/pica/uberhar_index_bounds.h" // AstraPro: Exact bounded retry.
+#include "video_core/renderer_vulkan/uberhar_gpu_vertex_policy.h" // AstraPro: Pure admission.
 #include "video_core/rasterizer_interface.h"
 #include "video_core/shader/shader.h"
 
@@ -139,6 +142,20 @@ void PicaCore::ReportVirtualVertices(const char* kind, std::chrono::steady_clock
              kind, native_input_results[0], native_input_results[1], native_input_results[2],
              native_input_results[3], native_input_results[4], native_input_maps,
              native_input_fused_vertices, native_input_legacy_vertices);
+    // AstraPro Log Line: Existing five-second/final cadence; no per-index clocks.
+    LOG_INFO(Render_Vulkan,
+             "Uberhar index bounds {}: schema=1 retries={} scanned_indices={} rescued_batches={} "
+             "rescued_vertices={} escaped_vertices={} scan_cap=262144 memory_reuse=within_batch_only",
+             kind, native_index_retries, native_scanned_indices, native_index_rescues,
+             native_rescued_vertices, native_index_escapes);
+    // AstraPro Log Line: Existing cadence/final; GPU inputs are submitted indices,
+    // not a count of actual driver shader invocations or measured GPU time.
+    LOG_INFO(Render_Vulkan,
+             "Uberhar PICA routes {}: schema=1 cpu_batches={} gpu_batches={} gpu_inputs={} "
+             "gpu_attempts={} auto_topologies=[{},{},{},{},{}] gpu_invocations=unknown",
+             kind, virtual_vertex_batches, ready_gpu_vertex_batches, ready_gpu_vertex_inputs,
+             ready_gpu_vertex_attempts, ready_gpu_topologies[0], ready_gpu_topologies[1],
+             ready_gpu_topologies[2], ready_gpu_topologies[3], ready_gpu_topologies[4]);
     virtual_window_start = now;
     virtual_last_ns = virtual_vertex_ns;
     virtual_last_inputs = virtual_vertex_inputs;
@@ -1132,6 +1149,27 @@ void PicaCore::DrawArrays(bool is_indexed) {
     delay_generator.AddVertices(regs.internal.pipeline.num_vertices,
                                 regs.internal.pipeline.triangle_topology);
 
+    // AstraPro: Combo can promote complete no-GS lists to already-ready GPU
+    // vertices. A false return still executes the full CPU batch below. Never
+    // pass debugger work, partial assembly, strip/fan tails or excessive uploads.
+    const bool ready_gpu_mode =
+        Settings::values.uberhar_test_mode.GetValue() == Settings::UberharTestMode::Automatic;
+    if (ready_gpu_mode) {
+        // AstraPro: Explain zero coverage without guessing which topologies a game uses.
+        ++ready_gpu_topologies[std::min<u32>(static_cast<u32>(primitive_assembler.GetTopology()), 4)];
+        if (Vulkan::ReadyVertexPolicy::Eligible(
+                true, static_cast<bool>(debug_context), primitive_assembler.IsEmpty(),
+                regs.internal.pipeline.use_gs != PipelineRegs::UseGS::No,
+                primitive_assembler.GetTopology(), regs.internal.pipeline.num_vertices)) {
+            ++ready_gpu_vertex_attempts;
+            if (rasterizer->AccelerateDrawBatchReady(is_indexed)) {
+                ++ready_gpu_vertex_batches;
+                ready_gpu_vertex_inputs += regs.internal.pipeline.num_vertices;
+                return;
+            }
+        }
+    }
+
     // Attempt to use hardware vertex shaders if possible.
     if (accelerate_draw && rasterizer->AccelerateDrawBatch(is_indexed)) {
         return;
@@ -1241,20 +1279,47 @@ void PicaCore::LoadVertices(bool is_indexed, std::chrono::steady_clock::time_poi
             const u64 maximum_vertex = is_indexed ? (index_u16 ? 65535 : 255)
                 : static_cast<u64>(pipeline.vertex_offset) +
                     (pipeline.num_vertices ? pipeline.num_vertices - 1 : 0);
-            const auto input_result = input_plan.Prepare(
-                regs.internal.vs, loader.GetNumTotalAttributes(), base_address, maximum_vertex,
-                [&](u32 attribute) { return loader.DescribeNativeInput(attribute); },
-                [&](PAddr address) -> std::span<const u8> {
-                    auto& ref = input_refs[input_ref_count++];
-                    ref = memory.GetPhysicalRef(address);
-                    return {ref.GetPtr(), ref.GetSize()};
-                });
+            const auto prepare_input = [&](u64 maximum) {
+                input_ref_count = 0;
+                return input_plan.Prepare(
+                    regs.internal.vs, loader.GetNumTotalAttributes(), base_address, maximum,
+                    [&](u32 attribute) { return loader.DescribeNativeInput(attribute); },
+                    [&](PAddr address) -> std::span<const u8> {
+                        auto& ref = input_refs[input_ref_count++];
+                        ref = memory.GetPhysicalRef(address);
+                        return {ref.GetPtr(), ref.GetSize()};
+                    });
+            };
+            auto input_result = prepare_input(maximum_vertex);
+            bool rescued_input = false;
+            // AstraPro: A full 65535-index domain need not fit when the draw only
+            // references a smaller mesh. Retry only the range-related failures;
+            // validate and pin the entire scanned index span before reading it.
+            if (is_indexed && (input_result == NativeVertexInputPlan::Result::ShortMapping ||
+                               input_result == NativeVertexInputPlan::Result::AddressWrap)) {
+                ++native_index_retries;
+                const u64 index_base = static_cast<u64>(base_address) + index_info.offset;
+                if (index_base <= std::numeric_limits<u32>::max()) {
+                    const auto indices = memory.GetPhysicalRef(static_cast<PAddr>(index_base));
+                    const auto maximum = NativeIndexMaximum(
+                        {indices.GetPtr(), indices.GetSize()}, pipeline.num_vertices, index_u16);
+                    if (maximum) {
+                        native_scanned_indices += pipeline.num_vertices;
+                        input_result = prepare_input(*maximum);
+                        rescued_input = input_result == NativeVertexInputPlan::Result::Ready;
+                        native_index_rescues += rescued_input;
+                    }
+                }
+            }
             ++native_input_results[static_cast<std::size_t>(input_result)];
             native_input_maps += input_plan.MappedAttributes();
             const auto vertex_at = [&](u32 index) -> u32 {
                 return is_indexed ? (index_u16 ? index_address_16[index] : index_address_8[index])
                                   : index + pipeline.vertex_offset;
             };
+            // AstraPro: A changed live index outside the rescanned bound retains
+            // legacy decoding; it must never escape a pinned attribute span.
+            u64 escaped_input_vertices = 0;
             // AstraEH: Compile out per-vertex clocks from ordinary batches. A sampled
             // vertex partitions input loading, shader execution and output conversion.
             const auto shade = [&]<bool Sample>(u32 vertex, u32 index) {
@@ -1262,9 +1327,10 @@ void PicaCore::LoadVertices(bool is_indexed, std::chrono::steady_clock::time_poi
                 Clock::time_point start, loaded, shaded;
                 if constexpr (Sample)
                     start = Clock::now();
-                if (input_plan.Ready()) {
+                if (input_plan.CanLoad(vertex)) {
                     input_plan.Load(shader_unit, input_default_attributes, vertex);
                 } else {
+                    escaped_input_vertices += input_plan.Ready();
                     AttributeBuffer input;
                     loader.LoadVertex(base_address, index, vertex, input, input_default_attributes);
                     plan.LoadInput(shader_unit, input);
@@ -1311,11 +1377,17 @@ void PicaCore::LoadVertices(bool is_indexed, std::chrono::steady_clock::time_poi
                 counts = RunNativeVertexBatch<false>(pipeline.num_vertices, is_indexed, vertex_at,
                                                      shade, submit, native_samples);
             }
+            // AstraPro: Separate recovered invocation coverage from batch counts.
+            if (rescued_input)
+                native_rescued_vertices += counts.invocations - escaped_input_vertices;
+            native_index_escapes += escaped_input_vertices;
             // AstraEH: Count actual misses using each transport, not all submitted indices.
-            if (input_plan.Ready())
-                native_input_fused_vertices += counts.invocations;
-            else
+            if (input_plan.Ready()) {
+                native_input_fused_vertices += counts.invocations - escaped_input_vertices;
+                native_input_legacy_vertices += escaped_input_vertices;
+            } else {
                 native_input_legacy_vertices += counts.invocations;
+            }
             ++native_vertex_batches;
             native_vertex_inputs += pipeline.num_vertices;
             native_vertex_conversions += counts.invocations;

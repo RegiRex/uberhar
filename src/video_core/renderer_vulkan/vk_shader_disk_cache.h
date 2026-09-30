@@ -32,11 +32,12 @@ public:
               const VideoCore::DiskResourceLoadCallback& callback);
 
     std::optional<std::pair<u64, Shader* const>> UseProgrammableVertexShader(
-        const Pica::RegsInternal& regs, Pica::ShaderSetup& setup, const VertexLayout& layout);
+        const Pica::RegsInternal& regs, Pica::ShaderSetup& setup, const VertexLayout& layout,
+        bool ready_only = false);
     std::optional<std::pair<u64, Shader* const>> UseFragmentShader(
         const Pica::Shader::FSConfig& fs_config, const Pica::Shader::UserConfig& user);
     std::optional<std::pair<u64, Shader* const>> UseFixedGeometryShader(
-        const Pica::RegsInternal& regs);
+        const Pica::RegsInternal& regs, bool ready_only = false);
 
     GraphicsPipeline* GetPipeline(const PipelineInfo& info);
     // AstraEH: Read renderer-owned cache sizes and foreground VS translation costs.
@@ -54,6 +55,11 @@ private:
     u64 live_vs_codegen_count{};
     u64 live_vs_codegen_ns{};
     u64 live_vs_codegen_max_ns{};
+    // AstraPro: One optional VS module in flight, bounded variant growth, and
+    // failed-completion accounting; zero-valued health data is unrelated to this.
+    Shader* warming_ready_vs{};
+    u64 ready_vs_deferred{}, ready_vs_capped{}, ready_gs_capped{};
+    std::atomic<u64> ready_shader_failures{};
     static constexpr std::size_t SOURCE_FILE_HASH_LENGTH = 64;
     using SourceFileCacheVersionHash = std::array<u8, SOURCE_FILE_HASH_LENGTH>;
 

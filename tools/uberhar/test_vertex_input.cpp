@@ -11,6 +11,7 @@
 #include <vector>
 #include "common/logging/log.h"
 #include "video_core/pica/uberhar_vertex_input.h"
+#include "video_core/pica/uberhar_index_bounds.h" // AstraPro: Actual-domain recovery tests.
 
 namespace Common::Log {
 void Stop() {}
@@ -178,7 +179,55 @@ void Boundaries() {
     Check(f.Prepare(plan,1,255)==Result::Ready,"Remapped next draw rejected");
     Reference(f,b,1,255); plan.Load(a,f.defaults,255); Same(a,b);
 }
+
+// AstraPro: Production scanning and failed-prepare/retry contract. Late live-index
+// escape must use legacy transport, never an unproven pinned host span.
+u64 IndexedRecovery() {
+    std::mt19937 rng{0xA57A018};
+    u64 comparisons = 0;
+    for (bool wide : {false, true}) {
+        for (u32 n = 1; n <= 2048; ++n) {
+            std::vector<u8> storage(1 + n * (wide ? 2 : 1));
+            u32 expected = 0;
+            for (u32 i = 0; i < n; ++i) {
+                const u32 v = rng() & (wide ? 65535 : 255);
+                expected = std::max(expected, v);
+                storage[1 + i * (wide ? 2 : 1)] = static_cast<u8>(v);
+                if (wide) storage[2 + i * 2] = static_cast<u8>(v >> 8);
+            }
+            const auto span = std::span<const u8>(storage).subspan(1);
+            Check(NativeIndexMaximum(span,n,wide) == expected, "Index maximum mismatch");
+            Check(!NativeIndexMaximum(span.first(span.size()-1),n,wide), "Short index range accepted");
+            ++comparisons;
+        }
+    }
+    std::vector<u8> cap(262144,255);
+    Check(NativeIndexMaximum(cap,262144,false)==255,"Exact scan cap rejected");
+    Check(!NativeIndexMaximum(cap,262145,false),"Scan budget exceeded");
+    Check(!NativeIndexMaximum(cap,0,false) && !NativeIndexMaximum({},1,true),"Empty indices accepted");
+    Fixture f;
+    f.memory.resize(512);
+    f.shader.max_input_attribute_index.Assign(0);
+    f.attributes[0] = {1,16,4,Format::UBYTE,false};
+    NativeVertexInputPlan plan;
+    Check(f.Prepare(plan,1,65535)==Result::ShortMapping && !plan.CanLoad(0),"Conservative range unexpectedly admitted");
+    const std::array<u8,6> indices{4,0,9,0,7,0};
+    const auto maximum = NativeIndexMaximum(indices,3,true);
+    Check(maximum==9 && f.Prepare(plan,1,*maximum)==Result::Ready,"Valid indexed domain not rescued");
+    ShaderUnit actual, reference;
+    for (u32 v : {4U,9U,7U}) {
+        Check(plan.CanLoad(v),"Actual index outside proven bound");
+        Reference(f,reference,1,v); plan.Load(actual,f.defaults,v); Same(actual,reference);
+        ++comparisons;
+    }
+    Check(!plan.CanLoad(10) && !plan.CanLoad(65535),"Live index escape admitted");
+    Check(f.Prepare(plan,1,10)==Result::Ready && plan.CanLoad(10),"Fresh next draw failed");
+    return comparisons;
+}
+
 int main() {
+    const auto indexed=IndexedRecovery();
+    std::printf("PASS: %llu index-domain differential checks and bounded live-index recovery\n", static_cast<unsigned long long>(indexed));
     const auto comparisons=Differential();
     Boundaries();
     std::printf("PASS: %llu fused-input bitwise comparisons; defaults, live data, aliases, "

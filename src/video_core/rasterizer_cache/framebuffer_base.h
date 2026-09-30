@@ -114,7 +114,13 @@ public:
         }
     }
 
+    // AstraPro: Speculative preparation has not authored framebuffer pixels.
+    // Cancel only before submission; normal and compute draws keep invalidation.
+    void CancelInvalidation() const noexcept { invalidate_on_exit = false; }
+
     ~FramebufferHelper() {
+        if (!invalidate_on_exit)
+            return;
         const Common::Rectangle draw_rect_unscaled{draw_rect / fb->Scale()};
         const auto invalidate = [&](SurfaceId surface_id, u32 level) {
             const auto& surface = res_cache->GetSurface(surface_id);
@@ -153,6 +159,8 @@ private:
     Common::Rectangle<s32> scissor_rect;
     Common::Rectangle<u32> draw_rect;
     ViewportInfo viewport;
+    // AstraPro: Per-helper ownership; no global cache-invalidation suppression.
+    mutable bool invalidate_on_exit{true};
 };
 
 } // namespace VideoCore

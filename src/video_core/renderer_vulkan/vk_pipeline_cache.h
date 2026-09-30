@@ -16,6 +16,7 @@
 #include "video_core/renderer_vulkan/uberhar_tev_preparation.h" // AstraEH: Exact preparation reuse.
 #include "video_core/renderer_vulkan/uberhar_wait_diagnostics.h" // AstraEH: Bounded worst waits.
 #include "video_core/renderer_vulkan/vk_graphics_pipeline.h"
+#include "video_core/renderer_vulkan/uberhar_gpu_vertex_policy.h" // AstraPro: Ready-only gates.
 #include "video_core/renderer_vulkan/vk_resource_pool.h"
 #include "video_core/renderer_vulkan/vk_shader_disk_cache.h"
 #include "video_core/shader/generator/glsl_fs_shader_gen.h" // AstraEH: Shared fallback ABI.
@@ -84,7 +85,14 @@ public:
     // AstraEH: A ready CPU bridge may bind its generic pipeline directly; admitting
     // another GPU-vertex fallback is optional while the shared CPU route warms.
     bool BindPipeline(PipelineInfo& info, bool wait_built = false,
-                      GraphicsPipeline* ready_cpu_fallback = nullptr, bool allow_tev_build = true);
+                      GraphicsPipeline* ready_cpu_fallback = nullptr, bool allow_tev_build = true,
+                      GraphicsPipeline* ready_gpu_vertex = nullptr);
+
+    // AstraPro: Nonblocking GPU promotion; a null result requires the full CPU
+    // draw. Generic fragment modules must already exist, so speculative GPU work
+    // cannot queue ahead of the CPU bank's first-use fragment compilation.
+    bool ReadyVertexShaders() const;
+    GraphicsPipeline* PrepareReadyGpuVertex(const PipelineInfo& info);
 
     struct CpuBridgePreparation {
         GraphicsPipeline* ready{};
@@ -193,6 +201,15 @@ private:
     // AstraEH: Optional fallback work must not occupy workers needed by specialized draws.
     // Created only in hybrid mode; shader and driver compilation run as one serial job.
     std::unique_ptr<Common::ThreadWorker> tev_worker;
+    // AstraPro: Combo-only, one in-flight pipeline and a separate bounded cache.
+    // Drain this worker before releasing ANY referenced shaders/driver cache.
+    std::unique_ptr<Common::ThreadWorker> ready_vertex_worker;
+    std::unordered_map<u64, std::unique_ptr<GraphicsPipeline>> ready_vertex_pipelines;
+    GraphicsPipeline* warming_ready_vertex{};
+    PipelineBuildStats ready_vertex_build_stats;
+    u64 ready_vertex_requests{}, ready_vertex_selected{}, ready_vertex_dependency_misses{},
+        ready_vertex_deferred{}, ready_vertex_capped{}, ready_vertex_failed{},
+        ready_vertex_key_mismatches{};
     PipelineInfo current_info{};
     // AstraEH: Only the scheduler accesses the actual bound pipeline. A queued draw may
     // choose a different winner from the render thread's original specialization.

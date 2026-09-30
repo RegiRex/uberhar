@@ -2,12 +2,14 @@
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
 
+#include <limits> // AstraPro: Reject wraparound before speculative memory reads.
 #include "common/alignment.h"
 #include "common/literals.h"
 #include "common/logging/log.h"
 #include "common/math_util.h"
 #include "common/microprofile.h"
 #include "common/settings.h"
+#include "common/scope_exit.h" // AstraPro: Clear speculative draw state on every exit.
 #include "core/core.h"
 #include "core/loader/loader.h"
 #include "core/memory.h"
@@ -442,6 +444,41 @@ bool RasterizerVulkan::SetupGeometryShader() {
     return pipeline_cache.UseFixedGeometryShader(regs);
 }
 
+// AstraPro: PICA admits only complete, independent no-GS triangle lists. Keep
+// Native unchanged; Combo uses the inherited GPU VS/GS translation only when ready.
+bool RasterizerVulkan::AccelerateDrawBatchReady(bool is_indexed) {
+    // AstraPro: Never bypass buffered CPU output left by an earlier non-draw.
+    if (!vertex_batch.empty())
+        return false;
+    if (!ReadyVertexPolicy::Eligible(
+            Settings::values.uberhar_test_mode.GetValue() == Settings::UberharTestMode::Automatic,
+            false, true, regs.pipeline.use_gs != Pica::PipelineRegs::UseGS::No,
+            regs.pipeline.triangle_topology, regs.pipeline.num_vertices))
+        return false;
+    // AstraPro: The stock accelerator assumes a valid index range. Validate it
+    // before its min/max scan; malformed optional input retains legacy handling.
+    if (is_indexed) {
+        const u64 address = static_cast<u64>(regs.pipeline.vertex_attributes.GetPhysicalBaseAddress()) +
+                            regs.pipeline.index_array.offset;
+        if (address > std::numeric_limits<u32>::max())
+            return false;
+        const auto indices = memory.GetPhysicalRef(static_cast<PAddr>(address));
+        const u32 width = regs.pipeline.index_array.format ? 2 : 1;
+        if (!indices.GetPtr() || indices.GetSize() / width < regs.pipeline.num_vertices)
+            return false;
+    } else if (static_cast<u64>(regs.pipeline.vertex_offset) + regs.pipeline.num_vertices - 1 >
+               std::numeric_limits<u32>::max()) {
+        return false;
+    }
+    ready_vertex_attempt = true;
+    ready_vertex_pipeline = nullptr;
+    SCOPE_EXIT({
+        ready_vertex_attempt = false;
+        ready_vertex_pipeline = nullptr;
+    });
+    return AccelerateDrawBatch(is_indexed);
+}
+
 bool RasterizerVulkan::AccelerateDrawBatch(bool is_indexed) {
     // AstraEH: A decision cannot leak into a later batch or an unsupported draw.
     cpu_bridge = {};
@@ -465,9 +502,34 @@ bool RasterizerVulkan::AccelerateDrawBatch(bool is_indexed) {
     // Vertex data setup might involve scheduler flushes so perform it
     // early to avoid invalidating our state in the middle of the draw.
     vertex_info = AnalyzeVertexArray(is_indexed, instance.GetMinVertexStrideAlignment());
+    if (ready_vertex_attempt && vertex_info.vs_input_size > ReadyVertexPolicy::MaxUploadBytes)
+        return false; // AstraPro: Bound speculative upload cost; CPU still renders the draw.
     if (vertex_info.Invalid()) {
-        // Do not draw anything if the vertex array is invalid.
-        return true;
+        // AstraPro: An optional promotion must not change the CPU path's handling
+        // of an invalid vertex analysis. Ordinary hardware mode retains its behavior.
+        return !ready_vertex_attempt;
+    }
+    if (ready_vertex_attempt) {
+        // AstraPro: Do not inherit the ordinary hardware path's log-and-copy
+        // behavior for a short source mapping. Validate every upload before any
+        // of these ranges is copied. No byte content survives beyond this draw.
+        const auto& attributes = regs.pipeline.vertex_attributes;
+        const u64 count = static_cast<u64>(vertex_info.vs_input_index_max) -
+                          vertex_info.vs_input_index_min + 1;
+        for (const auto& loader : attributes.attribute_loaders) {
+            if (!loader.component_count || !loader.byte_count)
+                continue;
+            const u64 address = static_cast<u64>(attributes.GetPhysicalBaseAddress()) +
+                                loader.data_offset +
+                                static_cast<u64>(vertex_info.vs_input_index_min) * loader.byte_count;
+            const u64 size = count * loader.byte_count;
+            if (address > std::numeric_limits<u32>::max() ||
+                size > (u64{1} << 32) - address)
+                return false;
+            const auto source = memory.GetPhysicalRef(static_cast<PAddr>(address));
+            if (!source.GetPtr() || source.GetSize() < size)
+                return false;
+        }
     }
     SetupVertexArray();
 
@@ -477,6 +539,10 @@ bool RasterizerVulkan::AccelerateDrawBatch(bool is_indexed) {
     if (!SetupGeometryShader()) {
         return false;
     }
+    // AstraPro: Decompilation can do foreground work, but shader-module and
+    // driver-pipeline compilation are never waited on by this optional route.
+    if (ready_vertex_attempt && !pipeline_cache.ReadyVertexShaders())
+        return false;
 
     return Draw(true, is_indexed);
 }
@@ -487,8 +553,10 @@ bool RasterizerVulkan::AccelerateDrawBatchInternal(bool is_indexed) {
     }
 
     const bool wait_built = !async_shaders || regs.pipeline.num_vertices <= 6;
-    if (!pipeline_cache.BindPipeline(pipeline_info, wait_built, nullptr, !cpu_bridge.preferred)) {
-        return true;
+    if (!pipeline_cache.BindPipeline(pipeline_info, wait_built, nullptr, !cpu_bridge.preferred,
+                                     ready_vertex_pipeline)) {
+        // AstraPro: A ready-key mismatch requires CPU recovery, not a skipped draw.
+        return !ready_vertex_attempt;
     }
 
     const DrawParams params = {
@@ -654,7 +722,17 @@ bool RasterizerVulkan::Draw(bool accelerate, bool is_indexed) {
     // Sync and bind the shader
     pipeline_cache.UseFragmentShader(regs, user_config);
 
-    if (accelerate) {
+    if (ready_vertex_attempt) {
+        ready_vertex_pipeline = pipeline_cache.PrepareReadyGpuVertex(pipeline_info);
+        if (!ready_vertex_pipeline) {
+            // AstraPro: Preparation did not write pixels. Do not publish a false
+            // framebuffer owner before CPU recovery re-enters the normal path.
+            fb_helper.CancelInvalidation();
+            return false;
+        }
+    }
+
+    if (accelerate && !ready_vertex_attempt) {
         // AstraEH: No draw, index binding, uniforms or render pass has been submitted
         // for this batch yet. Returning false invokes PicaCore's existing CPU path.
         cpu_bridge = pipeline_cache.PrepareCpuFallback(pipeline_info, software_layout,
@@ -719,6 +797,10 @@ bool RasterizerVulkan::Draw(bool accelerate, bool is_indexed) {
     // AstraEH: This sample covers the native draw's GPU work, not its compilation wait.
     if (compute_rect)
         compute_rect->EndSample(timing_slot);
+    // AstraPro: No draw occurred on a rejected ready-pipeline binding. Keep the
+    // CPU retry's original framebuffer ownership; previously queued uploads are inert.
+    if (!succeeded && ready_vertex_attempt)
+        fb_helper.CancelInvalidation();
     vertex_batch.clear();
     return succeeded;
 }

@@ -254,6 +254,39 @@ struct StaticPipelineInfo {
         return hash;
     }
 
+    // AstraPro: Hashes select a bucket, not proof of equality. Compare every
+    // consumed field as well, normalizing exactly the inactive fields omitted by
+    // ExecutionHash. This guards optional promotion even under a hash collision.
+    [[nodiscard]] bool ExecutionEquals(const StaticPipelineInfo& other, bool dynamic) const {
+        const auto& a = vertex_layout;
+        const auto& b = other.vertex_layout;
+        if (a.binding_count != b.binding_count || a.attribute_count != b.attribute_count ||
+            a.binding_count > a.bindings.size() || a.attribute_count > a.attributes.size() ||
+            std::memcmp(a.bindings.data(), b.bindings.data(),
+                        a.binding_count * sizeof(VertexBinding)) != 0 ||
+            std::memcmp(a.attributes.data(), b.attributes.data(),
+                        a.attribute_count * sizeof(VertexAttribute)) != 0 ||
+            attachments.color != other.attachments.color ||
+            attachments.depth != other.attachments.depth ||
+            blending.blend_enable != other.blending.blend_enable ||
+            blending.color_write_mask != other.blending.color_write_mask)
+            return false;
+        if (blending.blend_enable ? blending.value != other.blending.value
+                                  : blending.logic_op != other.blending.logic_op)
+            return false;
+        if (dynamic)
+            return true;
+        const auto normalized_depth = [](DepthStencilState depth) {
+            if (!depth.depth_test_enable)
+                depth.depth_compare_op.Assign(Pica::FramebufferRegs::CompareFunc::Always);
+            if (!depth.stencil_test_enable)
+                depth.value &= 0x3FU;
+            return depth.value;
+        };
+        return rasterization.value == other.rasterization.value &&
+               normalized_depth(depth_stencil) == normalized_depth(other.depth_stencil);
+    }
+
     static consteval u64 StructHash() {
         constexpr u64 STRUCT_VERSION = 0;
 
@@ -383,6 +416,9 @@ public:
         return build_phase.load(std::memory_order::relaxed);
     }
     [[nodiscard]] u64 Key() const noexcept;
+    // AstraPro: Collision-safe optional-promotion validation, excluding live descriptors/uniforms.
+    [[nodiscard]] bool MatchesExecution(const PipelineInfo& candidate,
+                                        const std::array<u64, MAX_SHADER_STAGES>& shaders) const;
     // AstraEH: Failed fallback completion releases waiters but is never bindable.
     void MarkFailed() {
         failed.store(true, std::memory_order_release);

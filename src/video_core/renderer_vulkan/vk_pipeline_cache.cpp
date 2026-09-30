@@ -110,12 +110,13 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
       force_tev{hybrid_tev && Settings::values.uberhar_force_tev.GetValue()},
       cpu_vertex_bridge{hybrid_tev && !force_tev &&
                         Settings::values.uberhar_cpu_vertex_bridge.GetValue()} {
+    // AstraPro: Diagnostics 19 adds bounded GPU promotion and rescued-input observations.
     // AstraEH: Record effective settings so a device log identifies the tested path.
     // AstraEH Log Line: bounded renderer diagnostics; see docs/UBERHAR_DIAGNOSTICS.md.
     LOG_INFO(
         Render_Vulkan,
         "Uberhar: hybrid_tev={} force_tev={} async_shaders={} spirv_generator={} "
-        "diagnostics=18 first_ready=true compact_tev=true canonical_tev=true dynamic_fragment=true "
+        "diagnostics=19 first_ready=true compact_tev=true canonical_tev=true dynamic_fragment=true "
         "cpu_bridge={} bridge_policy=ready_only fallback_abi={} push_bytes={} "
         "runtime_lighting_luts=true runtime_lighting_enables=true runtime_light_loop=true "
         "runtime_tev_plan=true prepared_tev_operands=true phase_diagnostics=1 "
@@ -128,6 +129,9 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
     // AstraEH: Allocate the isolated compiler only when the experiment is enabled.
     if (hybrid_tev) {
         tev_worker = std::make_unique<Common::ThreadWorker>(1, "Uberhar TEV");
+        // AstraPro: Native/Compute retain their prior worker count and CPU route.
+        if (Settings::values.uberhar_test_mode.GetValue() == Settings::UberharTestMode::Automatic)
+            ready_vertex_worker = std::make_unique<Common::ThreadWorker>(1, "Uberhar GPU vertex");
     }
     scheduler.RegisterOnDispatch([this] { update_queue.Flush(); });
     profile = Pica::Shader::Profile{
@@ -202,6 +206,9 @@ PipelineCache::~PipelineCache() {
     if (tev_worker) {
         tev_worker->WaitForRequests();
     }
+    // AstraPro: Candidates refer to modules owned by both fragment and disk caches.
+    if (ready_vertex_worker)
+        ready_vertex_worker->WaitForRequests();
     // AstraEH: Compiler/scheduler workers are drained before reading final counters.
     ReportUberharStats();
     SaveDriverPipelineDiskCache();
@@ -209,6 +216,10 @@ PipelineCache::~PipelineCache() {
 
 void PipelineCache::LoadCache(const std::atomic_bool& stop_loading,
                               const VideoCore::DiskResourceLoadCallback& callback) {
+    // AstraPro: A repeated frontend load may replace disk-cache module owners.
+    // Drain optional users before either the driver cache or shader caches change.
+    if (ready_vertex_worker && curr_disk_cache)
+        ClearTevFallbacks();
     LoadDriverPipelineDiskCache(stop_loading, callback);
     LoadDiskCache(stop_loading, callback);
 }
@@ -479,18 +490,31 @@ void PipelineCache::SwitchDiskCache(u64 title_id, const std::atomic_bool& stop_l
 }
 
 bool PipelineCache::BindPipeline(PipelineInfo& info, bool wait_built,
-                                 GraphicsPipeline* ready_cpu_fallback, bool allow_tev_build) {
+                                 GraphicsPipeline* ready_cpu_fallback, bool allow_tev_build,
+                                 GraphicsPipeline* ready_gpu_vertex) {
     MICROPROFILE_SCOPE(Vulkan_Bind);
 
     for (u32 i = 0; i < MAX_SHADER_STAGES; i++) {
         info.state.shader_ids[i] = shader_hashes[i];
     }
 
+    // AstraPro: Validate the complete execution identity immediately before use.
+    // On failure this call has queued no draw; its caller returns to CPU rendering.
+    if (ready_gpu_vertex && (!ready_gpu_vertex->MatchesExecution(info, HostShaderIds(current_shaders)) ||
+                            !ReadyVertexPolicy::CanSelect(
+            ready_gpu_vertex->IsDone(), ready_gpu_vertex->HasFailed(),
+            info.state.ExecutionHash(instance.IsExtendedDynamicStateSupported(),
+                                     HostShaderIds(current_shaders)), ready_gpu_vertex->Key()))) {
+        ++ready_vertex_key_mismatches;
+        return false;
+    }
+    if (ready_gpu_vertex)
+        ++ready_vertex_selected;
     // AstraEH: Count draw attempts and choose between specialization and a TEV fallback.
     ++draw_requests;
     // AstraEH: Validate the actual software draw's complete key before using the
     // prepared handle. On a mismatch, retain the accurate existing blocking path.
-    GraphicsPipeline* pipeline = nullptr;
+    GraphicsPipeline* pipeline = ready_gpu_vertex;
     if (ready_cpu_fallback && hybrid_tev && tev_supported && tev_family_config) {
         const auto family = GLSL::MakeDynamicTevFamilyConfig(*tev_family_config, profile).Hash();
         const auto shader = tev_shaders.find(family);
@@ -510,12 +534,14 @@ bool PipelineCache::BindPipeline(PipelineInfo& info, bool wait_built,
                         ready_cpu_fallback->Key());
         }
     }
-    const bool cpu_bridge = pipeline != nullptr;
+    const bool cpu_bridge = pipeline != nullptr && !ready_gpu_vertex;
     bool virtual_generic = false;
     if (virtual_fs_config) {
         // AstraEH: Start only the requested generic pipeline, never a speculative rival.
         // Until the ready bank is complete this wait is real, separately measured work.
-        auto* generic = GetTevFallback(info, true);
+        // AstraPro: A promoted draw uses its hardware-VS pipeline, never a
+        // trivial-VS CPU pipeline with the hardware vertex-buffer layout.
+        auto* generic = ready_gpu_vertex ? ready_gpu_vertex : GetTevFallback(info, true);
         if (generic && !generic->IsDone()) {
             const auto activity_start = Common::UberharActivity::Capture();
             const auto start = std::chrono::steady_clock::now();
@@ -576,7 +602,7 @@ bool PipelineCache::BindPipeline(PipelineInfo& info, bool wait_built,
     bool using_fallback = cpu_bridge || virtual_generic;
     GraphicsPipeline* alternative = nullptr;
     bool alternative_was_pending = false;
-    if (hybrid_tev && !cpu_bridge && !virtual_generic) {
+    if (hybrid_tev && !cpu_bridge && !virtual_generic && !ready_gpu_vertex) {
         // AstraEH: Admit a bounded fallback before queuing specialization. The scheduler
         // can use either completed result; neither path is allowed to omit this draw.
         if (force_tev || (pending && allow_tev_build)) {
@@ -853,11 +879,99 @@ ExtraVSConfig PipelineCache::CalcExtraConfig(const PicaVSConfig& config) {
     return res;
 }
 
+// AstraPro: Readiness checks are atomic acquire operations. Do not inspect module
+// handles before IsDone has published construction; absent GS is a valid stage.
+bool PipelineCache::ReadyVertexShaders() const {
+    const auto* vertex = current_shaders[ProgramType::VS];
+    const auto* geometry = current_shaders[ProgramType::GS];
+    return vertex && vertex != &trivial_vertex_shader && vertex->IsDone() &&
+           !vertex->HasFailed() && vertex->Handle() &&
+           (!geometry || (geometry->IsDone() && !geometry->HasFailed() && geometry->Handle()));
+}
+
+// AstraPro: Speculate only after every shader dependency is usable. One serial
+// build may be in flight; it uses a distinct 256-entry cache and never consumes
+// mandatory CPU-generic pipeline slots. Failure/pending/caps retain CPU rendering.
+GraphicsPipeline* PipelineCache::PrepareReadyGpuVertex(const PipelineInfo& info) {
+    ++ready_vertex_requests;
+    if (!ready_vertex_worker || !ReadyVertexShaders()) {
+        ++ready_vertex_dependency_misses;
+        return nullptr;
+    }
+    auto stages = current_shaders;
+    u64 fragment_id = shader_hashes[ProgramType::FS];
+    if (virtual_fs_config) {
+        fragment_id = GLSL::MakeDynamicTevFamilyConfig(*tev_family_config, profile).Hash();
+        const auto shader = tev_shaders.find(fragment_id);
+        if (shader == tev_shaders.end()) {
+            ++ready_vertex_dependency_misses;
+            return nullptr;
+        }
+        stages[ProgramType::FS] = shader->second.get();
+    }
+    auto* fragment = stages[ProgramType::FS];
+    if (!fragment || !fragment->IsDone() || fragment->HasFailed() || !fragment->Handle()) {
+        ++ready_vertex_dependency_misses;
+        return nullptr;
+    }
+    PipelineInfo candidate = info;
+    candidate.state.shader_ids = shader_hashes;
+    candidate.state.shader_ids[ProgramType::FS] = fragment_id;
+    const u64 key = candidate.state.ExecutionHash(instance.IsExtendedDynamicStateSupported(),
+                                                  HostShaderIds(stages));
+    if (auto it = ready_vertex_pipelines.find(key); it != ready_vertex_pipelines.end()) {
+        auto* pipeline = it->second.get();
+        if (ReadyVertexPolicy::CanSelect(pipeline->IsDone(), pipeline->HasFailed(), key,
+                                         pipeline->Key()) &&
+            pipeline->MatchesExecution(candidate, HostShaderIds(stages))) {
+            current_shaders = stages;
+            shader_hashes[ProgramType::FS] = fragment_id;
+            return pipeline;
+        }
+        if (pipeline->HasFailed())
+            ++ready_vertex_failed;
+        else
+            ++ready_vertex_deferred;
+        return nullptr;
+    }
+    const bool pending = warming_ready_vertex && !warming_ready_vertex->IsDone();
+    if (!ReadyVertexPolicy::CanQueue(ready_vertex_pipelines.size(), pending)) {
+        if (pending)
+            ++ready_vertex_deferred;
+        else
+            ++ready_vertex_capped;
+        return nullptr;
+    }
+    auto pipeline = std::make_unique<GraphicsPipeline>(
+        instance, renderpass_cache, candidate, *driver_pipeline_cache, *pipeline_layout,
+        stages, ready_vertex_worker.get(),
+        PipelineBuildOptions{&pipeline_completion, &ready_vertex_build_stats,
+                             virtual_fs_config.has_value()});
+    auto* prepared = pipeline.get();
+    ready_vertex_pipelines.emplace(key, std::move(pipeline));
+    warming_ready_vertex = prepared;
+    // AstraPro: Build errors publish failed completion. CPU never waits on this
+    // worker; keep even failed objects stable until drained title reset/shutdown.
+    ready_vertex_worker->QueueWork([prepared] {
+        try {
+            if (!prepared->Build())
+                prepared->MarkFailed();
+        } catch (const std::exception&) {
+            if (!prepared->IsDone())
+                prepared->MarkFailed();
+        }
+    });
+    ++ready_vertex_deferred;
+    return nullptr;
+}
+
 bool PipelineCache::UseProgrammableVertexShader(const Pica::RegsInternal& regs,
                                                 Pica::ShaderSetup& setup,
                                                 const VertexLayout& layout) {
 
-    auto res = curr_disk_cache->UseProgrammableVertexShader(regs, setup, layout);
+    // AstraPro: Optional GPU translation has separate admission/failure rules.
+    const bool ready_only = ready_vertex_worker != nullptr;
+    auto res = curr_disk_cache->UseProgrammableVertexShader(regs, setup, layout, ready_only);
 
     if (res.has_value()) {
         current_shaders[ProgramType::VS] = (*res).second;
@@ -875,7 +989,7 @@ void PipelineCache::UseTrivialVertexShader() {
 
 bool PipelineCache::UseFixedGeometryShader(const Pica::RegsInternal& regs) {
 
-    auto res = curr_disk_cache->UseFixedGeometryShader(regs);
+    auto res = curr_disk_cache->UseFixedGeometryShader(regs, ready_vertex_worker != nullptr);
 
     if (res.has_value()) {
         current_shaders[ProgramType::GS] = (*res).second;
@@ -1241,6 +1355,11 @@ void PipelineCache::ClearTevFallbacks() {
     pipeline_workers.WaitForRequests();
     shader_workers.WaitForRequests();
     tev_worker->WaitForRequests();
+    // AstraPro: Drain and release optional pipelines before their shared shaders.
+    if (ready_vertex_worker)
+        ready_vertex_worker->WaitForRequests();
+    warming_ready_vertex = nullptr;
+    ready_vertex_pipelines.clear();
     warming_tev_pipeline = nullptr;
     tev_pipelines.clear();
     tev_shaders.clear();
@@ -1274,6 +1393,18 @@ void PipelineCache::ReportTevPushStats(const char* kind) {
 
 // AstraEH: These are draw observations and CPU wait durations, not GPU timings or frame counts.
 void PipelineCache::ReportUberharStats(const char* kind) {
+    // AstraPro Log Line: Existing five-second/final cadence; no per-draw strings.
+    LOG_INFO(Render_Vulkan,
+             "Uberhar ready GPU vertices {}: schema=1 scope=renderer_lifetime requests={} selected={} dependency_misses={} "
+             "deferred={} capped={} failed_draw_attempts={} key_mismatches={} pipelines={} "
+             "builds={} driver_ms={:.3f} driver_max_ms={:.3f} max_pipelines=256 "
+             "selection=ready_only fallback=full_cpu_draw",
+             kind, ready_vertex_requests, ready_vertex_selected, ready_vertex_dependency_misses,
+             ready_vertex_deferred, ready_vertex_capped, ready_vertex_failed,
+             ready_vertex_key_mismatches, ready_vertex_pipelines.size(),
+             ready_vertex_build_stats.builds.load(), ready_vertex_build_stats.driver_ns.load()/1e6,
+             ready_vertex_build_stats.driver_max_ns.load()/1e6);
+
     // AstraEH: File presence at load and observed compatible reuse answer different
     // questions. Fingerprint changes can produce present_files + cold_encountered.
     const u64 observed_hits = generic_module_hits.load() - cache_start_hits;
@@ -1317,12 +1448,14 @@ void PipelineCache::ReportUberharStats(const char* kind) {
     }
     if (Settings::values.uberhar_test_mode.GetValue() != Settings::UberharTestMode::Custom) {
         // AstraEH Log Line: Foreground generic waits must not disappear from measured stutter.
+        // AstraPro: CPU and optional GPU vertices may share these fragment-route counts.
         LOG_INFO(Render_Vulkan,
                  "Uberhar virtual native {}: generic_draws={} recovery_draws={} generic_waits={} "
-                 "generic_wait_ms={:.3f} generic_max_wait_ms={:.3f} vertex_engine=cpu "
+                 "generic_wait_ms={:.3f} generic_max_wait_ms={:.3f} vertex_engine={} "
                  "complete_ready_bank=false",
                  kind, virtual_generic_draws, virtual_recovery_draws, virtual_waits,
-                 virtual_wait_ns / 1000000.0, virtual_max_wait_ns / 1000000.0);
+                 virtual_wait_ns / 1000000.0, virtual_max_wait_ns / 1000000.0,
+                 ready_vertex_worker ? "cpu_and_ready_gpu" : "cpu");
     }
     // AstraEH Log Line: One exclusive route-reason summary at the existing cadence.
     // Counts describe draw-path choices, never GPU cost or lost visuals.

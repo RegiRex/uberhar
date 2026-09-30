@@ -85,7 +85,8 @@ void ShaderDiskCache::Init(const std::atomic_bool& stop_loading,
 }
 
 std::optional<std::pair<u64, Shader* const>> ShaderDiskCache::UseProgrammableVertexShader(
-    const Pica::RegsInternal& regs, Pica::ShaderSetup& setup, const VertexLayout& layout) {
+    const Pica::RegsInternal& regs, Pica::ShaderSetup& setup, const VertexLayout& layout,
+    bool ready_only) {
 
     PicaVSConfig config{regs, setup};
 
@@ -102,6 +103,18 @@ std::optional<std::pair<u64, Shader* const>> ShaderDiskCache::UseProgrammableVer
 
     const auto config_hash = config.Hash();
 
+    // AstraPro: Only absent configs consume admission. Existing successful or
+    // failed entries remain stable; a failed translation must not repeat per draw.
+    if (ready_only && !programmable_vertex_map.contains(config_hash)) {
+        if (programmable_vertex_map.size() >= ReadyVertexPolicy::MaxPrograms) {
+            ++ready_vs_capped;
+            return {};
+        }
+        if (warming_ready_vs && !warming_ready_vs->IsDone()) {
+            ++ready_vs_deferred;
+            return {};
+        }
+    }
     const auto [iter_config, new_config] = programmable_vertex_map.try_emplace(config_hash);
     if (new_config) {
 
@@ -122,8 +135,11 @@ std::optional<std::pair<u64, Shader* const>> ShaderDiskCache::UseProgrammableVer
         live_vs_codegen_max_ns = std::max(live_vs_codegen_max_ns, codegen_ns);
 
         if (program.empty()) {
+            // AstraPro Log Line: Optional failed configs are retained, bounded
+            // by 128 entries, instead of repeatedly decompiling an unsupported VS.
             LOG_ERROR(Render_Vulkan, "Failed to retrieve programmable vertex shader");
-            programmable_vertex_map.erase(config_hash);
+            if (!ready_only)
+                programmable_vertex_map.erase(config_hash);
             return {};
         }
 
@@ -138,12 +154,36 @@ std::optional<std::pair<u64, Shader* const>> ShaderDiskCache::UseProgrammableVer
 
             shader.program = std::move(program);
             const vk::Device device = parent.instance.GetDevice();
-            parent.shader_workers.QueueWork([device, &shader, this, spirv_id] {
-                auto spirv = CompileGLSL(shader.program, vk::ShaderStageFlagBits::eVertex);
-                AppendVSSPIRV(vs_cache, spirv, spirv_id);
-                shader.program.clear();
-                shader.module = CompileSPV(spirv, device);
-                shader.MarkDone();
+            if (ready_only)
+                warming_ready_vs = &shader;
+            parent.shader_workers.QueueWork([device, &shader, this, spirv_id, ready_only] {
+                const auto compile = [&] {
+                    auto spirv = CompileGLSL(shader.program, vk::ShaderStageFlagBits::eVertex);
+                    if (ready_only && spirv.empty())
+                        throw std::runtime_error("empty optional vertex module");
+                    AppendVSSPIRV(vs_cache, spirv, spirv_id);
+                    shader.program.clear();
+                    shader.module = CompileSPV(spirv, device);
+                    if (ready_only && !shader.module)
+                        throw std::runtime_error("null optional vertex module");
+                    shader.MarkDone();
+                };
+                if (!ready_only) {
+                    compile();
+                    return;
+                }
+                // AstraPro: Every optional completion publishes success OR failure.
+                // Never strand a ready-only candidate behind an unfinished handle.
+                try {
+                    compile();
+                } catch (const std::exception& err) {
+                    shader.program.clear();
+                    shader.MarkFailed();
+                    if (ready_shader_failures.fetch_add(1) < 8) {
+                        // AstraPro Log Line: First eight shader failures per title.
+                        LOG_ERROR(Render_Vulkan, "Uberhar optional GPU VS failed: {}", err.what());
+                    }
+                }
             });
         }
 
@@ -154,7 +194,8 @@ std::optional<std::pair<u64, Shader* const>> ShaderDiskCache::UseProgrammableVer
 
     Shader* const shader{iter_config->second};
     if (!shader) {
-        LOG_ERROR(Render_Vulkan, "Failed to retrieve programmable vertex shader");
+        if (!ready_only)
+            LOG_ERROR(Render_Vulkan, "Failed to retrieve programmable vertex shader");
         return {};
     }
 
@@ -198,7 +239,7 @@ std::optional<std::pair<u64, Shader* const>> ShaderDiskCache::UseFragmentShader(
 }
 
 std::optional<std::pair<u64, Shader* const>> ShaderDiskCache::UseFixedGeometryShader(
-    const Pica::RegsInternal& regs) {
+    const Pica::RegsInternal& regs, bool ready_only) {
 
     const PicaFixedGSConfig gs_config{regs};
     const auto gs_config_hash = gs_config.Hash();
@@ -219,28 +260,54 @@ std::optional<std::pair<u64, Shader* const>> ShaderDiskCache::UseFixedGeometrySh
 
         return std::make_pair(gs_config_hash, nullptr);
     } else {
+        // AstraPro: Bound optional quaternion-fixup variants independently of VS.
+        if (ready_only && !fixed_geometry_shaders.contains(gs_config_hash) &&
+            fixed_geometry_shaders.size() >= ReadyVertexPolicy::MaxPrograms) {
+            ++ready_gs_capped;
+            return {};
+        }
         auto [it, new_shader] = fixed_geometry_shaders.try_emplace(gs_config_hash, parent.instance);
         auto& shader = it->second;
 
         if (new_shader) {
             LOG_NEW_OBJECT(Render_Vulkan, "New GS config {:016X}", gs_config_hash);
 
-            parent.shader_workers.QueueWork([gs_config, this, &shader, gs_config_hash]() {
-                ExtraFixedGSConfig extra;
-                extra.use_clip_planes = parent.profile.has_clip_planes;
-                extra.separable_shader = true;
-
-                const auto code = GLSL::GenerateFixedGeometryShader(gs_config, extra);
-                const auto spirv = CompileGLSL(code, vk::ShaderStageFlagBits::eGeometry);
-                shader.module = CompileSPV(spirv, parent.instance.GetDevice());
-                shader.MarkDone();
-
-                AppendGSSPIRV(gs_cache, spirv, gs_config_hash);
-                GSConfigEntry entry{
-                    .version = GSConfigEntry::EXPECTED_VERSION,
-                    .gs_config = gs_config,
+            parent.shader_workers.QueueWork([gs_config, this, &shader, gs_config_hash, ready_only]() {
+                const auto compile = [&] {
+                    ExtraFixedGSConfig extra;
+                    extra.use_clip_planes = parent.profile.has_clip_planes;
+                    extra.separable_shader = true;
+                    const auto code = GLSL::GenerateFixedGeometryShader(gs_config, extra);
+                    const auto spirv = CompileGLSL(code, vk::ShaderStageFlagBits::eGeometry);
+                    if (ready_only && spirv.empty())
+                        throw std::runtime_error("empty optional geometry module");
+                    shader.module = CompileSPV(spirv, parent.instance.GetDevice());
+                    if (ready_only && !shader.module)
+                        throw std::runtime_error("null optional geometry module");
+                    if (!ready_only)
+                        shader.MarkDone();
+                    AppendGSSPIRV(gs_cache, spirv, gs_config_hash);
+                    GSConfigEntry entry{.version = GSConfigEntry::EXPECTED_VERSION,
+                                        .gs_config = gs_config};
+                    AppendGSConfig(gs_cache, entry, gs_config_hash);
+                    // AstraPro: Publish optional success only after all throwing work.
+                    if (ready_only)
+                        shader.MarkDone();
                 };
-                AppendGSConfig(gs_cache, entry, gs_config_hash);
+                if (!ready_only) {
+                    compile();
+                    return;
+                }
+                // AstraPro: Same bounded failed-completion policy as optional VS.
+                try {
+                    compile();
+                } catch (const std::exception& err) {
+                    shader.MarkFailed();
+                    if (ready_shader_failures.fetch_add(1) < 8) {
+                        // AstraPro Log Line: Shared eight-failure per-title cap.
+                        LOG_ERROR(Render_Vulkan, "Uberhar optional GPU GS failed: {}", err.what());
+                    }
+                }
             });
         }
 
@@ -289,6 +356,12 @@ GraphicsPipeline* ShaderDiskCache::GetPipeline(const PipelineInfo& info) {
 
 // AstraEH: No new per-draw strings or sets: existing maps provide the census.
 void ShaderDiskCache::ReportUberharStats(const char* kind) const {
+    // AstraPro Log Line: Existing bounded cadence; counts don't imply GPU timings.
+    LOG_INFO(Render_Vulkan,
+             "Uberhar GPU shader admission {}: schema=1 vs_deferred={} vs_capped={} gs_capped={} "
+             "failures={} max_vs_configs=128 max_gs_configs=128",
+             kind, ready_vs_deferred, ready_vs_capped, ready_gs_capped,
+             ready_shader_failures.load());
     // AstraEH Log Line: Same bounded report cadence; counts objects, not completed compiles.
     LOG_INFO(Render_Vulkan,
              "Uberhar execution origins {}: startup_host={} startup_guest={} live_host={} "

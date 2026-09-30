@@ -428,6 +428,12 @@ private:
     // AstraEH: Fused-input admission/results, reset with the PICA instance at title start.
     std::array<u64, 5> native_input_results{};
     u64 native_input_maps{}, native_input_fused_vertices{}, native_input_legacy_vertices{};
+    // AstraPro: Exact-index retry coverage, reset with the PICA core.
+    // AstraPro: Count only successfully submitted optional GPU batches.
+    u64 ready_gpu_vertex_batches{}, ready_gpu_vertex_inputs{}, ready_gpu_vertex_attempts{};
+    std::array<u64, 5> ready_gpu_topologies{};
+    u64 native_index_retries{}, native_scanned_indices{}, native_index_rescues{},
+        native_rescued_vertices{}, native_index_escapes{};
     NativeVertexSamples native_samples;
     // AstraEH: Host-only admission state; ordinary batches add no diagnostic clock reads.
     NativeVertexSampleBudget native_sample_budget;
