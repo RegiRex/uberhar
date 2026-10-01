@@ -747,3 +747,21 @@ upload/dependency/pipeline state; it is not itself proof of improved performance
 Frame records append `mode_min`, `mode_max`, `resolution_min`, `resolution_max`, `render_context_changes`, `render_unknown_frames`, `render_context_source=frame_end_settings`. Ranges include both sampled endpoints of each valid interval. Pauses re-anchor; window reset preserves the preceding endpoint; automatic scale zero is not unknown. A pure fixed-setting comparison requires equal appropriate ranges, zero changes and zero unknown frames in addition to a constant speed limit. These are setting observations, not physical output dimensions; a change-and-revert between samples can still be invisible. Raw overall and speed-band timing are retained. Older records without these fields still need conservative first-observed-change exclusion.
 
 All new log calls remain on existing bounded five-second/final reporting paths or the eight-detail optional-fragment error cap. No per-draw text is introduced. New host/context sampling has a cost that requires device validation, not a claimed zero-overhead guarantee.
+
+
+<!-- AstraPro: Crash preservation is distinct from rendering or a fatal backtrace. -->
+## 0.1.11 current / old / older
+
+`log/azahar_log.older.txt` preserves the previous `azahar_log.old.txt` when a
+nonempty current log is rotated at logger initialization. Current and old stay
+the only in-app export choices. A crash log is normally old after one restart,
+older after two, and evicted by the third rotation. Copy it out promptly.
+
+No useful current data means no rotation. Rotation failure keeps the source and
+opens it in append mode; the current file can then contain multiple session
+headers. Retained bytes count toward the existing 100 MiB write cap. A startup
+failure note goes to stderr while normal logging is suppressed during creation.
+
+The first consumed record and periodic consumed timestamps trigger stdio flushes;
+this is not fsync, queue draining on a signal or guaranteed final crash context.
+The older-file addition cannot reconstruct already-lost 0.1.10 playtime.

@@ -382,3 +382,17 @@ Inherited shader translation, fragment accuracy guards, pipeline keys and driver
 No new emulator dependency, public telemetry or permission. Full compute, strip/fan continuation, programmable guest GS, physical latency, FEA ghosting and universal speed qualification are not delivered by this candidate.
 
 - `vk_shader_util.{h,cpp}`: explicit optimizer-input overload for immutable optional jobs; old callers preserve their setting-based behavior. The glslang-dependent translation unit still requires the full CI build.
+
+
+<!-- AstraPro: 0.1.11 preserves crash evidence without touching renderer routing. -->
+## 0.1.11 log retention
+
+- `src/common/logging/uberhar_log_retention.h`: two-generation rotation and
+  consumed-entry flush policy, independent of UI and shader state.
+- `src/common/logging/backend.cpp`: FileUtil adapter, append-only writer open,
+  preserved size cap, first/periodic/error/export/shutdown flushing.
+- `tools/uberhar/test_log_retention.cpp`: production-policy fault injection,
+  interrupted-startup recovery and actual filesystem generation checks.
+- `tools/uberhar/build_probe.sh`: run retention tests in the normal host gate.
+- Android `LogExporter.kt` is deliberately unchanged: current and old only;
+  `azahar_log.older.txt` is a manual filesystem emergency backup.

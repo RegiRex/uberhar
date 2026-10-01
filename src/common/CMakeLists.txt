@@ -45,6 +45,7 @@ add_library(citra_common STATIC EXCLUDE_FROM_ALL
     literals.h
     logging/backend.cpp
     logging/backend.h
+    logging/uberhar_log_retention.h # AstraPro: Crash-history rotation and bounded flush policy.
     logging/filter.cpp
     logging/filter.h
     logging/formatter.h

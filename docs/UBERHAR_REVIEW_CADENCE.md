@@ -118,3 +118,13 @@ published. With unchanged beta numbers, default review after 0.1.13 evidence,
 allowed after 0.1.12–0.1.14, before 0.1.15. Failed same-version retries do not
 advance the count. Review sooner for correctness regressions or another failed
 performance hypothesis.
+
+
+<!-- AstraPro: 0.1.10 visual/crash report blocks further performance qualification. -->
+0.1.10 passed its publication workflow, but the owner reports Dark Moon Combo
+visual corruption and a crash with lost logs. 0.1.11 is an evidence-retention
+update only: no renderer correction, full-review reset or device parity claim.
+The full-review anchor remains 0.1.9 (0.1.10 successor one, 0.1.11 successor two
+once published). The regression requires early source/device review before any
+further expansion of the experimental GPU path; obtaining a preserved short
+reproduction takes priority over another throughput milestone or suite replay.

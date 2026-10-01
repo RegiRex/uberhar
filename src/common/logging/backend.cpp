@@ -3,7 +3,6 @@
 // Refer to the license.txt file included.
 
 #include <chrono>
-#include <boost/algorithm/string/replace.hpp>
 #include <boost/regex.hpp>
 
 #include <fmt/format.h>
@@ -30,6 +29,7 @@
 #include "common/logging/log.h"
 #include "common/logging/log_entry.h"
 #include "common/logging/text_formatter.h"
+#include "common/logging/uberhar_log_retention.h"
 #include "common/polyfill_thread.h"
 #include "common/settings.h"
 #include "common/string_util.h"
@@ -151,17 +151,30 @@ private:
 class FileBackend final : public Backend {
 public:
     explicit FileBackend(const std::string& filename) {
-        auto old_filename = filename;
-        boost::replace_all(old_filename, ".txt", ".old.txt");
-
-        // Existence checks are done within the functions themselves.
-        // We don't particularly care if these succeed or not.
-        static_cast<void>(FileUtil::Delete(old_filename));
-        static_cast<void>(FileUtil::Rename(filename, old_filename));
-
-        // _SH_DENYWR allows read only access to the file for other programs.
-        // It is #defined to 0 on other platforms
-        file = std::make_unique<FileUtil::IOFile>(filename, "w", _SH_DENYWR);
+        // AstraPro: Keep two prior process logs using the same filesystem path
+        // adapter as the existing writer, including Android document providers.
+        struct Files {
+            bool Exists(const std::string& path) { return FileUtil::Exists(path); }
+            bool IsDirectory(const std::string& path) { return FileUtil::IsDirectory(path); }
+            u64 Size(const std::string& path) { return FileUtil::GetSize(path); }
+            bool Delete(const std::string& path) { return FileUtil::Delete(path); }
+            bool Rename(const std::string& from, const std::string& to) {
+                return FileUtil::Rename(from, to);
+            }
+        } files;
+        const auto rotation = Retention::Rotate(files, filename);
+        if (rotation == Retention::Result::Failed) {
+            // AstraPro Log Line: Startup logging is not initialized yet; never
+            // recurse through LOG_WARNING here. Keep the source file by appending.
+            std::fputs("Uberhar: log rotation incomplete; preserving current log in append mode\n",
+                       stderr);
+        }
+        // AstraPro: Append is also safe after a successful rename (new file).
+        // A provider/permission failure must never lead to truncating crash data.
+        // _SH_DENYWR allows readers on Windows and is 0 on other platforms.
+        file = std::make_unique<FileUtil::IOFile>(filename, "a", _SH_DENYWR);
+        bytes_written = file->GetSize();
+        enabled = file->IsOpen() && bytes_written < 100 * 1024 * 1024;
     }
 
     ~FileBackend() override = default;
@@ -177,7 +190,10 @@ public:
         // Prevent logs from exceeding a set maximum size in the event that log entries are spammed.
         const auto write_limit = 100_MiB;
         const bool write_limit_exceeded = bytes_written > write_limit;
-        if (entry.log_level >= Level::Error || write_limit_exceeded) {
+        // AstraPro: No per-line flush in the hot path; retain existing error and
+        // size-limit flushing and add bounded progress for abnormal process exits.
+        const bool periodic_flush = flush_policy.Due(entry.timestamp);
+        if (entry.log_level >= Level::Error || write_limit_exceeded || periodic_flush) {
             if (write_limit_exceeded) {
                 // Stop writing after the write limit is exceeded.
                 // Don't close the file so we can print a stacktrace if necessary
@@ -205,6 +221,7 @@ private:
     std::unique_ptr<FileUtil::IOFile> file;
     bool enabled = true;
     std::size_t bytes_written = 0;
+    Retention::FlushPolicy flush_policy;
 };
 
 /**

@@ -4,6 +4,11 @@
 set -euo pipefail
 mkdir -p build/uberhar-probe
 python3 tools/uberhar/check_android_keys.py
+# AstraPro: Preserve current/old/older logs under restarts and filesystem faults.
+c++ -std=c++20 -O2 -Isrc tools/uberhar/test_log_retention.cpp \
+  -o build/uberhar-probe/test-log-retention
+build/uberhar-probe/test-log-retention
+
 # AstraEH: Catch incorrect family merges before exercising the numerical shader corpus.
 c++ -std=c++20 -O2 -DFMT_HEADER_ONLY -DXXH_INLINE_ALL \
   -Isrc -Isrc/common -Iexternals/fmt/include -Iexternals/boost \
