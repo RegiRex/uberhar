@@ -1,0 +1,93 @@
+# AstraPro: Stage exact reviewed source on a separate branch; never bypass production gates.
+name: Uberhar stage reviewed 0.1.10
+on:
+  push:
+    branches: [uberhar/stage010-helper]
+    paths: [.github/workflows/uberhar-stage010.yml]
+permissions:
+  contents: write
+jobs:
+  stage:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: 1bce59f62b595da60f7f386e654bffbdeea5c876
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify reviewed patch and stage source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import base64, hashlib, json, os, pathlib, subprocess, urllib.request
+          parent = '1bce59f62b595da60f7f386e654bffbdeea5c876'
+          parts = ['c6770b848242a19ac70f430b28fece4103af5215',
+                   'e92f8dc4d4cfbf5406f83bd7771aa2b6c9e073dc',
+                   'e458cfc0c4e5ce155af565e9b8d0eca40bbe0de6',
+                   '2468406dd073fc690af60b45839b2dbb1a6c6e52',
+                   '9a514a5066be9e40abc0b10ec632c58666cc3703',
+                   '18d0f69bcd3a8763bc00dc963e54a8b8d9c7c942',
+                   'f465bb90b3ef40547ac7614ebd4a2353982cdb99',
+                   '051767f3c4f8441b869d373c37b7ba372f409f33',
+                   'c15efb638ab068690da6611fa2fba1e89eea8db2',
+                   '0509c2c4c81391f391100e83d87d151631c1be5c',
+                   '20e84d7821249d7dbeda9ece38c5211e09d5e1ce',
+                   'abbaf0175ddd2410e043c1c2b192203d5266f227',
+                   '176e24178aee93b612a703114d5e150a24471cd9',
+                   '6f5a3574089e441e37977d3c8f584fef9fb542cd',
+                   '655a5732788cb872afc1f5a8692c53e90f558d56',
+                   '165d48606975680b1ec27d9a6ff4f953278ed722']
+          data = bytearray()
+          for sha in parts:
+              request = urllib.request.Request(
+                  f'https://api.github.com/repos/RegiRex/uberhar/git/blobs/{sha}',
+                  headers={'Authorization': 'Bearer ' + os.environ['GH_TOKEN'],
+                           'Accept': 'application/vnd.github+json'})
+              with urllib.request.urlopen(request, timeout=30) as response:
+                  body = json.load(response)
+              assert body['encoding'] == 'base64'
+              chunk = base64.b64decode(body['content'])
+              assert hashlib.sha1(b'blob ' + str(len(chunk)).encode() + b'\0' + chunk).hexdigest() == sha
+              chunk.decode('utf-8')
+              data.extend(chunk)
+          assert len(data) == 109226
+          digest = hashlib.sha256(data).hexdigest()
+          assert digest == '185739a2724aef415b2730ec6b229ddd56ebdd9849f49017acca4fc4210b3dbd'
+          assert subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip() == parent
+          patch = pathlib.Path(os.environ['RUNNER_TEMP']) / 'reviewed.patch'
+          patch.write_bytes(data)
+          subprocess.run(['git', 'apply', '--check', str(patch)], check=True)
+          subprocess.run(['git', 'apply', str(patch)], check=True)
+          assert pathlib.Path('UBERHAR_VERSION').read_text().strip() == '0.1.10'
+          subprocess.run(['git', 'add', 'UBERHAR_VERSION', 'docs', 'src', 'tools/uberhar'], check=True)
+          paths = subprocess.check_output(['git', 'diff', '--cached', '--name-only'], text=True).splitlines()
+          assert len(paths) == 33
+          assert all(p == 'UBERHAR_VERSION' or p.startswith(('docs/', 'src/', 'tools/uberhar/')) for p in paths)
+          files = {p: subprocess.check_output(['git', 'rev-parse', ':' + p], text=True).strip() for p in paths}
+          manifest = hashlib.sha256(json.dumps(files, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+          assert manifest == '43ba0c2e6aaaa99e1b0995e7db98115ed3669a2b5f068cf94e28dbc82a59e064'
+          subprocess.run(['git', 'diff', '--cached', '--check'], check=True)
+          subprocess.run(['git', 'config', 'user.name', 'AstraPro'], check=True)
+          subprocess.run(['git', 'config', 'user.email', '83982867+RegiRex@users.noreply.github.com'], check=True)
+          subprocess.run(['git', 'commit', '-m', 'AstraPro: 0.1.10 bounded ready fragment specialization and scene-aligned testing'], check=True)
+          commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          tree = subprocess.check_output(['git', 'rev-parse', 'HEAD^{tree}'], text=True).strip()
+          # AstraPro: Credentials remain only in this same-repository push environment.
+          env = os.environ.copy()
+          env['GIT_CONFIG_COUNT'] = '1'
+          env['GIT_CONFIG_KEY_0'] = 'http.https://github.com/.extraheader'
+          env['GIT_CONFIG_VALUE_0'] = 'AUTHORIZATION: basic ' + base64.b64encode(('x-access-token:' + os.environ['GH_TOKEN']).encode()).decode()
+          subprocess.run(['git', 'push', 'https://github.com/RegiRex/uberhar.git',
+                          'HEAD:refs/heads/uberhar/stage-0.1.10-reviewed'], env=env, check=True)
+          proof = {'parent': parent, 'commit': commit, 'tree': tree, 'patch_sha256': digest,
+                   'files_sha256': manifest, 'files': files, 'production_updated': False}
+          pathlib.Path(os.environ['RUNNER_TEMP'], 'stage-proof.json').write_text(json.dumps(proof, indent=2))
+          print('STAGED_COMMIT=' + commit + ' TREE=' + tree + ' VERIFIED_FILES=' + manifest)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: uberhar-stage-proof-010
+          path: ${{ runner.temp }}/stage-proof.json
+          retention-days: 7
