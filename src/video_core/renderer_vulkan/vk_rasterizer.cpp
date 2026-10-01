@@ -450,10 +450,9 @@ bool RasterizerVulkan::AccelerateDrawBatchReady(bool is_indexed) {
     // AstraPro: Never bypass buffered CPU output left by an earlier non-draw.
     if (!vertex_batch.empty())
         return false;
-    if (!ReadyVertexPolicy::Eligible(
-            Settings::values.uberhar_test_mode.GetValue() == Settings::UberharTestMode::Automatic,
-            false, true, regs.pipeline.use_gs != Pica::PipelineRegs::UseGS::No,
-            regs.pipeline.triangle_topology, regs.pipeline.num_vertices))
+    // AstraPro: Revalidate actual debugger/assembly/winding/topology state. The
+    // Shader enum alone does not mean a guest geometry shader is executing.
+    if (!ReadyVertexPolicy::IsEligible(pica.GetReadyGpuVertexAdmission()))
         return false;
     // AstraPro: The stock accelerator assumes a valid index range. Validate it
     // before its min/max scan; malformed optional input retains legacy handling.

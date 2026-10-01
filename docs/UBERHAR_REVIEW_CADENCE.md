@@ -94,3 +94,13 @@ This is a focused extension, not a claimed reset of the full-review cadence.
 Default review remains after 0.1.10 evidence; allowed after 0.1.9–0.1.11, before
 0.1.12 if the beta number remains 0.1. Review earlier if GPU visual correctness
 regresses or measured route coverage invalidates the selected architecture.
+
+
+<!-- AstraPro: Eight 0.1.8 sessions identify a narrow admission blocker, not a new architecture. -->
+The [0.1.8 device analysis](UBERHAR_LOG_ANALYSIS_0.1.8.md) validates index rescue
+and finds all Dark Moon Combo draws excluded by Shader topology. 0.1.9 admits
+independent no-GS Shader lists with winding/assembly checks and retains Native
+as the control. This focused admission audit does not reset the full-review count.
+0.1.9 is successor three; default full review after 0.1.10 evidence, allowed after
+0.1.9–0.1.11, before 0.1.12. GPU visual regressions or high promotion without
+benefit should trigger earlier architectural reassessment.

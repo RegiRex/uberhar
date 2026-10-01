@@ -311,7 +311,8 @@ void PerfStats::LogUberharSettings(const char* event) {
         static_cast<u32>(values.texture_sampling.GetValue()), values.custom_textures.GetValue(),
         values.preload_textures.GetValue(), values.use_skip_duplicate_frames.GetValue(),
         values.delay_game_render_thread_us.GetValue(), values.simulate_3ds_gpu_timings.GetValue(),
-        mode == Settings::UberharTestMode::Automatic ? "eligible_lists" : "disabled");
+        // AstraPro: Name the expanded policy; selected routes are separate counters.
+        mode == Settings::UberharTestMode::Automatic ? "independent_lists_v2" : "disabled");
     const bool changed = text != uberhar_settings;
     if (changed && !uberhar_settings.empty())
         ++uberhar_settings_changes;

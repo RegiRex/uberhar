@@ -19,6 +19,12 @@
 #include "video_core/pica/shader_unit.h"
 #include "video_core/pica/uberhar_vertex_output.h" // AstraEH: Prepared native output and sparse samples.
 
+// AstraPro: A shared typed admission query lets Vulkan recheck the real PICA
+// assembler/debugger state, rather than substituting assumed-safe booleans.
+namespace Vulkan::ReadyVertexPolicy {
+enum class Admission : u32;
+}
+
 namespace Memory {
 class MemorySystem;
 }
@@ -123,6 +129,8 @@ public:
 
     void ProcessCmdList(PAddr list, u32 size, bool ignore_list);
 
+    Vulkan::ReadyVertexPolicy::Admission GetReadyGpuVertexAdmission() const;
+
 private:
     void InitializeRegs();
 
@@ -148,6 +156,8 @@ private:
     void LoadVertices(bool is_indexed, std::chrono::steady_clock::time_point batch_start);
     // AstraEH: Aggregate progress, including the engine actually in use.
     void ReportVirtualVertices(const char* kind, std::chrono::steady_clock::time_point now);
+    // AstraPro: GPU-heavy runs must not starve route progress diagnostics.
+    void ReportVirtualVerticesIfDue();
 
 public:
     union Regs {
@@ -432,6 +442,9 @@ private:
     // AstraPro: Count only successfully submitted optional GPU batches.
     u64 ready_gpu_vertex_batches{}, ready_gpu_vertex_inputs{}, ready_gpu_vertex_attempts{};
     std::array<u64, 5> ready_gpu_topologies{};
+    // AstraPro: Exclusive policy outcomes and actual accepted topology; host-only.
+    std::array<u64, 11> ready_gpu_admissions{};
+    std::array<u64, 5> ready_gpu_selected_topologies{};
     u64 native_index_retries{}, native_scanned_indices{}, native_index_rescues{},
         native_rescued_vertices{}, native_index_escapes{};
     NativeVertexSamples native_samples;

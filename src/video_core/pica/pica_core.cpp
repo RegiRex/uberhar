@@ -156,6 +156,19 @@ void PicaCore::ReportVirtualVertices(const char* kind, std::chrono::steady_clock
              kind, virtual_vertex_batches, ready_gpu_vertex_batches, ready_gpu_vertex_inputs,
              ready_gpu_vertex_attempts, ready_gpu_topologies[0], ready_gpu_topologies[1],
              ready_gpu_topologies[2], ready_gpu_topologies[3], ready_gpu_topologies[4]);
+    // AstraPro Log Line: Same 4096-batch/five-second cadence, plus final totals.
+    // Draw-weighted admission is not vertex, pixel or GPU-time coverage.
+    LOG_INFO(Render_Vulkan,
+             "Uberhar GPU admission {}: schema=1 scope=pica_title eligible_list={} "
+             "eligible_shader_list={} disabled={} debugger={} geometry={} assembly={} "
+             "winding={} topology={} small={} large={} incomplete={} "
+             "selected_topologies=[{},{},{},{},{}] weighting=draws exclusive=true",
+             kind, ready_gpu_admissions[0], ready_gpu_admissions[1], ready_gpu_admissions[2],
+             ready_gpu_admissions[3], ready_gpu_admissions[4], ready_gpu_admissions[5],
+             ready_gpu_admissions[6], ready_gpu_admissions[7], ready_gpu_admissions[8],
+             ready_gpu_admissions[9], ready_gpu_admissions[10], ready_gpu_selected_topologies[0],
+             ready_gpu_selected_topologies[1], ready_gpu_selected_topologies[2],
+             ready_gpu_selected_topologies[3], ready_gpu_selected_topologies[4]);
     virtual_window_start = now;
     virtual_last_ns = virtual_vertex_ns;
     virtual_last_inputs = virtual_vertex_inputs;
@@ -1115,6 +1128,28 @@ void PicaCore::DrawImmediate() {
     }
 }
 
+// AstraPro: Both entry points use the real assembler state. A topology mismatch,
+// retained partial primitive or pending Shader winding always preserves CPU execution.
+Vulkan::ReadyVertexPolicy::Admission PicaCore::GetReadyGpuVertexAdmission() const {
+    return Vulkan::ReadyVertexPolicy::Classify(
+        Settings::values.uberhar_test_mode.GetValue() == Settings::UberharTestMode::Automatic,
+        static_cast<bool>(debug_context), primitive_assembler.IsEmpty(),
+        regs.internal.pipeline.use_gs != PipelineRegs::UseGS::No,
+        primitive_assembler.GetTopology(), regs.internal.pipeline.num_vertices,
+        primitive_assembler.HasPendingWinding(),
+        primitive_assembler.GetTopology() == regs.internal.pipeline.triangle_topology);
+}
+
+// AstraPro: Count completed CPU and GPU batches, not CPU batches alone. This
+// reads the clock at most once per 4096 completed batches; no per-draw clock call.
+void PicaCore::ReportVirtualVerticesIfDue() {
+    if (((virtual_vertex_batches + ready_gpu_vertex_batches) & 4095) != 0)
+        return;
+    const auto now = std::chrono::steady_clock::now();
+    if (now - virtual_window_start >= std::chrono::seconds{5})
+        ReportVirtualVertices("progress", now);
+}
+
 void PicaCore::DrawArrays(bool is_indexed) {
     MICROPROFILE_SCOPE(GPU_Drawing);
 
@@ -1156,15 +1191,20 @@ void PicaCore::DrawArrays(bool is_indexed) {
         Settings::values.uberhar_test_mode.GetValue() == Settings::UberharTestMode::Automatic;
     if (ready_gpu_mode) {
         // AstraPro: Explain zero coverage without guessing which topologies a game uses.
-        ++ready_gpu_topologies[std::min<u32>(static_cast<u32>(primitive_assembler.GetTopology()), 4)];
-        if (Vulkan::ReadyVertexPolicy::Eligible(
-                true, static_cast<bool>(debug_context), primitive_assembler.IsEmpty(),
-                regs.internal.pipeline.use_gs != PipelineRegs::UseGS::No,
-                primitive_assembler.GetTopology(), regs.internal.pipeline.num_vertices)) {
+        const u32 topology =
+            std::min<u32>(static_cast<u32>(primitive_assembler.GetTopology()), 4);
+        ++ready_gpu_topologies[topology];
+        const auto admission = GetReadyGpuVertexAdmission();
+        static_assert(std::tuple_size_v<decltype(ready_gpu_admissions)> ==
+                      static_cast<u32>(Vulkan::ReadyVertexPolicy::Admission::Count));
+        ++ready_gpu_admissions[static_cast<u32>(admission)];
+        if (Vulkan::ReadyVertexPolicy::IsEligible(admission)) {
             ++ready_gpu_vertex_attempts;
             if (rasterizer->AccelerateDrawBatchReady(is_indexed)) {
                 ++ready_gpu_vertex_batches;
+                ++ready_gpu_selected_topologies[topology];
                 ready_gpu_vertex_inputs += regs.internal.pipeline.num_vertices;
+                ReportVirtualVerticesIfDue();
                 return;
             }
         }
@@ -1224,11 +1264,8 @@ void PicaCore::DrawArrays(bool is_indexed) {
 
     // AstraEH: Report only after the sampled draw is complete, so all sample denominators
     // match. Reuse the existing 4096-batch/five-second gate; no extra per-draw clock read.
-    if (virtual_test && (virtual_vertex_batches & 4095) == 0) {
-        const auto now = std::chrono::steady_clock::now();
-        if (now - virtual_window_start >= std::chrono::seconds{5})
-            ReportVirtualVertices("progress", now);
-    }
+    if (virtual_test)
+        ReportVirtualVerticesIfDue();
 
     if (debug_context) {
         debug_context->OnEvent(DebugContext::Event::FinishedPrimitiveBatch, nullptr);

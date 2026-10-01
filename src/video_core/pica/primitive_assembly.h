@@ -66,6 +66,12 @@ struct PrimitiveAssembler {
         return buffer_index == 0 && !strip_ready;
     }
 
+    // AstraPro: Read-only admission evidence. Do not clear a pending GS winding
+    // request to make a GPU draw eligible; the ordinary CPU path must consume it.
+    bool HasPendingWinding() const noexcept {
+        return winding;
+    }
+
     /**
      * Returns the current topology.
      */

@@ -350,3 +350,16 @@ per-title quota that could run out before the most useful scenes.
 
 Paths in the renderer rows are relative to `src/video_core/`. New GPU execution
 reuses inherited translation, not an AstraPro-authored GPU vertex interpreter.
+
+
+## 0.1.9 — AstraPro: independent Shader-list GPU admission
+
+- `pica/primitive_assembly.h`: read-only pending-winding accessor, no guest state layout change.
+- `renderer_vulkan/uberhar_gpu_vertex_policy.h`: typed exclusive admission classification; List and no-GS Shader lists, preserving limits.
+- `pica/pica_core.{h,cpp}`: shared real assembler/debugger/topology query, accepted-topology and admission counts, CPU+GPU progress gate.
+- `renderer_vulkan/vk_rasterizer.cpp`: recheck real PICA state rather than assumed-safe booleans.
+- `core/perf_stats.cpp`, `renderer_vulkan/vk_pipeline_cache.cpp`, Android `strings.xml`: policy label, diagnostic revision 20 and accurate mode description.
+- `tools/uberhar/test_ready_gpu_vertices.cpp`, `build_probe.sh`: production assembly/Vulkan mapping differentials and expanded contract tests.
+- `docs/UBERHAR_LOG_ANALYSIS_0.1.8.md`, `releases/0.1.9.md`: eight-session evidence, owner functional gates and versioned test card.
+
+Inherited shader translation, fragment accuracy guards, pipeline keys and driver workarounds are unchanged.

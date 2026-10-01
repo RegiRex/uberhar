@@ -709,3 +709,24 @@ No per-frame string/clock sampling is added to the renderer. The optional GPU
 shader compilation worker shares the existing driver cache: absence of an
 explicit wait is not absence of driver/compiler contention. First-use CPU
 pipeline waits and existing route limitations remain visible and unchanged.
+
+
+## 0.1.9 — AstraPro: independent-list admission and reporting
+
+Renderer diagnostic revision 20; settings policy `independent_lists_v2` only in Automatic.
+`Uberhar GPU admission` records exclusive first-failing draw-level decisions:
+`eligible_list`, `eligible_shader_list`, `disabled`, `debugger`, `geometry`,
+`assembly`, `winding`, `topology`, `small`, `large`, `incomplete`.
+Only Automatic attempts are classified, so disabled is normally zero.
+`topology` also includes a mismatch between registers and persistent assembler.
+`winding` applies only to Shader: List does not consume that flag.
+`selected_topologies=[List,Strip,Fan,Shader,Unknown]` counts actually submitted
+GPU draws, not requests. Eligibility does not establish dependency/driver readiness.
+These counts exclude immediate-mode draws, are host-only, and reset with PICA.
+
+The existing 4096-batch/five-second progress gate now counts completed CPU and
+GPU batches. CPU-stage totals remain CPU-only and cannot be compared across
+modes without GPU coverage. No GPU invocation or GPU-time estimate is invented.
+Old log parsers can still use existing PICA route counters; new fields are additive.
+A nonzero `eligible_shader_list` with zero selected Shader draws requires checking
+upload/dependency/pipeline state; it is not itself proof of improved performance.
