@@ -27,8 +27,10 @@ int main() {
         Check(!values.use_hw_shader.GetValue() && values.use_shader_jit.GetValue(),
               "profile must use CPU JIT with GPU vertex specialization disabled");
         Check(values.disable_spirv_optimizer.GetValue(), "first-use optimizer still active");
-        Check(values.uberhar_hybrid_tev.GetValue() && values.uberhar_force_tev.GetValue(),
-              "generic fragment route disabled");
+        Check(values.uberhar_hybrid_tev.GetValue(), "generic CPU recovery disabled");
+        // AstraPro: Only Combo opts out of forced-generic GPU fragments.
+        Check(values.uberhar_force_tev.GetValue() == (mode != UberharTestMode::Automatic),
+              "incorrect forced-generic profile");
         Check(values.resolution_factor.GetValue() == 3 && values.use_integer_scaling.GetValue(),
               "resolution changed");
     }

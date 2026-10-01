@@ -17,6 +17,15 @@ void FmtLogMessageImpl(Class, Level level, const char*, unsigned int, const char
 
 int main() {
     using namespace Vulkan;
+    // AstraPro: Optional specialized failures must recover just like optional
+    // generic ones; mandatory legacy failure policy remains unchanged.
+    for (bool generic : {false, true}) {
+        for (bool optional : {false, true}) {
+            PipelineBuildOptions options{nullptr, nullptr, generic, optional};
+            if (options.CanRecoverFailure() != (generic || optional))
+                throw std::runtime_error("optional pipeline failure policy");
+        }
+    }
     using FB = Pica::FramebufferRegs;
     const std::array<u64, 3> modules{0x100, 0x200, 0};
     PipelineInfo base{};

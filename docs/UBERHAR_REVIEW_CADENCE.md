@@ -104,3 +104,17 @@ as the control. This focused admission audit does not reset the full-review coun
 0.1.9 is successor three; default full review after 0.1.10 evidence, allowed after
 0.1.9–0.1.11, before 0.1.12. GPU visual regressions or high promotion without
 benefit should trigger earlier architectural reassessment.
+
+
+<!-- AstraPro: Early full review after three published successors; candidate is not publication. -->
+The [full 0.1.9 review](UBERHAR_ARCHITECTURE_0.1.9.md), completed locally on
+October 1, 2026, rechecks fourteen deduplicated sessions, changed resolutions,
+CPU/GPU routing, shader/pipeline costs, alternatives and correctness/lifetime
+constraints. High Dark Moon promotion without benefit justifies the early review.
+It selects bounded ready fragment specialization and measurement improvements,
+not broader unsafe topology admission. The public ledger is unchanged until the
+patch is applied; this local review anchor is 0.1.9. 0.1.10 is NOT counted until
+published. With unchanged beta numbers, default review after 0.1.13 evidence,
+allowed after 0.1.12–0.1.14, before 0.1.15. Failed same-version retries do not
+advance the count. Review sooner for correctness regressions or another failed
+performance hypothesis.

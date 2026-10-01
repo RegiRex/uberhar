@@ -441,6 +441,10 @@ private:
     // AstraPro: Exact-index retry coverage, reset with the PICA core.
     // AstraPro: Count only successfully submitted optional GPU batches.
     u64 ready_gpu_vertex_batches{}, ready_gpu_vertex_inputs{}, ready_gpu_vertex_attempts{};
+    // AstraPro: Periodic host attempt spans, not GPU execution or total CPU use.
+    // Sample one in 1024 attempts; the native CPU fallback happens after this span.
+    u64 ready_gpu_host_success_samples{}, ready_gpu_host_fallback_samples{};
+    u64 ready_gpu_host_success_ns{}, ready_gpu_host_fallback_ns{}, ready_gpu_host_max_ns{};
     std::array<u64, 5> ready_gpu_topologies{};
     // AstraPro: Exclusive policy outcomes and actual accepted topology; host-only.
     std::array<u64, 11> ready_gpu_admissions{};

@@ -18,6 +18,12 @@ namespace Vulkan {
 std::vector<u32> CompileGLSL(std::string_view code, vk::ShaderStageFlagBits stage,
                              std::string_view premable = "");
 
+// AstraPro: Optional jobs use their immutable profile's optimizer choice rather
+// than rereading a mutable UI setting on the compiler worker. Legacy callers
+// retain the existing three-argument entry point and setting behavior.
+std::vector<u32> CompileGLSL(std::string_view code, vk::ShaderStageFlagBits stage,
+                           std::string_view premable, bool disable_optimizer);
+
 /**
  * @brief Creates a vulkan shader module from SPIR-V bytecode.
  * @param code The SPIR-V bytecode data.

@@ -238,6 +238,91 @@ std::optional<std::pair<u64, Shader* const>> ShaderDiskCache::UseFragmentShader(
     return std::make_pair(fs_config_hash, &shader);
 }
 
+// AstraPro: Compile the inherited specialized fragment implementation, not a
+// relaxed approximation. CPU fallback continues until both this module and its
+// GPU pipeline are ready. The bounded in-memory cache never writes stock vkch.
+std::optional<std::pair<u64, Shader* const>> ShaderDiskCache::UseReadyFragmentShader(
+    const FSConfig& config, const Pica::Shader::UserConfig& user) {
+    ++ready_fragment_requests;
+    if (!user.IsCacheable()) {
+        ++ready_fragment_unsupported;
+        return {};
+    }
+    const u64 hash = config.Hash();
+    if (const auto it = ready_fragments.find(hash); it != ready_fragments.end()) {
+        auto& entry = *it->second;
+        // AstraPro: Compare immutable snapshots without copying a full profile
+        // on every ready-cache hit. Collision handling still checks both values.
+        if (!(entry.key.config == config) || !(entry.key.profile == parent.profile)) {
+            ++ready_fragment_mismatches;
+            return {}; // AstraPro: Full equality, not a hash, admits reuse.
+        }
+        auto& shader = entry.shader;
+        if (!shader.IsDone()) {
+            ++ready_fragment_busy;
+            return {};
+        }
+        if (shader.HasFailed() || !shader.Handle()) {
+            ++ready_fragment_failed_hits;
+            return {};
+        }
+        ++ready_fragment_hits;
+        return std::make_pair(hash, &shader);
+    }
+    const ReadyFragmentKey key{config, parent.profile};
+    if (!ready_fragment_demand.Observe(hash, key)) {
+        ++ready_fragment_cold;
+        return {};
+    }
+    const bool pending = warming_ready_fragment && !warming_ready_fragment->IsDone();
+    if (!ReadyFragmentPolicy::CanAdmit(ready_fragments.size(), pending)) {
+        if (pending) ++ready_fragment_busy;
+        else ++ready_fragment_capped;
+        return {};
+    }
+    auto object = std::make_unique<ReadyFragmentEntry>(parent.instance, key);
+    auto* entry = object.get();
+    ready_fragments.emplace(hash, std::move(object));
+    warming_ready_fragment = &entry->shader;
+    // AstraPro: All compiler inputs are immutable owned snapshots. A mutable
+    // renderer profile must not be read by this worker while emulation resumes.
+    const auto device = parent.instance.GetDevice();
+    parent.shader_workers.QueueWork([this, entry, device] {
+        const auto start = std::chrono::steady_clock::now();
+        bool failed = false;
+        try {
+            const auto& [fs, profile] = entry->key;
+            // AstraPro: Keep this optional experiment on the inherited GLSL
+            // specialization used by the existing full-fragment pixel oracle.
+            // This does not change the normal/custom renderer's SPIR-V choice.
+            const auto code = GLSL::GenerateFragmentShader(fs, {}, profile);
+            const auto spirv = CompileGLSL(code, vk::ShaderStageFlagBits::eFragment, "",
+                                           profile.vk_disable_spirv_optimizer != 0);
+            if (spirv.empty()) throw std::runtime_error("empty optional fragment module");
+            entry->shader.module = CompileSPV(spirv, device);
+            if (!entry->shader.module) throw std::runtime_error("null optional fragment module");
+        } catch (const std::exception& error) {
+            failed = true;
+            if (ready_fragment_failures.fetch_add(1) < 8) {
+                // AstraPro Log Line: Bound failure details; the CPU still renders.
+                LOG_ERROR(Render_Vulkan, "Uberhar optional GPU fragment failed: {}", error.what());
+            }
+        }
+        const u64 ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                           std::chrono::steady_clock::now() - start).count();
+        ready_fragment_compile_ns.fetch_add(ns);
+        // AstraPro: Admission permits one optional fragment compiler at a time;
+        // keep atomic stats so progress reporting never races its completion.
+        auto maximum = ready_fragment_max_compile_ns.load();
+        while (maximum < ns && !ready_fragment_max_compile_ns.compare_exchange_weak(maximum, ns)) {}
+        ready_fragment_builds.fetch_add(1);
+        if (failed) entry->shader.MarkFailed();
+        else entry->shader.MarkDone(); // Publish the module only after all writes.
+    });
+    ++ready_fragment_busy;
+    return {};
+}
+
 std::optional<std::pair<u64, Shader* const>> ShaderDiskCache::UseFixedGeometryShader(
     const Pica::RegsInternal& regs, bool ready_only) {
 
@@ -356,6 +441,19 @@ GraphicsPipeline* ShaderDiskCache::GetPipeline(const PipelineInfo& info) {
 
 // AstraEH: No new per-draw strings or sets: existing maps provide the census.
 void ShaderDiskCache::ReportUberharStats(const char* kind) const {
+    // AstraPro Log Line: Existing five-second/final cadence, not per draw.
+    LOG_INFO(Render_Vulkan,
+             "Uberhar ready GPU fragments {}: schema=1 scope=title requests={} ready_hits={} "
+             "cold_demand={} busy={} capped={} mismatches={} failed_hits={} unsupported={} "
+             "modules={} builds={} failures={} compile_ms={:.3f} max_compile_ms={:.3f} "
+             "demand_replacements={} max_modules={} warmup_draws={} storage=memory_only generator=glsl_specialized weighting=lookups",
+             kind, ready_fragment_requests, ready_fragment_hits, ready_fragment_cold,
+             ready_fragment_busy, ready_fragment_capped, ready_fragment_mismatches,
+             ready_fragment_failed_hits, ready_fragment_unsupported, ready_fragments.size(),
+             ready_fragment_builds.load(), ready_fragment_failures.load(),
+             ready_fragment_compile_ns.load() / 1e6, ready_fragment_max_compile_ns.load() / 1e6,
+             ready_fragment_demand.Replacements(), ReadyFragmentPolicy::MaxModules,
+             ReadyFragmentPolicy::WarmupDraws);
     // AstraPro Log Line: Existing bounded cadence; counts don't imply GPU timings.
     LOG_INFO(Render_Vulkan,
              "Uberhar GPU shader admission {}: schema=1 vs_deferred={} vs_capped={} gs_capped={} "

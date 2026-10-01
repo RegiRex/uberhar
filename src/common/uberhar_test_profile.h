@@ -23,7 +23,10 @@ inline void ApplyUberharTestProfile() {
     values.disable_spirv_optimizer = true;
     values.async_shader_compilation = false;
     values.uberhar_hybrid_tev = true;
-    values.uberhar_force_tev = true;
+    // AstraPro: Native/Compute keep the forced generic control. Combo may use
+    // ready specialized GPU fragments; its first-use CPU route stays generic.
+    // Frontends still restore the saved custom values before applying a preset.
+    values.uberhar_force_tev = mode != UberharTestMode::Automatic;
     values.uberhar_cpu_vertex_bridge = false;
     // AstraEH: 0.0.10's reference interpreter limited battle speed even at 1x.
     // Reuse the established CPU JIT while the GPU interpreter is unfinished.

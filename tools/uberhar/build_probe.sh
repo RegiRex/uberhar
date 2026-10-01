@@ -135,3 +135,11 @@ c++ -std=c++20 -O2 -DFMT_HEADER_ONLY -DXXH_INLINE_ALL \
   -Iexternals/vulkan-headers/include tools/uberhar/test_ready_gpu_vertices.cpp \
   src/video_core/pica/primitive_assembly.cpp -o build/uberhar-probe/test-ready-gpu-vertices
 build/uberhar-probe/test-ready-gpu-vertices
+
+# AstraPro: Optional specialization must be bounded and cannot alias configs by hash.
+c++ -std=c++20 -O2 -DFMT_HEADER_ONLY -DXXH_INLINE_ALL \
+  -Isrc -Iexternals/fmt/include -Iexternals/boost -Iexternals/xxHash \
+  -Iexternals/nihstro/include tools/uberhar/test_fragment_promotion.cpp \
+  src/video_core/shader/generator/pica_fs_config.cpp \
+  -o build/uberhar-probe/test-fragment-promotion
+build/uberhar-probe/test-fragment-promotion

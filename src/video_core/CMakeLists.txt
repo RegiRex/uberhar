@@ -188,6 +188,7 @@ if (ENABLE_VULKAN)
         renderer_vulkan/vk_memory_util.cpp
         renderer_vulkan/vk_memory_util.h
         renderer_vulkan/uberhar_gpu_vertex_policy.h # AstraPro: Ready-only GPU admission.
+        renderer_vulkan/uberhar_fragment_policy.h # AstraPro: Bounded optional specialization.
         renderer_vulkan/vk_rasterizer.cpp
         renderer_vulkan/vk_rasterizer.h
         renderer_vulkan/vk_rasterizer_cache.cpp

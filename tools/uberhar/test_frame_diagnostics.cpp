@@ -107,6 +107,37 @@ int main() {
               speed.Bands()[2].limit_max == 0 && speed.LimitTransitions() == 1 &&
               speed.Total().frames == 5,
           "Uncapped/transition accounting changed total evidence");
+    // AstraPro: Setting transitions remain in raw timing but must not be
+    // mislabeled by a report's final scale/mode. Exercise both endpoints, reset,
+    // actual auto-resolution zero, unknown provenance and a paused switch.
+    using Ctx = Core::UberharFrameDiagnostics::RenderContext;
+    Core::UberharFrameDiagnostics context;
+    context.Observe(0, 0, 0, 0, 100, false, {}, Ctx{1, 2});
+    context.Observe(10, 10, 1, 1, 100, false, {}, Ctx{1, 2});
+    context.ResetWindow();
+    context.Observe(20, 20, 2, 1, 100, false, {}, Ctx{3, 4});
+    auto rc = context.Window().render_context;
+    Check(rc.mode_min == 1 && rc.mode_max == 3 && rc.resolution_min == 2 &&
+          rc.resolution_max == 4 && rc.changes == 1 && rc.unknown_frames == 0,
+          "boundary settings lost previous endpoint");
+    context.ResetWindow();
+    context.Observe(30, 30, 3, 1, 100, false, {}, Ctx{3, 4});
+    rc = context.Window().render_context;
+    Check(rc.mode_min == 3 && rc.mode_max == 3 && rc.resolution_min == 4 &&
+          rc.resolution_max == 4 && rc.changes == 0, "window reset retained old range");
+    context.BreakInterval();
+    context.Observe(100, 30, 3, 0, 100, false, {}, Ctx{1, 0});
+    context.ResetWindow();
+    context.Observe(110, 40, 4, 1, 100, false, {}, Ctx{1, 0});
+    rc = context.Window().render_context;
+    Check(rc.resolution_min == 0 && rc.resolution_max == 0 && rc.changes == 0 &&
+          rc.unknown_frames == 0, "pause/auto resolution mislabeled");
+    context.Observe(120, 50, 5, 1, 100, false); // unknown context
+    Check(context.Window().render_context.unknown_frames == 1,
+          "unknown setting context silently considered fixed");
+    Check(context.Total().frames == 5 && context.Total().wall_ns == 50,
+          "render context changed numeric timing or pause behavior");
+    std::puts("PASS: sampled mode/resolution ranges, crossing window, pause, automatic and unknown contexts");
     std::puts(
         "PASS: pacing, speed, fast-forward, pause, clock/state boundaries and late worst frames");
 }

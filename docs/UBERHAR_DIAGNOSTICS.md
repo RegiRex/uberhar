@@ -730,3 +730,20 @@ modes without GPU coverage. No GPU invocation or GPU-time estimate is invented.
 Old log parsers can still use existing PICA route counters; new fields are additive.
 A nonzero `eligible_shader_list` with zero selected Shader draws requires checking
 upload/dependency/pipeline state; it is not itself proof of improved performance.
+
+
+## 0.1.10 candidate diagnostics — AstraPro
+
+`ready_gpu_fragment_policy=specialized_ready_v1` identifies the Combo policy, not a measured fast path. `force_tev=false` is intentional in the effective Combo preset; Native and Compute retain true. The CPU first-use route remains generic.
+
+`Uberhar ready GPU fragments`: shader-cache-object/title-scoped lookup counters, optional modules/builds/failures, frontend/module creation duration, demand replacements and fixed budgets. Lookup counts include preflight and final preparation, so they are not exclusive draw counts. Compilation wall time can overlap other work; do not add it to foreground stalls or GPU time. `storage=memory_only`, `generator=glsl_specialized`. Exact-profile collisions may defer rather than reuse an incompatible entry.
+
+`fragment_preflight_deferred` in ready GPU totals: optional attempts stopped before vertex analysis/uploads because the fragment module was not usable. It does not measure uploaded bytes or claim a speed gain. Final preparation revalidates state after synchronization.
+
+`optimized_gpu_draws` in virtual-native totals: covered draws that used ready specialized GPU fragments, distinct from generic draws and mandatory specialized recovery. `transport_bypassed_gpu`: optional GPU-only attempts that did not decode unused generic transport; it can exceed selected draws because pipeline readiness may still fail. A complete CPU retry prepares transport again. Existing preparation/recovery counts remain separate.
+
+`Uberhar GPU host attempts`: one sample per 1,024 actual optional GPU attempts. Success/fallback sample counts and summed sample spans, plus sampled maximum. Includes host acceleration preparation/submission and possible waits/backpressure, excludes the later CPU retry, and is NOT GPU execution or utilization. Fixed-period sampling may alias repeated workloads; do not extrapolate the sum to a whole-frame GPU budget.
+
+Frame records append `mode_min`, `mode_max`, `resolution_min`, `resolution_max`, `render_context_changes`, `render_unknown_frames`, `render_context_source=frame_end_settings`. Ranges include both sampled endpoints of each valid interval. Pauses re-anchor; window reset preserves the preceding endpoint; automatic scale zero is not unknown. A pure fixed-setting comparison requires equal appropriate ranges, zero changes and zero unknown frames in addition to a constant speed limit. These are setting observations, not physical output dimensions; a change-and-revert between samples can still be invisible. Raw overall and speed-band timing are retained. Older records without these fields still need conservative first-observed-change exclusion.
+
+All new log calls remain on existing bounded five-second/final reporting paths or the eight-detail optional-fragment error cap. No per-draw text is introduced. New host/context sampling has a cost that requires device validation, not a claimed zero-overhead guarantee.

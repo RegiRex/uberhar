@@ -225,7 +225,11 @@ void PerfStats::EndSystemFrame(std::chrono::microseconds guest_time) {
         }
     }
     uberhar_frames.Observe(now_ns, guest_time.count(), uberhar_game_frames, work_ns,
-                           Settings::GetFrameLimit(), Settings::is_temporary_frame_limit, activity);
+                           Settings::GetFrameLimit(), Settings::is_temporary_frame_limit, activity,
+                           // AstraPro: Two small setting samples disambiguate live 2x/4x
+                           // changes without per-frame text or altered speed accounting.
+                           {static_cast<u32>(Settings::values.uberhar_test_mode.GetValue()),
+                            Settings::values.resolution_factor.GetValue()});
     if (uberhar_frames.Window().wall_ns >= 5'000'000'000ULL) {
         LogUberharSettings("sample"); // AstraEH: No additional per-frame settings work.
         LogUberharFrames("window", uberhar_frames.Window());
@@ -295,7 +299,7 @@ void PerfStats::LogUberharSettings(const char* event) {
         "vsync_setting={} accurate_mul={} spirv_generator={} optimizer_disabled={} "
         "texture_filter={} texture_sampling={} custom_textures={} preload_textures={} "
         "skip_duplicate_frames={} render_thread_delay_us={} simulate_gpu_timings={} "
-        "ready_gpu_vertex_policy={}",
+        "ready_gpu_vertex_policy={} ready_gpu_fragment_policy={}",
         mode_index < mode_names.size() ? mode_names[mode_index] : "Unknown",
         api_index < api_names.size() ? api_names[api_index] : "Unknown",
         values.resolution_factor.GetValue(), values.resolution_factor.GetValue() ? "fixed" : "auto",
@@ -312,7 +316,11 @@ void PerfStats::LogUberharSettings(const char* event) {
         values.preload_textures.GetValue(), values.use_skip_duplicate_frames.GetValue(),
         values.delay_game_render_thread_us.GetValue(), values.simulate_3ds_gpu_timings.GetValue(),
         // AstraPro: Name the expanded policy; selected routes are separate counters.
-        mode == Settings::UberharTestMode::Automatic ? "independent_lists_v2" : "disabled");
+        mode == Settings::UberharTestMode::Automatic ? "independent_lists_v2" : "disabled",
+        // AstraPro: Snapshot the new choice, not an assertion of measured GPU use.
+        mode == Settings::UberharTestMode::Automatic
+            ? (values.uberhar_force_tev.GetValue() ? "generic_control" : "specialized_ready_v1")
+            : "disabled");
     const bool changed = text != uberhar_settings;
     if (changed && !uberhar_settings.empty())
         ++uberhar_settings_changes;
@@ -334,20 +342,27 @@ void PerfStats::LogUberharFrames(const char* kind,
     const double seconds = data.wall_ns / 1e9;
     const auto& h = data.intervals;
     // AstraEH Log Line: Once per five observed seconds, bounded pause details, and normal shutdown.
+    // AstraPro Log Line: Frame-end setting ranges reveal mixed scale/mode windows;
+    // these are not backend surface sizes or physical-display measurements.
     LOG_INFO(
         Core,
         "Uberhar frames {}: session={} mode={} resolution={} frame_limit={} temporary_limit={} "
         "frames={} game_submissions={} observed_wall_ms={:.3f} system_fps={:.3f} game_fps={:.3f} "
         "speed_percent={:.3f} work_ms={:.3f} max_work_ms={:.3f} max_interval_ms={:.3f} "
         "interval_bins=[{},{},{},{},{},{},{},{}] pauses={} paused_ms={:.3f} excluded={} "
-        "clock_discontinuities={} display_timing=false",
+        "clock_discontinuities={} display_timing=false "
+        "mode_min={} mode_max={} resolution_min={} resolution_max={} "
+        "render_context_changes={} render_unknown_frames={} render_context_source=frame_end_settings",
         kind, uberhar_session, static_cast<u32>(Settings::values.uberhar_test_mode.GetValue()),
         Settings::values.resolution_factor.GetValue(), Settings::GetFrameLimit(),
         Settings::is_temporary_frame_limit, data.frames, data.game_frames, data.wall_ns / 1e6,
         data.frames / seconds, data.game_frames / seconds, data.guest_us / (seconds * 10000.0),
         data.work_ns / 1e6, data.max_work_ns / 1e6, data.max_interval_ns / 1e6, h[0], h[1], h[2],
         h[3], h[4], h[5], h[6], h[7], uberhar_pause_count, uberhar_paused_ns / 1e6,
-        uberhar_frames.ExcludedIntervals(), uberhar_frames.Discontinuities());
+        uberhar_frames.ExcludedIntervals(), uberhar_frames.Discontinuities(), data.render_context.mode_min,
+        data.render_context.mode_max, data.render_context.resolution_min,
+        data.render_context.resolution_max, data.render_context.changes,
+        data.render_context.unknown_frames);
     // AstraEH Log Line: Same bounded cadence; I/O is evidence, never confirmation of
     // non-interactivity.
     const auto& phases = data.phase_frames;

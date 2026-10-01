@@ -88,9 +88,13 @@ public:
                       GraphicsPipeline* ready_cpu_fallback = nullptr, bool allow_tev_build = true,
                       GraphicsPipeline* ready_gpu_vertex = nullptr);
 
+    // AstraPro: A conservative fragment preflight avoids speculative vertex
+    // uploads while optional specialization is cold/pending. It cannot authorize
+    // drawing: PrepareReadyGpuVertex rechecks the final synchronized draw state.
+    bool ReadyGpuFragmentPreflight(const Pica::RegsInternal& regs,
+                                   const Pica::Shader::UserConfig& user);
     // AstraPro: Nonblocking GPU promotion; a null result requires the full CPU
-    // draw. Generic fragment modules must already exist, so speculative GPU work
-    // cannot queue ahead of the CPU bank's first-use fragment compilation.
+    // draw. Mandatory CPU-generic first-use handling remains independent.
     bool ReadyVertexShaders() const;
     GraphicsPipeline* PrepareReadyGpuVertex(const PipelineInfo& info);
 
@@ -121,7 +125,8 @@ public:
     void UseTrivialGeometryShader();
 
     /// Binds a fragment shader generated from PICA state
-    void UseFragmentShader(const Pica::RegsInternal& regs, const Pica::Shader::UserConfig& user);
+    void UseFragmentShader(const Pica::RegsInternal& regs, const Pica::Shader::UserConfig& user,
+                           bool preparing_ready_gpu = false);
 
     /// Gets the current program ID
     u64 GetProgramID() const {
@@ -207,6 +212,10 @@ private:
     std::unordered_map<u64, std::unique_ptr<GraphicsPipeline>> ready_vertex_pipelines;
     GraphicsPipeline* warming_ready_vertex{};
     PipelineBuildStats ready_vertex_build_stats;
+    // AstraPro: Optimized covered fragments are distinct from correctness recovery.
+    u64 virtual_specialized_gpu_draws{};
+    u64 tev_transport_bypassed_gpu{};
+    u64 ready_fragment_preflight_deferred{};
     u64 ready_vertex_requests{}, ready_vertex_selected{}, ready_vertex_dependency_misses{},
         ready_vertex_deferred{}, ready_vertex_capped{}, ready_vertex_failed{},
         ready_vertex_key_mismatches{};

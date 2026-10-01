@@ -469,6 +469,11 @@ bool RasterizerVulkan::AccelerateDrawBatchReady(bool is_indexed) {
                std::numeric_limits<u32>::max()) {
         return false;
     }
+    // AstraPro: Reject optional fragment misses before scanning/flushing/uploading
+    // vertices. A previous user-config snapshot may conservatively defer a draw;
+    // the final config/profile/modules are checked again after full state sync.
+    if (!pipeline_cache.ReadyGpuFragmentPreflight(regs, user_config))
+        return false;
     ready_vertex_attempt = true;
     ready_vertex_pipeline = nullptr;
     SCOPE_EXIT({
@@ -719,7 +724,7 @@ bool RasterizerVulkan::Draw(bool accelerate, bool is_indexed) {
     SyncUtilityTextures(framebuffer);
 
     // Sync and bind the shader
-    pipeline_cache.UseFragmentShader(regs, user_config);
+    pipeline_cache.UseFragmentShader(regs, user_config, ready_vertex_attempt);
 
     if (ready_vertex_attempt) {
         ready_vertex_pipeline = pipeline_cache.PrepareReadyGpuVertex(pipeline_info);

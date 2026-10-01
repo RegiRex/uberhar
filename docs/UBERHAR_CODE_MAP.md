@@ -363,3 +363,22 @@ reuses inherited translation, not an AstraPro-authored GPU vertex interpreter.
 - `docs/UBERHAR_LOG_ANALYSIS_0.1.8.md`, `releases/0.1.9.md`: eight-session evidence, owner functional gates and versioned test card.
 
 Inherited shader translation, fragment accuracy guards, pipeline keys and driver workarounds are unchanged.
+
+
+## 0.1.10 candidate — AstraPro
+
+- `uberhar_fragment_policy.h`: bounded repeated-demand admission and explicit generic-transport consumer rule.
+- `vk_shader_disk_cache.{h,cpp}`: isolated ready specialized fragment cache; immutable config/profile identity, worker publication, failure containment and lookup/cost counters.
+- `vk_pipeline_cache.{h,cpp}`: fragment preflight, ready specialized GPU pipeline selection, optimized-route/transport counters; CPU fallback is unchanged.
+- `vk_rasterizer.cpp`: preflight before vertex analysis/upload, final synchronized checks, generic-transport bypass only for optional GPU attempts.
+- `vk_graphics_pipeline.{h,cpp}`: recoverable optional errors separated from shader-kind statistics.
+- `uberhar_test_profile.h` / Android strings: Combo specialization effective preset, saved custom settings preserved; Native/Compute retain forced generic control.
+- `pica_core.{h,cpp}`: sparse host attempt timing, never described as GPU execution time.
+- `uberhar_frame_diagnostics.h` / `perf_stats.cpp`: frame-end setting ranges, transitions and unknown provenance without deleting timing samples.
+- `test_fragment_promotion.cpp`, pipeline/profile/frame tests: bounded policy, hash collisions, reset, CPU retry, failure handling and context boundaries.
+- `compare_fragment_state.py`: bounded test-driver program lifetime with the same full pixel corpus.
+- `UBERHAR_ARCHITECTURE_0.1.9.md`, release/test-card docs: measured evidence, alternatives, local candidate and explicit publication limits.
+
+No new emulator dependency, public telemetry or permission. Full compute, strip/fan continuation, programmable guest GS, physical latency, FEA ghosting and universal speed qualification are not delivered by this candidate.
+
+- `vk_shader_util.{h,cpp}`: explicit optimizer-input overload for immutable optional jobs; old callers preserve their setting-based behavior. The glslang-dependent translation unit still requires the full CI build.

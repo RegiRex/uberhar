@@ -162,6 +162,12 @@ bool InitializeCompiler() {
 
 std::vector<u32> CompileGLSL(std::string_view code, vk::ShaderStageFlagBits stage,
                              std::string_view premable) {
+    // AstraPro: Preserve legacy callers while allowing explicit worker snapshots.
+    return CompileGLSL(code, stage, premable, Settings::values.disable_spirv_optimizer.GetValue());
+}
+
+std::vector<u32> CompileGLSL(std::string_view code, vk::ShaderStageFlagBits stage,
+                           std::string_view premable, bool disable_optimizer) {
     if (!InitializeCompiler()) {
         return {};
     }
@@ -205,7 +211,7 @@ std::vector<u32> CompileGLSL(std::string_view code, vk::ShaderStageFlagBits stag
     glslang::SpvOptions options;
 
     // Controls optimizations on the generated SPIR-V code.
-    options.disableOptimizer = Settings::values.disable_spirv_optimizer.GetValue();
+    options.disableOptimizer = disable_optimizer; // AstraPro: Explicit caller snapshot.
     options.validate = false;
     options.optimizeSize = true;
 

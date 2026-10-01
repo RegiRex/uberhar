@@ -15,6 +15,7 @@
 #include "video_core/pica/shader_setup.h"
 #include "video_core/rasterizer_interface.h"
 #include "video_core/renderer_vulkan/vk_graphics_pipeline.h"
+#include "video_core/renderer_vulkan/uberhar_fragment_policy.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/shader/generator/pica_fs_config.h"
 #include "video_core/shader/generator/profile.h"
@@ -38,6 +39,11 @@ public:
         const Pica::Shader::FSConfig& fs_config, const Pica::Shader::UserConfig& user);
     std::optional<std::pair<u64, Shader* const>> UseFixedGeometryShader(
         const Pica::RegsInternal& regs, bool ready_only = false);
+
+    // AstraPro: Nonblocking optional specialization; no transferable-cache mutation.
+    // Only completed, successful, full-config/profile-matched modules are returned.
+    std::optional<std::pair<u64, Shader* const>> UseReadyFragmentShader(
+        const Pica::Shader::FSConfig& config, const Pica::Shader::UserConfig& user);
 
     GraphicsPipeline* GetPipeline(const PipelineInfo& info);
     // AstraEH: Read renderer-owned cache sizes and foreground VS translation costs.
@@ -365,6 +371,31 @@ private:
     std::unordered_set<u64> known_vertex_programs;
 
     std::unordered_map<u64, Shader> fragment_shaders;
+
+    // AstraPro: Isolated, map-stable optional modules are destroyed only after the
+    // parent drains shader and pipeline users. Failed entries stay failed; they
+    // cannot poison the inherited mandatory-recovery shader cache.
+    struct ReadyFragmentKey {
+        Pica::Shader::FSConfig config;
+        Pica::Shader::Profile profile;
+        bool operator==(const ReadyFragmentKey& other) const {
+            return config == other.config && profile == other.profile;
+        }
+    };
+    struct ReadyFragmentEntry {
+        ReadyFragmentEntry(const Instance& instance, const ReadyFragmentKey& key_)
+            : key(key_), shader(instance) {}
+        ReadyFragmentKey key;
+        Shader shader;
+    };
+    std::unordered_map<u64, std::unique_ptr<ReadyFragmentEntry>> ready_fragments;
+    ReadyFragmentPolicy::DemandGate<ReadyFragmentKey> ready_fragment_demand;
+    Shader* warming_ready_fragment{};
+    u64 ready_fragment_requests{}, ready_fragment_hits{}, ready_fragment_cold{},
+        ready_fragment_busy{}, ready_fragment_capped{}, ready_fragment_mismatches{},
+        ready_fragment_failed_hits{}, ready_fragment_unsupported{};
+    std::atomic<u64> ready_fragment_builds{}, ready_fragment_failures{},
+        ready_fragment_compile_ns{}, ready_fragment_max_compile_ns{};
 
     std::unordered_map<size_t, Shader> fixed_geometry_shaders;
     std::unordered_set<u64> known_geometry_shaders;

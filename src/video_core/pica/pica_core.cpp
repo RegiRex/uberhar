@@ -102,6 +102,16 @@ PicaCore::~PicaCore() {
 // AstraEH: Windowed CPU work identifies sustained geometry cost despite unequal run lengths.
 // Human absence is not inferred: a game can continue rendering while its player steps away.
 void PicaCore::ReportVirtualVertices(const char* kind, std::chrono::steady_clock::time_point now) {
+    // AstraPro Log Line: Existing five-second/final reporting gate. Periodic
+    // samples can alias recurring draw patterns; never extrapolate a GPU budget.
+    LOG_INFO(Render_Vulkan,
+             "Uberhar GPU host attempts {}: schema=1 success_samples={} fallback_samples={} "
+             "success_ms={:.3f} fallback_ms={:.3f} sample_max_ms={:.3f} period_attempts=1024 "
+             "scope=sampled_host_acceleration_prepare_submit timing=host_wall_gpu_execution_unknown",
+             kind, ready_gpu_host_success_samples, ready_gpu_host_fallback_samples,
+             ready_gpu_host_success_ns / 1e6, ready_gpu_host_fallback_ns / 1e6,
+             ready_gpu_host_max_ns / 1e6);
+
     const double window_ms =
         virtual_window_start == std::chrono::steady_clock::time_point{}
             ? 0.0
@@ -1200,7 +1210,20 @@ void PicaCore::DrawArrays(bool is_indexed) {
         ++ready_gpu_admissions[static_cast<u32>(admission)];
         if (Vulkan::ReadyVertexPolicy::IsEligible(admission)) {
             ++ready_gpu_vertex_attempts;
-            if (rasterizer->AccelerateDrawBatchReady(is_indexed)) {
+            // AstraPro: Attribute recurring host preparation separately from CPU
+            // vertex execution. No per-draw timing and no inference of GPU time.
+            const bool sample_attempt = (ready_gpu_vertex_attempts & 1023U) == 0;
+            const auto attempt_start = sample_attempt ? std::chrono::steady_clock::now()
+                                                     : std::chrono::steady_clock::time_point{};
+            const bool promoted = rasterizer->AccelerateDrawBatchReady(is_indexed);
+            if (sample_attempt) {
+                const u64 ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    std::chrono::steady_clock::now() - attempt_start).count();
+                ++(promoted ? ready_gpu_host_success_samples : ready_gpu_host_fallback_samples);
+                (promoted ? ready_gpu_host_success_ns : ready_gpu_host_fallback_ns) += ns;
+                ready_gpu_host_max_ns = std::max(ready_gpu_host_max_ns, ns);
+            }
+            if (promoted) {
                 ++ready_gpu_vertex_batches;
                 ++ready_gpu_selected_topologies[topology];
                 ready_gpu_vertex_inputs += regs.internal.pipeline.num_vertices;

@@ -116,7 +116,7 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
     LOG_INFO(
         Render_Vulkan,
         "Uberhar: hybrid_tev={} force_tev={} async_shaders={} spirv_generator={} "
-        "diagnostics=20 first_ready=true compact_tev=true canonical_tev=true dynamic_fragment=true "
+        "diagnostics=21 first_ready=true compact_tev=true canonical_tev=true dynamic_fragment=true "
         "cpu_bridge={} bridge_policy=ready_only fallback_abi={} push_bytes={} "
         "runtime_lighting_luts=true runtime_lighting_enables=true runtime_light_loop=true "
         "runtime_tev_plan=true prepared_tev_operands=true phase_diagnostics=1 "
@@ -536,7 +536,14 @@ bool PipelineCache::BindPipeline(PipelineInfo& info, bool wait_built,
     }
     const bool cpu_bridge = pipeline != nullptr && !ready_gpu_vertex;
     bool virtual_generic = false;
-    if (virtual_fs_config) {
+    // AstraPro: Specialized promotion is an optimization, not unsupported-state
+    // recovery and not a dynamic TEV draw. Do not upload generic push constants
+    // or label it generic merely because the CPU fallback has a virtual config.
+    const bool specialized_gpu = ready_gpu_vertex && virtual_fs_config &&
+        ReadyFragmentPolicy::PreferSpecialized(force_tev, tev_user.IsCacheable());
+    if (specialized_gpu) {
+        ++virtual_specialized_gpu_draws;
+    } else if (virtual_fs_config) {
         // AstraEH: Start only the requested generic pipeline, never a speculative rival.
         // Until the ready bank is complete this wait is real, separately measured work.
         // AstraPro: A promoted draw uses its hardware-VS pipeline, never a
@@ -892,6 +899,23 @@ bool PipelineCache::ReadyVertexShaders() const {
 // AstraPro: Speculate only after every shader dependency is usable. One serial
 // build may be in flight; it uses a distinct 256-entry cache and never consumes
 // mandatory CPU-generic pipeline slots. Failure/pending/caps retain CPU rendering.
+bool PipelineCache::ReadyGpuFragmentPreflight(const Pica::RegsInternal& regs,
+                                               const Pica::Shader::UserConfig& user) {
+    if (!ready_vertex_worker || !curr_disk_cache)
+        return false;
+    if (!ReadyFragmentPolicy::PreferSpecialized(force_tev, user.IsCacheable()))
+        return true;
+    const FSConfig config{regs};
+    // AstraPro: Preserve all generic support guards. Unsupported states already
+    // use the mandatory specialized path; do not give them speculative behavior.
+    if (GLSL::CheckDynamicTevSupport(config, user) != GLSL::DynamicTevSupport::Ready)
+        return true;
+    if (curr_disk_cache->UseReadyFragmentShader(config, user))
+        return true;
+    ++ready_fragment_preflight_deferred;
+    return false; // No uploads or framebuffer ownership changes occurred.
+}
+
 GraphicsPipeline* PipelineCache::PrepareReadyGpuVertex(const PipelineInfo& info) {
     ++ready_vertex_requests;
     if (!ready_vertex_worker || !ReadyVertexShaders()) {
@@ -900,7 +924,17 @@ GraphicsPipeline* PipelineCache::PrepareReadyGpuVertex(const PipelineInfo& info)
     }
     auto stages = current_shaders;
     u64 fragment_id = shader_hashes[ProgramType::FS];
-    if (virtual_fs_config) {
+    const bool specialize = virtual_fs_config &&
+        ReadyFragmentPolicy::PreferSpecialized(force_tev, tev_user.IsCacheable());
+    if (specialize) {
+        const auto fragment = curr_disk_cache->UseReadyFragmentShader(*virtual_fs_config, tev_user);
+        if (!fragment) {
+            ++ready_vertex_dependency_misses;
+            return nullptr;
+        }
+        fragment_id = fragment->first;
+        stages[ProgramType::FS] = fragment->second;
+    } else if (virtual_fs_config) {
         fragment_id = GLSL::MakeDynamicTevFamilyConfig(*tev_family_config, profile).Hash();
         const auto shader = tev_shaders.find(fragment_id);
         if (shader == tev_shaders.end()) {
@@ -946,7 +980,7 @@ GraphicsPipeline* PipelineCache::PrepareReadyGpuVertex(const PipelineInfo& info)
         instance, renderpass_cache, candidate, *driver_pipeline_cache, *pipeline_layout,
         stages, ready_vertex_worker.get(),
         PipelineBuildOptions{&pipeline_completion, &ready_vertex_build_stats,
-                             virtual_fs_config.has_value()});
+                             virtual_fs_config.has_value() && !specialize, true});
     auto* prepared = pipeline.get();
     ready_vertex_pipelines.emplace(key, std::move(pipeline));
     warming_ready_vertex = prepared;
@@ -1006,7 +1040,8 @@ void PipelineCache::UseTrivialGeometryShader() {
 }
 
 void PipelineCache::UseFragmentShader(const Pica::RegsInternal& regs,
-                                      const Pica::Shader::UserConfig& user) {
+                                      const Pica::Shader::UserConfig& user,
+                                      bool preparing_ready_gpu) {
 
     // AstraEH: Capture runtime controls before canonicalization. Lighting/procedural
     // structure and typed cube resources remain specialized; LUT controls/source slots are runtime.
@@ -1017,9 +1052,17 @@ void PipelineCache::UseFragmentShader(const Pica::RegsInternal& regs,
         // will never consume. Every supported draw still takes its own full snapshot.
         tev_support_reason = GLSL::CheckDynamicTevSupport(*tev_family_config, user);
         tev_supported = tev_support_reason == GLSL::DynamicTevSupport::Ready;
-        if (tev_supported) {
+        const bool need_transport = ReadyFragmentPolicy::NeedsDynamicTransport(
+            tev_supported, preparing_ready_gpu,
+            ReadyFragmentPolicy::PreferSpecialized(force_tev, user.IsCacheable()));
+        if (need_transport) {
             tev_constants = GLSL::MakeDynamicTevState(*tev_family_config, profile);
             ++tev_transport_prepared;
+        } else if (tev_supported) {
+            // AstraPro: This attempt can use only a ready specialized GPU FS or
+            // return for a complete CPU draw. No generic consumer sees old data;
+            // the CPU retry calls this again with preparing_ready_gpu=false.
+            ++tev_transport_bypassed_gpu;
         } else {
             ++tev_transport_skipped;
         }
@@ -1398,12 +1441,12 @@ void PipelineCache::ReportUberharStats(const char* kind) {
              "Uberhar ready GPU vertices {}: schema=1 scope=renderer_lifetime requests={} selected={} dependency_misses={} "
              "deferred={} capped={} failed_draw_attempts={} key_mismatches={} pipelines={} "
              "builds={} driver_ms={:.3f} driver_max_ms={:.3f} max_pipelines=256 "
-             "selection=ready_only fallback=full_cpu_draw",
+             "selection=ready_only fallback=full_cpu_draw fragment_preflight_deferred={}",
              kind, ready_vertex_requests, ready_vertex_selected, ready_vertex_dependency_misses,
              ready_vertex_deferred, ready_vertex_capped, ready_vertex_failed,
              ready_vertex_key_mismatches, ready_vertex_pipelines.size(),
              ready_vertex_build_stats.builds.load(), ready_vertex_build_stats.driver_ns.load()/1e6,
-             ready_vertex_build_stats.driver_max_ns.load()/1e6);
+             ready_vertex_build_stats.driver_max_ns.load()/1e6, ready_fragment_preflight_deferred);
 
     // AstraEH: File presence at load and observed compatible reuse answer different
     // questions. Fingerprint changes can produce present_files + cold_encountered.
@@ -1452,25 +1495,26 @@ void PipelineCache::ReportUberharStats(const char* kind) {
         LOG_INFO(Render_Vulkan,
                  "Uberhar virtual native {}: generic_draws={} recovery_draws={} generic_waits={} "
                  "generic_wait_ms={:.3f} generic_max_wait_ms={:.3f} vertex_engine={} "
-                 "complete_ready_bank=false",
+                 "complete_ready_bank=false optimized_gpu_draws={}",
                  kind, virtual_generic_draws, virtual_recovery_draws, virtual_waits,
                  virtual_wait_ns / 1000000.0, virtual_max_wait_ns / 1000000.0,
-                 ready_vertex_worker ? "cpu_and_ready_gpu" : "cpu");
+                 ready_vertex_worker ? "cpu_and_ready_gpu" : "cpu", virtual_specialized_gpu_draws);
     }
     // AstraEH Log Line: One exclusive route-reason summary at the existing cadence.
     // Counts describe draw-path choices, never GPU cost or lost visuals.
     if (Settings::values.uberhar_test_mode.GetValue() != Settings::UberharTestMode::Custom) {
+        // AstraPro Log Line: GPU transport bypass is not unsupported-fragment recovery.
         LOG_INFO(Render_Vulkan,
                  "Uberhar recovery reasons {}: schema=1 spirv_incompatible={} shadow2d={} "
                  "gas_fog={} custom_user={} light_count={} lighting_lut={} add_signed={} "
                  "generic_failed={} generic_unavailable={} disabled_or_other={} "
-                 "transport_prepared={} transport_skipped={} weighting=draws exclusive=true",
+                 "transport_prepared={} transport_skipped={} transport_bypassed_gpu={} weighting=draws exclusive=true",
                  kind, virtual_recovery_reasons[1], virtual_recovery_reasons[2],
                  virtual_recovery_reasons[3], virtual_recovery_reasons[4],
                  virtual_recovery_reasons[5], virtual_recovery_reasons[6],
                  virtual_recovery_reasons[7], virtual_recovery_reasons[8],
                  virtual_recovery_reasons[9], virtual_recovery_reasons[10],
-                 tev_transport_prepared, tev_transport_skipped);
+                 tev_transport_prepared, tev_transport_skipped, tev_transport_bypassed_gpu);
     }
     // AstraEH: Cumulative buckets at the existing cadence; build time and wait time overlap.
     if (hybrid_tev) {

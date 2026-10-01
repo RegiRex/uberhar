@@ -12,6 +12,37 @@ namespace Core {
 // These are emulator frame-end intervals, not Android display presentation timestamps.
 class UberharFrameDiagnostics {
 public:
+    // AstraPro: Sample setting values at frame boundaries, not just when a
+    // five-second report is emitted. Unknown is distinct from automatic scale 0.
+    struct RenderContext {
+        static constexpr u32 Unknown = ~u32{};
+        u32 mode{Unknown}, resolution{Unknown};
+        bool Known() const { return mode != Unknown && resolution != Unknown; }
+        bool operator==(const RenderContext&) const = default;
+    };
+    struct RenderContextCounters {
+        u32 mode_min{}, mode_max{}, resolution_min{}, resolution_max{};
+        u64 known_frames{}, unknown_frames{}, changes{};
+        void Add(RenderContext previous, RenderContext current) {
+            if (!previous.Known() || !current.Known()) {
+                ++unknown_frames;
+                return;
+            }
+            const u32 ml = std::min(previous.mode, current.mode);
+            const u32 mh = std::max(previous.mode, current.mode);
+            const u32 rl = std::min(previous.resolution, current.resolution);
+            const u32 rh = std::max(previous.resolution, current.resolution);
+            if (known_frames++ == 0) {
+                mode_min = ml; mode_max = mh;
+                resolution_min = rl; resolution_max = rh;
+            } else {
+                mode_min = std::min(mode_min, ml); mode_max = std::max(mode_max, mh);
+                resolution_min = std::min(resolution_min, rl);
+                resolution_max = std::max(resolution_max, rh);
+            }
+            changes += !(previous == current);
+        }
+    };
     struct Counters {
         u64 frames{}, game_frames{}, wall_ns{}, guest_us{}, work_ns{};
         u64 max_interval_ns{}, max_work_ns{};
@@ -21,6 +52,7 @@ public:
         // AstraEH: Keep unknown/mixed time visible instead of hiding it as loading.
         std::array<u64, Common::UberharActivity::PhaseCount> phase_frames{};
         u64 read_requests{}, requested_bytes{};
+        RenderContextCounters render_context; // AstraPro: No timing samples are discarded.
     };
     struct SlowFrame {
         u64 frame{}, end_ns{}, interval_ns{}, work_ns{};
@@ -29,7 +61,8 @@ public:
     };
 
     void Observe(u64 now_ns, s64 guest_us, u64 game_frames, u64 work_ns, double frame_limit,
-                 bool temporary_limit, Common::UberharActivity::Snapshot activity = {}) {
+                 bool temporary_limit, Common::UberharActivity::Snapshot activity = {},
+                 RenderContext render_context = {RenderContext::Unknown, RenderContext::Unknown}) {
         if (!anchored || now_ns <= last_ns || guest_us < last_guest_us ||
             game_frames < last_game_frames) {
             ++excluded_intervals;
@@ -45,18 +78,19 @@ public:
             const u64 bytes =
                 activity.bytes >= last_activity.bytes ? activity.bytes - last_activity.bytes : 0;
             Add(window, elapsed, guest_elapsed, games, work_ns, frame_limit, temporary_limit, phase,
-                reads, bytes);
+                reads, bytes, last_render_context, render_context);
             Add(total, elapsed, guest_elapsed, games, work_ns, frame_limit, temporary_limit, phase,
-                reads, bytes);
+                reads, bytes, last_render_context, render_context);
             Add(phase_bands[static_cast<std::size_t>(phase)], elapsed, guest_elapsed, games,
-                work_ns, frame_limit, temporary_limit, phase, reads, bytes);
+                work_ns, frame_limit, temporary_limit, phase, reads, bytes,
+                last_render_context, render_context);
             // AstraEH: Separate normal, fast-forward and uncapped throughput without
             // per-frame logging. A limit transition remains in overall timing, but
             // cannot be assigned wholly to either band, so exclude it from bands.
             if (frame_limit == last_limit && temporary_limit == last_temporary) {
                 const std::size_t band = frame_limit == 0 ? 2 : frame_limit > 100 ? 1 : 0;
                 Add(bands[band], elapsed, guest_elapsed, games, work_ns, frame_limit,
-                    temporary_limit, phase, reads, bytes);
+                    temporary_limit, phase, reads, bytes, last_render_context, render_context);
             } else {
                 ++limit_transitions;
             }
@@ -76,6 +110,7 @@ public:
         last_limit = frame_limit;
         last_temporary = temporary_limit;
         last_activity = activity;
+        last_render_context = render_context;
     }
 
     // AstraEH: Discard the interval crossing an explicit pause; retain all completed samples.
@@ -130,7 +165,8 @@ private:
     }
     static void Add(Counters& out, u64 elapsed, u64 guest, u64 games, u64 work, double frame_limit,
                     bool temporary_limit, Common::UberharActivity::Phase phase, u64 reads,
-                    u64 bytes) {
+                    u64 bytes, RenderContext previous_context, RenderContext current_context) {
+        out.render_context.Add(previous_context, current_context);
         if (out.frames == 0)
             out.limit_min = out.limit_max = frame_limit;
         out.limit_min = std::min(out.limit_min, frame_limit);
@@ -154,6 +190,7 @@ private:
         ++out.intervals[bucket];
     }
     Counters window, total;
+    RenderContext last_render_context{};
     std::array<Counters, Common::UberharActivity::PhaseCount> phase_bands{};
     Common::UberharActivity::Snapshot last_activity{};
     std::array<Counters, 3> bands{};

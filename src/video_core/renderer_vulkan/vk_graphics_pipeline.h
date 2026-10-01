@@ -395,6 +395,12 @@ struct PipelineBuildOptions {
     PipelineBuildStats* stats{};
     // AstraEH: Diagnostic label only; both paths use normal driver optimization.
     bool is_fallback{};
+    // AstraPro: Optional specialized pipelines also publish failure for CPU
+    // recovery. Keep this distinct from the fragment-kind diagnostic label.
+    bool recoverable_failure{};
+    constexpr bool CanRecoverFailure() const {
+        return is_fallback || recoverable_failure;
+    }
 };
 
 class GraphicsPipeline : public Common::AsyncHandle {

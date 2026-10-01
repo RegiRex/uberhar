@@ -332,7 +332,7 @@ bool GraphicsPipeline::Build(bool fail_on_compile_required) {
         return false;
     } else {
         // AstraEH: Let the fallback owner publish failure and retain specialization.
-        if (build_options.is_fallback) {
+        if (build_options.CanRecoverFailure()) {
             return false;
         }
         UNREACHABLE_MSG("Graphics pipeline creation failed!");

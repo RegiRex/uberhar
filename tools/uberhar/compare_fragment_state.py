@@ -7,6 +7,7 @@ push-constant and texel-buffer transport are adapted; fragment math and real
 """
 from pathlib import Path
 import re
+from collections import OrderedDict
 import struct
 import sys
 import moderngl
@@ -82,14 +83,23 @@ target = ctx.framebuffer([color], depth_attachment=depth)
 target.use()
 ctx.enable(moderngl.DEPTH_TEST)
 ctx.depth_func = "<="
-programs = {}
+# AstraPro: Bound the oracle's driver objects so the complete corpus can run on
+# memory-limited workers. Eviction changes only host test-object lifetime, never
+# shader source, state cases, expected pixels, or the pass/fail comparison.
+programs = OrderedDict()
+MAX_RESIDENT_PROGRAMS = 16
 
 
 def draw(path):
     source = adapt(path.read_text())
     if source not in programs:
+        if len(programs) >= MAX_RESIDENT_PROGRAMS:
+            _, (old_program, old_vao) = programs.popitem(last=False)
+            old_vao.release()
+            old_program.release()
         program = ctx.program(vertex_shader=vertex, fragment_shader=source)
         programs[source] = (program, ctx.vertex_array(program, []))
+    programs.move_to_end(source)
     program, vao = programs[source]
     target.clear(0.37, 0.19, 0.53, 0.71, depth=1.0)
     vao.render(mode=moderngl.TRIANGLES, vertices=3)
@@ -116,3 +126,8 @@ for i in range(1056):
     if i % 48 == 47:
         print(f"Compared {i + 1} full fragment states", flush=True)
 print(f"PASS: {count} exact RGBA8 pixels and {count} depth/discard comparisons across 1056 states", flush=True)
+
+# AstraPro: Explicitly release remaining test objects after the full comparison.
+for program, vao in programs.values():
+    vao.release()
+    program.release()
