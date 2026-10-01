@@ -128,3 +128,14 @@ The full-review anchor remains 0.1.9 (0.1.10 successor one, 0.1.11 successor two
 once published). The regression requires early source/device review before any
 further expansion of the experimental GPU path; obtaining a preserved short
 reproduction takes priority over another throughput milestone or suite replay.
+
+
+<!-- AstraPro: Matched evidence identifies a narrow retry defect and a working control. -->
+The [0.1.12 correctness review](UBERHAR_CORRECTNESS_0.1.12.md) uses the preserved
+0.1.10 Dark Moon pair plus Sonic's positive Combo pair. It corrects lost pending
+clip/viewport transport without altering the GPU/fragment policies. This focused
+review does not reset the full 0.1.9 anchor. 0.1.11's publication workflow passed;
+0.1.12 counts as successor three only after publication. Default full review
+remains after 0.1.13 evidence; allowed 0.1.12-0.1.14, before 0.1.15. The original
+Dark Moon crash cause and device image parity remain open, regardless of local
+host-test success or Sonic throughput.

@@ -765,3 +765,16 @@ failure note goes to stderr while normal logging is suppressed during creation.
 The first consumed record and periodic consumed timestamps trigger stdio flushes;
 this is not fsync, queue draining on a signal or guaranteed final crash context.
 The older-file addition cannot reconstruct already-lost 0.1.10 playtime.
+
+
+<!-- AstraPro: Pending transport is not the same as a bad frame or a crash. -->
+## 0.1.12 uniform transport
+`Uberhar uniform transport totals: pending_vs_resyncs=N scope=rasterizer_lifetime
+observed=unuploaded_clip_viewport_block_revisited` is emitted once at Vulkan
+rasterizer destruction. It counts a sync that revisits pending VS data with no
+new flip or clipping-register change. A deferred ready-GPU draw is one possible
+cause, not the only cause. Initial/restored pending data can also count. No GPU
+time, corrupted-pixel count, crash detection, or per-title split is implied.
+The 32-byte clip/viewport block is distinct from PICA vertex program constants.
+The periodic 0.1.11 flush/older retention remains, but a crash can still omit a
+final lifetime summary. No per-draw timing or extra device control is introduced.

@@ -144,6 +144,11 @@ RasterizerVulkan::RasterizerVulkan(Memory::MemorySystem& memory, Pica::PicaCore&
 }
 
 RasterizerVulkan::~RasterizerVulkan() {
+    // AstraPro Log Line: One bounded lifetime summary, never a per-draw log.
+    LOG_INFO(Render_Vulkan,
+             "Uberhar uniform transport totals: pending_vs_resyncs={} "
+             "scope=rasterizer_lifetime observed=unuploaded_clip_viewport_block_revisited",
+             pending_vs_uniform_resyncs);
     if (compute_rect) {
         // AstraEH: Queued compute/timestamp commands must finish before their owners die.
         scheduler.Finish();

@@ -69,6 +69,8 @@ protected:
     Pica::Shader::Generator::VSUniformData vs_data{};
     Pica::Shader::Generator::FSUniformData fs_data{};
     bool vs_data_dirty = true;
+    // AstraPro: Revisited pending CPU-side VS block; not a GPU time/error metric.
+    u64 pending_vs_uniform_resyncs = 0;
     bool fs_data_dirty = true;
 };
 

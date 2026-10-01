@@ -396,3 +396,14 @@ No new emulator dependency, public telemetry or permission. Full compute, strip/
 - `tools/uberhar/build_probe.sh`: run retention tests in the normal host gate.
 - Android `LogExporter.kt` is deliberately unchanged: current and old only;
   `azahar_log.older.txt` is a manual filesystem emergency backup.
+
+
+<!-- AstraPro: 0.1.12 pending-uniform correctness, without reverting Sonic acceleration. -->
+## Pending clip/viewport transport
+- `rasterizer_accelerated.cpp/.h`: accumulate VS dirty state until upload; count
+  repeated sync of an unuploaded block without adding clocks or per-draw logging.
+- `renderer_vulkan/vk_rasterizer.cpp`: one lifetime diagnostic for that counter.
+- `tools/uberhar/test_uniform_retry.py`: extract and exercise the production sync
+  body with real data types and a modeled owner/upload boundary; run in host CI.
+- `docs/UBERHAR_CORRECTNESS_0.1.12.md`: deduplicated Dark Moon/Sonic evidence,
+  owner lap/detour notes, source defect, alternatives and limits.

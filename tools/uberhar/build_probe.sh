@@ -4,6 +4,8 @@
 set -euo pipefail
 mkdir -p build/uberhar-probe
 python3 tools/uberhar/check_android_keys.py
+# AstraPro: A deferred GPU attempt must not erase an unuploaded vertex uniform block.
+python3 tools/uberhar/test_uniform_retry.py
 # AstraPro: Preserve current/old/older logs under restarts and filesystem faults.
 c++ -std=c++20 -O2 -Isrc tools/uberhar/test_log_retention.cpp \
   -o build/uberhar-probe/test-log-retention

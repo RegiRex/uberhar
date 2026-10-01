@@ -148,7 +148,13 @@ void RasterizerAccelerated::SyncDrawUniforms() {
     // that we don't depend on. So avoid the dirty table and check manually
     const bool is_flipped = regs.framebuffer.framebuffer.IsFlipped();
     const bool prev_flipped = std::exchange(vs_data.flip_viewport, is_flipped);
-    vs_data_dirty = is_flipped != prev_flipped;
+    // AstraPro: Dirty means not uploaded, not merely changed in this sync. A
+    // ready-GPU attempt can consume register dirtiness and return before
+    // UploadUniforms; its CPU retry must retain pending clip/viewport data.
+    // Only the existing upload path may clear this flag.
+    if (vs_data_dirty && is_flipped == prev_flipped && !dirty.CheckClipping())
+        ++pending_vs_uniform_resyncs;
+    vs_data_dirty |= is_flipped != prev_flipped;
 
     // Sync clip plane uniforms
     if (dirty.CheckClipping()) {
