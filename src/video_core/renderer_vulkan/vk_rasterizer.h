@@ -143,6 +143,10 @@ private:
     // AstraEH: One draw's pre-submission CPU routing decision, consumed by DrawTriangles.
     PipelineCache::CpuBridgePreparation cpu_bridge{};
     // AstraPro: Scoped to one call; no ready handle survives a draw or title switch.
+    // AstraPro: Bounded host-state evidence shared by Native and Combo.
+    u32 fixed_attribute_max_bytes{};
+    u64 fixed_attribute_over_legacy{}, diagnostic_draws{};
+    std::chrono::steady_clock::time_point next_draw_snapshot{};
     bool ready_vertex_attempt{};
     GraphicsPipeline* ready_vertex_pipeline{};
     std::chrono::steady_clock::time_point cpu_bridge_start{};

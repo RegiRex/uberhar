@@ -407,3 +407,17 @@ No new emulator dependency, public telemetry or permission. Full compute, strip/
   body with real data types and a modeled owner/upload boundary; run in host CI.
 - `docs/UBERHAR_CORRECTNESS_0.1.12.md`: deduplicated Dark Moon/Sonic evidence,
   owner lap/detour notes, source defect, alternatives and limits.
+
+
+<!-- AstraPro: 0.1.13 keeps CPU and GPU work independently measurable. -->
+## Native mapping reuse and targeted GPU diagnostics
+- `pica/uberhar_vertex_plan_cache.h`: exact value-only one-entry mapping cache;
+  `pica_core.cpp/.h` use it and report hits/builds at the existing cadence.
+- `renderer_vulkan/vk_rasterizer.cpp/.h`: correct 17-vector fixed reservation,
+  capacity totals and bounded synchronized draw-state snapshots.
+- `renderer_vulkan/vk_graphics_pipeline.h`: immutable diagnostic stage mask.
+- `renderer_vulkan/vk_pipeline_cache.cpp`: bounded optional pipeline completion
+  records with captured stage/state identity; no mutable PICA reads on workers.
+- `tools/uberhar/test_vertex_plan_cache.cpp` and `test_fixed_attribute_reserve.py`:
+  live-payload equivalence and production writer capacity regression tests.
+- `docs/UBERHAR_LOG_ANALYSIS_0.1.12.md`: mode/marker-qualified data and limits.

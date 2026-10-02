@@ -116,7 +116,7 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
     LOG_INFO(
         Render_Vulkan,
         "Uberhar: hybrid_tev={} force_tev={} async_shaders={} spirv_generator={} "
-        "diagnostics=21 first_ready=true compact_tev=true canonical_tev=true dynamic_fragment=true "
+        "diagnostics=22 first_ready=true compact_tev=true canonical_tev=true dynamic_fragment=true "
         "cpu_bridge={} bridge_policy=ready_only fallback_abi={} push_bytes={} "
         "runtime_lighting_luts=true runtime_lighting_enables=true runtime_light_loop=true "
         "runtime_tev_plan=true prepared_tev_operands=true phase_diagnostics=1 "
@@ -986,7 +986,16 @@ GraphicsPipeline* PipelineCache::PrepareReadyGpuVertex(const PipelineInfo& info)
     warming_ready_vertex = prepared;
     // AstraPro: Build errors publish failed completion. CPU never waits on this
     // worker; keep even failed objects stable until drained title reset/shutdown.
-    ready_vertex_worker->QueueWork([prepared] {
+    // AstraPro: Capture immutable stage/state identities for this bounded optional
+    // cache (at most 256 records per title). No worker reads mutable PICA state.
+    const auto shader_ids = candidate.state.shader_ids;
+    const auto raster = candidate.state.rasterization;
+    const auto attachments = candidate.state.attachments;
+    const auto layout = candidate.state.vertex_layout;
+    const u64 title = current_program_id;
+    const u64 ordinal = ready_vertex_pipelines.size();
+    ready_vertex_worker->QueueWork([prepared, shader_ids, raster, attachments, layout,
+                                    title, ordinal, specialize] {
         try {
             if (!prepared->Build())
                 prepared->MarkFailed();
@@ -994,6 +1003,18 @@ GraphicsPipeline* PipelineCache::PrepareReadyGpuVertex(const PipelineInfo& info)
             if (!prepared->IsDone())
                 prepared->MarkFailed();
         }
+        // AstraPro Log Line: One completion per admitted pipeline, including
+        // failures. This is driver creation time, NEVER GPU execution time.
+        LOG_INFO(Render_Vulkan,
+                 "Uberhar GPU pipeline detail: schema=1 title={:016X} ordinal={} "
+                 "key={:016X} vs={:016X} fs={:016X} gs={:016X} stages={} "
+                 "specialized_optional={} topology={} bindings={} attributes={} "
+                 "color_format={} depth_format={} driver_ms={:.3f} failed={} limit=256",
+                 title, ordinal, prepared->Key(), shader_ids[0], shader_ids[1], shader_ids[2],
+                 prepared->ShaderStageMask(), specialize, static_cast<u32>(raster.topology.Value()),
+                 layout.binding_count, layout.attribute_count,
+                 static_cast<u32>(attachments.color), static_cast<u32>(attachments.depth),
+                 prepared->DriverBuildNs() / 1e6, prepared->HasFailed());
     });
     ++ready_vertex_deferred;
     return nullptr;

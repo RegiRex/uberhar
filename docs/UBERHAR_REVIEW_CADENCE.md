@@ -139,3 +139,14 @@ review does not reset the full 0.1.9 anchor. 0.1.11's publication workflow passe
 remains after 0.1.13 evidence; allowed 0.1.12-0.1.14, before 0.1.15. The original
 Dark Moon crash cause and device image parity remain open, regardless of local
 host-test success or Sonic throughput.
+
+
+<!-- AstraPro: New Native requirement and persistent Combo anomalies keep the early review active. -->
+The [0.1.12 evidence and 0.1.13 decision](UBERHAR_LOG_ANALYSIS_0.1.12.md) separates
+Sonic's owner-marked racing windows, corrects intended versus recorded LEGO modes,
+and keeps Native optimization parallel to Combo diagnosis. It fixes a reproduced
+fixed-attribute capacity defect and adds exact semantic-plan reuse plus bounded
+stage/state diagnostics. Neither patch is declared the Dark Moon crash cure.
+This focused review does NOT reset the full 0.1.9 anchor. 0.1.13 becomes successor
+four only after publication; default full review remains after its evidence,
+allowed after 0.1.12–0.1.14 and before 0.1.15. No performance gate is waived.

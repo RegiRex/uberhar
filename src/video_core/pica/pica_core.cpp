@@ -179,6 +179,12 @@ void PicaCore::ReportVirtualVertices(const char* kind, std::chrono::steady_clock
              ready_gpu_admissions[9], ready_gpu_admissions[10], ready_gpu_selected_topologies[0],
              ready_gpu_selected_topologies[1], ready_gpu_selected_topologies[2],
              ready_gpu_selected_topologies[3], ready_gpu_selected_topologies[4]);
+    // AstraPro Log Line: Same five-second/final gate; hits are preparation reuse,
+    // not vertex-cache hits or a measured speedup. No game data is retained.
+    LOG_INFO(Render_Vulkan,
+             "Uberhar native plan {}: schema=1 hits={} builds={} capacity=1 "
+             "scope=pica_lifetime reuse=register_semantics_only",
+             kind, native_plan_cache.Hits(), native_plan_cache.Builds());
     virtual_window_start = now;
     virtual_last_ns = virtual_vertex_ns;
     virtual_last_inputs = virtual_vertex_inputs;
@@ -1327,7 +1333,9 @@ void PicaCore::LoadVertices(bool is_indexed, std::chrono::steady_clock::time_poi
     const bool virtual_test =
         Settings::values.uberhar_test_mode.GetValue() != Settings::UberharTestMode::Custom;
     if (virtual_test && !debug_context && pipeline.use_gs == PipelineRegs::UseGS::No) {
-        const NativeVertexPlan plan{regs.internal.vs, regs.internal.rasterizer};
+        // AstraPro: Refresh on exact mapping changes; live inputs and uniforms
+        // are still loaded and shaded for every FIFO miss in this draw.
+        const auto& plan = native_plan_cache.Get(regs.internal.vs, regs.internal.rasterizer);
         if (plan.Supported()) {
             // AstraEH: A conservative index-domain bound avoids a second index scan.
             // Pin each guest span for this draw only; range uncertainty retains the

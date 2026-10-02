@@ -778,3 +778,25 @@ time, corrupted-pixel count, crash detection, or per-title split is implied.
 The 32-byte clip/viewport block is distinct from PICA vertex program constants.
 The periodic 0.1.11 flush/older retention remains, but a crash can still omit a
 final lifetime summary. No per-draw timing or extra device control is introduced.
+
+
+<!-- AstraPro: 0.1.13 bounded host diagnostics are not GPU pixel evidence. -->
+## 0.1.13 Native and Combo evidence
+`Uberhar native plan progress/totals` counts one-entry exact semantic mapping
+hits/builds, not saved nanoseconds or reused vertex payloads. Scope is PICA lifetime.
+`Uberhar fixed attributes totals` reports max_bytes and over_legacy_reservation;
+reserved_bytes is 272. An old-bound crossing is not a crash or corruption count.
+`Uberhar GPU pipeline detail` emits once for each admitted optional pipeline
+(at most 256 per cache generation), with captured title/stage IDs, stage mask,
+topology, binding/attribute counts, attachment formats, driver_ms and failed.
+Stage mask bits 0/1/2 represent vertex/fragment/geometry; IDs identify programs,
+not game object names. Driver_ms is creation wall time, not GPU execution time.
+`Uberhar draw snapshot` samples prepared synchronized state at most once per five
+seconds, checking the clock every 4,096 prepared draws. Pipeline/stages zero on a
+CPU path mean no optional-ready handle, not that no actual graphics pipeline is
+used. Snapshots can precede a failed bind and do not claim successful submission.
+Fields identify clip/flip, viewport/scissor, framebuffer guest addresses, input
+count and output mask. No guest payload or screenshot is captured. A one-frame
+black region may fall between samples. Existing raw frame timing is unchanged.
+All new log calls carry AstraPro Log Line comments. Renderer diagnostics are 22;
+shader identity/ABI, current/old export choices and older backup are unchanged.

@@ -422,6 +422,14 @@ public:
         return build_phase.load(std::memory_order::relaxed);
     }
     [[nodiscard]] u64 Key() const noexcept;
+    // AstraPro: Immutable stage presence for diagnostic classification only.
+    // Bits follow the existing array order: vertex, fragment, geometry.
+    [[nodiscard]] u32 ShaderStageMask() const noexcept {
+        u32 mask = 0;
+        for (u32 i = 0; i < stages.size(); ++i)
+            mask |= static_cast<u32>(stages[i] != nullptr) << i;
+        return mask;
+    }
     // AstraPro: Collision-safe optional-promotion validation, excluding live descriptors/uniforms.
     [[nodiscard]] bool MatchesExecution(const PipelineInfo& candidate,
                                         const std::array<u64, MAX_SHADER_STAGES>& shaders) const;

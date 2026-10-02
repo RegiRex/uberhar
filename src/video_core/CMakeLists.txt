@@ -31,6 +31,7 @@ add_library(video_core STATIC EXCLUDE_FROM_ALL
     pica/uberhar_vertex_input.h
     pica/uberhar_vertex_cache.h
     pica/uberhar_vertex_output.h # AstraEH: Prepared native output and bounded CPU samples.
+    pica/uberhar_vertex_plan_cache.h # AstraPro: Value-only Native mapping reuse.
     pica/output_vertex.cpp
     pica/output_vertex.h
     pica/primitive_assembly.cpp

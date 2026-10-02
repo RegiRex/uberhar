@@ -17,6 +17,7 @@
 #include "video_core/pica/regs_lcd.h"
 #include "video_core/pica/shader_setup.h"
 #include "video_core/pica/shader_unit.h"
+#include "video_core/pica/uberhar_vertex_plan_cache.h"
 #include "video_core/pica/uberhar_vertex_output.h" // AstraEH: Prepared native output and sparse samples.
 
 // AstraPro: A shared typed admission query lets Vulkan recheck the real PICA
@@ -451,6 +452,8 @@ private:
     std::array<u64, 5> ready_gpu_selected_topologies{};
     u64 native_index_retries{}, native_scanned_indices{}, native_index_rescues{},
         native_rescued_vertices{}, native_index_escapes{};
+    // AstraPro: Pure mapping reuse also accelerates CPU fallback inside Combo.
+    NativeVertexPlanCache native_plan_cache;
     NativeVertexSamples native_samples;
     // AstraEH: Host-only admission state; ordinary batches add no diagnostic clock reads.
     NativeVertexSampleBudget native_sample_budget;

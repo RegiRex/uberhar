@@ -149,6 +149,11 @@ RasterizerVulkan::~RasterizerVulkan() {
              "Uberhar uniform transport totals: pending_vs_resyncs={} "
              "scope=rasterizer_lifetime observed=unuploaded_clip_viewport_block_revisited",
              pending_vs_uniform_resyncs);
+    // AstraPro Log Line: One final capacity summary, no crash-cause inference.
+    LOG_INFO(Render_Vulkan,
+             "Uberhar fixed attributes totals: max_bytes={} over_legacy_reservation={} "
+             "reserved_bytes=272 scope=rasterizer_lifetime",
+             fixed_attribute_max_bytes, fixed_attribute_over_legacy);
     if (compute_rect) {
         // AstraEH: Queued compute/timestamp commands must finish before their owners die.
         scheduler.Finish();
@@ -366,7 +371,11 @@ void RasterizerVulkan::SetupFixedAttribs() {
     const auto& vertex_attributes = regs.pipeline.vertex_attributes;
     VertexLayout& layout = pipeline_info.state.vertex_layout;
 
-    auto [fixed_ptr, fixed_offset, _] = stream_buffer.Map(16 * sizeof(Common::Vec4f), 0);
+    // AstraPro: Reserve the leading fallback vector PLUS up to sixteen distinct
+    // fixed-register vectors. The old 16-vector reservation could write/commit
+    // 272 bytes into a 256-byte reservation. This is a proven capacity bound,
+    // not evidence that Dark Moon used this worst-case layout.
+    auto [fixed_ptr, fixed_offset, _] = stream_buffer.Map(17 * sizeof(Common::Vec4f), 0);
     binding_offsets[layout.binding_count] = static_cast<u32>(fixed_offset);
 
     // Reserve the last binding for fixed and default attributes
@@ -420,6 +429,10 @@ void RasterizerVulkan::SetupFixedAttribs() {
     binding.fixed.Assign(1);
     binding.byte_count.Assign(offset);
 
+    // AstraPro: Count layouts exceeding the former reservation without logging
+    // each draw or attributing the earlier crash to an unobserved layout.
+    fixed_attribute_max_bytes = std::max(fixed_attribute_max_bytes, offset);
+    fixed_attribute_over_legacy += offset > 16 * sizeof(Common::Vec4f);
     stream_buffer.Commit(offset);
 }
 
@@ -780,6 +793,37 @@ bool RasterizerVulkan::Draw(bool accelerate, bool is_indexed) {
         compute_rect->BeginSample(timing_slot);
     }
     renderpass_cache.BeginRendering(framebuffer, draw_rect);
+
+    // AstraPro: Sample synchronized state, not a preflight's stale dynamic info.
+    // Only every 4096th completed preparation reads a clock, with a five-second
+    // ceiling. No queue flush, GPU readback, render-pass split or per-draw text.
+    if (((++diagnostic_draws) & 4095U) == 0) {
+        const auto now = std::chrono::steady_clock::now();
+        if (now >= next_draw_snapshot) {
+            next_draw_snapshot = now + std::chrono::seconds{5};
+            // AstraPro Log Line: Sparse state evidence, not a GPU timing/sample
+            // of a confirmed bad frame. Guest addresses identify render targets.
+            LOG_INFO(Render_Vulkan,
+                     "Uberhar draw snapshot: schema=1 title={:016X} ordinal={} "
+                     "accelerated={} ready_attempt={} pipeline={:016X} stages={} "
+                     "topology={} vertices={} lighting={} shadow={} clip={} flip={} "
+                     "viewport=[{},{},{},{}] scissor=[{},{},{},{}] "
+                     "color_addr={:08X} depth_addr={:08X} output_mask={:04X} "
+                     "input_count={} fixed_max_bytes={} sample=host_state_not_gpu_output",
+                     pipeline_cache.GetProgramID(), diagnostic_draws, accelerate,
+                     ready_vertex_attempt, ready_vertex_pipeline ? ready_vertex_pipeline->Key() : 0,
+                     ready_vertex_pipeline ? ready_vertex_pipeline->ShaderStageMask() : 0,
+                     static_cast<u32>(regs.pipeline.triangle_topology.Value()),
+                     regs.pipeline.num_vertices, !regs.lighting.disable, shadow_rendering,
+                     vs_data.enable_clip1, vs_data.flip_viewport,
+                     viewport.x, viewport.y, viewport.width, viewport.height,
+                     scissor_x1, scissor_y1, scissor_x2, scissor_y2,
+                     regs.framebuffer.framebuffer.GetColorBufferPhysicalAddress(),
+                     regs.framebuffer.framebuffer.GetDepthBufferPhysicalAddress(),
+                     regs.vs.output_mask.Value(), regs.vs.max_input_attribute_index.Value() + 1,
+                     fixed_attribute_max_bytes);
+        }
+    }
 
     // Draw the vertex batch
     bool succeeded = true;

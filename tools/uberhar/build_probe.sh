@@ -150,3 +150,11 @@ c++ -std=c++20 -O2 -DFMT_HEADER_ONLY -DXXH_INLINE_ALL \
   src/video_core/shader/generator/pica_fs_config.cpp \
   -o build/uberhar-probe/test-fragment-promotion
 build/uberhar-probe/test-fragment-promotion
+
+# AstraPro: Bound fixed GPU uploads and reuse only immutable Native mapping plans.
+python3 tools/uberhar/test_fixed_attribute_reserve.py
+c++ -std=c++20 -O2 -DFMT_HEADER_ONLY -Isrc -Iexternals/fmt/include -Iexternals/boost \
+  tools/uberhar/test_vertex_plan_cache.cpp src/video_core/pica/output_vertex.cpp \
+  src/video_core/pica/shader_unit.cpp src/video_core/pica/primitive_assembly.cpp \
+  -o build/uberhar-probe/test-vertex-plan-cache
+build/uberhar-probe/test-vertex-plan-cache
