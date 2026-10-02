@@ -1,0 +1,88 @@
+# AstraPro: Audit/staging helper only. This workflow is never merged into the emulator branch.
+name: Uberhar stage reviewed 0.1.13
+on:
+  push:
+    branches: [uberhar/stage013-helper]
+permissions:
+  contents: read
+jobs:
+  stage:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: 366ca36e88ec3dba7258fa270b343a5e93f9f6be
+          persist-credentials: false
+      - name: Verify exact patch and stage reviewed tree
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import base64, gzip, hashlib, json, os, pathlib, subprocess, urllib.request
+          parent = '366ca36e88ec3dba7258fa270b343a5e93f9f6be'
+          repo = 'RegiRex/uberhar'
+          expected = '6025e03149fb092fb67576e1d774b94289a3666a1cd9c18bca81599affa9ba00'
+          pieces = ['c950a545120885833317d978bccf387bd216518a',
+                    '4dcf4ae3d85673991b50396de63cc7717bbba5ea',
+                    '82ca181123997e25df66656f3d0061053b3338c9',
+                    '7c0cd5b05334734ff427e40a3694c65b9930ff1f']
+          def api(method, path, body=None):
+              request = urllib.request.Request(
+                  'https://api.github.com/repos/' + repo + path,
+                  data=None if body is None else json.dumps(body).encode(),
+                  method=method,
+                  headers={'Authorization': 'Bearer ' + os.environ['GH_TOKEN'],
+                           'Accept': 'application/vnd.github+json',
+                           'Content-Type': 'application/json',
+                           'X-GitHub-Api-Version': '2022-11-28'})
+              with urllib.request.urlopen(request, timeout=60) as response:
+                  return json.load(response)
+          assert subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip() == parent
+          encoded = b''
+          for sha in pieces:
+              blob = api('GET', '/git/blobs/' + sha)
+              chunk = base64.b64decode(blob['content'])
+              assert hashlib.sha1(('blob ' + str(len(chunk)) + '\0').encode() + chunk).hexdigest() == sha
+              encoded += chunk
+          raw = gzip.decompress(base64.b64decode(encoded, validate=True))
+          assert hashlib.sha256(raw).hexdigest() == expected
+          bundle = json.loads(raw)
+          assert bundle['parent'] == parent and len(bundle['files']) == 17
+          patch = pathlib.Path(os.environ['RUNNER_TEMP']) / 'reviewed-0.1.13.patch'
+          patch.write_text(bundle['patch'])
+          subprocess.run(['git', 'apply', '--check', '--whitespace=error', str(patch)], check=True)
+          subprocess.run(['git', 'apply', '--whitespace=error', str(patch)], check=True)
+          paths = sorted(bundle['files'])
+          for path, digest in bundle['files'].items():
+              p = pathlib.PurePosixPath(path)
+              assert not p.is_absolute() and '..' not in p.parts
+              assert path == 'UBERHAR_VERSION' or path.startswith(('src/', 'tools/uberhar/', 'docs/'))
+              assert hashlib.sha256(pathlib.Path(path).read_bytes()).hexdigest() == digest, path
+          assert pathlib.Path('UBERHAR_VERSION').read_text().strip() == '0.1.13'
+          subprocess.run(['git', 'add', '--', *paths], check=True)
+          changed = subprocess.check_output(['git', 'diff', '--cached', '--name-only'], text=True).splitlines()
+          assert sorted(changed) == paths
+          subprocess.run(['git', 'diff', '--cached', '--check'], check=True)
+          entries = []
+          for path in paths:
+              mode = subprocess.check_output(['git', 'ls-files', '-s', '--', path], text=True).split()[0]
+              assert mode in ('100644', '100755')
+              entries.append({'path': path, 'mode': mode, 'type': 'blob',
+                              'content': pathlib.Path(path).read_text()})
+          base = api('GET', '/git/commits/' + parent)
+          tree = api('POST', '/git/trees', {'base_tree': base['tree']['sha'], 'tree': entries})
+          commit = api('POST', '/git/commits', {
+              'message': 'AstraPro: 0.1.13 Native mapping reuse, fixed input bound and targeted Combo diagnostics',
+              'tree': tree['sha'], 'parents': [parent],
+              'author': {'name': 'AstraPro', 'email': '83982867+RegiRex@users.noreply.github.com'}})
+          api('POST', '/git/refs', {'ref': 'refs/heads/uberhar/stage-0.1.13-reviewed', 'sha': commit['sha']})
+          print('Verified bundle SHA256:', expected)
+          print('Verified changed files:', len(paths))
+          print('Staged source commit:', commit['sha'])
+          print('Staged source tree:', tree['sha'])
+          print('Production branch untouched; normal release gates remain required.')
+          PY
