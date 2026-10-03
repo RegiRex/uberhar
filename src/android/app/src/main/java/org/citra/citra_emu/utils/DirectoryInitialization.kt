@@ -42,7 +42,10 @@ object DirectoryInitialization {
             directoryState = if (hasWriteAccess(context)) {
                 if (setCitraUserDirectory()) {
                     CitraApplication.documentsTree.setRoot(Uri.parse(userPath))
-                    NativeLibrary.createLogFile()
+                    // AstraEH: Persist a session independently of SAF rotation and collect older
+                    // process exit evidence after the new logger can report recovery failures.
+                    NativeLibrary.createLogFile(CrashSessionLogs.prepare(context))
+                    CrashSessionLogs.loggerStarted(context)
                     // AstraEH: Store the session's local date/offset inside the log itself,
                     // so exporting a previous session cannot give it today's timestamp.
                     Log.info("Uberhar log session: ${java.time.OffsetDateTime.now()}")

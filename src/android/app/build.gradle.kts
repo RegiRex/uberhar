@@ -117,6 +117,8 @@ android {
     buildTypes {
         // Signed by release key, allowing for upload to Play Store.
         release {
+            // AstraEH: Preserve matching native function symbols separately from the installed APK.
+            ndk.debugSymbolLevel = "SYMBOL_TABLE"
             signingConfig = if (keystoreFile != null) {
                 signingConfigs.getByName("release")
             } else {

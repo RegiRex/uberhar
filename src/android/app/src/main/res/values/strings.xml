@@ -1159,4 +1159,22 @@
     <string name="uberhar_phase_automatic">Automatic evidence (unconfirmed)</string>
     <string name="uberhar_phase_loading">Loading — waiting for the game</string>
     <string name="uberhar_phase_gameplay">Gameplay — playing or in menus</string>
+    <!-- AstraEH: Saved sessions survive rotation; incident exports include their available evidence. -->
+    <string name="log_session_current">Current session bundle</string>
+    <string name="log_session_saved">Saved session bundle</string>
+    <string name="log_session_recording">Recording this app session</string>
+    <string name="log_export_older">Older log</string>
+    <string name="log_session_crash">Android reported a crash</string>
+    <string name="log_session_anr">Android reported an unresponsive app</string>
+    <string name="log_session_low_memory">Android reported a low-memory exit</string>
+    <string name="log_session_signal">Android reported a signal exit</string>
+    <string name="log_session_handled">Error recorded</string>
+    <string name="log_session_interrupted">Game interrupted; exit reason unknown</string>
+    <string name="log_session_exit_other">Session record; see bundle for exit details</string>
+    <string name="log_session_retention">Session bundles include the log and any available crash evidence. They are kept until you delete them. Export important bundles before clearing app data or uninstalling. Bundle filenames use the exit time when known, otherwise the session start time.</string>
+    <string name="log_session_storage_warning">Session logging could not save or flush all data. Check available storage and export older bundles before deleting them. Previously saved bundles are still available.</string>
+    <string name="log_session_delete">Delete saved session</string>
+    <string name="log_session_delete_confirm">Delete this saved log and its crash evidence? Export it first if you want to keep it. This cannot be undone.</string>
+    <string name="uberhar_renderer_stopped">Rendering stopped</string>
+    <string name="uberhar_renderer_stopped_description">Uberhar could not obtain a working shader and stopped this game. Export the current session bundle from the log menu to help investigate the failure.</string>
 </resources>

@@ -20,6 +20,19 @@ rg -n AstraEH src CMakeModules tools/uberhar .github/workflows README.md UBERHAR
 
 ## Renderer
 
+<!-- AstraEH: Accepted 0.1.13 review selects evidence retention before broader experiments. -->
+### Reliability and crash evidence (0.1.14)
+
+| Files | Purpose and limits |
+| --- | --- |
+| `utils/CrashSessionStore.kt`, `utils/CrashSessionLogs.kt` under the Android app package | Timestamp/UUID private session folders, synced lifecycle metadata, Android exit matching, optional raw trace capture and manual-only retention. One background flush per second; no native signal handler or promise of final queued bytes. |
+| `utils/LogExporter.kt`, `fragments/LogExportDialogFragment.kt` | ZIP snapshots, sizes, explicit saved-session deletion, current/old/older text exports. Saved evidence remains accessible after a failed current flush. |
+| `src/common/logging/backend.{h,cpp}`, Android `DirectoryInitialization.kt`, `Log.kt`, `jni/native_log.cpp` | Independent native session writer before provider writes; append without rotation, health reporting, existing 100 MiB cap. Adds disk writes whose device cost is unmeasured. |
+| Android `EmulationFragment.kt`, `NativeLibrary.kt`, `jni/native.cpp`, `src/core/core.h`, `src/video_core/shader_recovery_error.h` | Run markers and explicit terminal shader-recovery status. Catch only the typed missing-recovery-shader error around RunLoop; stop through existing teardown, never skip the draw and resume. Other native crashes stay fatal. |
+| `vk_pipeline_cache.{h,cpp}` | Capture generic job profile/options/title/path before queuing; drain generic module borrowers before repeated cache replacement in Native/Compute as well as Combo. No claim this resolves Dark Moon's visible errors. |
+| `CrashSessionStoreTest.kt`, `tools/uberhar/test_session_backend.py`, `build_probe.sh` | Production policy tests for retention, PID reuse, failure classification, ZIP bytes, damaged metadata and deletion guards; native file backend exercised across rotation and SIGKILL, with write/flush/cap failures. Host tests do not replace Android crash testing. |
+| Android `build.gradle.kts`, `.github/workflows/uberhar-alpha.yml` | Preserve release symbol tables and Java mapping alongside exact-build artifacts. Existing shader, package, signature and publication gates remain required. |
+
 <!-- AstraEH: 0.0.12 run/health evidence preserves the 0.0.11 rendering behavior. -->
 ### Run diagnostics (0.0.12)
 

@@ -160,7 +160,8 @@ object NativeLibrary {
 
     // Create the config.ini file.
     external fun createConfigFile()
-    external fun createLogFile()
+    // AstraEH: Private journal path is created before ordinary external-log rotation.
+    external fun createLogFile(sessionPath: String)
     external fun logUserDirectory(directory: String)
 
     /**
@@ -453,6 +454,10 @@ object NativeLibrary {
     @Keep
     @JvmStatic
     fun exitEmulationActivity(resultCode: Int) {
+        if (resultCode == CoreError.ErrorRendererRecovery.value) {
+            // AstraEH: A handled renderer failure remains evidence even after orderly teardown.
+            org.citra.citra_emu.utils.CrashSessionLogs.noteFailure("renderer_recovery_unavailable")
+        }
         val emulationActivity = sEmulationActivity.get()
         if (emulationActivity == null) {
             Log.warning("[NativeLibrary] EmulationActivity is null, can't exit.")
@@ -512,6 +517,11 @@ object NativeLibrary {
                 CoreError.ErrorLoaderErrorPatchesInvalidTitle -> {
                     title = getString(R.string.loader_error_applying_patches)
                     message = getString(R.string.loader_error_patch_wrong_application)
+                }
+
+                CoreError.ErrorRendererRecovery -> {
+                    title = getString(R.string.uberhar_renderer_stopped)
+                    message = getString(R.string.uberhar_renderer_stopped_description)
                 }
 
                 else -> {
@@ -971,7 +981,9 @@ object NativeLibrary {
         ErrorCoreExceptionRaised(14, R.string.core_error_core_exception_raised),
         ErrorSavestateBuildMismatch(15, R.string.core_error_savestate_build_mismatch),
         ShutdownRequested(16, R.string.core_error_shutdown_requested),
-        ErrorUnknown(17, R.string.core_error_unknown);
+        ErrorUnknown(17, R.string.core_error_unknown),
+        // AstraEH: Keep this appended value in sync with Core::System::ResultStatus.
+        ErrorRendererRecovery(18, R.string.uberhar_renderer_stopped);
 
         companion object {
             fun fromInt(value: Int): CoreError = entries.find { it.value == value } ?: ErrorUnknown

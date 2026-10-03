@@ -108,7 +108,9 @@ public:
         ErrorCoreExceptionRaised,    ///< The CPU emulation raised an exception
         ErrorSavestateBuildMismatch, ///< Tried to load savestate from a different Azahar version
         ShutdownRequested,           ///< Emulated program requested a system shutdown
-        ErrorUnknown                 ///< Any other error
+        ErrorUnknown,                ///< Any other error
+        // AstraEH: Appended to preserve all existing frontend result-code values.
+        ErrorRendererRecovery ///< No valid shader route; emulation must stop
     };
 
     explicit System();

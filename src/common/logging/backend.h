@@ -15,7 +15,11 @@ namespace Common::Log {
 class Filter;
 
 /// Initializes the logging system. This should be the first thing called in main.
-void Initialize(std::string_view log_file = "");
+// AstraEH: An optional unique, app-private session file bypasses legacy log rotation.
+void Initialize(std::string_view log_file = "", std::string_view session_file = "");
+
+// AstraEH: Android surfaces journal open/write/flush/size-limit failures to the owner.
+bool SessionFileHealthy();
 #ifdef HAVE_LIBRETRO
 void LibRetroStart(retro_log_printf_t callback);
 #endif

@@ -150,7 +150,7 @@ private:
  */
 class FileBackend final : public Backend {
 public:
-    explicit FileBackend(const std::string& filename) {
+    explicit FileBackend(const std::string& filename, bool rotate = true) {
         // AstraPro: Keep two prior process logs using the same filesystem path
         // adapter as the existing writer, including Android document providers.
         struct Files {
@@ -162,7 +162,9 @@ public:
                 return FileUtil::Rename(from, to);
             }
         } files;
-        const auto rotation = Retention::Rotate(files, filename);
+        // AstraEH: Unique session journals are never renamed, truncated or aged out here.
+        const auto rotation =
+            rotate ? Retention::Rotate(files, filename) : Retention::Result::NoData;
         if (rotation == Retention::Result::Failed) {
             // AstraPro Log Line: Startup logging is not initialized yet; never
             // recurse through LOG_WARNING here. Keep the source file by appending.
@@ -175,6 +177,7 @@ public:
         file = std::make_unique<FileUtil::IOFile>(filename, "a", _SH_DENYWR);
         bytes_written = file->GetSize();
         enabled = file->IsOpen() && bytes_written < 100 * 1024 * 1024;
+        healthy.store(enabled, std::memory_order_relaxed);
     }
 
     ~FileBackend() override = default;
@@ -184,7 +187,13 @@ public:
             return;
         }
 
-        bytes_written += file->WriteString(FormatLogMessage(entry).append(1, '\n'));
+        const auto text = FormatLogMessage(entry).append(1, '\n');
+        const auto written = file->WriteString(text);
+        bytes_written += written;
+        if (written != text.size()) {
+            healthy.store(false, std::memory_order_relaxed);
+            enabled = false;
+        }
 
         using namespace Common::Literals;
         // Prevent logs from exceeding a set maximum size in the event that log entries are spammed.
@@ -198,13 +207,15 @@ public:
                 // Stop writing after the write limit is exceeded.
                 // Don't close the file so we can print a stacktrace if necessary
                 enabled = false;
+                healthy.store(false, std::memory_order_relaxed);
             }
-            file->Flush();
+            Flush();
         }
     }
 
     void Flush() override {
-        file->Flush();
+        if (!file->Flush())
+            healthy.store(false, std::memory_order_relaxed);
     }
 
     void Close() override {
@@ -217,11 +228,16 @@ public:
         bytes_written = 0;
     }
 
+    bool Healthy() const {
+        return healthy.load(std::memory_order_relaxed);
+    }
+
 private:
     std::unique_ptr<FileUtil::IOFile> file;
     bool enabled = true;
     std::size_t bytes_written = 0;
     Retention::FlushPolicy flush_policy;
+    std::atomic_bool healthy{false};
 };
 
 /**
@@ -304,7 +320,7 @@ public:
         logging_initialized = true;
     }
 #endif
-    static void Initialize(std::string_view log_file) {
+    static void Initialize(std::string_view log_file, std::string_view session_file) {
         if (instance) {
             LOG_WARNING(Log, "Reinitializing logging backend");
             return;
@@ -315,13 +331,17 @@ public:
         Filter filter;
         filter.ParseFilterString(Settings::values.log_filter.GetValue());
         instance = std::unique_ptr<Impl, decltype(&Deleter)>(
-            new Impl(fmt::format("{}{}", log_dir, log_file), filter), Deleter);
+            new Impl(fmt::format("{}{}", log_dir, log_file), filter, session_file), Deleter);
         initialization_in_progress_suppress_logging = false;
         logging_initialized = true;
     }
 
     static void Start() {
         instance->StartBackendThread();
+    }
+
+    static bool SessionFileHealthy() {
+        return instance && instance->session_backend && instance->session_backend->Healthy();
     }
 
     static void Stop() {
@@ -415,8 +435,13 @@ private:
     Impl(retro_log_printf_t callback, const Filter& filter_)
         : filter{filter_}, file_backend{""}, libretro_backend{callback} {}
 #endif
-    Impl(const std::string& file_backend_filename, const Filter& filter_)
-        : filter{filter_}, file_backend{file_backend_filename} {
+    Impl(const std::string& file_backend_filename, const Filter& filter_,
+         std::string_view session_file)
+        : filter{filter_},
+          session_backend{session_file.empty()
+                              ? nullptr
+                              : std::make_unique<FileBackend>(std::string{session_file}, false)},
+          file_backend{file_backend_filename} {
 #ifdef CITRA_LINUX_GCC_BACKTRACE
         int waker_pipefd[2];
         int done_printing_pipefd[2];
@@ -529,6 +554,9 @@ private:
 #ifdef HAVE_LIBRETRO
         lambda(static_cast<Backend&>(libretro_backend));
 #else
+        // AstraEH: Write/flush the private journal before touching a removable document provider.
+        if (session_backend)
+            lambda(static_cast<Backend&>(*session_backend));
         lambda(static_cast<Backend&>(debugger_backend));
         lambda(static_cast<Backend&>(color_console_backend));
         lambda(static_cast<Backend&>(file_backend));
@@ -578,6 +606,7 @@ private:
     boost::regex regex_filter;
     DebuggerBackend debugger_backend{};
     ColorConsoleBackend color_console_backend{};
+    std::unique_ptr<FileBackend> session_backend;
     FileBackend file_backend;
 #ifdef ANDROID
     LogcatBackend lc_backend{};
@@ -606,8 +635,12 @@ void LibRetroStart(retro_log_printf_t callback) {
 }
 #endif
 
-void Initialize(std::string_view log_file) {
-    Impl::Initialize(log_file.empty() ? LOG_FILE : log_file);
+void Initialize(std::string_view log_file, std::string_view session_file) {
+    Impl::Initialize(log_file.empty() ? LOG_FILE : log_file, session_file);
+}
+
+bool SessionFileHealthy() {
+    return Impl::SessionFileHealthy();
 }
 
 void Start() {

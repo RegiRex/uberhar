@@ -34,6 +34,7 @@
 #include "video_core/shader/generator/glsl_fs_shader_gen.h"
 #include "video_core/shader/generator/glsl_shader_gen.h"
 #include "video_core/shader/generator/spv_fs_shader_gen.h"
+#include "video_core/shader_recovery_error.h" // AstraEH: Terminal recovery has a typed frontend path.
 
 using namespace Pica::Shader::Generator;
 using Pica::Shader::FSConfig;
@@ -218,7 +219,8 @@ void PipelineCache::LoadCache(const std::atomic_bool& stop_loading,
                               const VideoCore::DiskResourceLoadCallback& callback) {
     // AstraPro: A repeated frontend load may replace disk-cache module owners.
     // Drain optional users before either the driver cache or shader caches change.
-    if (ready_vertex_worker && curr_disk_cache)
+    // AstraEH: Generic pipelines also borrow disk-cache modules in Native/Compute profiles.
+    if (hybrid_tev && curr_disk_cache)
         ClearTevFallbacks();
     LoadDriverPipelineDiskCache(stop_loading, callback);
     LoadDiskCache(stop_loading, callback);
@@ -591,7 +593,7 @@ bool PipelineCache::BindPipeline(PipelineInfo& info, bool wait_built,
             ++virtual_recovery_reasons[generic ? 8 : 9];
             auto specialized = curr_disk_cache->UseFragmentShader(*virtual_fs_config, tev_user);
             if (!specialized)
-                throw std::runtime_error("Uberhar native recovery shader unavailable");
+                throw VideoCore::ShaderRecoveryError{};
             current_shaders[ProgramType::FS] = specialized->second;
             shader_hashes[ProgramType::FS] = specialized->first;
             info.state.shader_ids[ProgramType::FS] = specialized->first;
@@ -1208,8 +1210,16 @@ GraphicsPipeline* PipelineCache::GetTevFallback(const PipelineInfo& info, bool c
     // This cannot fill specialized pipeline workers with waits for large fallback shaders.
     // Owned config copies and map-stable pointers stay alive until ClearTevFallbacks drains.
     const auto queued = std::chrono::steady_clock::now();
+    // AstraEH: A title/profile switch may start before the serial job drains. Freeze all
+    // generation and disk-key inputs now; workers must not reread mutable UI/profile state.
+    const auto job_profile = profile;
+    const bool disable_optimizer = Settings::values.disable_spirv_optimizer.GetValue();
+    const bool persistent = Settings::values.use_disk_shader_cache.GetValue();
+    const u64 title = current_program_id;
+    const auto directory = GetPipelineCacheDir();
     tev_worker->QueueWork([this, shader_ptr, pipeline_ptr, family_hash, queued, cpu_vertex,
-                           config = family_config, user = tev_user] {
+                           config = family_config, user = tev_user, job_profile, disable_optimizer,
+                           persistent, title, directory] {
         try {
             if (shader_ptr->HasFailed()) {
                 throw std::runtime_error("fallback fragment family previously failed");
@@ -1221,9 +1231,10 @@ GraphicsPipeline* PipelineCache::GetTevFallback(const PipelineInfo& info, bool c
             std::size_t glsl_bytes = 0;
             std::size_t spirv_bytes = 0;
             if (!shader_ptr->IsDone()) {
-                GLSL::FragmentModule module{config, user, profile, true};
+                GLSL::FragmentModule module{config, user, job_profile, true};
                 const auto source = module.Generate();
-                const auto code = LoadOrCompileTevModule(source);
+                const auto code =
+                    LoadOrCompileTevModule(source, disable_optimizer, persistent, title, directory);
                 if (code.empty()) {
                     throw std::runtime_error("fallback GLSL compilation produced no SPIR-V");
                 }
@@ -1303,7 +1314,9 @@ GraphicsPipeline* PipelineCache::GetTevFallback(const PipelineInfo& info, bool c
 // AstraEH: Persist generated generic modules, not game programs. The title-prefixed
 // files live alongside driver caches so Android's existing Vulkan-cache deletion removes
 // both. Optional I/O runs on the serial TEV worker; failure retains normal compilation.
-std::vector<u32> PipelineCache::LoadOrCompileTevModule(std::string_view source) {
+std::vector<u32> PipelineCache::LoadOrCompileTevModule(std::string_view source,
+                                                       bool disable_optimizer, bool persistent,
+                                                       u64 title, const std::string& directory) {
     using namespace UberharSpirvCache;
     const std::string_view version{Common::g_shader_cache_version};
     // AstraEH: Also separate builds so a compiler-library/submodule update cannot reuse old output.
@@ -1311,10 +1324,9 @@ std::vector<u32> PipelineCache::LoadOrCompileTevModule(std::string_view source) 
     const Key key{Common::ComputeHash64(source.data(), source.size()),
                   Common::HashCombine(Common::ComputeHash64(version.data(), version.size()),
                                       Common::ComputeHash64(revision.data(), revision.size()),
-                                      Settings::values.disable_spirv_optimizer.GetValue())};
-    const bool persistent = Settings::values.use_disk_shader_cache.GetValue();
-    const auto path = fmt::format("{}{:016X}-uber-{:016X}.spv", GetPipelineCacheDir(),
-                                  GetProgramID(), Common::HashCombine(key.source, key.compiler));
+                                      disable_optimizer)};
+    const auto path = fmt::format("{}{:016X}-uber-{:016X}.spv", directory, title,
+                                  Common::HashCombine(key.source, key.compiler));
     if (persistent && FileUtil::Exists(path)) {
         FileUtil::IOFile file(path, "rb");
         const u64 bytes = file ? file.GetSize() : 0;
@@ -1335,7 +1347,7 @@ std::vector<u32> PipelineCache::LoadOrCompileTevModule(std::string_view source) 
         }
     }
     ++generic_module_misses;
-    auto code = CompileGLSL(source, vk::ShaderStageFlagBits::eFragment);
+    auto code = CompileGLSL(source, vk::ShaderStageFlagBits::eFragment, "", disable_optimizer);
     if (persistent && !code.empty()) {
         const auto words = Encode(key, code);
         const auto temporary = path + ".tmp";

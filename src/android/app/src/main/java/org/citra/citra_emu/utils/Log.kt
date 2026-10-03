@@ -9,6 +9,9 @@ object Log {
     // Flush on an IO worker before reading the current log, including shutdown totals.
     external fun flush(): Boolean
 
+    // AstraEH: Called by the session worker; no logging or file writes in this query.
+    external fun sessionFileHealthy(): Boolean
+
     external fun debug(message: String)
 
     external fun warning(message: String)

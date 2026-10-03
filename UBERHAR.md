@@ -7,6 +7,19 @@ Baseline: Azahar 2126.1.2, commit
 
 ## Current status
 
+<!-- AstraEH: Current reliability priority supersedes historical milestone plans below. -->
+**0.1.14 adds independently retained session evidence and narrow shader-worker
+correctness fixes.** Saved ZIP bundles survive ordinary log rotation and remain
+until explicitly deleted. Available Android exit records and exact-build symbols
+support crash diagnosis; lost queued records and unavailable OS traces remain
+limitations. Dark Moon graphical glitches and severe slowdown remain open.
+See the [release/test notes](docs/releases/0.1.14.md) and the
+[accepted full review](docs/UBERHAR_ARCHITECTURE_0.1.13.md).
+Per-game settings are planned by 2.0, using one editor reached from title
+long-press and the in-game Uberhar settings submenu. Broader audit experiments
+are deferred until at least Dark Moon's graphical issues are fixed and validated.
+The earlier status entries below are retained as milestone history.
+
 <!-- AstraEH: Scoped beta milestone and evidence-based vertex transport optimization. -->
 **0.1.0 is the Native beta update.** The owner's four 0.0.15 Thor runs show no
 noticeable normal-speed gameplay slowdown. [Measured results](docs/UBERHAR_LOG_ANALYSIS_0.0.15.md)

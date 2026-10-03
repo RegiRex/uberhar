@@ -1836,7 +1836,14 @@ class EmulationFragment :
                 State.STOPPED -> {
                     Thread({
                         Log.debug("[EmulationFragment] Starting emulation thread.")
-                        NativeLibrary.run(gamePath)
+                        // AstraEH: A fatal process exit leaves the active marker on disk. Normal
+                        // native return flushes teardown totals and records an orderly title stop.
+                        org.citra.citra_emu.utils.CrashSessionLogs.beginRun()
+                        try {
+                            NativeLibrary.run(gamePath)
+                        } finally {
+                            org.citra.citra_emu.utils.CrashSessionLogs.endRun()
+                        }
                     }, "NativeEmulation").start()
                 }
 

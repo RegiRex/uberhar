@@ -800,3 +800,36 @@ count and output mask. No guest payload or screenshot is captured. A one-frame
 black region may fall between samples. Existing raw frame timing is unchanged.
 All new log calls carry AstraPro Log Line comments. Renderer diagnostics are 22;
 shader identity/ABI, current/old export choices and older backup are unchanged.
+
+<!-- AstraEH: Independent journals supersede rotating-only crash retention. -->
+## 0.1.14 retained session bundles
+
+Each Android process creates a private timestamp/UUID folder. `log.txt` receives
+the same filtered records as the normal backend, before document-provider writes.
+No normal rotation or age-based pruning touches these folders. The picker shows
+sizes and allows explicit deletion of saved sessions, never the current session.
+Current, old and older legacy text exports remain available.
+
+ZIP contents: `session.properties` records build, version, UTC start, PID and ID;
+`run.properties` records the last active/idle transition; `failure.txt` preserves
+handled recovery or uncaught Java errors; `exit.properties` records matching
+Android reason/status/time and memory evidence when available. `trace.bin` keeps
+OS-provided bytes with format/availability in `trace.properties`. Native API31+
+tombstones are protobuf, not assumed text. Missing Android evidence stays unknown.
+`export.properties` identifies a live snapshot, flush completion and recovered
+metadata. A missing/corrupt manifest does not by itself hide the log.
+
+Exit matching prefers the process UUID; PID fallback is limited to the recorded
+process lifetime. Export names use Android exit time when known and explicitly
+use start time otherwise. Incomplete run markers alone do not prove a crash.
+All sessions are retained, including ordinary exits, to preserve uncertain cases.
+
+The fixed-delay background timer requests the existing bounded native flush
+barrier once per second. It does not fsync every frame or install a signal handler.
+Native logs retain the 100 MiB per-file cap; OS trace capture is capped at 32 MiB.
+Storage/flush/size failures warn the user. Quiet trailing records get a timer,
+but unflushed queued records and power-loss durability are not guaranteed.
+App-data clearing/uninstall still removes private evidence; export important bundles.
+Trace collection emits at most one warning per saved session per launch plus one
+outer failure warning. Renderer-stop output is once per terminal run; all new
+experimental log calls have adjacent `AstraEH Log Line` comments.

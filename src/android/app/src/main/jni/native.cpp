@@ -73,6 +73,7 @@
 #include "video_core/debug_utils/debug_utils.h"
 #include "video_core/gpu.h"
 #include "video_core/renderer_base.h"
+#include "video_core/shader_recovery_error.h"
 
 namespace {
 
@@ -367,7 +368,16 @@ static Core::System::ResultStatus RunCitra(const std::string& filepath) {
     // Start running emulation
     while (!stop_run) {
         if (!pause_emulation) {
-            const auto result = system.RunLoop();
+            Core::System::ResultStatus result;
+            try {
+                result = system.RunLoop();
+            } catch (const VideoCore::ShaderRecoveryError& error) {
+                // AstraEH Log Line: Stop this title, preserve the error, then use normal shutdown.
+                // Never continue with a missing draw or catch unrelated native failures here.
+                LOG_CRITICAL(Render_Vulkan, "Uberhar renderer stopped: {}", error.what());
+                Common::Log::Flush();
+                return Core::System::ResultStatus::ErrorRendererRecovery;
+            }
             if (result == Core::System::ResultStatus::Success) {
                 continue;
             }
@@ -1020,9 +1030,11 @@ void Java_org_citra_citra_1emu_NativeLibrary_createConfigFile([[maybe_unused]] J
     Config{};
 }
 
-void Java_org_citra_citra_1emu_NativeLibrary_createLogFile([[maybe_unused]] JNIEnv* env,
-                                                           [[maybe_unused]] jobject obj) {
-    Common::Log::Initialize();
+void Java_org_citra_citra_1emu_NativeLibrary_createLogFile(JNIEnv* env,
+                                                           [[maybe_unused]] jobject obj,
+                                                           jstring session_path) {
+    // AstraEH: The frontend creates a unique persistent directory before legacy rotation.
+    Common::Log::Initialize({}, GetJString(env, session_path));
     Common::Log::Start();
     LOG_INFO(Frontend, "Logging backend initialised");
 }

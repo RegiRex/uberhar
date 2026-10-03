@@ -16,6 +16,8 @@ Review early for correctness regressions or a changed architectural assumption.
 | 2026-09-27 | 0.0.15 | After 0.1.3 | After 0.1.2 through 0.1.4; before 0.1.5 work |
 | 2026-09-28 | 0.1.3 | After 0.1.7 | After 0.1.6 through 0.1.8; before 0.1.9 work |
 | 2026-09-29 | 0.1.6 | After four successor builds | After three through five; before beginning six |
+| 2026-10-01 | 0.1.9 | After 0.1.13 | After 0.1.12–0.1.14; before 0.1.15 work |
+| 2026-10-03 | 0.1.13 | After 0.1.17 | After 0.1.16–0.1.18; before 0.1.19 work |
 
 The [0.0.6 review](UBERHAR_ARCHITECTURE_2026-09-24.md) established the earlier
 roadmap. 0.0.7 implemented family consolidation; 0.0.8 added broader runtime state,
@@ -128,6 +130,17 @@ The full-review anchor remains 0.1.9 (0.1.10 successor one, 0.1.11 successor two
 once published). The regression requires early source/device review before any
 further expansion of the experimental GPU path; obtaining a preserved short
 reproduction takes priority over another throughput milestone or suite replay.
+
+<!-- AstraEH: Owner acceptance completes the source, evidence and two-audit review. -->
+The [full 0.1.13 review](UBERHAR_ARCHITECTURE_0.1.13.md) rechecks the released
+source, eleven complete/partial runs, two external audits and the owner’s scope.
+The owner accepted the priority order and resumed builds on October 3, 2026.
+0.1.14 introduces independent session retention and narrow correctness changes;
+it does not claim a Dark Moon image or performance cure. Count it as successor
+one only after publication. Default next review follows 0.1.17 evidence, allowed
+after 0.1.16–0.1.18 and required before 0.1.19. Broader performance experiments
+remain deferred until at least Dark Moon image correctness is device-validated.
+Earlier entries below retain their historical review anchors.
 
 
 <!-- AstraPro: Matched evidence identifies a narrow retry defect and a working control. -->

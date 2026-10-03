@@ -1,6 +1,6 @@
 // Copyright 2026 Uberhar contributors
 // Licensed under GPLv2 or any later version
-// AstraEH: Read only the two emulator logs and export immutable, privately staged copies.
+// AstraEH: Export legacy logs and independently retained session evidence through staged copies.
 package org.citra.citra_emu.utils
 
 import android.content.Context
@@ -20,22 +20,66 @@ object LogExporter {
     data class Choice(
         val source: DocumentFile,
         val current: Boolean,
-        val metadata: LogExportNames.Metadata
+        val metadata: LogExportNames.Metadata,
+        val session: CrashSessionStore.Session? = null,
+        val older: Boolean = false,
+        val sessionName: String = "",
+        val sessionOutcome: String = "",
+        val sessionBytes: Long = 0
     )
 
     // AstraEH: All calls perform file IO and belong on Dispatchers.IO. Flushing before
     // enumeration makes the displayed titles/date agree with buffered current-session data.
     fun choices(context: Context): List<Choice> {
-        val directory = DocumentFile.fromTreeUri(context, PermissionsHandler.citraDirectory)
-            ?.findFile("log") ?: return emptyList()
-        if (!Log.flush()) {
-            throw IOException("Log flush did not complete; retry after exiting the game")
+        // AstraEH: Never make historical evidence depend on a healthy current logger/provider.
+        val flushed = Log.flush()
+        val store = CrashSessionLogs.sessionStore(context)
+        val retained = store.sessions().mapNotNull { session ->
+            runCatching {
+                val file = DocumentFile.fromFile(session.log)
+                Choice(
+                    file,
+                    session.id == CrashSessionLogs.current?.id,
+                    metadata(context, file),
+                    session,
+                    sessionName = store.exportName(
+                        session,
+                        session.id == CrashSessionLogs.current?.id
+                    ),
+                    sessionOutcome = store.outcome(session),
+                    sessionBytes = store.sizeBytes(session)
+                )
+            }.getOrNull()
         }
-        return listOf("azahar_log.txt", "azahar_log.old.txt").mapIndexedNotNull { index, name ->
-            val file =
-                directory.findFile(name)?.takeIf { it.isFile } ?: return@mapIndexedNotNull null
-            Choice(file, index == 0, metadata(context, file))
-        }
+        val directory = runCatching {
+            DocumentFile.fromTreeUri(context, PermissionsHandler.citraDirectory)?.findFile("log")
+        }.getOrNull()
+        val legacy = listOf("azahar_log.txt", "azahar_log.old.txt", "azahar_log.older.txt")
+            .mapIndexedNotNull { index, name ->
+                if (index == 0 && !flushed) return@mapIndexedNotNull null
+                runCatching {
+                    val file = directory?.findFile(name)?.takeIf { it.isFile }
+                        ?: return@mapIndexedNotNull null
+                    Choice(file, index == 0, metadata(context, file), older = index == 2)
+                }.getOrNull()
+            }
+        return retained + legacy
+    }
+
+    fun filename(choice: Choice, style: LogExportNames.Style): String = if (choice.session !=
+        null
+    ) {
+        choice.sessionName
+    } else {
+        LogExportNames.filename(choice.metadata, style)
+    }
+
+    fun mimeType(filename: String): String =
+        if (filename.endsWith(".zip")) "application/zip" else "text/plain"
+
+    fun deleteSession(context: Context, choice: Choice) {
+        val session = choice.session ?: throw IOException("Not a saved session")
+        CrashSessionLogs.sessionStore(context).delete(session, CrashSessionLogs.current?.id)
     }
 
     private fun metadata(context: Context, source: DocumentFile): LogExportNames.Metadata {
@@ -49,7 +93,8 @@ object LogExporter {
     // AstraEH: The file picker may outlive the current Activity or app process. Stage a
     // byte-for-byte snapshot first so later log rotation cannot export another session.
     fun snapshot(context: Context, choice: Choice, style: LogExportNames.Style): File {
-        if (choice.current && !Log.flush()) throw IOException("Log flush did not complete")
+        val flushed = !choice.current || Log.flush()
+        if (!flushed && choice.session == null) throw IOException("Log flush did not complete")
         val root = File(context.cacheDir, DIRECTORY).apply { mkdirs() }
         // AstraEH: Only expired export copies are cleaned; never touch source logs or saves.
         val expiry = System.currentTimeMillis() - 7L * 24 * 60 * 60 * 1000
@@ -59,6 +104,15 @@ object LogExporter {
         val folder = File(root, UUID.randomUUID().toString())
         if (!folder.mkdirs()) throw IOException("Cannot create export directory")
         try {
+            choice.session?.let { session ->
+                // AstraEH: Archived sessions need no live flush. A live bundle explicitly records
+                // whether its barrier completed; an interrupted logger must not hide saved bytes.
+                val result = File(folder, filename(choice, style))
+                CrashSessionLogs.sessionStore(
+                    context
+                ).snapshot(session, result, choice.current, flushed)
+                return result
+            }
             val temporary = File(folder, "snapshot.txt")
             val input = context.contentResolver.openInputStream(choice.source.uri)
                 ?: throw IOException("Cannot read log")

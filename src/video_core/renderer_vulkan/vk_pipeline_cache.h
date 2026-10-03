@@ -141,7 +141,10 @@ public:
 
 private:
     // AstraEH: Only the serial TEV worker reads/writes generic modules; reports use atomics.
-    std::vector<u32> LoadOrCompileTevModule(std::string_view source);
+    // AstraEH: Compiler workers receive the exact options/path captured with their profile.
+    std::vector<u32> LoadOrCompileTevModule(std::string_view source, bool disable_optimizer,
+                                            bool persistent, u64 title,
+                                            const std::string& directory);
     std::atomic<u64> generic_module_hits{}, generic_module_misses{}, generic_module_rejected{},
         generic_module_write_failures{};
     friend ShaderDiskCache;

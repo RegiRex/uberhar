@@ -2,13 +2,13 @@
 
 <!-- AstraEH: Owner-requested continuity rules for this experimental fork. -->
 
-- AstraPro: Owner attribution update (2026-09-30): use `AstraPro` for new
+- AstraEH: Owner attribution update (2026-10-03): use `AstraEH` for new
   logical sections and their purpose in the current development context. Preserve
-  historical `AstraEH` comments and all inherited Azahar authorship; never relabel
+  historical `AstraEH`/`AstraPro` comments and all inherited Azahar authorship; never relabel
   old work. Keep `docs/UBERHAR_CODE_MAP.md` current. Future attribution changes
   follow an explicit owner instruction when product model selection is not
   reliably available; the marker does not assert automatic selector detection.
-- Mark each new experimental/debug log call with an adjacent `AstraPro Log Line`
+- Mark each new experimental/debug log call with an adjacent `AstraEH Log Line`
   comment. Bound record counts or reporting frequency; retain error recovery when
   removing diagnostics. Document each feature's counters and their limits.
 - Use release.beta.alpha versions. Publish Android ARM64 tests as GitHub
@@ -48,3 +48,12 @@
   Fast-forward usually skips menus/loading or is accidental; it does not by
   itself prove a loading phase. Derive resolution/settings and scoped cache
   reuse from logs; ask for manual notes only when they add unseen scene context.
+
+<!-- AstraEH: Owner accepted the 0.1.13 review plan and resumed builds on 2026-10-03. -->
+- Keep the audit's broader renderer/performance experiments in the deferred ledger
+  until at least Dark Moon's graphical issues are corrected and validated on device.
+  Crash evidence, confirmed correctness hazards and focused diagnosis remain active.
+- Per-game settings are required by 2.0: inherit globals, store explicit title-ID
+  overrides, reset to global and expose effective values. Provide the same editor
+  from the title long-press menu (beside cache deletion) and from an in-game Uberhar
+  settings submenu. This is not a requirement to include the whole feature in 0.1.14.
