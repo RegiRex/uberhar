@@ -69,13 +69,25 @@ object CrashSessionLogs {
                 }
                 collectExitEvidence(app)
             }
+            // AstraEH: Remove empty idle launch records only after collecting any OS incident.
+            runCatching { store?.removeEmptyIdleSessions(current?.id) }
+            runCatching { store?.pruneConfirmedCleanSessions(current?.id) }
         }
         // AstraEH: A real timer also flushes the last quiet record. Fixed delay avoids queue
         // growth if the five-second native barrier times out; no work runs on the UI thread.
         worker.scheduleWithFixedDelay({
             runCatching {
                 val flushed = Log.flush()
-                if (!flushed || !Log.sessionFileHealthy()) warn(app)
+                val healthy = Log.sessionFileHealthy()
+                if (!flushed || !healthy) {
+                    if (!warned.get()) {
+                        // AstraEH Log Line: Once per process; distinguish queue and journal failure.
+                        Log.warning(
+                            "Uberhar log health: flush_complete=$flushed journal_ok=$healthy"
+                        )
+                    }
+                    warn(app)
+                }
             }.onFailure { warn(app) }
         }, 1, 1, TimeUnit.SECONDS)
         val previous = Thread.getDefaultUncaughtExceptionHandler()

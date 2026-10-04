@@ -6,6 +6,8 @@
 #include <codecvt>
 #include <thread>
 #include <dlfcn.h>
+#include <fcntl.h>
+#include <unistd.h>
 #include "common/uberhar_activity.h" // AstraEH: Explicit loading and user phase boundaries.
 
 #include <android/api-level.h>
@@ -1033,8 +1035,17 @@ void Java_org_citra_citra_1emu_NativeLibrary_createConfigFile([[maybe_unused]] J
 void Java_org_citra_citra_1emu_NativeLibrary_createLogFile(JNIEnv* env,
                                                            [[maybe_unused]] jobject obj,
                                                            jstring session_path) {
-    // AstraEH: The frontend creates a unique persistent directory before legacy rotation.
-    Common::Log::Initialize({}, GetJString(env, session_path));
+    // AstraEH: This is an app-private absolute path, not a path relative to the emulation
+    // data folder. Open it directly and let IOFile duplicate the descriptor before closing
+    // our copy. fd:// bypasses both Android raw-path translation and document providers.
+    const auto private_path = GetJString(env, session_path);
+    const int session_fd =
+        private_path.empty() ? -1 : open(private_path.c_str(), O_WRONLY | O_APPEND | O_CLOEXEC);
+    SCOPE_EXIT({
+        if (session_fd >= 0)
+            close(session_fd);
+    });
+    Common::Log::Initialize({}, session_fd < 0 ? "" : "fd://" + std::to_string(session_fd));
     Common::Log::Start();
     LOG_INFO(Frontend, "Logging backend initialised");
 }

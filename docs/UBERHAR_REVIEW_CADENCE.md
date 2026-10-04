@@ -1,5 +1,15 @@
 # Architecture review ledger
 
+<!-- AstraEH: Current follow-up status; historical review entries below remain intact. -->
+The [0.1.14 device review](UBERHAR_LOG_ANALYSIS_0.1.14.md) identifies an Android
+private-log path defect and a rejected per-launch bundle UI. 0.1.15 fixes those
+issues without renderer changes. This focused review does not reset the full
+0.1.13 anchor: 0.1.14 is published successor one; 0.1.15 counts as two when its
+prerelease gates pass. Next default full review remains after 0.1.17 evidence,
+allowed after 0.1.16–0.1.18 and before 0.1.19. Dark Moon's large system-memory
+decline strengthens the need for focused crash/memory attribution, not an assumed
+OOM diagnosis or premature expansion of renderer coverage.
+
 <!-- AstraEH: Build-count workflow requested by the owner, not a timed reminder. -->
 
 Review every **three to five alpha builds**, normally every four. Count published

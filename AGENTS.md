@@ -57,3 +57,6 @@
   overrides, reset to global and expose effective values. Provide the same editor
   from the title long-press menu (beside cache deletion) and from an in-game Uberhar
   settings submenu. This is not a requirement to include the whole feature in 0.1.14.
+- AstraEH: Owner feedback (2026-10-04): remove per-launch session-bundle clutter
+  from normal log export. Keep current/previous/older text logs primary. Preserve
+  meaningful crash evidence separately; ordinary/empty launches are not crash reports.

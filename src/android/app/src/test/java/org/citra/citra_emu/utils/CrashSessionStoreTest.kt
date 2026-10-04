@@ -16,6 +16,59 @@ import org.junit.Test
 
 // AstraEH: Test retention/identity against real files, not a second implementation of the policy.
 class CrashSessionStoreTest {
+    // AstraEH: Regression: empty/ordinary launches must not appear as crash reports.
+    @Test fun crashViewFiltersOrdinarySessions() = withStore { store ->
+        val idle = store.create(1000, 1, "a", "0.1.15")
+        store.markRun(idle, false, 1001)
+        assertFalse(store.isReportable(idle, null))
+        idle.log.writeText("a normal game log")
+        assertFalse(store.isReportable(idle, null))
+        store.markRun(idle, true, 1002)
+        assertTrue(store.isReportable(idle, null))
+        assertFalse(store.isReportable(idle, idle.id))
+        idle.log.writeText("")
+        assertFalse(store.isReportable(idle, null))
+        CrashSessionStore.writeProperties(
+            File(idle.directory, "exit.properties"),
+            Properties().apply { setProperty("kind", "native_crash") }
+        )
+        assertTrue(store.isReportable(idle, null))
+        store.removeEmptyIdleSessions(null)
+        assertTrue(idle.directory.exists())
+    }
+
+    @Test fun cleanupPreservesIncidentsAndUnknownExits() = withStore { store ->
+        val current = store.create(20000, 99, "a", "0.1.15")
+        store.markRun(current, false, 20001)
+        val unknown = store.create(1000, 1, "a", "0.1.15")
+        unknown.log.writeText("unknown exit")
+        store.markRun(unknown, false, 1001)
+        val active = store.create(2000, 2, "a", "0.1.15")
+        store.markRun(active, true, 2001)
+        val crash = store.create(3000, 3, "a", "0.1.15")
+        store.markRun(crash, false, 3001)
+        CrashSessionStore.writeProperties(
+            File(crash.directory, "exit.properties"),
+            Properties().apply { setProperty("kind", "native_crash") }
+        )
+        val empty = store.create(4000, 4, "a", "0.1.15")
+        store.markRun(empty, false, 4001)
+        repeat(5) { n ->
+            val clean = store.create(5000L + n, 10 + n, "a", "0.1.15")
+            clean.log.writeText("ordinary log")
+            store.markRun(clean, false, 6000)
+            CrashSessionStore.writeProperties(
+                File(clean.directory, "exit.properties"),
+                Properties().apply { setProperty("kind", "user_exit") }
+            )
+        }
+        store.removeEmptyIdleSessions(current.id)
+        store.pruneConfirmedCleanSessions(current.id)
+        assertFalse(empty.directory.exists())
+        assertTrue(listOf(current, unknown, active, crash).all { it.directory.exists() })
+        assertEquals(6, store.sessions().size)
+    }
+
     private fun withStore(test: (CrashSessionStore) -> Unit) {
         val root = Files.createTempDirectory("uberhar-session-test").toFile()
         try {

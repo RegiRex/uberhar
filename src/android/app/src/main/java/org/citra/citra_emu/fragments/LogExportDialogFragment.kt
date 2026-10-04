@@ -36,6 +36,8 @@ import org.citra.citra_emu.utils.LogExportNames
 import org.citra.citra_emu.utils.LogExporter
 
 class LogExportDialogFragment : DialogFragment() {
+    // AstraEH: Keep normal text logs separate from actual interrupted/crashed-session evidence.
+    private val crashReports get() = arguments?.getBoolean("crash_reports") == true
     private var choices = emptyList<LogExporter.Choice>()
     private var selected = 0
     private var style = LogExportNames.Style.INITIALS
@@ -103,7 +105,7 @@ class LogExportDialogFragment : DialogFragment() {
         outState.putString("log_snapshot", pendingSnapshot)
     }
 
-    // AstraEH: Two visible session choices avoid guessing from a stale application flag.
+    // AstraEH: Normal logs show current/previous/older; incident reports have their own view.
     // A scrollable native dialog works on both Thor displays and larger accessibility text.
     override fun onCreateDialog(savedInstanceState: Bundle?): Dialog {
         val ctx = requireContext()
@@ -117,7 +119,12 @@ class LogExportDialogFragment : DialogFragment() {
         content.addView(progress)
         sessions = RadioGroup(ctx)
         content.addView(sessions)
-        content.addView(TextView(ctx).apply { setText(R.string.log_export_name_style) })
+        content.addView(
+            TextView(ctx).apply {
+                setText(R.string.log_export_name_style)
+                visibility = if (crashReports) View.GONE else View.VISIBLE
+            }
+        )
         styles = RadioGroup(ctx)
         val labels = listOf(R.string.log_export_initials, R.string.log_export_first_three)
         labels.forEachIndexed { index, label ->
@@ -136,6 +143,7 @@ class LogExportDialogFragment : DialogFragment() {
             style = LogExportNames.Style.entries[index]
             updatePreview()
         }
+        styles.visibility = if (crashReports) View.GONE else View.VISIBLE
         content.addView(styles)
         preview =
             TextView(ctx).apply {
@@ -143,15 +151,35 @@ class LogExportDialogFragment : DialogFragment() {
                 setTextIsSelectable(true)
             }
         content.addView(preview)
-        storageStatus = TextView(ctx).apply { setText(R.string.log_session_retention) }
+        storageStatus = TextView(ctx).apply {
+            setText(R.string.log_session_retention)
+            visibility = if (crashReports) View.VISIBLE else View.GONE
+        }
         content.addView(storageStatus)
         deleteSession = MaterialButton(ctx).apply {
+            visibility = if (crashReports) View.VISIBLE else View.GONE
             setText(R.string.log_session_delete)
             setOnClickListener { confirmDeleteSession() }
         }
         content.addView(deleteSession)
+        if (!crashReports) {
+            content.addView(
+                MaterialButton(ctx).apply {
+                    setText(R.string.log_crash_reports)
+                    setOnClickListener {
+                        if (!busy &&
+                            parentFragmentManager.findFragmentByTag("crash_reports") == null
+                        ) {
+                            LogExportDialogFragment().apply {
+                                arguments = Bundle().apply { putBoolean("crash_reports", true) }
+                            }.show(parentFragmentManager, "crash_reports")
+                        }
+                    }
+                }
+            )
+        }
         return MaterialAlertDialogBuilder(ctx)
-            .setTitle(R.string.log_export_title)
+            .setTitle(if (crashReports) R.string.log_crash_reports else R.string.log_export_title)
             .setView(ScrollView(ctx).apply { addView(content) })
             .setPositiveButton(R.string.log_export_download, null)
             .setNeutralButton(R.string.log_export_share, null)
@@ -180,7 +208,9 @@ class LogExportDialogFragment : DialogFragment() {
         lifecycleScope.launch {
             setBusy(true)
             try {
-                choices = withContext(Dispatchers.IO) { LogExporter.choices(app) }
+                choices = withContext(Dispatchers.IO) { LogExporter.choices(app, crashReports) }
+                storageStatus.visibility =
+                    if (crashReports || CrashSessionLogs.storageWarning) View.VISIBLE else View.GONE
                 storageStatus.setText(
                     if (CrashSessionLogs.storageWarning) {
                         R.string.log_session_storage_warning
@@ -198,7 +228,13 @@ class LogExportDialogFragment : DialogFragment() {
                         )
                             ?: getString(R.string.log_export_unknown_date)
                     val games = info.games.joinToString("; ").ifEmpty {
-                        getString(R.string.log_export_no_games)
+                        getString(
+                            if (crashReports) {
+                                R.string.log_crash_game_unknown
+                            } else {
+                                R.string.log_export_no_games
+                            }
+                        )
                     }
                     val kind = when {
                         choice.session != null -> getString(
@@ -257,7 +293,9 @@ class LogExportDialogFragment : DialogFragment() {
                     updatePreview()
                 }
                 if (choices.isEmpty()) {
-                    preview.setText(R.string.share_log_not_found)
+                    preview.setText(
+                        if (crashReports) R.string.log_crash_none else R.string.share_log_not_found
+                    )
                 } else {
                     updatePreview()
                 }

@@ -833,3 +833,27 @@ App-data clearing/uninstall still removes private evidence; export important bun
 Trace collection emits at most one warning per saved session per launch plus one
 outer failure warning. Renderer-stop output is once per terminal run; all new
 experimental log calls have adjacent `AstraEH Log Line` comments.
+
+
+<!-- AstraEH: 0.1.15 corrects private-path dispatch and keeps ordinary exports compact. -->
+## 0.1.15 logging health and incident-only reports
+
+`Uberhar log health: flush_complete=BOOL journal_ok=BOOL` is emitted at most once
+per process when the scheduled health check detects a failure. A completed barrier
+does not prove a successful file write; the two fields deliberately stay separate.
+The private writer now receives an owned duplicate descriptor through `fd://`,
+which bypasses Android data-folder-relative path translation. The ordinary backend
+is unchanged and can retain this diagnostic when the private writer fails.
+
+The main picker lists current/previous/older text logs. A separate Crash reports
+action lists meaningful crash/error/interruption evidence only; healthy live logs
+and ordinary launches are excluded. Android exit-only reports survive empty private
+logs from 0.1.14. An unresolved active marker remains an interruption, not proof of
+crash. Empty records without useful evidence do not clutter the report view.
+
+Empty idle launches with no incident evidence are reclaimed after exit collection.
+OS-confirmed clean idle backups retain the two newest; crash/error/active/unresolved
+records are never aged out. Existing 100 MiB log and 32 MiB trace limits, one-second
+flush timer, explicit incident deletion and final-queue/OS-availability limitations
+remain. The corrected dispatcher is covered by actual production Android path/JNI
+regression tests; host success does not claim on-device UI/crash validation.

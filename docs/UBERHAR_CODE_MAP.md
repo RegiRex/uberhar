@@ -20,6 +20,25 @@ rg -n AstraEH src CMakeModules tools/uberhar .github/workflows README.md UBERHAR
 
 ## Renderer
 
+<!-- AstraEH: 0.1.15 repairs the Android-specific path defect missed by prior host adapters. -->
+### Android logging correction (0.1.15)
+
+- `src/android/app/src/main/jni/native.cpp`: open the frontend-created private log
+  directly, hand off through `fd://`, then close the original descriptor after native
+  duplication. Bypasses both game-data-relative raw translation and SAF traversal.
+- Android `LogExporter.kt` and `LogExportDialogFragment.kt`: ordinary picker only
+  returns current/previous/older text. Separate Crash reports view filters out ordinary
+  launches and empty records; keeps useful exit-only incidents from the broken release.
+- `CrashSessionStore.kt` / `CrashSessionLogs.kt`: reclaim empty idle records without
+  incident evidence and retain two OS-confirmed clean idle backups. Never age out
+  crash/error/active/unresolved evidence. A single process warning logs both flush
+  completion and private-writer health if either fails.
+- `tools/uberhar/test_android_session_path.py`: compiles actual JNI setup and Android
+  `IOFile::Open`/`TranslateFilePath`, reproduces old relocation, tests descriptor
+  ownership, append, raw/provider dispatch and missing-file handling. Added to the
+  host gate. JVM tests cover incident filtering and conservative cleanup alongside
+  previous log export/retention cases. Android device acceptance remains separate.
+
 <!-- AstraEH: Accepted 0.1.13 review selects evidence retention before broader experiments. -->
 ### Reliability and crash evidence (0.1.14)
 

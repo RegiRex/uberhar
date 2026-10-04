@@ -17,7 +17,7 @@ import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
 // AstraEH: Pure filesystem policy, shared with JVM fault/retention tests. No normal rotation
-// touches these sessions. Only an explicit UI deletion removes a saved session.
+// touches these sessions. Incidents require explicit deletion; confirmed clean exits are bounded.
 class CrashSessionStore(val root: File) {
     data class Session(val directory: File, val properties: Properties) {
         val id: String get() = directory.name
@@ -42,7 +42,7 @@ class CrashSessionStore(val root: File) {
             setProperty("pid", pid.toString())
             setProperty("build", build)
             setProperty("version", version)
-            setProperty("retention", "manual_deletion_only")
+            setProperty("retention", "incidents_manual_clean_exit_last_two")
         }
         writeProperties(File(directory, "session.properties"), info)
         if (!File(
@@ -113,12 +113,66 @@ class CrashSessionStore(val root: File) {
                 "signal_exit"
             ) -> kind!!
             File(session.directory, "failure.txt").exists() -> "recorded_failure"
-            kind != null -> kind
+            kind == "user_exit" || kind == "self_exit" -> kind
             readOptional(
                 File(session.directory, "run.properties")
             ).getProperty("state") == "active" ->
                 "interrupted_unknown"
+            kind != null -> kind
             else -> "previous_session"
+        }
+    }
+
+    // AstraEH: Ordinary launches must not fill the log picker. Only incidents with useful
+    // evidence belong in the separate crash-report view; an active marker is not proof of crash.
+    fun isReportable(session: Session, currentId: String?): Boolean {
+        val kind = outcome(session)
+        if (session.id == currentId && kind != "recorded_failure") return false
+        if (kind !in incidentKinds) return false
+        return session.log.length() > 0 ||
+            File(session.directory, "failure.txt").length() > 0 ||
+            File(session.directory, "trace.bin").length() > 0 ||
+            (
+                kind != "interrupted_unknown" &&
+                    File(session.directory, "exit.properties").length() > 0
+                )
+    }
+
+    // AstraEH: Reclaim only empty idle launches with no failure or trace. Preserve every
+    // nonempty log and all unresolved active/crash records, including 0.1.14 evidence.
+    fun removeEmptyIdleSessions(currentId: String?) {
+        sessions().forEach { session ->
+            if (session.id != currentId &&
+                session.log.length() == 0L &&
+                File(session.directory, "failure.txt").length() == 0L &&
+                File(session.directory, "trace.bin").length() == 0L &&
+                outcome(session) !in incidentKinds &&
+                readOptional(File(session.directory, "run.properties"))
+                    .getProperty("state") == "idle"
+            ) {
+                delete(session, currentId)
+            }
+        }
+    }
+
+    // AstraEH: Bound ordinary, OS-confirmed clean backups to two. Never age out a crash,
+    // unresolved exit, active run, trace or recorded error, even if its log copy is empty.
+    fun pruneConfirmedCleanSessions(currentId: String?) {
+        var kept = 0
+        sessions().forEach { session ->
+            val exit = readOptional(File(session.directory, "exit.properties"))
+            val kind = exit.getProperty("kind")
+            val cleanExit = kind == "user_exit" ||
+                (kind == "self_exit" && exit.getProperty("status") == "0")
+            if (session.id != currentId &&
+                cleanExit &&
+                !File(session.directory, "failure.txt").exists() &&
+                !File(session.directory, "trace.bin").exists() &&
+                readOptional(File(session.directory, "run.properties"))
+                    .getProperty("state") == "idle"
+            ) {
+                if (++kept > 2) delete(session, currentId)
+            }
         }
     }
 
@@ -207,6 +261,15 @@ class CrashSessionStore(val root: File) {
     }
 
     companion object {
+        private val incidentKinds = setOf(
+            "java_crash",
+            "native_crash",
+            "anr",
+            "low_memory",
+            "signal_exit",
+            "recorded_failure",
+            "interrupted_unknown"
+        )
         private val validId = Regex("[0-9]{8}T[0-9]{6}\\.[0-9]{3}Z_[0-9a-f-]{36}")
         private val formatter = DateTimeFormatter.ofPattern(
             "yyyyMMdd'T'HHmmss.SSS'Z'"

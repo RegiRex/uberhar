@@ -30,27 +30,43 @@ object LogExporter {
 
     // AstraEH: All calls perform file IO and belong on Dispatchers.IO. Flushing before
     // enumeration makes the displayed titles/date agree with buffered current-session data.
-    fun choices(context: Context): List<Choice> {
+    fun choices(context: Context, crashReports: Boolean = false): List<Choice> {
         // AstraEH: Never make historical evidence depend on a healthy current logger/provider.
         val flushed = Log.flush()
         val store = CrashSessionLogs.sessionStore(context)
-        val retained = store.sessions().mapNotNull { session ->
-            runCatching {
-                val file = DocumentFile.fromFile(session.log)
-                Choice(
-                    file,
-                    session.id == CrashSessionLogs.current?.id,
-                    metadata(context, file),
-                    session,
-                    sessionName = store.exportName(
+        val retained = if (crashReports) {
+            store.sessions().filter {
+                store.isReportable(it, CrashSessionLogs.current?.id)
+            }.mapNotNull { session ->
+                runCatching {
+                    val file = DocumentFile.fromFile(session.log)
+                    Choice(
+                        file,
+                        session.id == CrashSessionLogs.current?.id,
+                        if (session.log.length() > 0) {
+                            metadata(context, file)
+                        } else {
+                            LogExportNames.Metadata(
+                                java.time.Instant.ofEpochMilli(session.startedMs)
+                                    .atZone(ZoneId.systemDefault()).toOffsetDateTime(),
+                                emptyList(),
+                                session.properties.getProperty("build")
+                            )
+                        },
                         session,
-                        session.id == CrashSessionLogs.current?.id
-                    ),
-                    sessionOutcome = store.outcome(session),
-                    sessionBytes = store.sizeBytes(session)
-                )
-            }.getOrNull()
+                        sessionName = store.exportName(
+                            session,
+                            session.id == CrashSessionLogs.current?.id
+                        ),
+                        sessionOutcome = store.outcome(session),
+                        sessionBytes = store.sizeBytes(session)
+                    )
+                }.getOrNull()
+            }
+        } else {
+            emptyList()
         }
+        if (crashReports) return retained
         val directory = runCatching {
             DocumentFile.fromTreeUri(context, PermissionsHandler.citraDirectory)?.findFile("log")
         }.getOrNull()
@@ -63,7 +79,7 @@ object LogExporter {
                     Choice(file, index == 0, metadata(context, file), older = index == 2)
                 }.getOrNull()
             }
-        return retained + legacy
+        return legacy
     }
 
     fun filename(choice: Choice, style: LogExportNames.Style): String = if (choice.session !=

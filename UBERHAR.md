@@ -7,6 +7,15 @@ Baseline: Azahar 2126.1.2, commit
 
 ## Current status
 
+<!-- AstraEH: Device feedback exposed Android path dispatch and rejected per-launch bundle clutter. -->
+**0.1.15 repairs private logging and restores the compact current/previous/older
+text-log picker.** Meaningful incident evidence moves behind a separate Crash reports
+action. The new host regression includes actual Android path dispatch, which the
+previous stdio-only test missed. See [release notes](docs/releases/0.1.15.md) and
+[0.1.14 device analysis](docs/UBERHAR_LOG_ANALYSIS_0.1.14.md). Renderer behavior is
+unchanged; Dark Moon's visual failure and large system-memory decline need focused
+diagnosis. Older status entries below are historical.
+
 <!-- AstraEH: Current reliability priority supersedes historical milestone plans below. -->
 **0.1.14 adds independently retained session evidence and narrow shader-worker
 correctness fixes.** Saved ZIP bundles survive ordinary log rotation and remain
