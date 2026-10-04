@@ -12,8 +12,10 @@ c++ -std=c++20 -O2 -Isrc tools/uberhar/test_log_retention.cpp \
 build/uberhar-probe/test-log-retention
 # AstraEH: Exercise the actual file writer, including a terminated helper and full storage.
 python3 tools/uberhar/test_session_backend.py
-# AstraEH: Include real Android path dispatch and JNI descriptor handoff in the host gate.
-python3 tools/uberhar/test_android_session_path.py
+# AstraEH: The existing log worker owns idle flushing; no Android timer is required.
+c++ -std=c++20 -O2 -pthread -Isrc tools/uberhar/test_log_queue.cpp \
+  -o build/uberhar-probe/test-log-queue
+build/uberhar-probe/test-log-queue
 
 # AstraEH: Catch incorrect family merges before exercising the numerical shader corpus.
 c++ -std=c++20 -O2 -DFMT_HEADER_ONLY -DXXH_INLINE_ALL \

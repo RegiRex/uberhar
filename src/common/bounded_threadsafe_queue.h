@@ -4,7 +4,9 @@
 
 #pragma once
 
+#include <array>
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <cstddef>
 #include <memory>
@@ -44,6 +46,22 @@ public:
 
     void PopWait(T& t, std::stop_token stop_token) {
         Pop<PopMode::WaitWithStopToken>(t, stop_token);
+    }
+
+    // AstraEH: A bounded idle wait lets the logging worker flush its final quiet record.
+    // Stop is checked in the predicate; even a racing notification is bounded by timeout.
+    template <typename Rep, typename Period>
+    bool PopWaitFor(T& t, std::stop_token token,
+                    const std::chrono::duration<Rep, Period>& timeout) {
+        std::stop_callback wake{token, [this] { consumer_cv.notify_all(); }};
+        {
+            std::unique_lock lock{consumer_cv_mutex};
+            consumer_cv.wait_for(lock, timeout, [this, token] {
+                return token.stop_requested() || m_read_index.load(std::memory_order::relaxed) !=
+                                                     m_write_index.load(std::memory_order::acquire);
+            });
+        }
+        return !token.stop_requested() && TryPop(t);
     }
 
     T PopWait() {
@@ -187,6 +205,13 @@ public:
 
     void PopWait(T& t, std::stop_token stop_token) {
         spsc_queue.PopWait(t, stop_token);
+    }
+
+    // AstraEH: Reuse the single consumer's timed wait; no extra thread or polling loop.
+    template <typename Rep, typename Period>
+    bool PopWaitFor(T& t, std::stop_token token,
+                    const std::chrono::duration<Rep, Period>& timeout) {
+        return spsc_queue.PopWaitFor(t, token, timeout);
     }
 
     T PopWait() {

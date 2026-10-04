@@ -13,9 +13,9 @@ jboolean Java_org_citra_citra_1emu_utils_Log_flush(JNIEnv*, jobject) {
     return Common::Log::Flush();
 }
 
-// AstraEH: A journal failure must be visible even when its own error cannot be written.
-jboolean Java_org_citra_citra_1emu_utils_Log_sessionFileHealthy(JNIEnv*, jobject) {
-    return Common::Log::SessionFileHealthy();
+// AstraEH: Surface primary writer failures without adding another writer.
+jboolean Java_org_citra_citra_1emu_utils_Log_fileHealthy(JNIEnv*, jobject) {
+    return Common::Log::FileHealthy();
 }
 
 void Java_org_citra_citra_1emu_utils_Log_debug(JNIEnv* env, jobject obj, jstring jmessage) {

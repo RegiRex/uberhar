@@ -60,3 +60,14 @@
 - AstraEH: Owner feedback (2026-10-04): remove per-launch session-bundle clutter
   from normal log export. Keep current/previous/older text logs primary. Preserve
   meaningful crash evidence separately; ordinary/empty launches are not crash reports.
+
+- AstraEH: Owner portability/overhead requirement (2026-10-04): target stripped-down
+  Android distributions including GammaOS. Core gameplay and log retention must not
+  require Android exit-history/tombstone services, Google Play services, telemetry
+  SDKs or vendor background services. Existing basic Android UI/storage/input APIs
+  remain necessary; optional diagnostics must tolerate unavailable services/sensors.
+- Keep logging lean: one existing current/previous/older text-log writer, one small
+  lifecycle marker and incident-only retained text. No per-launch session bundles,
+  continuously duplicated full logs or separate periodic logging worker. Preserve
+  actual crash evidence without overwriting it; ordinary launches must not accumulate
+  archives. Device compatibility/performance needs testing, not an OS-name assumption.

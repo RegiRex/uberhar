@@ -7,6 +7,19 @@ Baseline: Azahar 2126.1.2, commit
 
 ## Current status
 
+<!-- AstraEH: Owner requires lean logging and compatibility with stripped-down Android. -->
+**0.1.16 removes the per-launch bundle system and continuous duplicate log writer.**
+Current/previous/older remain the primary text logs. One small marker identifies
+unfinished runs; the next launch saves incident text before rotation, without Android
+exit-history collection or a separate periodic logging worker. Normal launches create
+no archives. Existing useful legacy evidence is migrated, with ordinary duplicates
+removed. See [release notes](docs/releases/0.1.16.md). GammaOS is a compatibility target;
+actual device validation remains pending. Renderer behavior is unchanged.
+**0.1.15 passed all Android, shader and publication gates; owner testing is pending.**
+Older implementation/status entries below are historical and are superseded where
+0.1.16 simplifies logging.
+
+
 <!-- AstraEH: Device feedback exposed Android path dispatch and rejected per-launch bundle clutter. -->
 **0.1.15 repairs private logging and restores the compact current/previous/older
 text-log picker.** Meaningful incident evidence moves behind a separate Crash reports

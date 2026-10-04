@@ -857,3 +857,38 @@ records are never aged out. Existing 100 MiB log and 32 MiB trace limits, one-se
 flush timer, explicit incident deletion and final-queue/OS-availability limitations
 remain. The corrected dispatcher is covered by actual production Android path/JNI
 regression tests; host success does not claim on-device UI/crash validation.
+
+
+<!-- AstraEH: Owner-directed simplification supersedes the session-journal design above. -->
+## Lean crash retention (0.1.16)
+
+- One existing `azahar_log.txt` backend; existing `.old.txt`/`.older.txt` rotation and
+  100 MiB writer cap. No second live writer, per-launch bundle or OS-history collection.
+- The existing native logger performs an idle flush after a one-second empty-queue wait.
+  No separate Java timer thread; clean idle ticks perform no file operation. This is
+  stdio flushing, not power-loss fsync or a guarantee for records still in the queue.
+- One app-private `uberhar_crash_logs/pending.properties` marker replaces per-launch
+  folders. Small synced writes occur at initialization, run start/end and failures.
+  Exception text is bounded to 65,536 characters across a process, not per frame.
+- On the next start, an active marker or recorded failure saves the original current
+  text to `uberhar_interrupted_start_<UTC>_<UUID>.txt` before normal rotation. Reports
+  include `detected_utc`, `log_available`, `started_utc`, `run_active`, bounded failure
+  text and explicitly unknown exit reason. Filename time is process start, not a
+  fabricated crash timestamp. Force-stop/system kill while playing can also qualify.
+- The snapshot is written/synced to a temporary file and committed before replacing
+  the marker. Failure suppresses rotation, keeps the marker and appends to the source
+  log for later recovery. Saved reports are never overwritten or automatically aged out.
+  Ordinary clean launches create no archives; actual incident storage can accumulate
+  until explicitly deleted. Data-folder removal/app-data clearing can still lose logs.
+- One-time upgrade removes ordinary legacy duplicates, converts useful old incident
+  logs/metadata to text, and moves existing binary traces unchanged into separately
+  exportable files. It collects no new traces and creates no ZIP bundles. Unknown old
+  files are retained; an upgrade IO failure is surfaced rather than discarding evidence.
+- Health checks use the existing writer's atomic status at startup, run end and export.
+  The removed `Uberhar log health ... journal_ok=...` record is historical to 0.1.15.
+  A storage/flush failure still warns visibly. Java failures are preserved directly
+  before the existing uncaught-handler chain runs. No new native signal handler.
+
+This preserves pre-crash context independently of Android exit-report services, but
+cannot guarantee a fatal native backtrace or exact cause/time. The actual filesystem,
+Android document-provider path and abrupt device termination remain device-test gates.

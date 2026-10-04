@@ -162,7 +162,7 @@ public:
                 return FileUtil::Rename(from, to);
             }
         } files;
-        // AstraEH: Unique session journals are never renamed, truncated or aged out here.
+        // AstraEH: Recovery failure suppresses rotation; append preserves the original evidence.
         const auto rotation =
             rotate ? Retention::Rotate(files, filename) : Retention::Result::NoData;
         if (rotation == Retention::Result::Failed) {
@@ -190,6 +190,7 @@ public:
         const auto text = FormatLogMessage(entry).append(1, '\n');
         const auto written = file->WriteString(text);
         bytes_written += written;
+        dirty = dirty || written > 0;
         if (written != text.size()) {
             healthy.store(false, std::memory_order_relaxed);
             enabled = false;
@@ -214,8 +215,12 @@ public:
     }
 
     void Flush() override {
-        if (!file->Flush())
-            healthy.store(false, std::memory_order_relaxed);
+        // AstraEH: Idle timer wakeups cost no file operation when there are no new bytes.
+        if (dirty) {
+            if (!file->Flush())
+                healthy.store(false, std::memory_order_relaxed);
+            dirty = false;
+        }
     }
 
     void Close() override {
@@ -235,6 +240,7 @@ public:
 private:
     std::unique_ptr<FileUtil::IOFile> file;
     bool enabled = true;
+    bool dirty = false;
     std::size_t bytes_written = 0;
     Retention::FlushPolicy flush_policy;
     std::atomic_bool healthy{false};
@@ -320,7 +326,7 @@ public:
         logging_initialized = true;
     }
 #endif
-    static void Initialize(std::string_view log_file, std::string_view session_file) {
+    static void Initialize(std::string_view log_file, bool rotate) {
         if (instance) {
             LOG_WARNING(Log, "Reinitializing logging backend");
             return;
@@ -331,7 +337,7 @@ public:
         Filter filter;
         filter.ParseFilterString(Settings::values.log_filter.GetValue());
         instance = std::unique_ptr<Impl, decltype(&Deleter)>(
-            new Impl(fmt::format("{}{}", log_dir, log_file), filter, session_file), Deleter);
+            new Impl(fmt::format("{}{}", log_dir, log_file), filter, rotate), Deleter);
         initialization_in_progress_suppress_logging = false;
         logging_initialized = true;
     }
@@ -340,8 +346,8 @@ public:
         instance->StartBackendThread();
     }
 
-    static bool SessionFileHealthy() {
-        return instance && instance->session_backend && instance->session_backend->Healthy();
+    static bool FileHealthy() {
+        return instance && instance->file_backend.Healthy();
     }
 
     static void Stop() {
@@ -435,13 +441,8 @@ private:
     Impl(retro_log_printf_t callback, const Filter& filter_)
         : filter{filter_}, file_backend{""}, libretro_backend{callback} {}
 #endif
-    Impl(const std::string& file_backend_filename, const Filter& filter_,
-         std::string_view session_file)
-        : filter{filter_},
-          session_backend{session_file.empty()
-                              ? nullptr
-                              : std::make_unique<FileBackend>(std::string{session_file}, false)},
-          file_backend{file_backend_filename} {
+    Impl(const std::string& file_backend_filename, const Filter& filter_, bool rotate)
+        : filter{filter_}, file_backend{file_backend_filename, rotate} {
 #ifdef CITRA_LINUX_GCC_BACKTRACE
         int waker_pipefd[2];
         int done_printing_pipefd[2];
@@ -522,7 +523,10 @@ private:
                 // AstraEH: A cancelled PopWait leaves its output untouched; clear the
                 // previous entry so shutdown cannot acknowledge a flush barrier twice.
                 entry = {};
-                message_queue.PopWait(entry, stop_token);
+                if (!message_queue.PopWaitFor(entry, stop_token, std::chrono::seconds{1})) {
+                    file_backend.Flush();
+                    continue;
+                }
                 // Only write the log if something was actually popped (entry.filename != nullptr)
                 // (for example, when the stop token is signaled).
                 if (entry.filename != nullptr || entry.flush_request) {
@@ -554,9 +558,6 @@ private:
 #ifdef HAVE_LIBRETRO
         lambda(static_cast<Backend&>(libretro_backend));
 #else
-        // AstraEH: Write/flush the private journal before touching a removable document provider.
-        if (session_backend)
-            lambda(static_cast<Backend&>(*session_backend));
         lambda(static_cast<Backend&>(debugger_backend));
         lambda(static_cast<Backend&>(color_console_backend));
         lambda(static_cast<Backend&>(file_backend));
@@ -606,7 +607,6 @@ private:
     boost::regex regex_filter;
     DebuggerBackend debugger_backend{};
     ColorConsoleBackend color_console_backend{};
-    std::unique_ptr<FileBackend> session_backend;
     FileBackend file_backend;
 #ifdef ANDROID
     LogcatBackend lc_backend{};
@@ -635,12 +635,12 @@ void LibRetroStart(retro_log_printf_t callback) {
 }
 #endif
 
-void Initialize(std::string_view log_file, std::string_view session_file) {
-    Impl::Initialize(log_file.empty() ? LOG_FILE : log_file, session_file);
+void Initialize(std::string_view log_file, bool rotate) {
+    Impl::Initialize(log_file.empty() ? LOG_FILE : log_file, rotate);
 }
 
-bool SessionFileHealthy() {
-    return Impl::SessionFileHealthy();
+bool FileHealthy() {
+    return Impl::FileHealthy();
 }
 
 void Start() {

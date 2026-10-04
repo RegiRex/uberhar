@@ -20,6 +20,23 @@ rg -n AstraEH src CMakeModules tools/uberhar .github/workflows README.md UBERHAR
 
 ## Renderer
 
+<!-- AstraEH: Current logging design supersedes historical 0.1.14/0.1.15 entries below. -->
+### Lean logging and portability (0.1.16)
+
+| Files | Purpose and limits |
+| --- | --- |
+| Android `utils/CrashLogStore.kt`, `CrashSessionLogs.kt` | One synced marker records active/idle state and bounded Java/handled failures. On next launch, copy the existing current text log only for incidents, commit before rotation, keep originals on failed recovery. No `ApplicationExitInfo`, process-history scan, new binary traces, session directories or scheduled Java flush worker. |
+| `LogExporter.kt`, `LogExportDialogFragment.kt`, `strings.xml` | Existing three-log main picker; plain incident files behind Crash reports. Previously collected binary traces remain individually exportable after migration. No ZIP creation. Only retained evidence is explicitly deletable. |
+| `src/common/logging/backend.{h,cpp}`, `src/common/bounded_threadsafe_queue.h` | Sole rotating text backend; native worker flushes a quiet tail after at most one idle second when scheduled. Dirty flag avoids file operations on empty wakeups. Failed archive recovery suppresses rotation and preserves append mode. Existing queue, provider and 100 MiB writer limitations remain. |
+| Android JNI `native.cpp`, `native_log.cpp`, `NativeLibrary.kt`, `Log.kt`, `DirectoryInitialization.kt` | Pass a rotation decision instead of a second log path; primary-writer health checked at startup, run end and export. No descriptor handoff or duplicated live logger. |
+| `CrashLogStoreTest.kt`, `test_session_backend.py`, `test_log_queue.cpp`, `test_log_retention.cpp` | Real-file restart/fault/migration tests, existing export-name tests, actual production worker quiet-tail flush/barrier teardown, SIGKILL, rotation and storage faults. Removed obsolete duplicate-journal path test. Full Android/provider and GammaOS checks remain device gates. |
+
+The owner requires basic Android compatibility without depending on optional OS/vendor
+services. No claim of an Android-free frontend, tested GammaOS performance or guaranteed
+native fatal stacks. Existing health diagnostics stay optional, unknown-tolerant and
+capped at one sample per 30 seconds. Historical entries below document superseded designs.
+
+
 <!-- AstraEH: 0.1.15 repairs the Android-specific path defect missed by prior host adapters. -->
 ### Android logging correction (0.1.15)
 

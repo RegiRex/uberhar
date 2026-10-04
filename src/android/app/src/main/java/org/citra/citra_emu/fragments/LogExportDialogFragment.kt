@@ -237,41 +237,24 @@ class LogExportDialogFragment : DialogFragment() {
                         )
                     }
                     val kind = when {
-                        choice.session != null -> getString(
-                            if (choice.current) {
-                                R.string.log_session_current
-                            } else {
-                                R.string.log_session_saved
-                            }
-                        )
+                        choice.report != null -> getString(R.string.log_session_saved)
                         choice.current -> getString(R.string.log_export_current)
                         choice.older -> getString(R.string.log_export_older)
                         else -> getString(R.string.log_export_previous)
                     }
-                    val savedInfo = choice.session?.let {
-                        // AstraEH: Distinguish OS-confirmed crashes from merely unfinished runs.
-                        val outcome = if (choice.current &&
-                            choice.sessionOutcome != "recorded_failure"
-                        ) {
-                            "recording"
-                        } else {
-                            choice.sessionOutcome
-                        }
-                        val label = when (outcome) {
-                            "recording" -> R.string.log_session_recording
-                            "java_crash", "native_crash" -> R.string.log_session_crash
-                            "anr" -> R.string.log_session_anr
-                            "low_memory" -> R.string.log_session_low_memory
-                            "signal_exit" -> R.string.log_session_signal
-                            "recorded_failure" -> R.string.log_session_handled
-                            "interrupted_unknown" -> R.string.log_session_interrupted
-                            else -> R.string.log_session_exit_other
-                        }
+                    // AstraEH: Keep the report description factual; an active marker alone
+                    // cannot distinguish a native crash, force-stop or system termination.
+                    val savedInfo = choice.report?.let {
                         val size = android.text.format.Formatter.formatShortFileSize(
                             app,
-                            choice.sessionBytes
+                            it.length()
                         )
-                        "${getString(label)} · $size"
+                        val kind = if (it.name.endsWith(".trace.bin")) {
+                            getString(R.string.log_legacy_trace)
+                        } else {
+                            getString(R.string.log_session_interrupted)
+                        }
+                        "$kind · $size"
                     }.orEmpty()
                     val label = listOf(
                         "$kind — $date",
@@ -313,21 +296,21 @@ class LogExportDialogFragment : DialogFragment() {
     private fun updatePreview() {
         choices.getOrNull(selected)?.let {
             preview.text = LogExporter.filename(it, style)
-            deleteSession.isEnabled = !busy && it.session != null && !it.current
+            deleteSession.isEnabled = !busy && it.report != null && !it.current
             for (index in 0 until styles.childCount) {
                 styles.getChildAt(index).isEnabled =
                     !busy &&
-                    it.session == null
+                    it.report == null
             }
         }
     }
 
     // AstraEH: Retained evidence has no automatic expiry. Only an explicit, confirmed owner
-    // action can remove a saved session; the current process is never deletable.
+    // action can remove a saved report; current/previous/older text logs are not deletable here.
     private fun confirmDeleteSession() {
         if (busy) return
         val choice = choices.getOrNull(selected) ?: return
-        if (choice.current || choice.session == null) return
+        if (choice.current || choice.report == null) return
         MaterialAlertDialogBuilder(requireContext())
             .setTitle(R.string.log_session_delete)
             .setMessage(R.string.log_session_delete_confirm)
@@ -405,7 +388,7 @@ class LogExportDialogFragment : DialogFragment() {
         }
         deleteSession.isEnabled =
             !value &&
-            choices.getOrNull(selected)?.let { it.session != null && !it.current } == true
+            choices.getOrNull(selected)?.let { it.report != null && !it.current } == true
         if (!value) updatePreview()
         (dialog as? AlertDialog)?.let {
             it.getButton(AlertDialog.BUTTON_POSITIVE)?.isEnabled = !value && choices.isNotEmpty()

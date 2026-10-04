@@ -161,7 +161,7 @@ object NativeLibrary {
     // Create the config.ini file.
     external fun createConfigFile()
     // AstraEH: Private journal path is created before ordinary external-log rotation.
-    external fun createLogFile(sessionPath: String)
+    external fun createLogFile(rotate: Boolean)
     external fun logUserDirectory(directory: String)
 
     /**

@@ -6,8 +6,6 @@
 #include <codecvt>
 #include <thread>
 #include <dlfcn.h>
-#include <fcntl.h>
-#include <unistd.h>
 #include "common/uberhar_activity.h" // AstraEH: Explicit loading and user phase boundaries.
 
 #include <android/api-level.h>
@@ -1032,21 +1030,14 @@ void Java_org_citra_citra_1emu_NativeLibrary_createConfigFile([[maybe_unused]] J
     Config{};
 }
 
-void Java_org_citra_citra_1emu_NativeLibrary_createLogFile(JNIEnv* env,
+void Java_org_citra_citra_1emu_NativeLibrary_createLogFile([[maybe_unused]] JNIEnv* env,
                                                            [[maybe_unused]] jobject obj,
-                                                           jstring session_path) {
-    // AstraEH: This is an app-private absolute path, not a path relative to the emulation
-    // data folder. Open it directly and let IOFile duplicate the descriptor before closing
-    // our copy. fd:// bypasses both Android raw-path translation and document providers.
-    const auto private_path = GetJString(env, session_path);
-    const int session_fd =
-        private_path.empty() ? -1 : open(private_path.c_str(), O_WRONLY | O_APPEND | O_CLOEXEC);
-    SCOPE_EXIT({
-        if (session_fd >= 0)
-            close(session_fd);
-    });
-    Common::Log::Initialize({}, session_fd < 0 ? "" : "fd://" + std::to_string(session_fd));
+                                                           jboolean rotate) {
+    // AstraEH: Use the original text writer only. If incident recovery failed, append to
+    // the existing current log so the next launch can retry without losing its source.
+    Common::Log::Initialize({}, rotate);
     Common::Log::Start();
+    // AstraEH Log Line: One startup record for the sole rotating text writer.
     LOG_INFO(Frontend, "Logging backend initialised");
 }
 

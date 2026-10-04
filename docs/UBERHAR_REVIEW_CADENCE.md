@@ -1,5 +1,14 @@
 # Architecture review ledger
 
+<!-- AstraEH: Lean logging is a focused owner-directed follow-up, not a full review reset. -->
+0.1.15 has passed Android, shader and publication gates and is successor two after
+0.1.13. The owner requires GammaOS-compatible, lean logging without per-launch bundles
+or dependence on optional crash services. 0.1.16 implements that simplification and
+counts as successor three only after publication. Default full review remains after
+0.1.17 evidence, allowed after 0.1.16–0.1.18 and before 0.1.19. No new renderer/device
+results are claimed. The prior status snapshots below remain historical.
+
+
 <!-- AstraEH: Current follow-up status; historical review entries below remain intact. -->
 The [0.1.14 device review](UBERHAR_LOG_ANALYSIS_0.1.14.md) identifies an Android
 private-log path defect and a rejected per-launch bundle UI. 0.1.15 fixes those
