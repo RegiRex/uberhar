@@ -20,6 +20,20 @@ rg -n AstraEH src CMakeModules tools/uberhar .github/workflows README.md UBERHAR
 
 ## Renderer
 
+<!-- AstraEH: Optional Android evidence supplements the lean 0.1.16 logger; no crash UI. -->
+### File-only optional Android evidence (0.1.17)
+
+| Files | Purpose and limits |
+| --- | --- |
+| Android `utils/AndroidCrashEvidence.kt` | One API-30+ startup check: tag current build/process, inspect at most eight exits, capture at most two previously unrecorded abnormal tagged exits. API-31+ native tombstones retain original protobuf bytes; no custom signal handler or per-frame work. Exceptions/missing services do not gate gameplay. |
+| `utils/AndroidCrashReportStore.kt` | Atomic private staging of dated summary/optional trace; 8 MiB trace cap, 4,096-character OS description cap, 32-entry duplicate ledger. Untagged records are not assigned a guessed build. Missing/oversized traces still yield an exit summary. |
+| `utils/CrashReportTransfer.kt`, `CrashReportFiles.kt` | Copy staged evidence into existing `log/crashes/` using temporary files. Verify SHA-256 before deleting private staging; differing existing files are never overwritten. Failed transfers remain recoverable; one bad destination does not block other reports. |
+| `CrashSessionLogs.kt`, `DirectoryInitialization.kt` | Read the capture switch after config load, then run one short-lived worker. Base text preservation/file publication works with optional capture disabled/unavailable. Main log receives a bounded file-location pointer or pending-save record, with no crash-report popup. |
+| `LogExporter.kt`, `LogExportDialogFragment.kt`, `strings.xml` | Remove crash-report listing/actions. Main picker exports only current/previous/older text. Older staged incident files migrate into the same filesystem-only crash folder. |
+| `GenerateSettingKeys.cmake`, `settings.h`, Android config/default INI/JNI/setting bindings | `android_crash_reports` defaults true, may be disabled in `[Debugging]` in the config file; no new settings-screen item. Normal logger remains independent. |
+| `AndroidCrashReportStoreTest.kt`, `CrashReportTransferTest.kt` | Production-policy tests for identity attribution, exact binary bytes, missing/oversized traces, interrupted commit/retry, bounded deduplication and transfer failures/conflicts. Combined with existing retention/export tests: 33 JVM cases. Android API/provider/device coverage remains separate. |
+
+
 <!-- AstraEH: Current logging design supersedes historical 0.1.14/0.1.15 entries below. -->
 ### Lean logging and portability (0.1.16)
 

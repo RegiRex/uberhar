@@ -19,6 +19,7 @@ import org.citra.citra_emu.R
 object CrashSessionLogs {
     private val started = AtomicBoolean(false)
     private val warned = AtomicBoolean(false)
+    private val recovered = AtomicBoolean(false)
     private var store: CrashLogStore? = null
     private var app: Context? = null
 
@@ -70,6 +71,37 @@ object CrashSessionLogs {
                 Process.killProcess(Process.myPid())
             }
         }
+    }
+
+    // AstraEH: One short-lived worker per process, no timer or polling. Existing saved text
+    // is published even when OS capture is disabled, unsupported or fails.
+    fun recoverFiles(androidEvidence: Boolean) {
+        if (!recovered.compareAndSet(false, true)) return
+        val context = app ?: return
+        val logs = store ?: return
+        Thread({
+            // AstraEH: Recovery IO yields scheduling priority to gameplay and the UI.
+            runCatching { Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND) }
+            if (androidEvidence) {
+                runCatching { AndroidCrashEvidence.collect(context, logs.root) }.onFailure {
+                    // AstraEH Log Line: At most once per startup; missing OS data is nonfatal.
+                    Log.warning(
+                        "Uberhar optional crash evidence unavailable: ${it.javaClass.simpleName}"
+                    )
+                }
+            }
+            runCatching { CrashReportFiles.publish(context, logs.reports()) }.onSuccess { count ->
+                if (count > 0) {
+                    // AstraEH Log Line: One file-location pointer after successful incident saves.
+                    Log.info("Uberhar crash evidence saved: files=$count directory=log/crashes")
+                }
+            }.onFailure {
+                // AstraEH Log Line: Keep staging bytes for a later retry; do not block play.
+                Log.warning(
+                    "Uberhar crash-file save pending: directory=log/crashes ${it.javaClass.simpleName}"
+                )
+            }
+        }, "UberharCrashRecovery").apply { isDaemon = true }.start()
     }
 
     fun checkHealth() {

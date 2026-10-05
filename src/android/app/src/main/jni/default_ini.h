@@ -583,6 +583,10 @@ static const char* android_config_default_file_content = (BOOST_HANA_STRING(R"(
 # Immediately commits the debug log to file. Use this if Azahar crashes and the log output is being cut.
 )") DECLARE_KEY(instant_debug_log) BOOST_HANA_STRING(R"(
 
+# AstraEH: Save available Android crash evidence to log/crashes on the next launch.
+# Optional and file-only; no monitor or in-app reports. Set false to disable OS capture.
+)") DECLARE_KEY(android_crash_reports) BOOST_HANA_STRING(R"(
+
 # Enable RPC server for scripting purposes. Allows accessing guest memory remotely.
 # 0 (default): Off, 1: On
 )") DECLARE_KEY(enable_rpc_server) BOOST_HANA_STRING(R"(

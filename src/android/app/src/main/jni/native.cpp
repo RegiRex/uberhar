@@ -1041,6 +1041,11 @@ void Java_org_citra_citra_1emu_NativeLibrary_createLogFile([[maybe_unused]] JNIE
     LOG_INFO(Frontend, "Logging backend initialised");
 }
 
+// AstraEH: Read on the startup thread after Config has loaded; worker captures this decision.
+jboolean Java_org_citra_citra_1emu_NativeLibrary_androidCrashReportsEnabled(JNIEnv*, jobject) {
+    return Settings::values.android_crash_reports.GetValue();
+}
+
 void Java_org_citra_citra_1emu_NativeLibrary_logUserDirectory(JNIEnv* env,
                                                               [[maybe_unused]] jobject obj,
                                                               jstring j_path) {

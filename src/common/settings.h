@@ -668,6 +668,8 @@ struct Values {
     Setting<bool> use_gdbstub{false, Keys::use_gdbstub};
     Setting<u16> gdbstub_port{24689, Keys::gdbstub_port};
     Setting<bool> instant_debug_log{false, Keys::instant_debug_log};
+    // AstraEH: Optional, file-only OS crash evidence; never required for normal logging.
+    Setting<bool> android_crash_reports{true, Keys::android_crash_reports};
     Setting<bool> enable_rpc_server{false, Keys::enable_rpc_server};
     Setting<bool> toggle_unique_data_console_type{false, Keys::toggle_unique_data_console_type};
     Setting<bool> enable_exception_handler{false, Keys::enable_exception_handler};

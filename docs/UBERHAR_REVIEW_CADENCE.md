@@ -1,5 +1,14 @@
 # Architecture review ledger
 
+<!-- AstraEH: Optional file-only crash evidence follows the owner's explicit clarification. -->
+0.1.16 passed all Android, shader and publication gates and is successor three after
+0.1.13. 0.1.17 adds an optional bounded Android crash-evidence layer, with reports
+available only as files. Count it as successor four only after publication. The default
+full review is after 0.1.17 evidence; allowed through 0.1.18 and required before 0.1.19.
+This focused reliability change does not reset the anchor. No new device runs or
+renderer improvements are claimed; the owner's pending tests remain the next evidence.
+
+
 <!-- AstraEH: Lean logging is a focused owner-directed follow-up, not a full review reset. -->
 0.1.15 has passed Android, shader and publication gates and is successor two after
 0.1.13. The owner requires GammaOS-compatible, lean logging without per-launch bundles

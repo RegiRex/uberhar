@@ -1160,19 +1160,9 @@
     <string name="uberhar_phase_loading">Loading — waiting for the game</string>
     <string name="uberhar_phase_gameplay">Gameplay — playing or in menus</string>
     <!-- AstraEH: Saved sessions survive rotation; incident exports include their available evidence. -->
-    <string name="log_session_saved">Saved error or interrupted log</string>
     <string name="log_export_older">Older log</string>
-    <string name="log_session_interrupted">See text for recorded errors; an interruption alone does not confirm a crash</string>
-    <string name="log_session_retention">Only recorded errors and interrupted runs are retained. Reports use the existing text log and stay until you delete them. An interruption does not always mean a crash. Older binary traces, if any, are listed separately; no new bundles or OS traces are created.</string>
     <string name="log_session_storage_warning">A log write or flush failed. Existing text logs may still be available. Export important logs before deleting files or clearing app data.</string>
-    <string name="log_session_delete">Delete crash report</string>
-    <string name="log_session_delete_confirm">Delete this saved file? Export it first if you want to keep it. This cannot be undone.</string>
     <string name="uberhar_renderer_stopped">Rendering stopped</string>
-    <string name="uberhar_renderer_stopped_description">Uberhar could not obtain a working shader and stopped this game. Export the error report from Crash reports in the log menu to help investigate the failure.</string>
+    <string name="uberhar_renderer_stopped_description">Uberhar could not obtain a working shader and stopped this game. Export the current text log to help investigate the failure. Additional evidence may be saved in log/crashes after restarting Uberhar.</string>
     <!-- AstraEH: Keep incident evidence off the ordinary current/previous/older log list. -->
-    <!-- AstraEH: Preserve previously collected traces without producing new log bundles. -->
-    <string name="log_legacy_trace">Previously saved binary crash trace</string>
-    <string name="log_crash_reports">Crash reports</string>
-    <string name="log_crash_none">No saved crash reports or interrupted logs are available.</string>
-    <string name="log_crash_game_unknown">Game details unavailable; see the saved report.</string>
 </resources>

@@ -123,6 +123,7 @@ foreach(KEY IN ITEMS
     "use_gdbstub"
     "gdbstub_port"
     "instant_debug_log"
+    "android_crash_reports" # AstraEH: Optional Android-only evidence; no UI dependency.
     "enable_rpc_server"
     "log_filter"
     "log_regex_filter"

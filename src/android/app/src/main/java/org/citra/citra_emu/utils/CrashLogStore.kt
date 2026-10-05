@@ -87,7 +87,11 @@ class CrashLogStore(val root: File) {
     fun reports(): List<File> = root.listFiles().orEmpty().filter {
         it.isFile &&
             it.name.startsWith("uberhar_") &&
-            (it.extension == "txt" || it.name.endsWith(".trace.bin"))
+            (
+                it.extension == "txt" ||
+                    it.name.endsWith(".trace.bin") ||
+                    it.name.endsWith(".tombstone.pb")
+                )
     }.sortedByDescending { it.name }
 
     fun delete(report: File) {

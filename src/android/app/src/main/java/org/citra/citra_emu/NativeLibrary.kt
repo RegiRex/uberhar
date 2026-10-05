@@ -162,6 +162,9 @@ object NativeLibrary {
     external fun createConfigFile()
     // AstraEH: Private journal path is created before ordinary external-log rotation.
     external fun createLogFile(rotate: Boolean)
+
+    // AstraEH: Query after config load, before optional one-shot recovery.
+    external fun androidCrashReportsEnabled(): Boolean
     external fun logUserDirectory(directory: String)
 
     /**

@@ -24,6 +24,8 @@ enum class BooleanSetting(
     ALLOW_PLUGIN_LOADER(SettingKeys.allow_plugin_loader(), Settings.SECTION_SYSTEM, true),
     SWAP_SCREEN(SettingKeys.swap_screen(), Settings.SECTION_LAYOUT, false),
     INSTANT_DEBUG_LOG(SettingKeys.instant_debug_log(), Settings.SECTION_DEBUG, false),
+    // AstraEH: Preserve this config-file option through saves; no settings-screen entry.
+    ANDROID_CRASH_REPORTS(SettingKeys.android_crash_reports(), Settings.SECTION_DEBUG, true),
     ENABLE_RPC_SERVER(SettingKeys.enable_rpc_server(), Settings.SECTION_DEBUG, false),
     TOGGLE_UNIQUE_DATA_CONSOLE_TYPE(
         SettingKeys.toggle_unique_data_console_type(),

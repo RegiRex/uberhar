@@ -51,6 +51,8 @@ object DirectoryInitialization {
                     Log.info("Uberhar log session: ${java.time.OffsetDateTime.now()}")
                     NativeLibrary.logUserDirectory(userPath.toString())
                     NativeLibrary.createConfigFile()
+                    // AstraEH: Optional OS recovery runs once off the startup/UI thread.
+                    CrashSessionLogs.recoverFiles(NativeLibrary.androidCrashReportsEnabled())
                     GpuDriverHelper.initializeDriverParameters()
                     DirectoryInitializationState.CITRA_DIRECTORIES_INITIALIZED
                 } else {

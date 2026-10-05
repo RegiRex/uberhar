@@ -21,28 +21,12 @@ object LogExporter {
         val source: DocumentFile,
         val current: Boolean,
         val metadata: LogExportNames.Metadata,
-        val report: File? = null,
         val older: Boolean = false
     )
 
-    // AstraEH: All provider IO stays off the UI thread. Normal exports enumerate only three
-    // rotating logs; the separate incident list contains plain text, never launch bundles.
-    fun choices(context: Context, crashReports: Boolean = false): List<Choice> {
-        if (crashReports) {
-            return CrashSessionLogs.crashStore(context).reports().map { report ->
-                val file = DocumentFile.fromFile(report)
-                // AstraEH: An old binary OS trace remains exportable after the one-time upgrade.
-                // Its companion text supplies titles/date; no new binary traces are collected.
-                val text = if (report.name.endsWith(".trace.bin")) {
-                    File(report.parentFile, report.name.removeSuffix(".trace.bin") + ".txt")
-                } else {
-                    report
-                }
-                val info = runCatching { metadata(context, DocumentFile.fromFile(text)) }
-                    .getOrDefault(LogExportNames.Metadata(null, emptyList(), null))
-                Choice(file, false, info, report)
-            }
-        }
+    // AstraEH: Only the existing three text logs appear in-app. Crash evidence is saved
+    // directly under log/crashes for file access, never enumerated by this picker.
+    fun choices(context: Context): List<Choice> {
         val flushed = Log.flush()
         CrashSessionLogs.checkHealth()
         val directory = runCatching {
@@ -60,15 +44,7 @@ object LogExporter {
     }
 
     fun filename(choice: Choice, style: LogExportNames.Style): String =
-        choice.report?.name ?: LogExportNames.filename(choice.metadata, style)
-
-    fun mimeType(filename: String): String =
-        if (filename.endsWith(".bin")) "application/octet-stream" else "text/plain"
-
-    fun deleteSession(context: Context, choice: Choice) {
-        val report = choice.report ?: throw IOException("Not a saved crash log")
-        CrashSessionLogs.crashStore(context).delete(report)
-    }
+        LogExportNames.filename(choice.metadata, style)
 
     private fun metadata(context: Context, source: DocumentFile): LogExportNames.Metadata {
         val input = context.contentResolver.openInputStream(source.uri)
@@ -92,11 +68,6 @@ object LogExporter {
         val folder = File(root, UUID.randomUUID().toString())
         if (!folder.mkdirs()) throw IOException("Cannot create export directory")
         try {
-            choice.report?.let { report ->
-                val result = File(folder, report.name)
-                report.inputStream().use { input -> result.outputStream().use { input.copyTo(it) } }
-                return result
-            }
             val temporary = File(folder, "snapshot.txt")
             val input = context.contentResolver.openInputStream(choice.source.uri)
                 ?: throw IOException("Cannot read log")

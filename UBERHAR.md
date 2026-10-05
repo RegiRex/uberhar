@@ -7,6 +7,19 @@ Baseline: Azahar 2126.1.2, commit
 
 ## Current status
 
+<!-- AstraEH: Optional OS evidence is now explicitly accepted, with file-only access. -->
+**0.1.17 adds optional Android crash evidence saved under `log/crashes/`.** A single
+background startup check can save a dated exit summary and available native tombstone
+or OS trace for an abnormal exit from a tagged Uberhar process. The in-app crash-report
+browser is removed; ordinary current/previous/older export remains. No continuous
+monitor, second log writer, new permission or runtime dependency. OS capture defaults
+on and is disabled with `[Debugging] android_crash_reports=false` in `config/config.ini`.
+Missing Android services or traces do not block gameplay or base log retention.
+See [release and file-access notes](docs/releases/0.1.17.md).
+**0.1.16 passed all release gates; owner/device acceptance is still pending.** Renderer
+behavior is unchanged. Older status snapshots below preserve the superseded designs.
+
+
 <!-- AstraEH: Owner requires lean logging and compatibility with stripped-down Android. -->
 **0.1.16 removes the per-launch bundle system and continuous duplicate log writer.**
 Current/previous/older remain the primary text logs. One small marker identifies

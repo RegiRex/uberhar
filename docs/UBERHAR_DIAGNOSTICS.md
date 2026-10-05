@@ -892,3 +892,57 @@ regression tests; host success does not claim on-device UI/crash validation.
 This preserves pre-crash context independently of Android exit-report services, but
 cannot guarantee a fatal native backtrace or exact cause/time. The actual filesystem,
 Android document-provider path and abrupt device termination remain device-test gates.
+
+
+<!-- AstraEH: Latest owner-approved optional layer; supersedes 0.1.16's no-OS-collection policy. -->
+## Optional Android crash files (0.1.17)
+
+`[Debugging] android_crash_reports=true` enables best-effort capture, default on under
+the owner's authorization. `false` skips Android crash APIs; base text retention and
+publishing already-saved files still work. There is no new in-app setting/report page.
+The existing Android frontend minimum stays API 29; exit history is guarded at API 30,
+and native tombstone interpretation is labeled only on API 31+.
+
+After config load, one background worker tags the current process/build once (under
+Android's 128-byte summary limit), examines at most eight historical OS exits, and
+captures at most two new tagged abnormal exits. Recognized kinds: `java_crash`,
+`native_crash`, `anr`, `low_memory_exit`, `signal_exit`. Ordinary exits and untagged old
+versions are ignored. This is restart recovery of Android's existing record, not
+additional continuous monitoring or an attempt to run file IO inside a dead process.
+
+Files appear in the existing data folder's **`log/crashes/`**, outside the app UI:
+
+- `uberhar_android_<exit-UTC>_<PID>_<token>.txt`: schema, source build/process token,
+  OS exit and collection time, PID/process, exit kind/status or signal, description,
+  sampled PSS/RSS, trace status/name/format and limits. Memory values are last samples,
+  not peak consumption or proof of OOM. Description capped at 4,096 characters.
+- Matching `.tombstone.pb` for an available API-31+ native tombstone, or `.trace.bin`
+  for another available OS trace. Bytes are unmodified; traces over 8 MiB are omitted
+  with an explicit status in the summary. Missing/denied/expired traces do not prevent
+  the small exit summary. Native traces require decoding/symbolication against the
+  recorded source build's existing symbols; no parser/SDK is added to the app.
+- Existing `uberhar_interrupted_start_...txt` / migrated legacy evidence remains useful
+  but separate from a confirmed Android exit reason. Those files move out of the old
+  in-app crash browser into the same folder after byte verification.
+
+Private staging survives provider failures. Each final copy is read back and SHA-256
+checked before deleting the private source; existing different content is never
+replaced. Interrupted `.pending` destination writes are retried. A 32-entry identity
+ledger suppresses recapture, including after a user deletes a saved report. No ordinary
+launch archive, ZIP, live duplicate writer, new permission, network dependency or
+telemetry SDK. Genuine saved incidents are not automatically erased and may accumulate.
+
+New bounded main-log lines (AstraEH Log Line): `Uberhar crash evidence saved` once after
+successful file publication; `Uberhar crash-file save pending` once if publication has
+failures; `Uberhar optional crash evidence unavailable` once if the optional API path
+throws. They point to `log/crashes` without adding a report list or notification.
+The inherited primary-writer storage warning and terminal renderer-error dialog remain.
+
+Android can return no trace, and its bounded system history can expire. Early crashes
+before the process tag is registered are not falsely attributed. No guarantee of a
+fatal stack, capture during power loss, or a root-cause diagnosis. Android/GammaOS API,
+provider, file-manager access and physical-device validation remain pending.
+
+References: [ApplicationExitInfo](https://developer.android.com/reference/android/app/ApplicationExitInfo),
+[ActivityManager process summaries](https://developer.android.com/reference/android/app/ActivityManager#setProcessStateSummary(byte[])),
+[AOSP tombstone schema](https://android.googlesource.com/platform/system/core/+/refs/heads/main/debuggerd/proto/tombstone.proto).

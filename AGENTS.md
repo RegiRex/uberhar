@@ -71,3 +71,10 @@
   continuously duplicated full logs or separate periodic logging worker. Preserve
   actual crash evidence without overwriting it; ordinary launches must not accumulate
   archives. Device compatibility/performance needs testing, not an OS-name assumption.
+
+- AstraEH: Owner clarification (2026-10-04 evening): optional Android-supplied crash
+  evidence is accepted to help identify failures. Recover it once on the next launch
+  when available; missing services/traces must not affect play or primary logging.
+  Save separate dated files under the existing `log/crashes` folder, with no in-app
+  crash-report listing or popup. No continuous capture, per-launch bundles or duplicate
+  full-log writer. The config-file switch may disable OS capture; retain base text logs.

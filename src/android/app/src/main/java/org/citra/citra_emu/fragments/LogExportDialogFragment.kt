@@ -5,7 +5,6 @@ package org.citra.citra_emu.fragments
 
 import android.app.Dialog
 import android.content.ClipData
-import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.view.View
@@ -20,7 +19,6 @@ import androidx.appcompat.app.AlertDialog
 import androidx.core.content.FileProvider
 import androidx.fragment.app.DialogFragment
 import androidx.lifecycle.lifecycleScope
-import com.google.android.material.button.MaterialButton
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.radiobutton.MaterialRadioButton
 import java.io.File
@@ -36,8 +34,7 @@ import org.citra.citra_emu.utils.LogExportNames
 import org.citra.citra_emu.utils.LogExporter
 
 class LogExportDialogFragment : DialogFragment() {
-    // AstraEH: Keep normal text logs separate from actual interrupted/crashed-session evidence.
-    private val crashReports get() = arguments?.getBoolean("crash_reports") == true
+    // AstraEH: File-only crash evidence has no in-app browser or popup.
     private var choices = emptyList<LogExporter.Choice>()
     private var selected = 0
     private var style = LogExportNames.Style.INITIALS
@@ -49,17 +46,12 @@ class LogExportDialogFragment : DialogFragment() {
     private lateinit var styles: RadioGroup
     private lateinit var preview: TextView
     private lateinit var progress: ProgressBar
-    private lateinit var deleteSession: MaterialButton
     private lateinit var storageStatus: TextView
 
     // AstraEH: CreateDocument lets the user choose Downloads or another provider without
     // adding storage permissions. Keep the staged path across rotation/process recreation.
     private val saveDocument =
-        registerForActivityResult(object : ActivityResultContracts.CreateDocument("text/plain") {
-            // AstraEH: Keep ordinary text exports while allowing complete incident ZIP bundles.
-            override fun createIntent(context: Context, input: String): Intent =
-                super.createIntent(context, input).setType(LogExporter.mimeType(input))
-        }) { uri ->
+        registerForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
             val relative = pendingSnapshot
             pendingSnapshot = null
             if (uri != null && relative != null) {
@@ -105,7 +97,7 @@ class LogExportDialogFragment : DialogFragment() {
         outState.putString("log_snapshot", pendingSnapshot)
     }
 
-    // AstraEH: Normal logs show current/previous/older; incident reports have their own view.
+    // AstraEH: Normal logs show current/previous/older; crash files stay outside this UI.
     // A scrollable native dialog works on both Thor displays and larger accessibility text.
     override fun onCreateDialog(savedInstanceState: Bundle?): Dialog {
         val ctx = requireContext()
@@ -122,7 +114,6 @@ class LogExportDialogFragment : DialogFragment() {
         content.addView(
             TextView(ctx).apply {
                 setText(R.string.log_export_name_style)
-                visibility = if (crashReports) View.GONE else View.VISIBLE
             }
         )
         styles = RadioGroup(ctx)
@@ -143,7 +134,6 @@ class LogExportDialogFragment : DialogFragment() {
             style = LogExportNames.Style.entries[index]
             updatePreview()
         }
-        styles.visibility = if (crashReports) View.GONE else View.VISIBLE
         content.addView(styles)
         preview =
             TextView(ctx).apply {
@@ -152,34 +142,12 @@ class LogExportDialogFragment : DialogFragment() {
             }
         content.addView(preview)
         storageStatus = TextView(ctx).apply {
-            setText(R.string.log_session_retention)
-            visibility = if (crashReports) View.VISIBLE else View.GONE
+            setText(R.string.log_session_storage_warning)
+            visibility = View.GONE
         }
         content.addView(storageStatus)
-        deleteSession = MaterialButton(ctx).apply {
-            visibility = if (crashReports) View.VISIBLE else View.GONE
-            setText(R.string.log_session_delete)
-            setOnClickListener { confirmDeleteSession() }
-        }
-        content.addView(deleteSession)
-        if (!crashReports) {
-            content.addView(
-                MaterialButton(ctx).apply {
-                    setText(R.string.log_crash_reports)
-                    setOnClickListener {
-                        if (!busy &&
-                            parentFragmentManager.findFragmentByTag("crash_reports") == null
-                        ) {
-                            LogExportDialogFragment().apply {
-                                arguments = Bundle().apply { putBoolean("crash_reports", true) }
-                            }.show(parentFragmentManager, "crash_reports")
-                        }
-                    }
-                }
-            )
-        }
         return MaterialAlertDialogBuilder(ctx)
-            .setTitle(if (crashReports) R.string.log_crash_reports else R.string.log_export_title)
+            .setTitle(R.string.log_export_title)
             .setView(ScrollView(ctx).apply { addView(content) })
             .setPositiveButton(R.string.log_export_download, null)
             .setNeutralButton(R.string.log_export_share, null)
@@ -208,16 +176,9 @@ class LogExportDialogFragment : DialogFragment() {
         lifecycleScope.launch {
             setBusy(true)
             try {
-                choices = withContext(Dispatchers.IO) { LogExporter.choices(app, crashReports) }
+                choices = withContext(Dispatchers.IO) { LogExporter.choices(app) }
                 storageStatus.visibility =
-                    if (crashReports || CrashSessionLogs.storageWarning) View.VISIBLE else View.GONE
-                storageStatus.setText(
-                    if (CrashSessionLogs.storageWarning) {
-                        R.string.log_session_storage_warning
-                    } else {
-                        R.string.log_session_retention
-                    }
-                )
+                    if (CrashSessionLogs.storageWarning) View.VISIBLE else View.GONE
                 sessions.removeAllViews()
                 selected = selected.coerceIn(0, (choices.size - 1).coerceAtLeast(0))
                 choices.forEachIndexed { index, choice ->
@@ -228,37 +189,15 @@ class LogExportDialogFragment : DialogFragment() {
                         )
                             ?: getString(R.string.log_export_unknown_date)
                     val games = info.games.joinToString("; ").ifEmpty {
-                        getString(
-                            if (crashReports) {
-                                R.string.log_crash_game_unknown
-                            } else {
-                                R.string.log_export_no_games
-                            }
-                        )
+                        getString(R.string.log_export_no_games)
                     }
                     val kind = when {
-                        choice.report != null -> getString(R.string.log_session_saved)
                         choice.current -> getString(R.string.log_export_current)
                         choice.older -> getString(R.string.log_export_older)
                         else -> getString(R.string.log_export_previous)
                     }
-                    // AstraEH: Keep the report description factual; an active marker alone
-                    // cannot distinguish a native crash, force-stop or system termination.
-                    val savedInfo = choice.report?.let {
-                        val size = android.text.format.Formatter.formatShortFileSize(
-                            app,
-                            it.length()
-                        )
-                        val kind = if (it.name.endsWith(".trace.bin")) {
-                            getString(R.string.log_legacy_trace)
-                        } else {
-                            getString(R.string.log_session_interrupted)
-                        }
-                        "$kind · $size"
-                    }.orEmpty()
                     val label = listOf(
                         "$kind — $date",
-                        savedInfo,
                         games.take(1200),
                         info.build.orEmpty().take(160)
                     ).filter { it.isNotEmpty() }.joinToString("\n")
@@ -276,9 +215,7 @@ class LogExportDialogFragment : DialogFragment() {
                     updatePreview()
                 }
                 if (choices.isEmpty()) {
-                    preview.setText(
-                        if (crashReports) R.string.log_crash_none else R.string.share_log_not_found
-                    )
+                    preview.setText(R.string.share_log_not_found)
                 } else {
                     updatePreview()
                 }
@@ -296,40 +233,7 @@ class LogExportDialogFragment : DialogFragment() {
     private fun updatePreview() {
         choices.getOrNull(selected)?.let {
             preview.text = LogExporter.filename(it, style)
-            deleteSession.isEnabled = !busy && it.report != null && !it.current
-            for (index in 0 until styles.childCount) {
-                styles.getChildAt(index).isEnabled =
-                    !busy &&
-                    it.report == null
-            }
         }
-    }
-
-    // AstraEH: Retained evidence has no automatic expiry. Only an explicit, confirmed owner
-    // action can remove a saved report; current/previous/older text logs are not deletable here.
-    private fun confirmDeleteSession() {
-        if (busy) return
-        val choice = choices.getOrNull(selected) ?: return
-        if (choice.current || choice.report == null) return
-        MaterialAlertDialogBuilder(requireContext())
-            .setTitle(R.string.log_session_delete)
-            .setMessage(R.string.log_session_delete_confirm)
-            .setNegativeButton(android.R.string.cancel, null)
-            .setPositiveButton(R.string.log_session_delete) { _, _ ->
-                val app = requireContext().applicationContext
-                lifecycleScope.launch {
-                    setBusy(true)
-                    try {
-                        withContext(Dispatchers.IO) { LogExporter.deleteSession(app, choice) }
-                        choices = emptyList()
-                        selected = 0
-                        loadChoices()
-                    } catch (_: Exception) {
-                        showError()
-                        setBusy(false)
-                    }
-                }
-            }.show()
     }
 
     // AstraEH: Disable repeated exports while staging/copying. Share grants temporary read
@@ -355,7 +259,7 @@ class LogExportDialogFragment : DialogFragment() {
                         snapshot
                     )
                     val intent = Intent(Intent.ACTION_SEND).apply {
-                        type = LogExporter.mimeType(snapshot.name)
+                        type = "text/plain"
                         putExtra(Intent.EXTRA_STREAM, uri)
                         clipData = ClipData.newRawUri(snapshot.name, uri)
                         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
@@ -386,9 +290,6 @@ class LogExportDialogFragment : DialogFragment() {
         listOf(sessions, styles).forEach { group ->
             for (i in 0 until group.childCount) group.getChildAt(i).isEnabled = !value
         }
-        deleteSession.isEnabled =
-            !value &&
-            choices.getOrNull(selected)?.let { it.report != null && !it.current } == true
         if (!value) updatePreview()
         (dialog as? AlertDialog)?.let {
             it.getButton(AlertDialog.BUTTON_POSITIVE)?.isEnabled = !value && choices.isNotEmpty()
