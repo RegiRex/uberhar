@@ -363,6 +363,8 @@ public:
         Entry barrier{};
         barrier.flush_request = std::make_shared<std::promise<void>>();
         auto done = barrier.flush_request->get_future();
+        // CodexAstraUlt-2: Both queue locks are attempted without waiting, so a stalled
+        // producer cannot block crash handling before the five-second barrier timeout.
         if (!instance->message_queue.TryEmplace(std::move(barrier))) {
             return false;
         }

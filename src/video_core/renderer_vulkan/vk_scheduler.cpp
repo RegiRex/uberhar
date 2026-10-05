@@ -34,14 +34,24 @@ std::unique_ptr<MasterSemaphore> MakeMasterSemaphore(const Instance& instance) {
 } // Anonymous namespace
 
 void Scheduler::CommandChunk::ExecuteAll(vk::CommandBuffer cmdbuf) {
-    auto command = first;
-    while (command != nullptr) {
-        auto next = command->GetNext();
+    while (first != nullptr) {
+        auto* command = first;
+        // CodexAstraUlt-2: Leave the throwing command linked for cancellation.
         command->Execute(cmdbuf);
+        first = command->GetNext();
         command->~Command();
-        command = next;
+    }
+    Discard();
+}
+
+void Scheduler::CommandChunk::Discard() noexcept {
+    while (first != nullptr) {
+        auto* command = first;
+        first = command->GetNext();
+        command->~Command();
     }
     submit = false;
+    recorded_counts = 0;
     command_offset = 0;
     first = nullptr;
     last = nullptr;
@@ -65,6 +75,10 @@ void Scheduler::Flush(vk::Semaphore signal, vk::Semaphore wait) {
 }
 
 void Scheduler::Finish(vk::Semaphore signal, vk::Semaphore wait) {
+    if (shader_failure.Failed()) {
+        WaitWorker();
+        return;
+    }
     // When finishing, we need to wait for the submission to have executed on the device.
     const u64 presubmit_tick = CurrentTick();
     SubmitExecution(signal, wait);
@@ -77,7 +91,12 @@ void Scheduler::WaitWorker() {
     }
 
     MICROPROFILE_SCOPE(Vulkan_WaitForWorker);
-    DispatchWork();
+    // CodexAstraUlt-2: Drain captures even after failure; report only after the
+    // worker no longer references them. Shutdown leaves the latch terminal.
+    if (shader_failure.Failed())
+        chunk->Discard();
+    else
+        DispatchWork();
 
     // Ensure the queue is drained.
     {
@@ -88,17 +107,28 @@ void Scheduler::WaitWorker() {
     // Now wait for execution to finish.
     // This needs to be done in the same order as WorkerThread.
     std::scoped_lock el{execution_mutex};
+    shader_failure.Check();
 }
 
 void Scheduler::Wait(u64 tick) {
+    shader_failure.Check();
+    if (master_semaphore->IsFree(tick))
+        return;
     if (tick >= master_semaphore->CurrentTick()) {
         // Make sure we are not waiting for the current tick without signalling
         Flush();
     }
-    master_semaphore->Wait(tick);
+    // CodexAstraUlt-2: A canceled submission never signals its Vulkan tick.
+    if (shader_failure.WaitSubmitted(tick))
+        master_semaphore->Wait(tick);
 }
 
 void Scheduler::DispatchWork() {
+    // CodexAstraUlt-2: During shutdown, discard instead of submitting a partial draw.
+    if (shader_failure.Failed()) {
+        chunk->Discard();
+        return;
+    }
     if (!use_worker_thread || chunk->Empty()) {
         return;
     }
@@ -150,10 +180,13 @@ void Scheduler::WorkerThread(std::stop_token stop_token) {
             // Perform the work, tracking whether the chunk was a submission
             // before executing.
             const bool has_submit = work->HasSubmit();
-            work->ExecuteAll(current_cmdbuf);
+            // CodexAstraUlt-2: Stop the entire stream; the producer reports this
+            // typed failure. No draw or submission after it may execute.
+            VideoCore::ExecuteShaderCommands(shader_failure,
+                [&] { work->ExecuteAll(current_cmdbuf); }, [&] { work->Discard(); });
 
             // If the chunk was a submission, reallocate the command buffer.
-            if (has_submit) {
+            if (has_submit && !shader_failure.Failed()) {
                 AllocateWorkerCommandBuffers();
             }
         }
@@ -177,6 +210,10 @@ void Scheduler::AllocateWorkerCommandBuffers() {
 }
 
 void Scheduler::SubmitExecution(vk::Semaphore signal_semaphore, vk::Semaphore wait_semaphore) {
+    if (shader_failure.Failed()) {
+        shader_failure.Check();
+        return;
+    }
     state = StateFlags::AllDirty;
     const u64 signal_value = master_semaphore->NextTick();
 
@@ -186,6 +223,7 @@ void Scheduler::SubmitExecution(vk::Semaphore signal_semaphore, vk::Semaphore wa
         MICROPROFILE_SCOPE(Vulkan_Submit);
         std::scoped_lock lock{submit_mutex};
         master_semaphore->SubmitWork(cmdbuf, wait_semaphore, signal_semaphore, signal_value);
+        shader_failure.Submitted(signal_value);
     });
 
     master_semaphore->Refresh();

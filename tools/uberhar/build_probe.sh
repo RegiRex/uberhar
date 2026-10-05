@@ -44,6 +44,12 @@ build/uberhar-probe/test-pipeline-keys
 c++ -std=c++20 -O2 -pthread -DFMT_HEADER_ONLY -Isrc -Iexternals/fmt/include \
   tools/uberhar/test_pipeline_policy.cpp -o build/uberhar-probe/test-pipeline-policy
 timeout 30s build/uberhar-probe/test-pipeline-policy
+# CodexAstraUlt-2: Failed compiler jobs and canceled GPU submissions must wake every owner.
+c++ -std=c++20 -O2 -pthread -Isrc tools/uberhar/test_shader_failure.cpp \
+  -o build/uberhar-probe/test-shader-failure
+timeout 30s build/uberhar-probe/test-shader-failure
+# CodexAstraUlt-2: Terminal readback errors must leave noexcept cleanup safely.
+python3 tools/uberhar/test_download_recovery.py
 # AstraEH: Real primitive assembly must match native topology and leave no bridge tail.
 c++ -std=c++20 -O2 -DFMT_HEADER_ONLY -Isrc -Iexternals/fmt/include -Iexternals/boost \
   tools/uberhar/test_bridge_assembly.cpp src/video_core/pica/primitive_assembly.cpp \
@@ -159,6 +165,8 @@ build/uberhar-probe/test-fragment-promotion
 
 # AstraPro: Bound fixed GPU uploads and reuse only immutable Native mapping plans.
 python3 tools/uberhar/test_fixed_attribute_reserve.py
+# CodexAstraUlt-2: Compare real Native/GPU input packing and quarantine zero-stride promotion.
+python3 tools/uberhar/test_gpu_input_parity.py
 c++ -std=c++20 -O2 -DFMT_HEADER_ONLY -Isrc -Iexternals/fmt/include -Iexternals/boost \
   tools/uberhar/test_vertex_plan_cache.cpp src/video_core/pica/output_vertex.cpp \
   src/video_core/pica/shader_unit.cpp src/video_core/pica/primitive_assembly.cpp \

@@ -7,6 +7,18 @@ Baseline: Azahar 2126.1.2, commit
 
 ## Current status
 
+<!-- CodexAstraUlt-2: Separate 0.1.18 implementation and publication from device acceptance. -->
+**0.1.18 is the correctness/recovery update following the 0.1.17 review.** Combo
+retains CPU rendering for active zero-stride vertex loaders whose GPU input packing
+differs from Native. Shader/pipeline failures publish completion and stop the failed
+command stream; log-flush queue insertion is nonblocking. Interrupted logs are staged
+before rotation, with large preservation copies on the existing recovery worker.
+See [release and short test instructions](docs/releases/0.1.18.md),
+[progress](docs/UBERHAR_PROGRESS.md), and [review](docs/UBERHAR_ARCHITECTURE_0.1.17.md).
+Build/publication and Thor device acceptance are separate gates. No Dark Moon cure,
+speed increase, general compute rasterizer or zero-first-use-wait claim is made.
+The 0.1.17 Android, shader and publication workflow completed successfully.
+
 <!-- AstraEH: Optional OS evidence is now explicitly accepted, with file-only access. -->
 **0.1.17 adds optional Android crash evidence saved under `log/crashes/`.** A single
 background startup check can save a dated exit summary and available native tombstone

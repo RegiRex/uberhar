@@ -12,6 +12,7 @@
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_render_manager.h"
 #include "video_core/renderer_vulkan/vk_shader_util.h"
+#include "video_core/shader_recovery_error.h" // CodexAstraUlt-2: Typed dependency failure.
 
 namespace Vulkan {
 
@@ -56,7 +57,9 @@ Shader::Shader(const Instance& instance) : device{instance.GetDevice()} {}
 Shader::Shader(const Instance& instance, vk::ShaderStageFlagBits stage, std::string code)
     : Shader{instance} {
     module = Compile(code, stage, instance.GetDevice());
-    MarkDone();
+    // CodexAstraUlt-2: Publish startup failure without unwinding a partly-built
+    // renderer. Its first dependent pipeline takes the normal terminal route.
+    PublishModule();
 }
 
 Shader::~Shader() {
@@ -94,6 +97,9 @@ bool GraphicsPipeline::TryBuild(bool wait_built, bool background_only) {
         instance.IsPipelineCreationCacheControlSupported() && Build(true)) {
         return true;
     }
+    // CodexAstraUlt-2: A failed cache probe is terminal for this object, not a retry.
+    if (HasFailed())
+        return true;
 
     // Fallback to (a)synchronous compilation
     // AstraEH: Publish queue time before the worker can read it.
@@ -129,6 +135,32 @@ bool GraphicsPipeline::MatchesExecution(
 }
 
 bool GraphicsPipeline::Build(bool fail_on_compile_required) {
+    // CodexAstraUlt-2: Mandatory and optional jobs both release their waiters.
+    // Only a cache-control miss remains pending for a later full build.
+    const auto fail = [this](const char* reason) noexcept {
+        MarkFailed();
+        static std::atomic<u32> reported_failures{};
+        if (reported_failures.fetch_add(1, std::memory_order_relaxed) < 8) {
+            try {
+                // CodexAstraUlt-2 Log Line: At most eight pipeline failures per process.
+                LOG_ERROR(Render_Vulkan, "Uberhar pipeline failed: key={:016X} error={} limit=8",
+                          Key(), reason);
+            } catch (...) {
+                // CodexAstraUlt-2: Logging cannot rethrow an already-contained compiler failure.
+            }
+        }
+    };
+    try {
+        return BuildImpl(fail_on_compile_required);
+    } catch (const std::exception& error) {
+        fail(error.what());
+    } catch (...) {
+        fail("unknown compiler exception");
+    }
+    return false;
+}
+
+bool GraphicsPipeline::BuildImpl(bool fail_on_compile_required) {
     MICROPROFILE_SCOPE(Vulkan_Pipeline);
     // AstraEH: Timers run once per build, not once per draw. Shader waits are distinct
     // from vkCreateGraphicsPipelines wall time, which may include internal driver locks.
@@ -292,6 +324,10 @@ bool GraphicsPipeline::Build(bool fail_on_compile_required) {
             shader->WaitDone();
             shader_wait_ns[i] = nanoseconds(std::chrono::steady_clock::now() - wait_start);
         }
+        // CodexAstraUlt-2: Completion includes failed compilation; never pass a
+        // missing module to the driver or wait forever for a failed dependency.
+        if (shader->HasFailed() || !shader->Handle())
+            throw VideoCore::ShaderRecoveryError{};
         shader_stages[shader_count++] = vk::PipelineShaderStageCreateInfo{
             .stage = MakeShaderStage(i),
             .module = shader->Handle(),
@@ -326,16 +362,14 @@ bool GraphicsPipeline::Build(bool fail_on_compile_required) {
     const auto driver_start = std::chrono::steady_clock::now();
     auto result = instance.GetDevice().createGraphicsPipelineUnique(pipeline_cache, pipeline_info);
     const u64 driver_ns = nanoseconds(std::chrono::steady_clock::now() - driver_start);
-    if (result.result == vk::Result::eSuccess) {
+    if (result.result == vk::Result::eSuccess && result.value) {
         pipeline = std::move(result.value);
-    } else if (result.result == vk::Result::eErrorPipelineCompileRequiredEXT) {
+    } else if (fail_on_compile_required &&
+               result.result == vk::Result::eErrorPipelineCompileRequiredEXT) {
         return false;
     } else {
-        // AstraEH: Let the fallback owner publish failure and retain specialization.
-        if (build_options.CanRecoverFailure()) {
-            return false;
-        }
-        UNREACHABLE_MSG("Graphics pipeline creation failed!");
+        // CodexAstraUlt-2: The wrapper publishes failure for every pipeline kind.
+        throw VideoCore::ShaderRecoveryError{};
     }
 
     if (auto* stats = build_options.stats) {

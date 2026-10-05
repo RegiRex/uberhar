@@ -338,6 +338,14 @@ static Core::System::ResultStatus RunCitra(const std::string& filepath) {
     stop_run = false;
     pause_emulation = false;
 
+    // CodexAstraUlt-2: Cache-loading failures need the same shutdown as gameplay failures.
+    // Install cleanup before loading resources, and clear startup/running state on every exit.
+    SCOPE_EXIT({
+        stop_run = true;
+        Common::UberharActivity::SetStartup(false);
+        TryShutdown();
+    });
+
     // AstraEH: This frontend progress screen is known non-interactive loading.
     Common::UberharActivity::SetStartup(true);
     const auto loading_start = std::chrono::steady_clock::now();
@@ -346,11 +354,20 @@ static Core::System::ResultStatus RunCitra(const std::string& filepath) {
              Common::UberharActivity::Capture().run);
     LoadDiskCacheProgress(VideoCore::LoadCallbackStage::Prepare, 0, 0, "");
 
-    system.GPU().ApplyPerProgramSettings(program_id);
-
     std::unique_ptr<Frontend::GraphicsContext> cpu_context;
-    system.GPU().Renderer().Rasterizer()->LoadDefaultDiskResources(stop_run,
-                                                                   &LoadDiskCacheProgress);
+    try {
+        // CodexAstraUlt-2: Profile changes may drain renderer work too; include
+        // them in the same terminal startup boundary as disk resource loading.
+        system.GPU().ApplyPerProgramSettings(program_id);
+        system.GPU().Renderer().Rasterizer()->LoadDefaultDiskResources(stop_run,
+                                                                      &LoadDiskCacheProgress);
+    } catch (const VideoCore::ShaderRecoveryError& error) {
+        // CodexAstraUlt-2 Log Line: One terminal startup record; never launch gameplay
+        // with an unusable shader or let this typed worker failure cross JNI.
+        LOG_CRITICAL(Render_Vulkan, "Uberhar renderer stopped during cache loading: {}", error.what());
+        Common::Log::Flush();
+        return Core::System::ResultStatus::ErrorRendererRecovery;
+    }
 
     LoadDiskCacheProgress(VideoCore::LoadCallbackStage::Complete, 0, 0, "");
     // AstraEH Log Line: Startup cache work is distinct from unclassified in-game screens.
@@ -360,8 +377,6 @@ static Core::System::ResultStatus RunCitra(const std::string& filepath) {
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - loading_start)
             .count());
     Common::UberharActivity::SetStartup(false);
-
-    SCOPE_EXIT({ TryShutdown(); });
 
     system.RegisterCoreLoopThreadId();
 

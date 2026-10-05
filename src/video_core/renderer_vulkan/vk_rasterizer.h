@@ -146,6 +146,8 @@ private:
     // AstraPro: Bounded host-state evidence shared by Native and Combo.
     u32 fixed_attribute_max_bytes{};
     u64 fixed_attribute_over_legacy{}, diagnostic_draws{};
+    // CodexAstraUlt-2: Count input fallbacks; only the first four emit a record.
+    u64 ready_vertex_zero_stride_rejections{};
     std::chrono::steady_clock::time_point next_draw_snapshot{};
     bool ready_vertex_attempt{};
     GraphicsPipeline* ready_vertex_pipeline{};

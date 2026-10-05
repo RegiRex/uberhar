@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Uberhar roadmap — 0.1.18</title>
+  <!-- CodexAstraUlt-2: Repository continuity document; preserve history and distinguish candidate from tested work. -->
+  <style>
+    body{font:16px/1.6 system-ui,sans-serif;max-width:980px;margin:40px auto;padding:0 22px;color:#172532;background:#fafbfc}
+    h1,h2{line-height:1.2} h2{margin-top:36px} a{color:#145ba5} table{border-collapse:collapse;width:100%}
+    th,td{text-align:left;vertical-align:top;padding:12px;border-bottom:1px solid #d8e0e7}
+    th{background:#edf2f6} .status{border-left:5px solid #bc7411;padding:12px 18px;background:#fff4df}
+    small{color:#465768} code{font-size:.92em} @media(max-width:650px){table{font-size:14px}th,td{padding:7px}}
+  </style>
+</head>
+<body>
+<h1>Uberhar roadmap</h1>
+<p>0.1.18 · Updated October 5, 2026 · <strong>CodexAstraUlt-2</strong></p>
+<p class="status"><strong>Current gate: correctness and reliable failure evidence.</strong>
+0.1.18 implements focused renderer and logging corrections. Android publication and
+Thor Max device acceptance remain separate gates. No new speed result is claimed.</p>
+<p><a href="UBERHAR_PROGRESS.md">Current build and validation status</a> ·
+<a href="releases/0.1.18.md">Release/test notes</a> ·
+<a href="UBERHAR_ARCHITECTURE_0.1.17.md">Full review</a></p>
+
+<!-- CodexAstraUlt-2: Evidence-led milestones retain the owner's first-playthrough and later product goals. -->
+<h2>Milestones and acceptance gates</h2>
+<table><thead><tr><th>Milestone</th><th>Current state</th><th>Acceptance evidence</th></tr></thead><tbody>
+<tr><td>0.1.18 correctness and recovery</td><td>Zero-stride CPU fallback; completed shader failures; safe terminal scheduling; nonblocking flush; staged incident copies.</td><td>Host regressions, shader/pixel and Android gates, then short matched Dark Moon scenes and a working-game regression.</td></tr>
+<tr><td>First-playthrough shader handling</td><td>Generic fragment families and ready-only GPU promotion implemented. Lazy generic pipeline creation still waits. Compute covers only a narrow rectangle case.</td><td>No omitted draws, correct images and zero interactive compilation waits for measured cold/new-effect coverage. Do not equate disk cache hits with ready driver pipelines.</td></tr>
+<tr><td>Performance and broader coverage</td><td>Deferred until Dark Moon graphics are corrected. Native CPU vertex cost and Combo GPU/driver cost require separate measurement.</td><td>Matched scenes/settings; normal-speed bands separated from fast-forward; CPU/GPU timing and process/driver memory evidence.</td></tr>
+<tr><td>0.4 display synchronization; 0.8 scaling; 1.0 qualification</td><td>Retained from previous review scope; not delivered by 0.1.18.</td><td>Image, pacing, physical-device and game-coverage gates. Separate 2x/400% and 4x/200% capacity goals from normal gameplay claims.</td></tr>
+<tr><td>Per-game settings by 2.0</td><td>Owner requirement retained.</td><td>Global inheritance, explicit title-ID overrides, reset to global, effective-value display; same editor from title long press and in-game Uberhar submenu.</td></tr>
+</tbody></table>
+
+<!-- CodexAstraUlt-2: Keep explicit owner requests separate from proposed experiments. -->
+<h2>Scope ledger</h2>
+<table><thead><tr><th>Origin</th><th>Scope</th><th>Disposition</th></tr></thead><tbody>
+<tr><td>Owner</td><td>Avoid draw skipping and compilation stalls on first playthrough; preserve exact rendering.</td><td>Primary goal; partial architecture remains incomplete.</td></tr>
+<tr><td>Owner, October 5</td><td>Implement review fixes, build 0.1.18, label new comments CodexAstraUlt-2.</td><td>Authorized implementation and gated publication; original authorship retained.</td></tr>
+<tr><td>Owner</td><td>Lean log retention, file-only optional crash evidence, stripped Android compatibility, no per-launch bundles.</td><td>Preserved. Incident-only staging uses the existing one-shot recovery worker.</td></tr>
+<tr><td>Review proposal</td><td>Separate GPU vertex versus specialized-fragment tests; process/GPU memory attribution; startup-ready fallback coverage.</td><td>Next evidence-driven experiments, not claimed 0.1.18 speed improvements.</td></tr>
+<tr><td>Deferred alternatives</td><td>GPU shader interpretation, broad compute rasterization, cache eviction, wider topology admission.</td><td>Require output/order/lifetime validation and measurable benefit before adoption.</td></tr>
+</tbody></table>
+
+<!-- CodexAstraUlt-2: History references preserve earlier review evidence instead of replacing it. -->
+<h2>Review history and risks</h2>
+<ul>
+<li>0.1.0: Native beta based on scoped Awakening results; not universal game qualification.</li>
+<li><a href="UBERHAR_ARCHITECTURE_0.1.9.md">0.1.9 review</a>: bounded ready fragment specialization selected.</li>
+<li><a href="UBERHAR_ARCHITECTURE_0.1.13.md">0.1.13 review</a>: Dark Moon corruption/crash evidence prioritized over broad performance experiments.</li>
+<li>0.1.14–0.1.17: logging and crash evidence iterations; renderer results remain unverified by those changes.</li>
+<li>October 5, <a href="UBERHAR_ARCHITECTURE_0.1.17.md">0.1.17 review</a>: reproduced input/flush defects, incomplete mandatory error containment, persistent post-compilation slowdown. 0.1.18 authorized.</li>
+</ul>
+<p>Dark Moon's specific failure remains unproven. Host mocks cannot validate Adreno pixels,
+driver memory or Android provider behavior. System memory decline is not proof of a leak.
+Count 0.1.18 only after publication; next default full review after 0.1.21 evidence,
+allowed after 0.1.20–0.1.22 and before 0.1.23, earlier for regressions.</p>
+<small>The repository review ledger and release notes retain the detailed historical record.</small>
+</body>
+</html>

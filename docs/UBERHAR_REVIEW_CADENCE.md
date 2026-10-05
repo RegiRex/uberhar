@@ -1,5 +1,15 @@
 # Architecture review ledger
 
+<!-- CodexAstraUlt-2: Completed 0.1.17 source/evidence/alternatives review and accepted 0.1.18 order. -->
+The [0.1.17 full review](UBERHAR_ARCHITECTURE_0.1.17.md) was completed October 5,
+2026 against `fe7d1b8a0`, using the owner's current Thor symptom report and the
+committed device analyses, with fresh host reproductions and no new device claims.
+The owner approved 0.1.18 correctness/recovery work. The anchor is **0.1.17**;
+0.1.18 counts as successor one only after its publication gates pass. Default next
+review: after 0.1.21 evidence; allowed after 0.1.20–0.1.22, before 0.1.23. Continued
+Dark Moon faults or failed recovery require earlier review. Previous entries retain
+their original anchors and evidence.
+
 <!-- AstraEH: Optional file-only crash evidence follows the owner's explicit clarification. -->
 0.1.16 passed all Android, shader and publication gates and is successor three after
 0.1.13. 0.1.17 adds an optional bounded Android crash-evidence layer, with reports
@@ -46,6 +56,7 @@ Review early for correctness regressions or a changed architectural assumption.
 | 2026-09-29 | 0.1.6 | After four successor builds | After three through five; before beginning six |
 | 2026-10-01 | 0.1.9 | After 0.1.13 | After 0.1.12–0.1.14; before 0.1.15 work |
 | 2026-10-03 | 0.1.13 | After 0.1.17 | After 0.1.16–0.1.18; before 0.1.19 work |
+| 2026-10-05 | 0.1.17 | After 0.1.21 | After 0.1.20–0.1.22; before 0.1.23 work |
 
 The [0.0.6 review](UBERHAR_ARCHITECTURE_2026-09-24.md) established the earlier
 roadmap. 0.0.7 implemented family consolidation; 0.0.8 added broader runtime state,

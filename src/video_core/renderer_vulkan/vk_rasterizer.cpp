@@ -472,6 +472,20 @@ bool RasterizerVulkan::AccelerateDrawBatchReady(bool is_indexed) {
     // Shader enum alone does not mean a guest geometry shader is executing.
     if (!ReadyVertexPolicy::IsEligible(pica.GetReadyGpuVertexAdmission()))
         return false;
+    // CodexAstraUlt-2: Reject known input divergence before reads or GPU setup;
+    // PicaCore will execute the complete CPU batch with the live zero-stride data.
+    if (ReadyVertexPolicy::HasActiveZeroStrideLoader(regs.pipeline)) {
+        if (++ready_vertex_zero_stride_rejections <= 4) {
+            // CodexAstraUlt-2 Log Line: First four per rasterizer lifetime;
+            // CodexAstraUlt-2: This records fallback coverage, not a crash diagnosis.
+            LOG_INFO(Render_Vulkan,
+                     "Uberhar GPU input fallback: reason=zero_stride title={:016X} "
+                     "ordinal={} vertices={} action=cpu limit=4",
+                     pipeline_cache.GetProgramID(), ready_vertex_zero_stride_rejections,
+                     regs.pipeline.num_vertices);
+        }
+        return false;
+    }
     // AstraPro: The stock accelerator assumes a valid index range. Validate it
     // before its min/max scan; malformed optional input retains legacy handling.
     if (is_indexed) {

@@ -43,6 +43,16 @@ constexpr Admission Classify(bool automatic, bool debugging, bool assembler_empt
 constexpr bool IsEligible(Admission admission) {
     return admission == Admission::List || admission == Admission::ShaderList;
 }
+// CodexAstraUlt-2: CPU input transport repeats an active zero-stride source,
+// while the inherited GPU uploader omits it. Keep these draws on CPU until
+// their input translation is equivalent; unused loader slots remain eligible.
+inline bool HasActiveZeroStrideLoader(const Pica::PipelineRegs& pipeline) {
+    for (const auto& loader : pipeline.vertex_attributes.attribute_loaders) {
+        if (loader.component_count != 0 && loader.byte_count == 0)
+            return true;
+    }
+    return false;
+}
 // AstraPro: Only a completed, successful, exact-state pipeline can replace CPU
 // execution. Pending/failed/mismatched handles always retain the original draw.
 constexpr bool CanSelect(bool done, bool failed, u64 expected, u64 actual) {

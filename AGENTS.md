@@ -1,5 +1,15 @@
 # Uberhar development instructions
 
+<!-- CodexAstraUlt-2: Owner-approved 0.1.18 attribution and implementation scope, 2026-10-05. -->
+- New and changed logical sections, tests, documentation and experimental log comments
+  use `CodexAstraUlt-2`; new log markers use `CodexAstraUlt-2 Log Line`. Preserve all
+  historical author markers. Machine-readable version data remains comment-free.
+- The owner approved 0.1.18 implementation and the gated Android prerelease build:
+  correct Combo vertex-input parity, contain shader/pipeline failures, and harden
+  logging/recovery. Device performance and Dark Moon correctness remain unverified
+  until testing; do not expand renderer coverage or claim a measured speedup from
+  host regression results alone.
+
 <!-- AstraEH: Owner-requested continuity rules for this experimental fork. -->
 
 - AstraEH: Owner attribution update (2026-10-03): use `AstraEH` for new

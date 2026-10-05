@@ -66,6 +66,8 @@ private:
     Shader* warming_ready_vs{};
     u64 ready_vs_deferred{}, ready_vs_capped{}, ready_gs_capped{};
     std::atomic<u64> ready_shader_failures{};
+    // CodexAstraUlt-2: Bound mandatory failure reports independently of optional jobs.
+    std::atomic<u32> mandatory_shader_failures{};
     static constexpr std::size_t SOURCE_FILE_HASH_LENGTH = 64;
     using SourceFileCacheVersionHash = std::array<u8, SOURCE_FILE_HASH_LENGTH>;
 

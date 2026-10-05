@@ -9,6 +9,11 @@ ubershader renderer and screen-synchronization changes are not implemented yet.
 The upstream project information and download links below describe Azahar.
 Uberhar builds are produced by this repository's **Uberhar ARM64 prerelease** workflow.
 
+<!-- CodexAstraUlt-2: Current candidate and validation are kept separate from historical milestones. -->
+Current development: **[0.1.18 correctness and recovery](docs/releases/0.1.18.md)**.
+Follow [build/device status](docs/UBERHAR_PROGRESS.md) and the
+[roadmap](docs/Uberhar_Roadmap.html). Older milestones below retain their original evidence.
+
 **The initial APK was withdrawn:** an unintended Android `testOnly` flag
 blocked normal installation. Packaging was fixed in **0.0.2**; **0.0.3** isolates
 and limits fallback compilation after the first gameplay stall report, following the owner's

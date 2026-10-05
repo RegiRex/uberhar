@@ -103,5 +103,41 @@ int main() {
         fallback.Fail();
         Check(selection.get() == &preferred, "Forced fallback failure stranded a waiter");
     }
+    // CodexAstraUlt-2: Mandatory failure can retain a matching fallback, but
+    // failure of both routes is terminal and must release the command worker.
+    for (bool force : {false, true}) {
+        Common::AsyncCompletion completion;
+        Pipeline preferred{completion}, fallback{completion};
+        preferred.Fail();
+        auto selection = std::async(std::launch::async, [&] {
+            return SelectUsablePipeline(completion, preferred, &fallback, force);
+        });
+        Check(selection.wait_for(std::chrono::milliseconds{2}) == std::future_status::timeout,
+              "Failed primary prevented waiting for a usable fallback");
+        fallback.MarkDone();
+        Check(selection.get() == &fallback, "Failed primary masked a working fallback");
+        fallback.Fail();
+        bool terminal = false;
+        try {
+            SelectUsablePipeline(completion, preferred, &fallback, force);
+        } catch (const VideoCore::ShaderRecoveryError&) {
+            terminal = true;
+        }
+        Check(terminal, "Two failed pipelines were treated as a usable draw");
+    }
+    {
+        Common::AsyncCompletion completion;
+        Pipeline preferred{completion};
+        auto selection = std::async(std::launch::async, [&] {
+            try {
+                SelectUsablePipeline(completion, preferred, static_cast<Pipeline*>(nullptr), false);
+                return false;
+            } catch (const VideoCore::ShaderRecoveryError&) {
+                return true;
+            }
+        });
+        preferred.Fail();
+        Check(selection.get(), "Mandatory failure without fallback did not release its waiter");
+    }
     std::puts("PASS: CPU admission boundaries and normal/forced failure-aware pipeline selection");
 }

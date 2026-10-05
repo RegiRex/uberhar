@@ -93,8 +93,14 @@ private:
     template <PushMode Mode, typename... Args>
     bool Emplace(Args&&... args) {
         const std::size_t write_index = m_write_index.load(std::memory_order::relaxed);
+        std::unique_lock notify_lock{consumer_cv_mutex, std::defer_lock};
 
         if constexpr (Mode == PushMode::Try) {
+            // CodexAstraUlt-2: Reserve the notification lock before publishing. A failed
+            // try must not consume its arguments or wait behind the queue's consumer.
+            if (!notify_lock.try_lock()) {
+                return false;
+            }
             // Check if we have free slots to write to.
             if ((write_index - m_read_index.load(std::memory_order::acquire)) == Capacity) {
                 return false;
@@ -119,7 +125,9 @@ private:
         ++m_write_index;
 
         // Notify the consumer that we have pushed into the queue.
-        std::scoped_lock lock{consumer_cv_mutex};
+        if constexpr (Mode == PushMode::Wait) {
+            notify_lock.lock();
+        }
         consumer_cv.notify_one();
 
         return true;
@@ -185,7 +193,12 @@ class MPSCQueue {
 public:
     template <typename... Args>
     bool TryEmplace(Args&&... args) {
-        std::scoped_lock lock{write_mutex};
+        // CodexAstraUlt-2: A normal producer can hold this mutex while a full queue
+        // waits for storage IO. Flush barriers must fail instead of waiting with it.
+        std::unique_lock lock{write_mutex, std::try_to_lock};
+        if (!lock.owns_lock()) {
+            return false;
+        }
         return spsc_queue.TryEmplace(std::forward<Args>(args)...);
     }
 

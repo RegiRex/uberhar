@@ -946,3 +946,27 @@ provider, file-manager access and physical-device validation remain pending.
 References: [ApplicationExitInfo](https://developer.android.com/reference/android/app/ApplicationExitInfo),
 [ActivityManager process summaries](https://developer.android.com/reference/android/app/ActivityManager#setProcessStateSummary(byte[])),
 [AOSP tombstone schema](https://android.googlesource.com/platform/system/core/+/refs/heads/main/debuggerd/proto/tombstone.proto).
+# 0.1.18 diagnostic additions
+
+<!-- CodexAstraUlt-2: Bound new records; distinguish incidence from proven game/crash causality. -->
+
+`Uberhar GPU input fallback: reason=zero_stride` records only the first four rejected
+optional GPU draws per renderer lifetime, with title, ordinal and vertex count. The
+complete CPU draw still executes. A record establishes use of the guarded layout,
+not a Dark Moon crash diagnosis; silence does not prove all input layouts are equal.
+
+`Uberhar renderer stopped during cache loading` is emitted once for a terminal
+typed loading failure. The established gameplay renderer-stop record remains.
+`Uberhar mandatory VS/FS/GS failed` retains compiler error text, collectively capped
+at eight records per title/cache owner. `Uberhar pipeline failed` retains pipeline
+key and error text, capped at eight records per process; repeated failures still
+publish failed completion even after the diagnostic cap is exhausted.
+Compiler/pipeline failure completion prevents null-handle selection and canceled
+submission waits; an explicit rendering stop is not successful continued gameplay.
+Unrelated native/driver faults still require OS evidence and are not swallowed.
+
+Flush insertion can now return failure immediately on queue/lock contention; the
+five-second timeout applies only to a successfully enqueued barrier. A failed flush
+does not delete earlier ordinary records or certify that the file lacks them.
+Incident log staging moves bulk IO to the existing worker, with retries preserving
+source evidence and ordinary current/previous/older export retained.

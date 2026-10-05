@@ -16,6 +16,7 @@
 #include "video_core/shader/generator/glsl_shader_gen.h"
 #include "video_core/shader/generator/shader_gen.h"
 #include "video_core/shader/generator/spv_fs_shader_gen.h"
+#include "video_core/shader_build_failure.h" // CodexAstraUlt-2: Publish all compiler outcomes.
 
 #define MALFORMED_DISK_CACHE                                                                       \
     do {                                                                                           \
@@ -159,23 +160,30 @@ std::optional<std::pair<u64, Shader* const>> ShaderDiskCache::UseProgrammableVer
             parent.shader_workers.QueueWork([device, &shader, this, spirv_id, ready_only] {
                 const auto compile = [&] {
                     auto spirv = CompileGLSL(shader.program, vk::ShaderStageFlagBits::eVertex);
-                    if (ready_only && spirv.empty())
-                        throw std::runtime_error("empty optional vertex module");
+                    if (spirv.empty())
+                        throw std::runtime_error("empty vertex module");
                     AppendVSSPIRV(vs_cache, spirv, spirv_id);
                     shader.program.clear();
                     shader.module = CompileSPV(spirv, device);
-                    if (ready_only && !shader.module)
-                        throw std::runtime_error("null optional vertex module");
-                    shader.MarkDone();
+                    if (!shader.module)
+                        throw std::runtime_error("null vertex module");
                 };
                 if (!ready_only) {
-                    compile();
+                    // CodexAstraUlt-2: A failed mandatory VS must wake dependent pipelines.
+                    VideoCore::CompleteShaderBuild(shader, compile, [this](const char* reason) {
+                        if (mandatory_shader_failures.fetch_add(1) < 8) {
+                            // CodexAstraUlt-2 Log Line: Eight mandatory shader failures per title.
+                            LOG_ERROR(Render_Vulkan, "Uberhar mandatory VS failed: error={} limit=8",
+                                      reason);
+                        }
+                    });
                     return;
                 }
                 // AstraPro: Every optional completion publishes success OR failure.
                 // Never strand a ready-only candidate behind an unfinished handle.
                 try {
                     compile();
+                    shader.MarkDone();
                 } catch (const std::exception& err) {
                     shader.program.clear();
                     shader.MarkFailed();
@@ -211,27 +219,35 @@ std::optional<std::pair<u64, Shader* const>> ShaderDiskCache::UseFragmentShader(
     if (new_shader) {
         LOG_NEW_OBJECT(Render_Vulkan, "New FS config {:016X}", fs_config_hash);
 
-        parent.shader_workers.QueueWork([fs_config, user, this, &shader, fs_config_hash]() {
-            std::vector<u32> spirv;
-            const bool use_spirv = parent.profile.vk_use_spirv_generator;
-            if (use_spirv && !fs_config.UsesSpirvIncompatibleConfig()) {
-                spirv = SPIRV::GenerateFragmentShader(fs_config, parent.profile);
+        // CodexAstraUlt-2: Freeze inputs before the compiler worker resumes.
+        parent.shader_workers.QueueWork([fs_config, user, this, &shader, fs_config_hash,
+                                         profile = parent.profile]() {
+            // CodexAstraUlt-2: Publish only after generation, module creation and
+            // cache scheduling finish; never expose a null module as success.
+            VideoCore::CompleteShaderBuild(shader, [&] {
+                std::vector<u32> spirv;
+                const bool use_spirv = profile.vk_use_spirv_generator;
+                if (use_spirv && !fs_config.UsesSpirvIncompatibleConfig()) {
+                    spirv = SPIRV::GenerateFragmentShader(fs_config, profile);
+                } else {
+                    const std::string code =
+                        GLSL::GenerateFragmentShader(fs_config, user, profile);
+                    spirv = CompileGLSL(code, vk::ShaderStageFlagBits::eFragment, "",
+                                        profile.vk_disable_spirv_optimizer != 0);
+                }
                 shader.module = CompileSPV(spirv, parent.instance.GetDevice());
-            } else {
-                const std::string code =
-                    GLSL::GenerateFragmentShader(fs_config, user, parent.profile);
-                spirv = CompileGLSL(code, vk::ShaderStageFlagBits::eFragment);
-                shader.module = CompileSPV(spirv, parent.instance.GetDevice());
-            }
-            shader.MarkDone();
-
-            if (user.IsCacheable()) {
-                // Only cache to disk if the user config is cacheable
-                AppendFSSPIRV(fs_cache, spirv, fs_config_hash);
-                FSConfigEntry entry{.version = FSConfigEntry::EXPECTED_VERSION,
-                                    .fs_config = fs_config};
-                AppendFSConfig(fs_cache, entry, fs_config_hash);
-            }
+                if (shader.module && user.IsCacheable()) {
+                    AppendFSSPIRV(fs_cache, spirv, fs_config_hash);
+                    FSConfigEntry entry{.version = FSConfigEntry::EXPECTED_VERSION,
+                                        .fs_config = fs_config};
+                    AppendFSConfig(fs_cache, entry, fs_config_hash);
+                }
+            }, [this](const char* reason) {
+                if (mandatory_shader_failures.fetch_add(1) < 8) {
+                    // CodexAstraUlt-2 Log Line: Eight mandatory shader failures per title.
+                    LOG_ERROR(Render_Vulkan, "Uberhar mandatory FS failed: error={} limit=8", reason);
+                }
+            });
         });
     }
 
@@ -364,28 +380,32 @@ std::optional<std::pair<u64, Shader* const>> ShaderDiskCache::UseFixedGeometrySh
                     extra.separable_shader = true;
                     const auto code = GLSL::GenerateFixedGeometryShader(gs_config, extra);
                     const auto spirv = CompileGLSL(code, vk::ShaderStageFlagBits::eGeometry);
-                    if (ready_only && spirv.empty())
-                        throw std::runtime_error("empty optional geometry module");
+                    if (spirv.empty())
+                        throw std::runtime_error("empty geometry module");
                     shader.module = CompileSPV(spirv, parent.instance.GetDevice());
-                    if (ready_only && !shader.module)
-                        throw std::runtime_error("null optional geometry module");
-                    if (!ready_only)
-                        shader.MarkDone();
+                    if (!shader.module)
+                        throw std::runtime_error("null geometry module");
                     AppendGSSPIRV(gs_cache, spirv, gs_config_hash);
                     GSConfigEntry entry{.version = GSConfigEntry::EXPECTED_VERSION,
                                         .gs_config = gs_config};
                     AppendGSConfig(gs_cache, entry, gs_config_hash);
-                    // AstraPro: Publish optional success only after all throwing work.
-                    if (ready_only)
-                        shader.MarkDone();
                 };
                 if (!ready_only) {
-                    compile();
+                    // CodexAstraUlt-2: Geometry dependencies share mandatory completion rules.
+                    VideoCore::CompleteShaderBuild(shader, compile, [this](const char* reason) {
+                        if (mandatory_shader_failures.fetch_add(1) < 8) {
+                            // CodexAstraUlt-2 Log Line: Eight mandatory shader failures per title.
+                            LOG_ERROR(Render_Vulkan, "Uberhar mandatory GS failed: error={} limit=8",
+                                      reason);
+                        }
+                    });
                     return;
                 }
                 // AstraPro: Same bounded failed-completion policy as optional VS.
                 try {
                     compile();
+                    // AstraPro: Publish optional success only after all throwing work.
+                    shader.MarkDone();
                 } catch (const std::exception& err) {
                     shader.MarkFailed();
                     if (ready_shader_failures.fetch_add(1) < 8) {
@@ -895,7 +915,8 @@ bool ShaderDiskCache::InitVSCache(const std::atomic_bool& stop_loading,
                         reinterpret_cast<const u32*>(spirv_data), spirv_size / sizeof(u32));
 
                     iter_prog->second.module = CompileSPV(spirv, parent.instance.GetDevice());
-                    iter_prog->second.MarkDone();
+                    // CodexAstraUlt-2: A failed cached module is complete but never usable.
+                    iter_prog->second.PublishModule();
 
                     if (!iter_prog->second.module) {
                         // Compilation failed for some reason, remove from cache to let it
@@ -1052,7 +1073,8 @@ bool ShaderDiskCache::InitVSCache(const std::atomic_bool& stop_loading,
                     auto spirv = CompileGLSL(program_glsl, vk::ShaderStageFlagBits::eVertex);
 
                     iter_prog->second.module = CompileSPV(spirv, parent.instance.GetDevice());
-                    iter_prog->second.MarkDone();
+                    // CodexAstraUlt-2: Regenerated dependencies also publish failed completion.
+                    iter_prog->second.PublishModule();
 
                     if (regenerate_file) {
                         // If we are regenerating, save the new spirv to disk.
@@ -1196,7 +1218,8 @@ bool ShaderDiskCache::InitFSCache(const std::atomic_bool& stop_loading,
                         reinterpret_cast<const u32*>(spirv_data), spirv_size / sizeof(u32));
 
                     iter_spirv->second.module = CompileSPV(spirv, parent.instance.GetDevice());
-                    iter_spirv->second.MarkDone();
+                    // CodexAstraUlt-2: A failed cached fragment must not enter pipeline creation.
+                    iter_spirv->second.PublishModule();
 
                     if (!iter_spirv->second.module) {
                         // Compilation failed for some reason, remove from cache to let it
@@ -1284,7 +1307,8 @@ bool ShaderDiskCache::InitFSCache(const std::atomic_bool& stop_loading,
             spirv = CompileGLSL(code_glsl, vk::ShaderStageFlagBits::eFragment);
             shader.module = CompileSPV(spirv, parent.instance.GetDevice());
         }
-        shader.MarkDone();
+        // CodexAstraUlt-2: Reject unsuccessful regeneration before any dependent draw.
+        shader.PublishModule();
 
         if (regenerate_file) {
             // Append the config and SPIRV to the new file.
@@ -1429,7 +1453,8 @@ bool ShaderDiskCache::InitGSCache(const std::atomic_bool& stop_loading,
                         reinterpret_cast<const u32*>(spirv_data), spirv_size / sizeof(u32));
 
                     iter_spirv->second.module = CompileSPV(spirv, parent.instance.GetDevice());
-                    iter_spirv->second.MarkDone();
+                    // CodexAstraUlt-2: Cached geometry follows the same dependency contract.
+                    iter_spirv->second.PublishModule();
 
                     if (!iter_spirv->second.module) {
                         // Compilation failed for some reason, remove from cache to let it
@@ -1510,7 +1535,8 @@ bool ShaderDiskCache::InitGSCache(const std::atomic_bool& stop_loading,
 
         spirv = CompileGLSL(code_glsl, vk::ShaderStageFlagBits::eGeometry);
         shader.module = CompileSPV(spirv, parent.instance.GetDevice());
-        shader.MarkDone();
+        // CodexAstraUlt-2: Geometry regeneration publishes a null module as failure.
+        shader.PublishModule();
 
         if (regenerate_file) {
             // Append the config and SPIRV to the new file.

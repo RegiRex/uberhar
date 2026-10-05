@@ -227,6 +227,9 @@ std::vector<u32> CompileGLSL(std::string_view code, vk::ShaderStageFlagBits stag
 }
 
 vk::ShaderModule CompileSPV(std::span<const u32> code, vk::Device device) {
+    // CodexAstraUlt-2: GLSL failure returns empty code; Vulkan requires nonzero codeSize.
+    if (code.empty())
+        return {};
     const vk::ShaderModuleCreateInfo shader_info = {
         .codeSize = code.size() * sizeof(u32),
         .pCode = code.data(),

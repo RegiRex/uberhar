@@ -137,6 +137,8 @@ RendererVulkan::RendererVulkan(Core::System& system, Pica::PicaCore& pica_,
 
 RendererVulkan::~RendererVulkan() {
     vk::Device device = instance.GetDevice();
+    // CodexAstraUlt-2: A reported shader failure must not throw again during teardown.
+    scheduler.BeginShutdown();
     scheduler.Finish();
     main_present_window.WaitPresent();
     device.waitIdle();

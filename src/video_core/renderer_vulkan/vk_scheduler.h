@@ -12,6 +12,7 @@
 #include "common/polyfill_thread.h"
 #include "video_core/renderer_vulkan/vk_master_semaphore.h"
 #include "video_core/renderer_vulkan/vk_resource_pool.h"
+#include "video_core/shader_build_failure.h" // CodexAstraUlt-2: Terminal worker handoff.
 
 namespace Vulkan {
 
@@ -43,6 +44,9 @@ public:
     /// safe to touch worker resources.
     void WaitWorker();
 
+    // CodexAstraUlt-2: Destructor drains may not rethrow a reported terminal error.
+    void BeginShutdown() noexcept { shader_failure.BeginShutdown(); }
+
     /// Waits for the given tick to trigger on the GPU.
     void Wait(u64 tick);
 
@@ -52,6 +56,10 @@ public:
     /// Records the command to the current chunk.
     template <typename T>
     void Record(T&& command) {
+        if (shader_failure.Failed()) {
+            shader_failure.Check();
+            return;
+        }
         if (chunk->Record(command)) {
             return;
         }
@@ -139,7 +147,10 @@ private:
 
     class CommandChunk final {
     public:
+        ~CommandChunk() { Discard(); }
         void ExecuteAll(vk::CommandBuffer cmdbuf);
+        // CodexAstraUlt-2: Destroy captured owners without executing canceled work.
+        void Discard() noexcept;
 
         template <typename T>
         bool Record(T& command) {
@@ -208,6 +219,7 @@ private:
     std::mutex reserve_mutex;
     std::mutex queue_mutex;
     std::condition_variable_any event_cv;
+    VideoCore::ShaderFailureState shader_failure;
     std::jthread worker_thread;
     bool use_worker_thread;
 };

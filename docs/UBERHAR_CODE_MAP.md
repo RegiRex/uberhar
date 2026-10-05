@@ -1,5 +1,28 @@
 <!-- AstraEH: Attribution index for the Uberhar implementation, tests, packaging and documentation. -->
-# AstraEH code map
+# Uberhar code map
+
+<!-- CodexAstraUlt-2: Current owner-selected attribution for the 0.1.18 work; historical entries follow. -->
+New 0.1.18 sections use **CodexAstraUlt-2**. Search with
+`rg -n 'CodexAstraUlt-2|AstraEH|AstraPro' src tools/uberhar docs`.
+Older attribution statements below describe their original development periods.
+
+## 0.1.18 input correctness and failure recovery
+
+<!-- CodexAstraUlt-2: Map production changes, their purpose and independent validation. -->
+
+| Files | Purpose and limits |
+| --- | --- |
+| `renderer_vulkan/uberhar_gpu_vertex_policy.h`, `vk_rasterizer.cpp/.h` | Reject active zero-stride loaders before optional GPU work; preserve CPU draw; first-four incidence records per renderer. Ordinary hardware mode and all other admission rules remain intact. |
+| `video_core/shader_build_failure.h`, Vulkan shader/pipeline cache and policy files | Publish null/throwing compiler outcomes as failed completion; never select unusable shader/pipeline handles; retain an accurate surviving alternative. |
+| `vk_scheduler.cpp/.h`, `renderer_vulkan.cpp`, `vk_present_window.cpp`, `vk_texture_runtime.cpp` | Cancel a terminal failed command stream, wake producer/presentation waits, distinguish submitted from canceled ticks and make teardown safe. No new normal-path foreground shader wait. |
+| Android JNI `native.cpp` | Install cleanup before cache loading, clear startup/running state on exit and handle the typed loading failure as the existing terminal renderer outcome. |
+| `common/bounded_threadsafe_queue.h`, `logging/backend.cpp` | Nonblocking flush insertion across writer/notification locks; ordinary producer FIFO and waiting remain. |
+| Android `utils/CrashLogStore.kt`, `CrashSessionLogs.kt` | Stage incident text before rotation; large copying and legacy migration use the existing worker; provider failures preserve sources and pending recovery. |
+| `test_gpu_input_parity.py`, `test_shader_failure.cpp`, `test_download_recovery.py`, `test_pipeline_policy.cpp`, `test_log_queue.cpp`, Android `CrashLogStoreTest.kt` | Real input preparation/routing, compiler failure and canceled submission, exception-safe readback/debug cleanup, full/contended queue, and staged incident retry regressions. Host tests do not establish Adreno output or speed. |
+| `UBERHAR_VERSION`, release/progress/review/roadmap docs, `AGENTS.md` | Owner-approved version and attribution, acceptance gates and implementation order; preserve earlier history. |
+
+Renderer paths above are relative to `src/video_core/renderer_vulkan/` unless
+otherwise specified. No APK is considered ready before all publication gates pass.
 
 **AstraEH** is the assistant attribution name requested for work on Uberhar.
 Comments use `AstraEH:` at each logical change section to explain intent and

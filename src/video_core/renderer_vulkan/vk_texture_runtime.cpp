@@ -19,7 +19,6 @@
 
 #include "common/literals.h"
 #include "common/microprofile.h"
-#include "common/scope_exit.h"
 #include "video_core/custom_textures/material.h"
 #include "video_core/rasterizer_cache/texture_codec.h"
 #include "video_core/rasterizer_cache/utils.h"
@@ -28,6 +27,7 @@
 #include "video_core/renderer_vulkan/vk_render_manager.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/renderer_vulkan/vk_texture_runtime.h"
+#include "video_core/shader_recovery_error.h"
 
 #include <vk_mem_alloc.h>
 #include <vulkan/vulkan_format_traits.hpp>
@@ -1028,15 +1028,18 @@ void Surface::UploadCustom(const VideoCore::Material* material, u32 level) {
 
 void Surface::Download(const VideoCore::BufferTextureCopy& download,
                        const VideoCore::StagingData& staging) {
-    SCOPE_EXIT({
+    // CodexAstraUlt-2: Synchronization may report a terminal shader failure. Keep
+    // it outside noexcept cleanup so the frontend can stop before reading stale data.
+    const auto finish_download = [&] {
         scheduler.Finish();
         runtime.download_buffer.Commit(staging.size);
-    });
+    };
 
     runtime.renderpass_cache.EndRendering();
 
     if (pixel_format == PixelFormat::D24S8) {
         runtime.blit_helper.DepthToBuffer(*this, runtime.download_buffer.Handle(), download);
+        finish_download();
         return;
     }
 
@@ -1110,6 +1113,7 @@ void Surface::Download(const VideoCore::BufferTextureCopy& download,
                                    vk::DependencyFlagBits::eByRegion, memory_write_barrier, {},
                                    image_write_barrier);
         });
+    finish_download();
 }
 
 void Surface::ScaleUp(u32 new_scale) {
@@ -1598,7 +1602,12 @@ DebugScope::~DebugScope() {
     if (!has_debug_tool) {
         return;
     }
-    scheduler.Record([](vk::CommandBuffer cmdbuf) { cmdbuf.endDebugUtilsLabelEXT(); });
+    try {
+        scheduler.Record([](vk::CommandBuffer cmdbuf) { cmdbuf.endDebugUtilsLabelEXT(); });
+    } catch (const VideoCore::ShaderRecoveryError&) {
+        // CodexAstraUlt-2: A canceled command stream needs no closing GPU label.
+        // Preserve its latched error for producer code; cleanup must not terminate.
+    }
 }
 
 } // namespace Vulkan

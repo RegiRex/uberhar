@@ -17,36 +17,41 @@ import java.util.UUID
 class CrashLogStore(val root: File) {
     private val marker get() = File(root, "pending.properties")
     private var current: Properties? = null
+    // CodexAstraUlt-2: Keep retry metadata until the old lifecycle marker is replaced, or a
+    // failed startup followed by publication could reuse its incident ID for appended bytes.
+    @Volatile private var recoveryBlockedId: String? = null
 
-    // AstraEH: Commit saved text before replacing the marker or allowing native rotation.
-    // A failed copy leaves the original marker/log intact and makes the writer append.
+    // CodexAstraUlt-2: Snapshot by provider rename before native rotation. Only tiny metadata
+    // is synced on startup; the existing recovery worker copies the immutable incident later.
+    // A provider that cannot snapshot leaves the original marker/log intact for append mode.
     @Synchronized
-    fun prepare(nowMs: Long, tree: String, openLog: (String) -> InputStream?): Boolean {
+    fun prepare(nowMs: Long, tree: String, stageLog: (String, String) -> Boolean): Boolean {
         current = null
+        recoveryBlockedId = null
         root.mkdirs()
         if (marker.exists()) {
             val previous = readProperties(marker)
-            require(validId.matches(previous.getProperty("id", "")))
+            val id = previous.getProperty("id", "")
+            require(validId.matches(id))
             if (previous.getProperty("active") == "true" || previous.containsKey("failure")) {
-                val target =
-                    File(root, "uberhar_interrupted_start_${previous.getProperty("id")}.txt")
+                recoveryBlockedId = id
+                val target = reportFile(id)
                 if (!target.isFile) {
-                    saveText(target) { output ->
-                        val input = openLog(previous.getProperty("tree"))
-                        val available = input != null
-                        input?.use { it.copyTo(output) }
-                        output.write(
-                            (
-                                "\n\nUberhar interruption report\n" +
-                                    "detected_utc=${Instant.ofEpochMilli(nowMs)}\n" +
-                                    "log_available=$available\n" +
-                                    "exit_reason=unknown; interruption does not prove a crash\n" +
-                                    "timestamp_basis=process_start; crash time unknown\n" +
-                                    "started_utc=${previous.getProperty("started_utc")}\n" +
-                                    "run_active=${previous.getProperty("active")}\n" +
-                                    "${previous.getProperty("failure", "")}\n"
-                                ).toByteArray()
-                        )
+                    val recovery = File(root, "recovery_$id.properties")
+                    val state = if (recovery.isFile) {
+                        readProperties(recovery)
+                    } else {
+                        previous.apply {
+                            setProperty("detected_utc", Instant.ofEpochMilli(nowMs).toString())
+                        }.also { writeProperties(recovery, it) }
+                    }
+                    if (state.getProperty("captured") != "true") {
+                        // CodexAstraUlt-2: A restart between rename and this commit reuses the
+                        // deterministic snapshot instead of renaming a subsequent current log.
+                        val available = stageLog(state.getProperty("tree"), snapshotName(id))
+                        state.setProperty("log_available", available.toString())
+                        state.setProperty("captured", "true")
+                        writeProperties(recovery, state)
                     }
                 }
             }
@@ -59,8 +64,71 @@ class CrashLogStore(val root: File) {
         }
         writeProperties(marker, next)
         current = next
+        recoveryBlockedId = null
         return true
     }
+
+    // CodexAstraUlt-2: Recovery never holds the lifecycle-marker monitor during bulk IO.
+    // Failed copies retain their sidecar/snapshot; cleanup follows the committed internal copy.
+    fun recoverStaged(
+        openLog: (String, String) -> InputStream?,
+        deleteLog: (String, String) -> Unit
+    ) {
+        var failure: Exception? = null
+        root.listFiles().orEmpty().filter {
+            it.isFile && it.name.startsWith("recovery_") && it.extension == "properties"
+        }.forEach { recovery ->
+            try {
+                val state = readProperties(recovery)
+                val id = state.getProperty("id", "")
+                require(validId.matches(id) && recovery.name == "recovery_$id.properties")
+                if (id == recoveryBlockedId || state.getProperty("captured") != "true") {
+                    return@forEach
+                }
+                val tree = state.getProperty("tree")
+                val name = snapshotName(id)
+                val available = state.getProperty("log_available") == "true"
+                val target = reportFile(id)
+                if (state.getProperty("saved") != "true") {
+                    if (!target.isFile) {
+                        saveText(target) { output ->
+                            if (available) {
+                                val input = openLog(tree, name)
+                                    ?: throw IOException("Interrupted log snapshot unavailable")
+                                input.use { it.copyTo(output) }
+                            }
+                            output.write(
+                                (
+                                    "\n\nUberhar interruption report\n" +
+                                        "detected_utc=${state.getProperty("detected_utc")}\n" +
+                                        "log_available=$available\n" +
+                                        "exit_reason=unknown; interruption does not prove a crash\n" +
+                                        "timestamp_basis=process_start; crash time unknown\n" +
+                                        "started_utc=${state.getProperty("started_utc")}\n" +
+                                        "run_active=${state.getProperty("active")}\n" +
+                                        "${state.getProperty("failure", "")}\n"
+                                    ).toByteArray()
+                            )
+                        }
+                    }
+                    // CodexAstraUlt-2: Publishing can retire the internal report even when
+                    // cleanup fails. Commit that copy before deleting its provider snapshot.
+                    state.setProperty("saved", "true")
+                    writeProperties(recovery, state)
+                }
+                if (available) deleteLog(tree, name)
+                if (!recovery.delete()) throw IOException("Cannot remove recovered marker")
+            } catch (error: Exception) {
+                // CodexAstraUlt-2: One unavailable provider must not block other incidents.
+                failure = error
+            }
+        }
+        failure?.let { throw it }
+    }
+
+    // CodexAstraUlt-2: IDs come only from validated markers, keeping snapshot paths local.
+    private fun reportFile(id: String) = File(root, "uberhar_interrupted_start_$id.txt")
+    private fun snapshotName(id: String) = "uberhar_interrupted_start_$id.txt.pending"
 
     @Synchronized
     fun markRun(active: Boolean, nowMs: Long) {
@@ -84,8 +152,11 @@ class CrashLogStore(val root: File) {
         writeProperties(marker, state)
     }
 
+    // CodexAstraUlt-2: Retain a preexisting private report until its old lifecycle ID retires;
+    // verified publication deletes private copies and must not reopen that ID for reuse.
     fun reports(): List<File> = root.listFiles().orEmpty().filter {
-        it.isFile &&
+        it.name != recoveryBlockedId?.let { id -> reportFile(id).name } &&
+            it.isFile &&
             it.name.startsWith("uberhar_") &&
             (
                 it.extension == "txt" ||

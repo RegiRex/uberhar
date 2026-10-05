@@ -20,6 +20,9 @@ add_library(video_core STATIC EXCLUDE_FROM_ALL
     rasterizer_interface.h
     renderer_base.cpp
     renderer_base.h
+    # CodexAstraUlt-2: Shared compiler completion and terminal command-stream handoff.
+    shader_build_failure.h
+    shader_recovery_error.h
     pica/dirty_regs.h
     pica/geometry_pipeline.cpp
     pica/geometry_pipeline.h

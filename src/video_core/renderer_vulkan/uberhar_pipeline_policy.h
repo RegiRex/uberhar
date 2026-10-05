@@ -4,6 +4,7 @@
 #pragma once
 #include "common/async_handle.h"
 #include "video_core/pica/regs_pipeline.h"
+#include "video_core/shader_recovery_error.h" // CodexAstraUlt-2: Terminal selection.
 
 namespace Vulkan {
 
@@ -49,7 +50,7 @@ bool PipelineWaitRequired(const Pipeline& preferred, const Pipeline* alternative
     if (force && alternative) {
         return !alternative->IsDone() || (alternative->HasFailed() && !preferred.IsDone());
     }
-    return !preferred.IsDone() &&
+    return (!preferred.IsDone() || preferred.HasFailed()) &&
            (!alternative || !alternative->IsDone() || alternative->HasFailed());
 }
 
@@ -66,12 +67,19 @@ Pipeline* SelectUsablePipeline(Common::AsyncCompletion& completion, Pipeline& pr
         } else if (!preferred.IsDone() && !alternative->IsDone()) {
             completion.WaitAny(preferred, *alternative);
         }
-        if (alternative->IsDone() && !alternative->HasFailed() && (force || !preferred.IsDone())) {
+        // CodexAstraUlt-2: Failed mandatory work may still use an exact fallback.
+        if (preferred.IsDone() && preferred.HasFailed() && !alternative->IsDone())
+            alternative->WaitDone();
+        if (alternative->IsDone() && !alternative->HasFailed() &&
+            (force || !preferred.IsDone() || preferred.HasFailed())) {
             return alternative;
         }
     }
     if (!preferred.IsDone())
         preferred.WaitDone();
+    // CodexAstraUlt-2: Both routes failed; callers must terminate this stream.
+    if (preferred.HasFailed())
+        throw VideoCore::ShaderRecoveryError{};
     return &preferred;
 }
 

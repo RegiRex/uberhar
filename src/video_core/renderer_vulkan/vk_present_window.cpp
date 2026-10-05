@@ -249,6 +249,14 @@ Frame* PresentWindow::GetRenderFrame() {
 
     // Wait for free presentation frames
     std::unique_lock lock{free_mutex};
+    // CodexAstraUlt-2: A canceled frame never reaches the presentation queue.
+    // At frame exhaustion, finish producer work before waiting for presenters;
+    // this surfaces a terminal shader error instead of waiting for that frame.
+    if (free_queue.empty()) {
+        lock.unlock();
+        scheduler.WaitWorker();
+        lock.lock();
+    }
     free_cv.wait(lock, [this] { return !free_queue.empty(); });
 
     // Take the frame from the queue

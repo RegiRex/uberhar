@@ -7,8 +7,8 @@ import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.os.Process
+import android.provider.DocumentsContract
 import android.widget.Toast
-import androidx.documentfile.provider.DocumentFile
 import java.io.File
 import java.io.IOException
 import java.util.concurrent.atomic.AtomicBoolean
@@ -36,23 +36,34 @@ object CrashSessionLogs {
             logs.prepare(
                 System.currentTimeMillis(),
                 PermissionsHandler.citraDirectory.toString()
-            ) { tree ->
-                val directory = DocumentFile.fromTreeUri(context, Uri.parse(tree))
-                    ?: throw IOException("Log directory unavailable")
-                if (!directory.canRead()) throw IOException("Log directory unreadable")
-                val file = directory.findFile("log")?.findFile("azahar_log.txt")
-                file?.let {
-                    context.contentResolver.openInputStream(it.uri)
-                        ?: throw IOException("Cannot read interrupted log")
+            ) { tree, snapshotName ->
+                // CodexAstraUlt-2: Rename only; bulk copies/fsyncs run on the existing worker.
+                // A deterministic name lets startup retry safely after an interrupted rename.
+                val directory = logDirectory(context, tree)
+                if (directory != null && findDocument(context, directory, snapshotName) != null) {
+                    true
+                } else {
+                    val file = directory?.let { findDocument(context, it, "azahar_log.txt") }
+                    if (file == null) {
+                        false
+                    } else {
+                        val renamed = DocumentsContract.renameDocument(
+                            context.contentResolver, file, snapshotName
+                        )
+                        if (renamed == null) {
+                            throw IOException("Cannot preserve interrupted log before rotation")
+                        }
+                        if (findDocument(context, checkNotNull(directory), snapshotName) == null) {
+                            throw IOException("Interrupted log rename could not be verified")
+                        }
+                        true
+                    }
                 }
             }
         }.getOrElse {
             warn()
             false
         }
-        // AstraEH: Legacy cleanup is an upgrade operation, never required to play.
-        runCatching { logs.migrateLegacy(File(context.filesDir, "uberhar_sessions")) }
-            .onFailure { warn() }
         return rotate
     }
 
@@ -90,6 +101,27 @@ object CrashSessionLogs {
                     )
                 }
             }
+            // CodexAstraUlt-2: Finish incident-only snapshots and legacy migration here,
+            // after synchronous startup has secured the source and initialized the sole logger.
+            runCatching {
+                logs.recoverStaged(
+                    openLog = { tree, name ->
+                        logDirectory(context, tree)?.let { findDocument(context, it, name) }?.let {
+                            context.contentResolver.openInputStream(it)
+                                ?: throw IOException("Cannot read interrupted log snapshot")
+                        }
+                    },
+                    deleteLog = { tree, name ->
+                        logDirectory(context, tree)?.let { findDocument(context, it, name) }?.let {
+                            if (!DocumentsContract.deleteDocument(context.contentResolver, it)) {
+                                throw IOException("Cannot remove recovered snapshot")
+                            }
+                        }
+                    }
+                )
+            }.onFailure { warn() }
+            runCatching { logs.migrateLegacy(File(context.filesDir, "uberhar_sessions")) }
+                .onFailure { warn() }
             runCatching { CrashReportFiles.publish(context, logs.reports()) }.onSuccess { count ->
                 if (count > 0) {
                     // AstraEH Log Line: One file-location pointer after successful incident saves.
@@ -126,6 +158,52 @@ object CrashSessionLogs {
 
     fun crashStore(context: Context): CrashLogStore =
         store ?: CrashLogStore(File(context.filesDir, "uberhar_crash_logs"))
+
+    // CodexAstraUlt-2: Unavailable storage is an error, not proof that a log is absent.
+    // Fail closed so native startup appends instead of rotating potentially unread evidence.
+    private fun logDirectory(context: Context, tree: String): Uri? {
+        val treeUri = Uri.parse(tree)
+        val root = DocumentsContract.buildDocumentUriUsingTree(
+            treeUri, DocumentsContract.getTreeDocumentId(treeUri)
+        )
+        return findDocument(context, root, "log", directory = true)
+    }
+
+    // CodexAstraUlt-2: DocumentFile.findFile hides provider query errors as a missing file.
+    // Query directly so interrupted evidence is never rotated after an ambiguous lookup.
+    private fun findDocument(
+        context: Context,
+        parent: Uri,
+        name: String,
+        directory: Boolean = false
+    ): Uri? {
+        val children = DocumentsContract.buildChildDocumentsUriUsingTree(
+            parent, DocumentsContract.getDocumentId(parent)
+        )
+        val columns = arrayOf(
+            DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+            DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+            DocumentsContract.Document.COLUMN_MIME_TYPE
+        )
+        val cursor = context.contentResolver.query(children, columns, null, null, null)
+            ?: throw IOException("Cannot inspect interrupted log directory")
+        cursor.use {
+            // CodexAstraUlt-2: Cloud/provider partial results do not prove a file is absent.
+            if (it.extras.getBoolean(DocumentsContract.EXTRA_LOADING) ||
+                it.extras.getString(DocumentsContract.EXTRA_ERROR) != null
+            ) {
+                throw IOException("Interrupted log directory lookup incomplete")
+            }
+            while (it.moveToNext()) {
+                if (it.getString(1) == name) {
+                    val isDirectory = it.getString(2) == DocumentsContract.Document.MIME_TYPE_DIR
+                    if (isDirectory != directory) throw IOException("Unexpected log document type")
+                    return DocumentsContract.buildDocumentUriUsingTree(parent, it.getString(0))
+                }
+            }
+        }
+        return null
+    }
 
     private fun warn() {
         storageWarning = true

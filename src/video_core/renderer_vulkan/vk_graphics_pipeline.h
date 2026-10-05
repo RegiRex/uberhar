@@ -355,12 +355,20 @@ struct Shader : public Common::AsyncHandle {
     std::string program;
     // AstraEH: Only experimental fallback failures use this state; done publishes
     // completion so queued jobs can stop safely without treating a null module as ready.
+    // CodexAstraUlt-2: Mandatory and disk-loaded failures now publish here too.
     void MarkFailed() {
         failed.store(true, std::memory_order_release);
         MarkDone();
     }
     bool HasFailed() const {
         return failed.load(std::memory_order_acquire);
+    }
+    // CodexAstraUlt-2: Disk-loaded modules obey the same success/null distinction.
+    void PublishModule() {
+        if (module)
+            MarkDone();
+        else
+            MarkFailed();
     }
 
 private:
@@ -460,6 +468,8 @@ public:
     }
 
 private:
+    // CodexAstraUlt-2: Keep throwing Vulkan work behind completion publication.
+    bool BuildImpl(bool fail_on_compile_required);
     const Instance& instance;
     RenderManager& renderpass_cache;
     Common::ThreadWorker* worker;
