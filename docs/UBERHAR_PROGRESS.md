@@ -31,8 +31,12 @@
   uploaded no validated APK. Public GitHub exposes only exit code 1 for that step;
   authenticated error details are needed to identify the failing subcheck. The
   branch-scoped signing-key cache is a hypothesis, not an established cause.
-  A follow-up adds fixed-stage failure annotations and a comparison certificate
-  preflight while preserving the final package/signing gates. No APK is ready.
+  Follow-up `1f4708eb8` adds fixed-stage failure annotations and a comparison
+  certificate preflight while preserving the final package/signing gates.
+  [Run 37401999433](https://github.com/RegiRex/uberhar/actions/runs/37401999433)
+  is queued behind the initial 0.1.20 run. Extracted Bash checks passed with
+  missing, unreadable, wrong and correct temporary test keys, cleanup and error
+  exit-status cases. No APK is ready; no signing-key diagnosis is claimed yet.
 - **Limits/next:** the game upload failed; no cutscene or physical Adreno execution
   occurred here. These guards are confirmed correctness fixes, not a demonstrated
   Dark Moon cure. Short route-isolation and process/GPU memory attribution come
