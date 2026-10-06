@@ -39,7 +39,9 @@ enum class AttribLoadFlags : u32 {
     Float = 1 << 0,
     Sint = 1 << 1,
     Uint = 1 << 2,
-    ZeroW = 1 << 3,
+    // CodexAstraUlt: Rename inherited ZeroW while retaining its serialized bit.
+    // Emulated three-component fetches must restore PICA's missing-component W=1.
+    PadWOne = 1 << 3,
 };
 DECLARE_ENUM_FLAG_OPERATORS(AttribLoadFlags)
 

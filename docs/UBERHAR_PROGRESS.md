@@ -1,4 +1,41 @@
-# Uberhar progress — 0.1.21 architecture and memory comparison
+# Uberhar progress — 0.1.22 Dark Moon lighting and memory follow-up
+
+<!-- CodexAstraUlt: New owner-supplied 0.1.21 device evidence supersedes the pending comparison status; retain prior records below. -->
+- **Evidence:** the owner supplied one `e72209ba6` full Combo/Vulkan/2x Dark Moon
+  run and a 15.747-second recording. System available memory still falls sharply;
+  warmed process RSS and tracked Vulkan capacities plateau, and explicit Vulkan
+  allocations are released at orderly shutdown. This is persistent system memory
+  pressure, not proof of a growing application heap or a crash in this run.
+- **Correction implemented:** the 0.1.21 optional GPU path admitted lit draws
+  on Android despite geometry correction being disabled and this driver lacking
+  fragment barycentrics. The CPU path performs triangle quaternion sign correction;
+  that GPU path did not. Added an early accurate CPU fallback and differential
+  regression, preserving unlit promotion and inherited Custom admission rules.
+- **Independent input fix:** restore `w=1` for emulated three-component vertex
+  fetches before guest shader execution; the wider fetch previously forced zero
+  instead of matching the CPU loader. Source-derived cache identity invalidates
+  old compiled code. Dark Moon's use of this format is not established.
+- **Memory follow-up implemented:** two bounded optional own-process KGSL counters
+  and system `MemAvailable` join the existing periodic/lifecycle snapshots.
+  Missing or denied nodes stay unknown. No extra worker, scan, bundle, GPU wait,
+  arbitrary cache eviction or claimed leak cure.
+- **Validation passed:** reconfigured native build with fresh source-derived
+  shader cache identity; full host probes; 62 passing CTest entries and five
+  firmware-dependent skips; Android production compilation and 54 JVM tests;
+  eight manifest tests. Quaternion admission/generator checks pass ASan/UBSan.
+  Mesa reproduces opposite-hemisphere lighting divergence with matching positive
+  controls. All 21 padding cases match CPU/interpreter values on Mesa, and all
+  21 emitted vertex modules pass Vulkan SPIR-V compilation/validation. Old admission
+  and old W=0 fixtures fail the respective semantic regressions. Independent
+  source reviews found no blocker. Full fragment pixel corpus is left to the
+  unchanged CI gates; no Adreno or Dark Moon execution occurred in this environment.
+- **Build:** 0.1.21 [run 37436727334](https://github.com/RegiRex/uberhar/actions/runs/37436727334)
+  passed Android, signing/package and shader gates; its comparison artifact is
+  available. 0.1.22 is ready for the existing comparison PR build, without shared
+  release publication. Shader and Android/package jobs must both pass before its
+  artifact is ready. Device correction and performance remain unverified.
+
+## Previous 0.1.21 comparison record
 
 <!-- CodexAstraUlt: Replace the current milestone for the owner's architecture review; retain prior evidence/build records below. -->
 - **Scope:** full source/evidence review of `c75e544f7` against base Azahar

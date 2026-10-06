@@ -6,15 +6,21 @@
   attributed block, explain the removed behavior, reason and replacement in a new
   adjacent comment, and keep the code map current.
 - The owner requested a full architecture review and a next build that fixes proven
-  resource defects and supplies missing Dark Moon memory/route evidence. Follow the
-  reviewed sequence: pool/allocation ownership fixes, bounded memory attribution,
-  and an explicit Combo generic-fragment control before broader specialization.
+  resource defects and supplies missing Dark Moon memory/route evidence. The new
+  0.1.21 device run confirms continued system pressure outside tracked allocations
+  and reaches lit GPU draws without quaternion sign correction. Prioritize exact
+  triangle output parity and bounded driver/system memory evidence before broader
+  specialization; record CPU fallback's potential throughput cost explicitly.
   Preserve draw order and reliable error context; neither host regressions nor
   system-wide memory loss establish the title's allocation owner or graphical cause.
 - The owner is comparing concurrent development sessions. This follow-up uses
   `uberhar/codexastra-diag-comparison`; run the same build gates and retain artifacts
-  without publishing a shared release. Version 0.1.21 is a comparison candidate;
+  without publishing a shared release. Version 0.1.22 is a comparison candidate;
   check the release branch and assign the next available version before integration.
+- After changing shader generator sources, rerun CMake configuration before a
+  reused local build: the inherited source-derived shader cache version is computed
+  at configure time. Fresh CI configures automatically; never claim cache-version
+  invalidation based only on recompiling one generator object in a stale build tree.
 - Use the existing isolated checkout in cloud tasks; do not create a worktree unless
   requested. Cloud checks do not simulate handheld performance. Thor Max Vulkan is
   primary; the exact secondary Retroid model remains unconfirmed. GammaOS must

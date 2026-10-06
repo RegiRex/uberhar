@@ -887,7 +887,9 @@ ExtraVSConfig PipelineCache::CalcExtraConfig(const PicaVSConfig& config) {
             flags = MakeAttribLoadFlag(type);
         }
         if (traits.needs_emulation) {
-            flags |= AttribLoadFlags::ZeroW;
+            // CodexAstraUlt: The wider Vulkan format reads an extra component;
+            // replace inherited zero padding with the missing PICA component W=1.
+            flags |= AttribLoadFlags::PadWOne;
         }
     }
 

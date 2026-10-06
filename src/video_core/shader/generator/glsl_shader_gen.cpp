@@ -283,8 +283,11 @@ std::string GenerateVertexShader(const ShaderSetup& setup, const PicaVSConfig& c
     for (std::size_t i = 0; i < used_regs.size(); ++i) {
         if (used_regs[i]) {
             out += fmt::format("vs_in_reg{0} = vec4(vs_in_typed_reg{0});\n", i);
-            if (True(extra.load_flags[i] & AttribLoadFlags::ZeroW)) {
-                out += fmt::format("vs_in_reg{0}.w = 0;\n", i);
+            // CodexAstraUlt: Replace inherited W=0 for emulated three-component
+            // fetches with the CPU loader's W=1 before the guest program executes.
+            // The source-derived shader cache version invalidates old compiled code.
+            if (True(extra.load_flags[i] & AttribLoadFlags::PadWOne)) {
+                out += fmt::format("vs_in_reg{0}.w = 1;\n", i);
             }
         }
     }

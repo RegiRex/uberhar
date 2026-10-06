@@ -45,6 +45,13 @@ constexpr Admission Classify(bool automatic, bool debugging, bool assembler_empt
 constexpr bool IsEligible(Admission admission) {
     return admission == Admission::List || admission == Admission::ShaderList;
 }
+// CodexAstraUlt: CPU triangle submission aligns opposite quaternion signs before
+// interpolation. A lit GPU draw needs the enabled geometry or barycentric path
+// to preserve that result; raw per-vertex quaternions are not equivalent.
+constexpr bool CanPreserveQuaternionInterpolation(bool lighting_enabled, bool geometry_shader,
+                                                  bool barycentric) {
+    return !lighting_enabled || geometry_shader || barycentric;
+}
 // CodexAstraUlt-2: CPU input transport repeats an active zero-stride source,
 // while the inherited GPU uploader omits it. Keep these draws on CPU until
 // their input translation is equivalent; unused loader slots remain eligible.

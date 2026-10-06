@@ -155,18 +155,20 @@ RasterizerVulkan::~RasterizerVulkan() {
              "Uberhar fixed attributes totals: max_bytes={} over_legacy_reservation={} "
              "reserved_bytes=272 scope=rasterizer_lifetime",
              fixed_attribute_max_bytes, fixed_attribute_over_legacy);
-    // CodexAstraUlt Log Line: One reliable lifetime total complements the bounded
-    // input-fallback records; a killed process may never reach this destructor.
+    // CodexAstraUlt Log Line: Extend the input-only lifetime summary with the
+    // quaternion-correction boundary; a killed process may skip this destructor.
     LOG_INFO(Render_Vulkan,
              "Uberhar GPU input fallback totals: zero_stride={} short_stride={} "
-             "default_attribute={} register_alias={} scope=rasterizer_lifetime action=cpu",
+             "default_attribute={} register_alias={} quaternion_interpolation={} "
+             "scope=rasterizer_lifetime action=cpu",
              ready_vertex_zero_stride_rejections,
              ready_vertex_layout_rejections[static_cast<std::size_t>(
                  ReadyVertexPolicy::InputLayoutIssue::ShortStride)],
              ready_vertex_layout_rejections[static_cast<std::size_t>(
                  ReadyVertexPolicy::InputLayoutIssue::DefaultAttribute)],
              ready_vertex_layout_rejections[static_cast<std::size_t>(
-                 ReadyVertexPolicy::InputLayoutIssue::RegisterAlias)]);
+                 ReadyVertexPolicy::InputLayoutIssue::RegisterAlias)],
+             ready_vertex_quaternion_rejections);
     if (compute_rect) {
         // AstraEH: Queued compute/timestamp commands must finish before their owners die.
         scheduler.Finish();
@@ -532,6 +534,24 @@ bool RasterizerVulkan::AccelerateDrawBatchReady(bool is_indexed) {
                      "ordinal={} vertices={} action=cpu limit=4",
                      ReadyVertexPolicy::InputLayoutIssueName(input_issue),
                      pipeline_cache.GetProgramID(), rejections, regs.pipeline.num_vertices);
+        }
+        return false;
+    }
+    // CodexAstraUlt: The inherited Android accelerator disables geometry shaders
+    // even when that loses quaternion sign correction. Optional Combo promotion
+    // must retain the CPU triangle result when neither correction path is enabled;
+    // keep the Custom policy and driver workarounds unchanged.
+    if (!ReadyVertexPolicy::CanPreserveQuaternionInterpolation(
+            !regs.lighting.disable, instance.UseGeometryShaders(),
+            instance.IsFragmentShaderBarycentricSupported())) {
+        if (++ready_vertex_quaternion_rejections <= 4) {
+            // CodexAstraUlt Log Line: Bounded coverage evidence for the missing
+            // correction path, not a claim that a specific title's image is fixed.
+            LOG_INFO(Render_Vulkan,
+                     "Uberhar GPU input fallback: reason=quaternion_interpolation title={:016X} "
+                     "ordinal={} vertices={} action=cpu limit=4",
+                     pipeline_cache.GetProgramID(), ready_vertex_quaternion_rejections,
+                     regs.pipeline.num_vertices);
         }
         return false;
     }

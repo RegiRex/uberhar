@@ -1,6 +1,20 @@
 <!-- AstraEH: Attribution index for the Uberhar implementation, tests, packaging and documentation. -->
 # Uberhar code map
 
+<!-- CodexAstraUlt: Track the next evidence-supported triangle correction and bounded missing-memory attribution. -->
+## 0.1.22 lit triangle parity and kernel memory
+
+| Files | Purpose and limits |
+| --- | --- |
+| `renderer_vulkan/uberhar_gpu_vertex_policy.h`, `vk_rasterizer.cpp/.h` | Reject optional lit GPU draws without an enabled quaternion-correction path; preserve complete CPU rendering, unlit eligibility and Custom policy. Four coverage records and a teardown total. |
+| `shader/generator/glsl_shader_gen.cpp`, `shader_gen.h`, `renderer_vulkan/vk_pipeline_cache.cpp` | Replace emulated three-component W=0 with the CPU loader's W=1 before guest shader execution. Rename the flag without changing its bit; existing source-derived cache version causes old compiled shader regeneration. |
+| Android `utils/UberharKernelMemory.kt`, `UberharDeviceDiagnostics.kt`, associated JVM tests | Fixed bounded own-process KGSL counters and system `MemAvailable` at existing periodic/lifecycle hooks. Unknown on absent/denied/malformed data; no scans, services, workers or extra permissions. |
+| `tools/uberhar/test_gpu_quaternion_parity.py`, updated input fixture | Exercise production quaternion correction and optional admission, including positive route controls; this does not execute Dark Moon. |
+| `tools/uberhar/test_gpu_attribute_padding.py` | Compare real CPU loader/interpreter values with emitted vertex shader input padding and execute the synthetic shaders on Mesa; no title-specific format claim. |
+| `UBERHAR_LOG_ANALYSIS_0.1.21.md`, derived memory chart | New one-run evidence separates severe system pressure from stable tracked application allocations and records the visual observation without a claimed device cure. |
+
+See [candidate notes](releases/0.1.22.md) and [validation/build status](UBERHAR_PROGRESS.md).
+
 <!-- CodexAstraUlt: Map resource ownership fixes and diagnostic isolation to production/test boundaries. -->
 ## 0.1.21 memory ownership and Combo isolation
 

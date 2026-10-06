@@ -152,6 +152,9 @@ private:
     // four records per reason and one reliable summary at rasterizer teardown.
     std::array<u64, static_cast<std::size_t>(ReadyVertexPolicy::InputLayoutIssue::Count)>
         ready_vertex_layout_rejections{};
+    // CodexAstraUlt: Count lit draws lacking GPU quaternion correction; only four
+    // detail records per rasterizer, followed by one existing teardown summary.
+    u64 ready_vertex_quaternion_rejections{};
     std::chrono::steady_clock::time_point next_draw_snapshot{};
     // CodexAstraUlt: Existing TickFrame owner samples memory at most every 30 seconds;
     // the clock is checked once per 64 completed frames, never once per draw.

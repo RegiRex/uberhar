@@ -94,6 +94,11 @@ c++ -std=c++20 -O2 -DENABLE_VULKAN -DFMT_HEADER_ONLY -Isrc -Ibuild/uberhar-profi
 build/uberhar-probe/test-graphics-profile
 # CodexAstraUlt: Execute production route control with the generated setting keys.
 python3 tools/uberhar/test_combo_generic_route.py
+# CodexAstraUlt: Reproduce triangle quaternion parity using the real CPU submission
+# and generated vertex program; the shader job also executes the emitted GPU cases.
+python3 tools/uberhar/test_gpu_quaternion_parity.py
+# CodexAstraUlt: The wider Vulkan fetch must retain CPU defaults before guest code.
+python3 tools/uberhar/test_gpu_attribute_padding.py
 
 # AstraEH: Exact CPU cache/stack behavior and safe generic-module reuse gate the next build.
 c++ -std=c++20 -O2 -Isrc -Iexternals/boost tools/uberhar/test_vertex_runtime.cpp \

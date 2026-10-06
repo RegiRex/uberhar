@@ -92,17 +92,30 @@ struct TestStream {
     void Commit(u32 size) { cursor=mapped+size; }
 };
 struct RasterizerVulkan {
-    struct { Pica::PipelineRegs pipeline{}; Pica::ShaderRegs vs{}; } regs;
+    struct {
+        Pica::PipelineRegs pipeline{};
+        Pica::ShaderRegs vs{};
+        // CodexAstraUlt: Existing transport fixtures are unlit; new cases vary this explicitly.
+        struct { bool disable{true}; } lighting;
+    } regs;
     struct PicaShell {
+        // CodexAstraUlt: Observe that Custom bypasses optional admission before capability checks.
+        bool automatic{true};
         Pica::AttributeBuffer input_default_attributes{};
         auto GetReadyGpuVertexAdmission() const {
-            return ReadyVertexPolicy::Classify(true,false,true,false,
+            return ReadyVertexPolicy::Classify(automatic,false,true,false,
                 Pica::PipelineRegs::TriangleTopology::List,96,false,true);
         }
     } pica;
     struct { struct { VertexLayout vertex_layout; } state; } pipeline_info;
     struct { u32 vs_input_index_min{}, vs_input_index_max{95}, vs_input_size{1536}; } vertex_info;
-    struct { u32 GetMinVertexStrideAlignment() const { return 1; } } instance;
+    struct {
+        u32 GetMinVertexStrideAlignment() const { return 1; }
+        // CodexAstraUlt: Model available correction paths without a physical device.
+        bool geometry{}, barycentric{};
+        bool UseGeometryShaders() const { return geometry; }
+        bool IsFragmentShaderBarycentricSupported() const { return barycentric; }
+    } instance;
     struct { void FlushRegion(PAddr,u32) {} } res_cache;
     TestMemory memory;
     TestStream stream_buffer;
@@ -121,6 +134,8 @@ struct RasterizerVulkan {
     void* ready_vertex_pipeline{};
     std::vector<u32> vertex_batch;
     u64 ready_vertex_zero_stride_rejections{};
+    // CodexAstraUlt: Match the production quaternion fallback's bounded counter.
+    u64 ready_vertex_quaternion_rejections{};
     // CodexAstraUlt: Match the production per-reason accounting without device plumbing.
     std::array<u64, static_cast<std::size_t>(ReadyVertexPolicy::InputLayoutIssue::Count)>
         ready_vertex_layout_rejections{};
@@ -319,6 +334,50 @@ void TestAdditionalInputLayouts() {
         CheckOrdinary(renderer,descriptions);
     }
 }
+// CodexAstraUlt: Exercise the actual optional admission body across the five useful
+// lighting/correction combinations. Rejected draws cannot read indices, warm fragments
+// or reserve uploads; Custom remains outside this optional route entirely.
+void TestQuaternionAdmission() {
+    struct Case { bool lighting, geometry, barycentric, expected; };
+    constexpr std::array cases{
+        Case{false,false,false,true}, Case{true,false,false,false},
+        Case{true,true,false,true}, Case{true,false,true,true}, Case{true,true,true,true}};
+    for (const auto& c : cases) {
+        Check(Vulkan::ReadyVertexPolicy::CanPreserveQuaternionInterpolation(
+                  c.lighting,c.geometry,c.barycentric)==c.expected,"Quaternion policy changed");
+        for (bool optional : {false,true}) {
+            for (bool indexed : {false,true}) {
+                Vulkan::RasterizerVulkan renderer;
+                InitInputFixture(renderer,1);
+                renderer.pica.automatic=optional;
+                renderer.regs.lighting.disable=!c.lighting;
+                renderer.instance.geometry=c.geometry;
+                renderer.instance.barycentric=c.barycentric;
+                const auto records=TestLog::info_lines;
+                if (optional && c.expected) {
+                    Check(renderer.AccelerateDrawBatchReady(indexed),
+                          "Available correction or unlit draw lost admission");
+                    Check(renderer.accelerated==1 && renderer.pipeline_cache.preflights==1 &&
+                          renderer.ready_vertex_quaternion_rejections==0 &&
+                          TestLog::info_lines==records,"Ordinary route changed fallback accounting");
+                } else {
+                    for (unsigned retry=0;retry<10;++retry)
+                        Check(!renderer.AccelerateDrawBatchReady(indexed),
+                              "Unsafe quaternion interpolation reached optional GPU route");
+                    Check(renderer.memory.reads==0 && renderer.stream_buffer.maps==0 &&
+                          renderer.pipeline_cache.preflights==0 && renderer.accelerated==0 &&
+                          !renderer.ready_vertex_attempt && !renderer.ready_vertex_pipeline,
+                          "Quaternion rejection performed speculative work");
+                    Check(renderer.ready_vertex_quaternion_rejections==(optional ? 10U : 0U) &&
+                          TestLog::info_lines-records==(optional ? 4U : 0U),
+                          "Quaternion first-four limit or Custom admission changed");
+                }
+            }
+        }
+    }
+    std::puts("PASS: five quaternion capability cases; indexed/nonindexed admission; "
+              "early full CPU fallback, four-record limit and Custom exclusion");
+}
 int main() {
     using Format=Pica::PipelineRegs::VertexAttributeFormat;
     using namespace Vulkan::ReadyVertexPolicy;
@@ -425,6 +484,7 @@ int main() {
     TestAdditionalInputLayouts();
     std::printf("PASS: four additional CPU/GPU divergences quarantined before GPU work; "
                 "three reasons with four-record limits; five ordinary layouts retain parity\n");
+    TestQuaternionAdmission();
 }
 '''
     args.output.parent.mkdir(parents=True, exist_ok=True)

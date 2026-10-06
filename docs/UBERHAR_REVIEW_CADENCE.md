@@ -1,5 +1,15 @@
 # Architecture review ledger
 
+<!-- CodexAstraUlt: Record the first successful successor and the new focused correction without falsely resetting the completed full review. -->
+0.1.21 comparison CI passed all Android, signing/package and shader gates in
+[run 37436727334](https://github.com/RegiRex/uberhar/actions/runs/37436727334),
+so it is successful comparison successor one after the 0.1.20 source review.
+Its [device evidence](UBERHAR_LOG_ANALYSIS_0.1.21.md) still shows ghost corruption
+and system memory pressure outside tracked live allocations. 0.1.22 addresses
+the reproduced quaternion-correction admission gap and extends bounded driver
+accounting. This focused follow-up does not reset the full review anchor or qualify
+device correctness/performance. Broader optimization remains behind those gates.
+
 <!-- CodexAstraUlt: Owner-requested full review resets the comparison lineage's architecture anchor, not another session's shared-release history. -->
 The [full 0.1.20 architecture review](UBERHAR_ARCHITECTURE_0.1.20.md), completed
 October 6, 2026 against `c75e544f7`, covers current source versus base Azahar,

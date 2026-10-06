@@ -1,6 +1,35 @@
 <!-- AstraEH: Bounded troubleshooting and removal map for the hybrid renderer. -->
 # Renderer diagnostics, schema 17
 
+<!-- CodexAstraUlt: Add independently scoped driver/kernel evidence without changing existing native accounting or claiming total GPU residency. -->
+## Quaternion eligibility and kernel memory (0.1.22)
+
+`Uberhar GPU input fallback` adds `reason=quaternion_interpolation`, with the first
+four records per renderer and a final total. A lit optional draw needs an enabled
+geometry or fragment-barycentric correction path. Otherwise it returns to the
+complete CPU draw before speculative reads/uploads/pipelines. The count reports
+coverage, not observed bad pixels, and excludes draws rejected by earlier guards.
+
+Health **schema 4** and process-memory **schema 2** retain all prior fields and add:
+
+| Field | Meaning and limits |
+| --- | --- |
+| `system_mem_available_kib` | Linux `/proc/meminfo` `MemAvailable`: a system-wide estimate, in KiB. Also present before/after native execution, unlike the previous health-only system field. Do not subtract it from RSS to invent an allocation owner. |
+| `kgsl_kernel_bytes` | Optional own-PID `/sys/class/kgsl/kgsl/proc/<pid>/kernel` counter: KGSL process kernel-allocation accounting in bytes. It is not a per-pipeline measurement or every driver allocation. |
+| `kgsl_cpu_mapped_bytes` | Optional same-PID `gpumem_mapped`: KGSL allocations mapped into CPU address space, in bytes. This is not GPU residency and overlaps other accounting. |
+
+The [published SM8550 KGSL implementation](https://github.com/OnePlusOSS/android_kernel_modules_and_devicetree_oneplus_sm8550/blob/oneplus/sm8550_v_15.0.0_oneplus11/vendor/qcom/opensource/graphics-kernel/kgsl_sharedmem.c)
+exposes these two fields as atomic counters. Actual firmware may omit or deny the
+nodes; all such failures remain `unknown`, without warnings or permission changes.
+`/proc/meminfo` reads at most 16 KiB plus an overflow sentinel; each of the two
+sysfs reads is capped at 32 bytes plus a sentinel. No allocation-list scan,
+directory traversal, root access, extra worker, sample timer or GPU wait is used.
+The existing 30-second worker and two lifecycle records call the same formatter.
+Sources describe attempted reads; `unknown` does not imply successful access.
+Snapshots are not simultaneous and none of these counters should be added to RSS
+or the existing Vulkan scopes. Immediate teardown samples also do not prove that
+all asynchronous kernel reclamation has completed.
+
 <!-- CodexAstraUlt: Memory records carry their own schemas; do not reinterpret older system-only health fields as process usage. -->
 ## Memory ownership and route isolation (0.1.21)
 

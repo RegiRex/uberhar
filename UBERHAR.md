@@ -7,19 +7,22 @@ Baseline: Azahar 2126.1.2, commit
 
 ## Current status
 
-<!-- CodexAstraUlt: Replace the current 0.1.20 summary after the full architecture review; its input guards/logging changes remain. -->
-**The 0.1.21 comparison fixes two resource-management defects and adds bounded
-memory attribution plus Combo (generic fragments).** This isolates optional fragment
-specialization while preserving Combo's vertex/compute policy and complete CPU
-fallback. It retains previous input guards and lean logging. Dark Moon's allocation
-owner, visual-fault cause and device performance remain unverified. See the
+<!-- CodexAstraUlt: Replace the 0.1.21 candidate summary after actual device evidence; preserve its resource fixes and isolation mode. -->
+**The 0.1.22 comparison preserves CPU quaternion correction for lit draws when
+the optional GPU path cannot perform it.** It also corrects three-component GPU
+input padding to match the CPU loader. The 0.1.21 device run confirms continued
+system memory pressure despite stable tracked allocations and orderly cleanup.
+Bounded KGSL/system snapshots extend the existing logging cadence to investigate
+that gap. Affected scenes may cost more CPU; image correction and memory benefit
+remain device gates. See the [new evidence](docs/UBERHAR_LOG_ANALYSIS_0.1.21.md),
 [architecture review](docs/UBERHAR_ARCHITECTURE_0.1.20.md),
-[release/test notes](docs/releases/0.1.21.md) and [validation status](docs/UBERHAR_PROGRESS.md).
+[release/test notes](docs/releases/0.1.22.md) and [validation status](docs/UBERHAR_PROGRESS.md).
 It is isolated on `uberhar/codexastra-diag-comparison`; its workflow retains artifacts
 only after package/signing checks and does not publish or reserve a shared release.
-The comparison now builds through a narrowly restricted PR into the release branch
-so it can restore that base's existing signing cache if retained; it tests the exact
-comparison head and cannot publish a shared release. The inherited
+The comparison builds through the existing narrowly restricted PR into the release
+branch, testing the exact comparison head. The 0.1.21 build restored the approved
+key and passed all Android/package/shader gates. Its device result does not establish
+bounded system memory or correct ghost rendering. The inherited
 [0.1.18 workflow](https://github.com/RegiRex/uberhar/actions/runs/37382914237)
 completed successfully; this does not establish device correctness or performance.
 

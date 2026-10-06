@@ -66,11 +66,11 @@ object UberharDeviceDiagnostics {
             }.getOrNull()
         }
 
-        // CodexAstraUlt Log Line: Replace AstraPro's schema-2 health record with schema 3
-        // to distinguish process RSS from allocator/system memory while preserving its
-        // cadence and sensor fields. Android NONE/unknown headroom is not thermal proof.
+        // CodexAstraUlt Log Line: Extend our schema-3 process/allocator snapshot with
+        // schema-4 system availability and optional driver counters. Preserve the
+        // existing sensor fields/cadence; NONE/unknown headroom is not thermal proof.
         Log.info(
-            "Uberhar device health: schema=3 elapsed_ms=$now uptime_ms=${SystemClock.uptimeMillis()} model=${Build.MODEL} api=${Build.VERSION.SDK_INT} " +
+            "Uberhar device health: schema=4 elapsed_ms=$now uptime_ms=${SystemClock.uptimeMillis()} model=${Build.MODEL} api=${Build.VERSION.SDK_INT} " +
                 "thermal_status=${thermal ?: "unknown"} thermal_headroom=${headroom ?: "unknown"} " +
                 "power_save=${powerSave ?: "unknown"} battery_percent=${batteryPercent ?: "unknown"} " +
                 "plugged=${plugged ?: "unknown"} battery_c=${temperature ?: "unknown"} " +
@@ -89,7 +89,7 @@ object UberharDeviceDiagnostics {
             // CodexAstraUlt Log Line: Reliable lifecycle evidence precedes the existing
             // endRun flush; a process kill may prevent the final sample from existing.
             Log.info(
-                "Uberhar process memory: schema=1 event=$event " +
+                "Uberhar process memory: schema=2 event=$event " +
                     "elapsed_ms=${SystemClock.elapsedRealtime()} wall_ms=${System.currentTimeMillis()} " +
                     processMemoryFields()
             )
@@ -99,6 +99,11 @@ object UberharDeviceDiagnostics {
     // CodexAstraUlt: Local bounded reads and allocator counters only. Kernel RSS,
     // malloc and JVM numbers overlap and may be sampled at slightly different times.
     private fun processMemoryFields(): String {
+        // CodexAstraUlt: The same bounded read-only sample is present before/after
+        // native return and on the existing 30-second cadence. No extra timer or
+        // Android service query; absent KGSL access is normal on other devices/OSes.
+        val pid = Process.myPid()
+        val kernelMemory = UberharKernelMemory.sample(pid)
         val nativeHeap = runCatching { Debug.getNativeHeapAllocatedSize() }.getOrNull()
         val processMemory = runCatching {
             File("/proc/self/status").inputStream().use(UberharProcessMemory::read)
@@ -107,7 +112,7 @@ object UberharDeviceDiagnostics {
             val runtime = Runtime.getRuntime()
             (runtime.totalMemory() - runtime.freeMemory()).takeIf { it >= 0 }
         }.getOrNull()
-        return "pid=${Process.myPid()} native_heap_bytes=${UberharHealthValues.positive(nativeHeap)} " +
+        return "pid=$pid native_heap_bytes=${UberharHealthValues.positive(nativeHeap)} " +
             "java_heap_used_bytes=${javaHeap ?: "unknown"} " +
             "process_rss_kib=${processMemory.rssKiB ?: "unknown"} " +
             "process_rss_hwm_kib=${processMemory.highWaterKiB ?: "unknown"} " +
@@ -115,6 +120,12 @@ object UberharDeviceDiagnostics {
             "process_rss_file_kib=${processMemory.fileKiB ?: "unknown"} " +
             "process_rss_shmem_kib=${processMemory.sharedKiB ?: "unknown"} " +
             "process_swap_kib=${processMemory.swapKiB ?: "unknown"} " +
-            "process_memory_source=${processMemory.source} memory_counters_not_additive=true"
+            "process_memory_source=${processMemory.source} " +
+            "system_mem_available_kib=${kernelMemory.availableKiB ?: "unknown"} " +
+            "system_memory_source=proc_meminfo " +
+            "kgsl_kernel_bytes=${kernelMemory.kgslKernelBytes ?: "unknown"} " +
+            "kgsl_cpu_mapped_bytes=${kernelMemory.kgslCpuMappedBytes ?: "unknown"} " +
+            "kgsl_source=optional_process_sysfs kgsl_scope=kernel_allocations " +
+            "memory_counters_not_additive=true"
     }
 }
