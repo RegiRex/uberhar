@@ -15,9 +15,29 @@
 
 #include <vk_mem_alloc.h>
 
+// CodexAstraUlt: PID joins native ownership samples to the existing Android health
+// record. No platform service or diagnostic permission is required.
+#ifdef _WIN32
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
+
 namespace Vulkan {
 
 namespace {
+
+// CodexAstraUlt: Process-local allocator generations distinguish repeated games and
+// orderly teardown; PID plus the text-log process identity disambiguate relaunches.
+std::atomic<u64> next_memory_generation{};
+
+u64 MemoryProcessId() {
+#ifdef _WIN32
+    return static_cast<u64>(_getpid());
+#else
+    return static_cast<u64>(getpid());
+#endif
+}
 
 vk::Format MakeFormat(VideoCore::PixelFormat format) {
     switch (format) {
@@ -167,7 +187,65 @@ Instance::Instance(Frontend::EmuWindow& window, u32 physical_device_index)
 }
 
 Instance::~Instance() {
+    // CodexAstraUlt: Renderer members (including VMA images and raw stream buffers)
+    // have already been destroyed. VMA may still retain empty blocks until its own
+    // destruction; report allocation counts separately instead of calling that a leak.
+    if (allocator) {
+        ReportMemoryUsage("after_dependents", memory_last_title, memory_last_session);
+    }
     vmaDestroyAllocator(allocator);
+}
+
+// CodexAstraUlt: O(heap count), at most VK_MAX_MEMORY_HEAPS atomic VMA snapshots.
+// The allocator does not enable EXT_memory_budget, so VMA usage/budget would be
+// heuristics. Only actual explicit-allocation statistics are reported. Driver
+// pipelines, descriptors, imported host screenshots and process RSS are not bytes
+// accounted by these numbers; pool capacities are separate object counts.
+void Instance::ReportMemoryUsage(std::string_view kind, u64 title_id, u64 session,
+                                 u64 current_tick, u64 known_gpu_tick) const {
+    if (!allocator)
+        return;
+    memory_last_title = title_id;
+    memory_last_session = session;
+    std::array<VmaBudget, VK_MAX_MEMORY_HEAPS> heaps{};
+    vmaGetHeapBudgets(allocator, heaps.data());
+    const VkPhysicalDeviceMemoryProperties* memory_properties{};
+    vmaGetMemoryProperties(allocator, &memory_properties);
+    const auto totals = SumMemoryHeapStatistics(std::span<const VmaBudget>{
+        heaps.data(), memory_properties->memoryHeapCount});
+    vma_sampled_peak_bytes = std::max(vma_sampled_peak_bytes, totals.block_bytes);
+    const auto stream = raw_stream_memory.Read();
+    const auto pools = descriptor_pools.Read();
+    const auto sets = descriptor_sets.Read();
+    const auto commands = command_buffers.Read();
+    const auto delivery = kind == "progress" ? Common::Log::Delivery::Diagnostic
+                                              : Common::Log::Delivery::Reliable;
+    // CodexAstraUlt Log Line: One bounded aggregate on the existing render thread,
+    // periodic delivery may be omitted under logger pressure; lifecycle remains reliable.
+    LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
+        "Uberhar Vulkan memory {}: schema=1 pid={} generation={} session={} title={:016X} "
+        "mode={} resolution_setting={} current_tick={} known_gpu_tick={} tick_source=cached "
+        "scope=allocator_lifetime snapshot=concurrent heap_count={} "
+        "vma_blocks={} vma_allocations={} vma_block_bytes={} vma_allocation_bytes={} "
+        "vma_sampled_peak_block_bytes={} raw_stream_bytes={} raw_stream_peak_bytes={} "
+        "raw_stream_alloc_events={} raw_stream_free_events={} raw_stream_failures={} "
+        "descriptor_pools={} descriptor_pool_peak={} descriptor_pool_alloc_events={} "
+        "descriptor_pool_free_events={} descriptor_set_capacity={} descriptor_set_peak_capacity={} "
+        "descriptor_set_alloc_batches={} descriptor_set_free_batches={} "
+        "command_buffer_capacity={} command_buffer_peak_capacity={} command_buffer_alloc_batches={} "
+        "command_buffer_free_batches={} driver_internal_bytes=unknown imported_host_bytes=excluded "
+        "memory_budget=unqueried counters_not_additive_to_rss=true",
+        kind, MemoryProcessId(), memory_generation, session, title_id,
+        static_cast<u32>(Settings::values.uberhar_test_mode.GetValue()),
+        Settings::values.resolution_factor.GetValue(),
+        current_tick ? std::to_string(current_tick) : "unknown",
+        current_tick ? std::to_string(known_gpu_tick) : "unknown",
+        memory_properties->memoryHeapCount, totals.blocks, totals.allocations, totals.block_bytes,
+        totals.allocation_bytes,
+        vma_sampled_peak_bytes, stream.current, stream.peak, stream.allocations, stream.frees,
+        raw_stream_failures.load(std::memory_order_relaxed), pools.current, pools.peak,
+        pools.allocations, pools.frees, sets.current, sets.peak, sets.allocations, sets.frees,
+        commands.current, commands.peak, commands.allocations, commands.frees);
 }
 
 const FormatTraits& Instance::GetTraits(VideoCore::PixelFormat pixel_format) const {
@@ -712,6 +790,9 @@ void Instance::CreateAllocator() {
     if (result != VK_SUCCESS) {
         UNREACHABLE_MSG("Failed to initialize VMA with error {}", result);
     }
+    // CodexAstraUlt: Assign only after successful creation; no stale generation is
+    // reused by a later renderer lifetime in the same Android process.
+    memory_generation = next_memory_generation.fetch_add(1, std::memory_order_relaxed) + 1;
 }
 
 void Instance::CollectToolingInfo() {

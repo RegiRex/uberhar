@@ -951,7 +951,8 @@ class SettingsFragmentPresenter(private val fragmentView: SettingsFragmentView) 
 
     private fun addGraphicsSettings(sl: ArrayList<SettingsItem>) {
         settingsActivity.setToolbarTitle(settingsActivity.getString(R.string.preferences_graphics))
-        // AstraEH: Three switches select one profile. Custom settings are not mutated.
+        // CodexAstraUlt: Extend AstraEH's exclusive presets with the generic-fragment Combo
+        // comparison. All choices share one persisted mode; custom settings remain untouched.
         val mode = UberharTestMode.from(IntSetting.UBERHAR_TEST_MODE.int)
         sl.add(HeaderSetting(R.string.uberhar_test_modes))
         val modes = listOf(
@@ -969,6 +970,11 @@ class SettingsFragmentPresenter(private val fragmentView: SettingsFragmentView) 
                 UberharTestMode.AUTOMATIC,
                 R.string.uberhar_test_auto,
                 R.string.uberhar_test_auto_description
+            ),
+            Triple(
+                UberharTestMode.COMBO_GENERIC,
+                R.string.uberhar_test_combo_generic,
+                R.string.uberhar_test_combo_generic_description
             )
         )
         for ((choice, title, description) in modes) {
@@ -1291,7 +1297,8 @@ class SettingsFragmentPresenter(private val fragmentView: SettingsFragmentView) 
                     item.setting == BooleanSetting.USE_INTEGER_SCALING ||
                     item.type == SettingsItem.TYPE_HEADER
                 ) continue
-                UberharGraphicsProfile.applyTo(item)
+                // CodexAstraUlt: Display the effective fragment choice for this exact preset.
+                UberharGraphicsProfile.applyTo(item, mode)
                 item.isEnabled = false
                 item.disabledMessage = R.string.uberhar_test_locked
             }

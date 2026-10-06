@@ -8,12 +8,14 @@ import org.citra.citra_emu.features.settings.model.view.SettingsItem
 // AstraEH: Read-only presentation of common/uberhar_test_profile.h. The original
 // setting objects retain the user's custom values and remain the objects saved to INI.
 object UberharGraphicsProfile {
-    private val booleans get() = mapOf(
+    // CodexAstraUlt: Replace AstraEH's mode-independent forced-TEV display, which showed
+    // true even for full Combo. Read the selected profile without modifying saved settings.
+    private fun booleans(mode: UberharTestMode) = mapOf(
         BooleanSetting.SPIRV_SHADER_GEN to true,
         BooleanSetting.DISABLE_SPIRV_OPTIMIZER to true,
         BooleanSetting.ASYNC_SHADERS to false,
         BooleanSetting.UBERHAR_HYBRID_TEV to true,
-        BooleanSetting.UBERHAR_FORCE_TEV to true,
+        BooleanSetting.UBERHAR_FORCE_TEV to !mode.allowsSpecializedFragments,
         BooleanSetting.UBERHAR_CPU_VERTEX_BRIDGE to false,
         BooleanSetting.LINEAR_FILTERING to true,
         BooleanSetting.SHADERS_ACCURATE_MUL to true,
@@ -35,9 +37,10 @@ object UberharGraphicsProfile {
         IntSetting.STEREOSCOPIC_3D_DEPTH to 0
     )
 
-    fun applyTo(item: SettingsItem) {
+    // CodexAstraUlt: The presenter passes the same selection used to lock the settings screen.
+    fun applyTo(item: SettingsItem, mode: UberharTestMode) {
         when (val original = item.setting) {
-            is BooleanSetting -> booleans[original]?.let { effective ->
+            is BooleanSetting -> booleans(mode)[original]?.let { effective ->
                 item.setting = object : AbstractBooleanSetting by original {
                     override var boolean: Boolean
                         get() = effective

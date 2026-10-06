@@ -189,6 +189,7 @@ if (ENABLE_VULKAN)
         renderer_vulkan/vk_graphics_pipeline.h
         renderer_vulkan/vk_master_semaphore.cpp
         renderer_vulkan/vk_master_semaphore.h
+        renderer_vulkan/vk_memory_diagnostics.h # CodexAstraUlt: Allocation-event counters.
         renderer_vulkan/vk_memory_util.cpp
         renderer_vulkan/vk_memory_util.h
         renderer_vulkan/uberhar_gpu_vertex_policy.h # AstraPro: Ready-only GPU admission.

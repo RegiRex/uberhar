@@ -1,5 +1,22 @@
 # Architecture review ledger
 
+<!-- CodexAstraUlt: Owner-requested full review resets the comparison lineage's architecture anchor, not another session's shared-release history. -->
+The [full 0.1.20 architecture review](UBERHAR_ARCHITECTURE_0.1.20.md), completed
+October 6, 2026 against `c75e544f7`, covers current source versus base Azahar,
+the supplied device evidence, resource ownership, correctness contracts, active
+overhead, alternatives and measurable gates. Its comparison-lineage anchor is
+**0.1.20 source**; unpublished candidates and failed retries are not published
+alpha successors. Review this lineage again after three to five successful
+successor candidates, normally four, or immediately if route/memory evidence
+contradicts the plan. Reconcile this source anchor with shared-release numbering
+when integrating; the other session's release ledger is not silently rewritten.
+
+0.1.21 selects proven pool/stream ownership repairs, bounded process/Vulkan
+measurements and an explicit generic-fragment Combo control. Independent fragment
+promotion, broader eligibility and speculative eviction remain gated by image
+correctness and bounded working-set evidence. This records a completed source
+review, not completed device qualification or APK delivery.
+
 <!-- CodexAstraUlt: New device evidence triggers focused early diagnosis without claiming a completed full architecture review. -->
 The [0.1.17/0.1.18 attachment review](UBERHAR_LOG_ANALYSIS_0.1.17_0.1.18.md) confirms
 Android-classified low-memory exits and sustained Sonic/Dark Moon limitations.

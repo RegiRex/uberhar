@@ -44,4 +44,20 @@ class UberharTestModeTest {
         assertEquals(UberharTestMode.CUSTOM, UberharTestMode.from(99))
         assertFalse(UberharTestModeSwitch(backing, UberharTestMode.AUTOMATIC).isRuntimeEditable)
     }
+
+    // CodexAstraUlt: Persisted IDs remain stable and the effective UI fragment choice matches
+    // the native preset policy. The existing exclusivity test includes the appended mode.
+    @Test fun fragmentIsolationPreservesIdsAndEffectiveDisplayPolicy() {
+        assertEquals(listOf(0, 1, 2, 3, 4), UberharTestMode.entries.map { it.id })
+        assertEquals(UberharTestMode.COMBO_GENERIC, UberharTestMode.from(4))
+        for (mode in UberharTestMode.entries) {
+            assertEquals(mode == UberharTestMode.AUTOMATIC, mode.allowsSpecializedFragments)
+        }
+        val backing = Backing().apply { int = 4 }
+        val generic = UberharTestModeSwitch(backing, UberharTestMode.COMBO_GENERIC)
+        assertTrue(generic.boolean)
+        assertFalse(generic.isRuntimeEditable)
+        generic.boolean = false
+        assertEquals(UberharTestMode.CUSTOM.id, backing.int)
+    }
 }

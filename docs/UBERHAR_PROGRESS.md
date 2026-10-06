@@ -1,4 +1,41 @@
-# Uberhar progress — 0.1.20 comparison candidate
+# Uberhar progress — 0.1.21 architecture and memory comparison
+
+<!-- CodexAstraUlt: Replace the current milestone for the owner's architecture review; retain prior evidence/build records below. -->
+- **Scope:** full source/evidence review of `c75e544f7` against base Azahar
+  `9e6f523a5`, followed by a diagnostic/correctness comparison candidate. The
+  0.1.17 gameplay and 0.1.18 exit evidence remain the latest device measurements.
+- **Selected changes:** correct stale completion reuse in Vulkan resource pools
+  and release allocated stream-buffer memory on failed initialization attempts;
+  add bounded process/explicit Vulkan memory measurements; expose Combo with
+  generic fragments to separate GPU vertex behavior from optional specialization.
+- **Architecture:** Native deliberately uses CPU vertices and generic fragments.
+  Dark Moon's CPU stage accounts for about 78% of its Native run, but only about
+  15% of the much slower Combo run. Large compile jobs do not establish runtime
+  bloat. Preserve beneficial CPU caches and focus first on resource ownership and
+  route correctness; independent fragment promotion is a later measured change.
+- **Validation passed:** native core/Vulkan/tests/room build; complete host probes;
+  62 passing CTest entries with five firmware-dependent skips; Android production
+  Kotlin/Java/resources compilation and 48 JVM tests; eight manifest checks.
+  New ownership, route and concurrent-counter regressions pass optimized and
+  ASan/UBSan checks. Old-source fixtures fail the targeted ownership regressions.
+  Workflow trust/ref selection and signing-failure scenarios pass focused checks.
+  Independent source reviews found no blocker. The full shader pixel corpus was
+  not repeated locally for this candidate; PR CI must rerun all existing gates.
+  No new image-correctness, memory plateau, performance or device result is claimed.
+- **Build blocker confirmed:** [0.1.20 diagnostic run](https://github.com/RegiRex/uberhar/actions/runs/37401999433)
+  reports **Comparison signing key unavailable**. No replacement was generated.
+  Its shader gate passed; Android compilation did not run. The original 0.1.20
+  run passed Android compilation/JVM/shader checks but failed packaging.
+- **Recovery:** owner reports the original key is only in GitHub Actions or has
+  no known backup. The narrowly restricted same-repository comparison PR workflow
+  is implemented and tested. It can read its release-base cache if retained;
+  certificate and package gates remain intact. An authenticated GitHub PR-creation
+  tool is unavailable here: opening a draft PR from the comparison branch into
+  `uberhar/hybrid-shaders` is the remaining external step to start CI. A comparison
+  push alone no longer starts an inaccessible-key build. No shared release or
+  default-branch change; no 0.1.21 APK is ready.
+
+## Previous 0.1.20 comparison record
 
 <!-- CodexAstraUlt: Replace the current 0.1.19 summary with the owner-authorized device-evidence follow-up; retain its validation record below. -->
 - **Branch/base:** `uberhar/codexastra-diag-comparison`, following `c1516360b`

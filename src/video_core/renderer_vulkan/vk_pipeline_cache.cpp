@@ -19,6 +19,7 @@
 #include "common/scm_rev.h" // AstraEH: Fingerprint the compiler/generator cache ABI.
 #include "common/scope_exit.h"
 #include "common/settings.h"
+#include "common/uberhar_test_profile.h" // CodexAstraUlt: Shared diagnostic route capabilities.
 #include "core/core.h"
 #include "core/loader/loader.h"
 #include "video_core/pica/shader_setup.h"
@@ -109,6 +110,10 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
       // AstraEH: Capture per-game settings once; changing modes requires a restart.
       hybrid_tev{Settings::values.uberhar_hybrid_tev.GetValue()},
       force_tev{hybrid_tev && Settings::values.uberhar_force_tev.GetValue()},
+      // CodexAstraUlt: Force-generic and ready-vertex admission are independent. The new
+      // preset keeps the same worker/cache bounds while disabling optional fragment work.
+      allow_specialized_fragments{
+          Settings::AllowsSpecializedFragments(Settings::values.uberhar_test_mode.GetValue())},
       cpu_vertex_bridge{hybrid_tev && !force_tev &&
                         Settings::values.uberhar_cpu_vertex_bridge.GetValue()} {
     // AstraPro: Diagnostics 19 adds bounded GPU promotion and rescued-input observations.
@@ -130,8 +135,9 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
     // AstraEH: Allocate the isolated compiler only when the experiment is enabled.
     if (hybrid_tev) {
         tev_worker = std::make_unique<Common::ThreadWorker>(1, "Uberhar TEV");
-        // AstraPro: Native/Compute retain their prior worker count and CPU route.
-        if (Settings::values.uberhar_test_mode.GetValue() == Settings::UberharTestMode::Automatic)
+        // CodexAstraUlt: Replace AstraPro's Automatic-only worker gate with shared vertex
+        // eligibility, so forced-generic Combo still builds its existing bounded GPU pipelines.
+        if (Settings::UsesReadyGpuVertices(Settings::values.uberhar_test_mode.GetValue()))
             ready_vertex_worker = std::make_unique<Common::ThreadWorker>(1, "Uberhar GPU vertex");
     }
     scheduler.RegisterOnDispatch([this] { update_queue.Flush(); });
@@ -542,7 +548,7 @@ bool PipelineCache::BindPipeline(PipelineInfo& info, bool wait_built,
     // recovery and not a dynamic TEV draw. Do not upload generic push constants
     // or label it generic merely because the CPU fallback has a virtual config.
     const bool specialized_gpu = ready_gpu_vertex && virtual_fs_config &&
-        ReadyFragmentPolicy::PreferSpecialized(force_tev, tev_user.IsCacheable());
+        PreferReadySpecializedFragment(tev_user);
     if (specialized_gpu) {
         ++virtual_specialized_gpu_draws;
     } else if (virtual_fs_config) {
@@ -898,6 +904,13 @@ bool PipelineCache::ReadyVertexShaders() const {
            (!geometry || (geometry->IsDone() && !geometry->HasFailed() && geometry->Handle()));
 }
 
+// CodexAstraUlt: Replace repeated AstraPro fragment preferences with a single immutable
+// preset gate. Generic-only Combo never asks the optional fragment cache to warm or select.
+bool PipelineCache::PreferReadySpecializedFragment(const Pica::Shader::UserConfig& user) const {
+    return allow_specialized_fragments &&
+           ReadyFragmentPolicy::PreferSpecialized(force_tev, user.IsCacheable());
+}
+
 // AstraPro: Speculate only after every shader dependency is usable. One serial
 // build may be in flight; it uses a distinct 256-entry cache and never consumes
 // mandatory CPU-generic pipeline slots. Failure/pending/caps retain CPU rendering.
@@ -905,7 +918,7 @@ bool PipelineCache::ReadyGpuFragmentPreflight(const Pica::RegsInternal& regs,
                                                const Pica::Shader::UserConfig& user) {
     if (!ready_vertex_worker || !curr_disk_cache)
         return false;
-    if (!ReadyFragmentPolicy::PreferSpecialized(force_tev, user.IsCacheable()))
+    if (!PreferReadySpecializedFragment(user))
         return true;
     const FSConfig config{regs};
     // AstraPro: Preserve all generic support guards. Unsupported states already
@@ -926,8 +939,7 @@ GraphicsPipeline* PipelineCache::PrepareReadyGpuVertex(const PipelineInfo& info)
     }
     auto stages = current_shaders;
     u64 fragment_id = shader_hashes[ProgramType::FS];
-    const bool specialize = virtual_fs_config &&
-        ReadyFragmentPolicy::PreferSpecialized(force_tev, tev_user.IsCacheable());
+    const bool specialize = virtual_fs_config && PreferReadySpecializedFragment(tev_user);
     if (specialize) {
         const auto fragment = curr_disk_cache->UseReadyFragmentShader(*virtual_fs_config, tev_user);
         if (!fragment) {
@@ -1077,7 +1089,7 @@ void PipelineCache::UseFragmentShader(const Pica::RegsInternal& regs,
         tev_supported = tev_support_reason == GLSL::DynamicTevSupport::Ready;
         const bool need_transport = ReadyFragmentPolicy::NeedsDynamicTransport(
             tev_supported, preparing_ready_gpu,
-            ReadyFragmentPolicy::PreferSpecialized(force_tev, user.IsCacheable()));
+            PreferReadySpecializedFragment(user));
         if (need_transport) {
             tev_constants = GLSL::MakeDynamicTevState(*tev_family_config, profile);
             ++tev_transport_prepared;
@@ -1434,6 +1446,11 @@ void PipelineCache::ClearTevFallbacks() {
     // AstraPro: Drain and release optional pipelines before their shared shaders.
     if (ready_vertex_worker)
         ready_vertex_worker->WaitForRequests();
+    // CodexAstraUlt Log Line: Sample at the existing drained cache boundary, without another
+    // wait. Allocation counters cannot attribute opaque driver memory to these shader objects.
+    instance.ReportMemoryUsage("before_cache_clear", GetProgramID(), cache_session,
+                               scheduler.CurrentTick(),
+                               scheduler.GetMasterSemaphore()->KnownGpuTick());
     warming_ready_vertex = nullptr;
     ready_vertex_pipelines.clear();
     warming_tev_pipeline = nullptr;
@@ -1452,6 +1469,10 @@ void PipelineCache::ClearTevFallbacks() {
     tev_family_details = 0;    // AstraEH: The serial compiler is drained above.
     bound_pipeline = nullptr;
     tev_family_config.reset();
+    // CodexAstraUlt Log Line: Pair the post-clear observation with the same title/session.
+    instance.ReportMemoryUsage("after_cache_clear", GetProgramID(), cache_session,
+                               scheduler.CurrentTick(),
+                               scheduler.GetMasterSemaphore()->KnownGpuTick());
 }
 
 // AstraEH: Ordered worker snapshots avoid per-draw atomics or a reporting stall.

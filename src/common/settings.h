@@ -26,7 +26,14 @@ enum class GraphicsAPI {
 };
 
 // AstraEH: Values match Android's mutually exclusive test switches; zero preserves custom settings.
-enum class UberharTestMode : u32 { Custom = 0, Native = 1, Compute = 2, Automatic = 3 };
+// CodexAstraUlt: Append the fragment-isolation preset; persisted IDs 0–3 retain their meanings.
+enum class UberharTestMode : u32 {
+    Custom = 0,
+    Native = 1,
+    Compute = 2,
+    Automatic = 3,
+    ComboGeneric = 4,
+};
 
 enum class InitClock : u32 {
     SystemTime = 0,

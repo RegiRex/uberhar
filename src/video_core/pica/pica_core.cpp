@@ -10,6 +10,7 @@
 #include "common/microprofile.h"
 #include "common/scope_exit.h"
 #include "common/settings.h"
+#include "common/uberhar_test_profile.h" // CodexAstraUlt: Shared Combo admission policy.
 #include "core/core.h"
 #include "core/memory.h"
 #include "video_core/debug_utils/debug_utils.h"
@@ -1161,7 +1162,7 @@ void PicaCore::DrawImmediate() {
 // retained partial primitive or pending Shader winding always preserves CPU execution.
 Vulkan::ReadyVertexPolicy::Admission PicaCore::GetReadyGpuVertexAdmission() const {
     return Vulkan::ReadyVertexPolicy::Classify(
-        Settings::values.uberhar_test_mode.GetValue() == Settings::UberharTestMode::Automatic,
+        Settings::UsesReadyGpuVertices(Settings::values.uberhar_test_mode.GetValue()),
         static_cast<bool>(debug_context), primitive_assembler.IsEmpty(),
         regs.internal.pipeline.use_gs != PipelineRegs::UseGS::No,
         primitive_assembler.GetTopology(), regs.internal.pipeline.num_vertices,
@@ -1216,8 +1217,10 @@ void PicaCore::DrawArrays(bool is_indexed) {
     // AstraPro: Combo can promote complete no-GS lists to already-ready GPU
     // vertices. A false return still executes the full CPU batch below. Never
     // pass debugger work, partial assembly, strip/fan tails or excessive uploads.
+    // CodexAstraUlt: Replace AstraPro's Automatic-only gate with the same vertex policy for
+    // both Combo presets; the diagnostic preset changes fragments, never vertex eligibility.
     const bool ready_gpu_mode =
-        Settings::values.uberhar_test_mode.GetValue() == Settings::UberharTestMode::Automatic;
+        Settings::UsesReadyGpuVertices(Settings::values.uberhar_test_mode.GetValue());
     if (ready_gpu_mode) {
         // AstraPro: Explain zero coverage without guessing which topologies a game uses.
         const u32 topology =

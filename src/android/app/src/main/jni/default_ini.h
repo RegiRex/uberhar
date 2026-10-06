@@ -110,6 +110,7 @@ static const char* android_config_default_file_content = (BOOST_HANA_STRING(R"(
 )") DECLARE_KEY(uberhar_force_tev) BOOST_HANA_STRING(R"(
 
 # AstraEH: 0=custom, 1=virtual native, 2=compute prototype, 3=automatic prototype.
+# CodexAstraUlt: 4=Combo with generic fragments; keeps Combo vertices and compute selection.
 # Requires a game restart. Custom graphics settings are preserved.
 )") DECLARE_KEY(uberhar_test_mode) BOOST_HANA_STRING(R"(
 

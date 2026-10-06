@@ -1,6 +1,7 @@
 // Copyright 2026 Uberhar contributors
 // Licensed under GPLv2 or any later version. Refer to license.txt.
 #include "common/logging/log.h"
+#include "common/uberhar_test_profile.h" // CodexAstraUlt: Keep both Combo compute routes equal.
 #include "video_core/renderer_vulkan/uberhar_compute_rect_shader.h"
 #include "video_core/renderer_vulkan/vk_compute_rect.h"
 #include "video_core/renderer_vulkan/vk_descriptor_update_queue.h"
@@ -17,7 +18,9 @@ ComputeRectRenderer::ComputeRectRenderer(const Instance& instance_, Scheduler& s
 
 void ComputeRectRenderer::Initialize(vk::PipelineCache cache) {
     // AstraEH: Compile once before gameplay, using the application's persisted driver cache.
-    if (mode == Settings::UberharTestMode::Native || pipeline)
+    // CodexAstraUlt: Replace AstraEH's Native-only exclusion with explicit compute
+    // capability; existing presets and both Combo comparison routes keep their behavior.
+    if (!Settings::AllowsComputeRendering(mode) || pipeline)
         return;
     const auto device = instance.GetDevice();
     const auto physical = instance.GetPhysicalDevice();
@@ -82,7 +85,8 @@ bool ComputeRectRenderer::Choose(const ComputeRectPacket& packet) {
         return false;
     if (mode == Settings::UberharTestMode::Compute)
         return true;
-    return mode == Settings::UberharTestMode::Automatic && queries &&
+    // CodexAstraUlt: Both Combo presets use the same measured rectangle selection.
+    return Settings::UsesAutomaticCompute(mode) && queries &&
            selector.Select(ComputeRectSelector::Bucket(packet.PixelCount()));
 }
 
@@ -124,8 +128,8 @@ int ComputeRectRenderer::ReserveSample(bool compute, u64 pixels) {
         return -1;
     // AstraEH: Bound measurement overhead after initial samples; never wait for a free slot.
     const auto bucket = ComputeRectSelector::Bucket(pixels);
-    const bool exploring =
-        mode == Settings::UberharTestMode::Automatic && selector.NeedsSample(bucket);
+    // CodexAstraUlt: Fragment isolation must not change compute warm-up measurements.
+    const bool exploring = Settings::UsesAutomaticCompute(mode) && selector.NeedsSample(bucket);
     if (++measurement_attempts > 64 && !exploring && (measurement_attempts & 31) != 0)
         return -1;
     for (unsigned i = 0; i < samples.size(); ++i) {

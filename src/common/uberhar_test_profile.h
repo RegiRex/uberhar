@@ -7,13 +7,37 @@
 
 namespace Settings {
 
+// CodexAstraUlt: Centralize preset capabilities so the comparison changes only optional
+// fragment specialization. Both Combo presets retain identical ready-vertex and compute rules;
+// mandatory specialized recovery for unsupported generic states is never disabled here.
+constexpr bool UsesReadyGpuVertices(UberharTestMode mode) {
+    return mode == UberharTestMode::Automatic || mode == UberharTestMode::ComboGeneric;
+}
+
+constexpr bool AllowsSpecializedFragments(UberharTestMode mode) {
+    return mode == UberharTestMode::Automatic;
+}
+
+constexpr bool UsesAutomaticCompute(UberharTestMode mode) {
+    return mode == UberharTestMode::Automatic || mode == UberharTestMode::ComboGeneric;
+}
+
+constexpr bool AllowsComputeRendering(UberharTestMode mode) {
+    return mode == UberharTestMode::Compute || UsesAutomaticCompute(mode);
+}
+
+constexpr bool IsUberharTestProfile(UberharTestMode mode) {
+    return mode == UberharTestMode::Native || AllowsComputeRendering(mode);
+}
+
 // AstraEH: Apply ONLY after the frontend has reloaded the user's saved settings.
 // These are effective session values; Android persists its separate Kotlin model.
 // Disabling a profile therefore restores the INI values without a lossy backup.
 inline void ApplyUberharTestProfile() {
     const auto mode = values.uberhar_test_mode.GetValue();
-    if (mode != UberharTestMode::Native && mode != UberharTestMode::Compute &&
-        mode != UberharTestMode::Automatic) {
+    // CodexAstraUlt: Replace the original three-profile whitelist with the shared policy,
+    // preserving invalid-value recovery while accepting the appended diagnostic preset.
+    if (!IsUberharTestProfile(mode)) {
         values.uberhar_test_mode = UberharTestMode::Custom;
         return;
     }
@@ -23,10 +47,10 @@ inline void ApplyUberharTestProfile() {
     values.disable_spirv_optimizer = true;
     values.async_shader_compilation = false;
     values.uberhar_hybrid_tev = true;
-    // AstraPro: Native/Compute keep the forced generic control. Combo may use
-    // ready specialized GPU fragments; its first-use CPU route stays generic.
-    // Frontends still restore the saved custom values before applying a preset.
-    values.uberhar_force_tev = mode != UberharTestMode::Automatic;
+    // CodexAstraUlt: Replace AstraPro's Automatic-only comparison with the shared fragment
+    // policy. Existing presets are unchanged; ComboGeneric retains ready GPU vertices while
+    // forcing covered fragments through the generic path. Saved custom values remain separate.
+    values.uberhar_force_tev = !AllowsSpecializedFragments(mode);
     values.uberhar_cpu_vertex_bridge = false;
     // AstraEH: 0.0.10's reference interpreter limited battle speed even at 1x.
     // Reuse the established CPU JIT while the GPU interpreter is unfinished.

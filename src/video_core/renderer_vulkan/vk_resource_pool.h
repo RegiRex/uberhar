@@ -59,6 +59,8 @@ private:
     const Instance& instance;
     vk::UniqueCommandPool cmd_pool;
     std::vector<vk::CommandBuffer> cmd_buffers;
+    // CodexAstraUlt: Failed allocation can leave resized slots without Vulkan handles.
+    u64 allocated_command_buffers{};
 };
 
 class DescriptorHeap final : public ResourcePool {
@@ -80,12 +82,16 @@ private:
     void AppendDescriptorPool();
 
 private:
+    // CodexAstraUlt: Publish allocation cardinality through the existing device owner.
+    const Instance& instance;
     vk::Device device;
     vk::UniqueDescriptorSetLayout descriptor_set_layout;
     u32 descriptor_heap_count;
     std::vector<vk::DescriptorPoolSize> pool_sizes;
     std::vector<vk::UniqueDescriptorPool> pools;
     std::vector<vk::DescriptorSet> descriptor_sets;
+    // CodexAstraUlt: Count only successful allocations, independently of vector size.
+    u64 allocated_descriptor_sets{};
 };
 
 } // namespace Vulkan

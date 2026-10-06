@@ -1,6 +1,44 @@
 <!-- AstraEH: Bounded troubleshooting and removal map for the hybrid renderer. -->
 # Renderer diagnostics, schema 17
 
+<!-- CodexAstraUlt: Memory records carry their own schemas; do not reinterpret older system-only health fields as process usage. -->
+## Memory ownership and route isolation (0.1.21)
+
+| Record | Fields / scope | Cadence and limits |
+| --- | --- | --- |
+| `Uberhar device health: schema=3` | Existing system/sensor fields plus PID, process RSS/HWM/anonymous/file/shared RSS, swap, native heap and JVM used heap | Existing 30-second IO-worker gate. `/proc/self/status` is capped at 16 KiB plus one overflow sentinel; missing/invalid/duplicate fields stay unknown. KiB values require no page-size assumption. |
+| `Uberhar process memory: schema=1` | Same process fields with elapsed/wall clocks; `before_native_run` and `after_native_run` | Existing native-run lifecycle only: active marker first, end sample before the existing flush. A killed process may never produce the end sample. No sensor service is queried here. |
+| `Uberhar Vulkan memory ...: schema=1` | PID, allocator generation, run/title, mode/configured resolution, cached current/completed ticks; VMA blocks/live allocations and bytes; raw stream bytes/peak/alloc/free/retry failures; descriptor pool/set and command capacities | Existing frame callback, clock checked every 64 completed frames and at least 30 seconds between progress records. Startup, drained cache-clear and teardown snapshots are reliable; periodic delivery is optional. No additional GPU wait or worker. |
+
+VMA block-byte peak is **sampled**. Raw-stream byte peak follows allocation events,
+using actual Vulkan memory requirements. `raw_stream_failures` counts caught Vulkan
+retry failures, not every host exception. The constructor still cleans up and
+rethrows host failures. Capacity counts include only successfully allocated Vulkan
+objects and are not in-flight counts or driver-byte estimates. Counter fields are
+individually atomic; a concurrent sample is not a transaction. Cached completion
+may lag actual GPU work, and a stalled renderer can delay native samples while
+Android health retains its independent existing cadence.
+
+`vma_block_bytes` includes allocator reserves and live allocations; it must not be
+added to `vma_allocation_bytes`. VMA covers explicit images here, combining active
+and fence-retired ownership. Raw stream allocations bypass VMA and are separate.
+Opaque compiler/pipeline/descriptor driver bytes and imported screenshot memory
+are not included. No `VK_EXT_memory_budget` or heuristic VMA usage/budget claim is
+introduced. None of these values should be added to process RSS. Kernel/process,
+Java and native allocator measurements overlap and are sampled at different instants.
+
+`before_dependents` still includes live renderer objects. `after_dependents` is
+before VMA allocator destruction: live allocation counts should be zero, while
+empty reserved blocks can legitimately remain. Android `after_native_run` compares
+process RSS after normal native cleanup. PID and process/log timestamps aid exit
+correlation but are not a globally unique shared OS/run identifier.
+
+Mode 4 (`ComboGeneric`) records `generic_control` fragments with the same vertex
+and compute admission as mode 3. It does not warm/select optional specialized
+fragments; unsupported generic states keep mandatory recovery. Promotion/defer
+counts can differ because optional-fragment readiness no longer gates the GPU
+attempt. Compare those counts and cache state along with speed and memory.
+
 <!-- CodexAstraUlt: Additional bounded records retain the existing diagnostic schema and worker. -->
 ## Input fallbacks and applet repetition (0.1.20)
 

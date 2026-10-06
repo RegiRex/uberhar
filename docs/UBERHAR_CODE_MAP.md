@@ -1,6 +1,23 @@
 <!-- AstraEH: Attribution index for the Uberhar implementation, tests, packaging and documentation. -->
 # Uberhar code map
 
+<!-- CodexAstraUlt: Map resource ownership fixes and diagnostic isolation to production/test boundaries. -->
+## 0.1.21 memory ownership and Combo isolation
+
+| Files | Purpose and limits |
+| --- | --- |
+| `renderer_vulkan/vk_resource_pool.cpp/.h` | Search with the refreshed GPU tick instead of a stale capture; count successful pool/set/command allocations and release their capacity at owner teardown. No new wait or arbitrary pool cap. |
+| `renderer_vulkan/vk_stream_buffer.cpp/.h` | Shared partial/full teardown and constructor exception cleanup; retain allocation retry sizes and account actual raw memory requirement bytes. |
+| `renderer_vulkan/vk_memory_diagnostics.h`, `vk_instance.cpp/.h`, `vk_rasterizer.cpp/.h` | Allocation-event counters, fixed-heap VMA statistics and bounded frame-cadence snapshots, including PID/generation/mode/cached GPU progress. Driver/internal bytes remain unknown. |
+| Android `utils/UberharProcessMemory.kt`, `UberharDeviceDiagnostics.kt`, `CrashSessionLogs.kt` | Bounded process-RSS parser and shared process-memory fields at existing health cadence and run lifecycle boundaries; no new service, worker, bundle or permission. |
+| `common/uberhar_test_profile.h`, `settings.h`, `pica_core.cpp`, `vk_pipeline_cache.cpp/.h`, `vk_compute_rect.cpp`, `core/perf_stats.cpp` | Shared capabilities for appended mode 4, optional-fragment isolation, effective route labels and paired snapshots around existing drained cache clearing. Existing modes and accurate recovery remain. |
+| Android graphics-profile models/presenter/strings/default INI | Named exclusive Combo generic-fragment control, effective Force TEV parity, unchanged saved IDs 0–3. |
+| `test_resource_pool_reuse.py`, `test_stream_buffer_ownership.py`, `test_memory_diagnostics.cpp`, `test_combo_generic_route.py`, `test_graphics_profile.cpp`, JVM memory/profile tests | Reuse and partial-construction failures, counter balance/concurrency, bounded input parsing, route preparation and preset compatibility. Mocks/extracted methods do not establish Vulkan game images. |
+| ARM64/shader workflows | Trusted same-repository comparison PR, immutable head checkout and restore-only base signing cache; fixed certificate and package gates remain. |
+
+See [review](UBERHAR_ARCHITECTURE_0.1.20.md), [release notes](releases/0.1.21.md)
+and [executed checks/build status](UBERHAR_PROGRESS.md).
+
 <!-- CodexAstraUlt: Index the additional verified input guards and observed log-noise reduction. -->
 ## 0.1.20 input parity and bounded applet warnings
 

@@ -153,6 +153,10 @@ private:
     std::array<u64, static_cast<std::size_t>(ReadyVertexPolicy::InputLayoutIssue::Count)>
         ready_vertex_layout_rejections{};
     std::chrono::steady_clock::time_point next_draw_snapshot{};
+    // CodexAstraUlt: Existing TickFrame owner samples memory at most every 30 seconds;
+    // the clock is checked once per 64 completed frames, never once per draw.
+    u64 memory_diagnostic_frames{};
+    std::chrono::steady_clock::time_point next_memory_snapshot{};
     bool ready_vertex_attempt{};
     GraphicsPipeline* ready_vertex_pipeline{};
     std::chrono::steady_clock::time_point cpu_bridge_start{};

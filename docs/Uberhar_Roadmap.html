@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Uberhar roadmap — 0.1.20 comparison</title>
+  <title>Uberhar roadmap — 0.1.21 memory and architecture comparison</title>
   <!-- CodexAstraUlt-2: Repository continuity document; preserve history and distinguish candidate from tested work. -->
   <style>
     body{font:16px/1.6 system-ui,sans-serif;max-width:980px;margin:40px auto;padding:0 22px;color:#172532;background:#fafbfc}
@@ -15,31 +15,39 @@
 </head>
 <body>
 <h1>Uberhar roadmap</h1>
-<!-- CodexAstraUlt: Replace the current milestone after fresh device evidence; preserve prior candidate history below. -->
-<p>0.1.20 comparison candidate · Updated October 5 EDT / October 6 UTC, 2026 · <strong>CodexAstraUlt</strong></p>
-<p class="status"><strong>Current gate: correctness and reliable failure evidence.</strong>
-Android reports low-memory exits in 0.1.17 and 0.1.18. All uploaded gameplay is
-0.1.17: Dark Moon Combo loses 8.45 GiB of system available memory; Sonic's inferred
-racing bands achieve 91–96% at 2x and 41–44% at 4x. Ownership and graphical-fault
-cause remain unresolved. 0.1.20 adds three reproduced input-parity fallbacks and
-bounds repeated applet warnings, retaining 0.1.19 logging work. It remains on the
-comparison branch with all package/signing gates and no shared release publication.
-No device cure or speedup is claimed.</p>
+<!-- CodexAstraUlt: Replace the current milestone with the owner's full architecture review and bounded diagnostic implementation. -->
+<p>0.1.21 comparison candidate · Updated October 6, 2026 EDT · <strong>CodexAstraUlt</strong></p>
+<p class="status"><strong>Current gate: image correctness and bounded memory ownership.</strong>
+The full review separates Native's deliberate CPU-vertex cost from Combo's collapse.
+Dark Moon's memory decline correlates with optional pipeline growth, but driver
+ownership is unproved. 0.1.21 corrects two reproduced resource-management defects,
+adds bounded process/Vulkan memory snapshots and exposes Combo with generic fragments.
+Device gains remain unmeasured. The comparison APK requires the existing signing key;
+a narrowly trusted PR build can restore its base cache only if retained.</p>
 <p><a href="UBERHAR_PROGRESS.md">Current build and validation status</a> ·
-<a href="releases/0.1.20.md">Release/test notes</a> ·
+<a href="releases/0.1.21.md">Release/test notes</a> ·
 <a href="UBERHAR_LOG_ANALYSIS_0.1.17_0.1.18.md">New device evidence</a> ·
-<a href="UBERHAR_ARCHITECTURE_0.1.17.md">Full review</a></p>
+<a href="UBERHAR_ARCHITECTURE_0.1.20.md">Full architecture review</a></p>
+
+<!-- CodexAstraUlt: Measurements choose the architectural correction; do not increase optional work before identifying ownership. -->
+<h2>Dark Moon correction sequence</h2>
+<table><thead><tr><th>Stage</th><th>Concrete work</th><th>Decision gate</th></tr></thead><tbody>
+<tr><td>1. Correct ownership and isolate routes</td><td>Refreshed pool reuse; complete stream allocation/constructor cleanup. Native / Combo generic fragments / full Combo control with process RSS, explicit Vulkan bytes, pool capacities and lifecycle samples.</td><td>Host failure tests and unchanged package gates; same short 2x opening with image and route-count evidence.</td></tr>
+<tr><td>2. Fix the identified owner or state divergence</td><td>Pipeline/compiler residency: bounded optional admission and safe retirement. Image growth: cache ownership and fenced reclamation. Backlog: submission backpressure. Vertex corruption: shared input/output and draw-state contract. Fragment-only fault: exact specialization/interface parity.</td><td>Correct images and stable working set after warm-up; repeated title cycles return to a bounded baseline. No guessed driver-byte accounting or in-flight eviction.</td></tr>
+<tr><td>3. Recover sustained performance</td><td>Remove duplicate fragment-state preparation and dormant classification/census work. Then decouple ready fragment specialization from GPU-vertex eligibility while keeping generic cold fallback; evaluate further GPU interpretation only with coverage/cost evidence.</td><td>Matched 2x then 4x scenes, zero skipped draws, explicit new-effect waits and no renewed memory slope; retain Sonic/other working-game gains.</td></tr>
+</tbody></table>
 
 <!-- CodexAstraUlt-2: Evidence-led milestones retain the owner's first-playthrough and later product goals. -->
 <h2>Milestones and acceptance gates</h2>
 <table><thead><tr><th>Milestone</th><th>Current state</th><th>Acceptance evidence</th></tr></thead><tbody>
 <!-- CodexAstraUlt: The follow-up targets logging pressure, not renderer throughput or broader coverage. -->
 <!-- CodexAstraUlt: Narrow unsafe input layouts and confirmed log spam before route/memory attribution. -->
+<tr><td>0.1.21 memory ownership and Combo isolation</td><td>Source fixes and low-rate ownership records; mode 4 changes optional fragments while retaining vertex/compute eligibility. No new monitor or log bundle.</td><td>Production failure/route regressions, native/Android checks, existing certificate and APK validation; short controlled device evidence.</td></tr>
 <tr><td>0.1.20 input parity and applet warnings</td><td>Short strides, default conflicts and register aliases retain complete CPU draws; two repeated utility signatures use bounded warnings.</td><td>Production input/IPC regressions, native build, unchanged CI gates; short matched Dark Moon images and memory ownership before performance claims.</td></tr>
 <tr><td>0.1.19 bounded progress logging</td><td>Optional periodic reports, nonblocking queue admission, bounded omitted-record summaries; reliable final/error context retained.</td><td>Saturation/contention and backend concurrency regressions, full host/shader/Android gates, then paired device logging-overhead measurements.</td></tr>
 <tr><td>0.1.18 correctness and recovery</td><td>Zero-stride CPU fallback; completed shader failures; safe terminal scheduling; nonblocking flush; staged incident copies.</td><td>Host regressions, shader/pixel and Android gates, then short matched Dark Moon scenes and a working-game regression.</td></tr>
 <tr><td>First-playthrough shader handling</td><td>Generic fragment families and ready-only GPU promotion implemented. Lazy generic pipeline creation still waits. Compute covers only a narrow rectangle case.</td><td>No omitted draws, correct images and zero interactive compilation waits for measured cold/new-effect coverage. Do not equate disk cache hits with ready driver pipelines.</td></tr>
-<tr><td>Performance and broader coverage</td><td>Deferred until Dark Moon graphics are corrected. Next separate optional vertex promotion from fragment specialization and attribute growing memory before changing limits.</td><td>Matched scenes/settings; normal-speed bands separated from fast-forward; CPU/GPU timing and process/driver memory evidence. No speculative cache eviction without lifetime validation.</td></tr>
+<tr><td>Performance and broader coverage</td><td>Independent ready fragments for CPU-generated vertices is the next major architectural option after memory/image gates. CPU FIFO/JIT and immutable state remain useful; large compilation units are not runtime bloat evidence.</td><td>Matched scenes/settings; normal-speed bands separated from fast-forward; measured CPU/GPU cost and bounded resource residency.</td></tr>
 <tr><td>0.4 display synchronization; 0.8 scaling; 1.0 qualification</td><td>Retained from previous review scope; not delivered by 0.1.18.</td><td>Image, pacing, physical-device and game-coverage gates. Separate 2x/400% and 4x/200% capacity goals from normal gameplay claims.</td></tr>
 <tr><td>Per-game settings by 2.0</td><td>Owner requirement retained.</td><td>Global inheritance, explicit title-ID overrides, reset to global, effective-value display; same editor from title long press and in-game Uberhar submenu.</td></tr>
 </tbody></table>
@@ -48,12 +56,13 @@ No device cure or speedup is claimed.</p>
 <h2>Scope ledger</h2>
 <table><thead><tr><th>Origin</th><th>Scope</th><th>Disposition</th></tr></thead><tbody>
 <!-- CodexAstraUlt: Preserve the current owner's device, attribution and low-overhead requirements alongside the earlier ledger. -->
+<tr><td>Owner, October 6</td><td>Reassess the entire architecture, fix Dark Moon Combo and prevent hidden memory exhaustion in other games; use an intermediate diagnostic build if needed.</td><td>Full source/evidence review completed at 0.1.20. 0.1.21 implements the focused fixes/controls above; no causal or speed claim precedes device evidence.</td></tr>
 <tr><td>Owner, latest uploads</td><td>Analyze 0.1.17/0.1.18 crashes and Sonic lap markers; test the opening if game data is available.</td><td>Six unique text files analyzed. Game upload failed, so no cutscene run occurred. Host-proven correctness and warning fixes proceed; Thor behavior remains a device gate.</td></tr>
 <tr><td>Owner, current session</td><td>Prepare cloud Android tooling; use CodexAstraUlt commentary; target Thor Max Vulkan, eventual Retroid and HD packs; avoid logging bloat. Compare concurrent development sessions.</td><td>Tooling and focused logging follow-up implemented on an isolated comparison branch. Local and CI validation are recorded in the progress document. Device performance, exact Retroid identity, and texture-pack profile support remain separate work.</td></tr>
 <tr><td>Owner</td><td>Avoid draw skipping and compilation stalls on first playthrough; preserve exact rendering.</td><td>Primary goal; partial architecture remains incomplete.</td></tr>
 <tr><td>Owner, October 5</td><td>Implement review fixes, build 0.1.18, label new comments CodexAstraUlt-2.</td><td>Authorized implementation and gated publication; original authorship retained.</td></tr>
 <tr><td>Owner</td><td>Lean log retention, file-only optional crash evidence, stripped Android compatibility, no per-launch bundles.</td><td>Preserved. Incident-only staging uses the existing one-shot recovery worker.</td></tr>
-<tr><td>Review proposal</td><td>Separate GPU vertex versus specialized-fragment tests; process/GPU memory attribution; startup-ready fallback coverage.</td><td>Next evidence-driven experiments, not claimed 0.1.18 speed improvements.</td></tr>
+<tr><td>Review proposal, now selected in part</td><td>Separate GPU vertex versus specialized-fragment tests; process/Vulkan memory attribution; startup-ready fallback coverage.</td><td>Generic Combo control and bounded attribution implemented in 0.1.21. Fragment-only optimization and complete startup-ready coverage remain deferred.</td></tr>
 <tr><td>Deferred alternatives</td><td>GPU shader interpretation, broad compute rasterization, cache eviction, wider topology admission.</td><td>Require output/order/lifetime validation and measurable benefit before adoption.</td></tr>
 </tbody></table>
 
@@ -61,6 +70,8 @@ No device cure or speedup is claimed.</p>
 <h2>Review history and risks</h2>
 <ul>
 <!-- CodexAstraUlt: This focused comparison does not reset the full architectural-review cadence. -->
+<!-- CodexAstraUlt: Unlike the focused entries below, this owner-requested full review establishes a new comparison-lineage source anchor. -->
+<li>October 6, <a href="UBERHAR_ARCHITECTURE_0.1.20.md">0.1.20 full architecture review</a>: base-Azahar comparison, memory/pipeline evidence, ownership defects, required/dormant cost inventory and explicit correction/optimization gates. 0.1.21 is the diagnostic implementation, not a measured cure.</li>
 <li>October 5 EDT / October 6 UTC, 0.1.20 comparison candidate: fresh low-memory evidence, three reproduced input hazards and repeated-app utility warning reduction. Focused review retains the 0.1.17 full-review anchor.</li>
 <li>October 6, 0.1.19 comparison candidate: optional logging admission and omission accounting; source inherits 0.1.18 and preserves renderer policy. No shared release number reserved.</li>
 <li>0.1.0: Native beta based on scoped Awakening results; not universal game qualification.</li>
@@ -70,10 +81,10 @@ No device cure or speedup is claimed.</p>
 <li>October 5, <a href="UBERHAR_ARCHITECTURE_0.1.17.md">0.1.17 review</a>: reproduced input/flush defects, incomplete mandatory error containment, persistent post-compilation slowdown. 0.1.18 authorized.</li>
 </ul>
 <p>Dark Moon's specific failure remains unproven. Host probes cannot validate Adreno pixels,
-driver memory or Android provider behavior. OS-classified low-memory exits do not identify
-an allocation owner or prove a leak. 0.1.18 passed publication; comparison candidates do
-not count as shared published alphas. Next default full review after 0.1.21 evidence,
-allowed after 0.1.20–0.1.22 and before 0.1.23, earlier for regressions.</p>
+driver memory or Android provider behavior. The full comparison review is anchored to
+0.1.20 source; repeat after three to five successful successors, normally four, and sooner
+if new route/memory evidence contradicts it. Unpublished comparisons do not advance another
+session's shared-release count. Reconcile anchors when integrating the branches.</p>
 <small>The repository review ledger and release notes retain the detailed historical record.</small>
 </body>
 </html>

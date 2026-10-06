@@ -5,6 +5,13 @@ on:
   workflow_dispatch:
   # AstraEH: The release workflow calls this gate and waits for it before publication.
   workflow_call:
+    # CodexAstraUlt: Let the trusted comparison caller select its immutable head
+    # SHA instead of implicitly testing concurrent changes in a synthetic PR merge.
+    inputs:
+      checkout_ref:
+        type: string
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -17,6 +24,8 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
+          # CodexAstraUlt: Manual runs retain their source SHA; callers may pin a PR head.
+          ref: ${{ inputs.checkout_ref || github.sha }}
           persist-credentials: false
       # AstraEH: Test production first-ready completion before any renderer release.
       - name: Test asynchronous pipeline completion

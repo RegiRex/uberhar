@@ -140,9 +140,17 @@ object CrashSessionLogs {
         if (!Log.fileHealthy()) warn()
     }
 
-    fun beginRun() = markRun(true)
+    // CodexAstraUlt: Keep the active marker before optional diagnostics, then compare
+    // this process baseline with the normal native-return sample across title cycles.
+    fun beginRun() {
+        markRun(true)
+        UberharDeviceDiagnostics.reportProcessMemory("before_native_run")
+    }
 
     fun endRun() {
+        // CodexAstraUlt: NativeEmulation's existing finally hook runs after native
+        // cleanup on an orderly return. Failure to sample must not prevent the flush.
+        UberharDeviceDiagnostics.reportProcessMemory("after_native_run")
         // AstraEH: Normal teardown flushes the primary log before clearing its run marker.
         if (!runCatching { Log.flush() && Log.fileHealthy() }.getOrDefault(false)) warn()
         markRun(false)

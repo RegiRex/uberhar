@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <stdexcept>
 #include "common/uberhar_test_profile.h"
+#include "video_core/renderer_vulkan/uberhar_gpu_vertex_policy.h" // CodexAstraUlt: Real admission policy.
 
 Settings::Values Settings::values;
 void Check(bool ok, const char* text) {
@@ -13,8 +14,15 @@ void Check(bool ok, const char* text) {
 }
 int main() {
     using namespace Settings;
+    // CodexAstraUlt: Persisted IDs are a compatibility contract; append the diagnostic preset.
+    static_assert(static_cast<u32>(UberharTestMode::Custom) == 0);
+    static_assert(static_cast<u32>(UberharTestMode::Native) == 1);
+    static_assert(static_cast<u32>(UberharTestMode::Compute) == 2);
+    static_assert(static_cast<u32>(UberharTestMode::Automatic) == 3);
+    static_assert(static_cast<u32>(UberharTestMode::ComboGeneric) == 4);
     for (auto mode :
-         {UberharTestMode::Native, UberharTestMode::Compute, UberharTestMode::Automatic}) {
+         {UberharTestMode::Native, UberharTestMode::Compute, UberharTestMode::Automatic,
+          UberharTestMode::ComboGeneric}) { // CodexAstraUlt: Exercise every supported preset.
         values.uberhar_test_mode = mode;
         values.graphics_api = GraphicsAPI::OpenGL;
         values.use_hw_shader = true;
@@ -28,11 +36,29 @@ int main() {
               "profile must use CPU JIT with GPU vertex specialization disabled");
         Check(values.disable_spirv_optimizer.GetValue(), "first-use optimizer still active");
         Check(values.uberhar_hybrid_tev.GetValue(), "generic CPU recovery disabled");
-        // AstraPro: Only Combo opts out of forced-generic GPU fragments.
+        // CodexAstraUlt: Replace AstraPro's three-mode expectation with an independent
+        // four-mode matrix: existing Combo alone permits optional specialized fragments.
         Check(values.uberhar_force_tev.GetValue() == (mode != UberharTestMode::Automatic),
               "incorrect forced-generic profile");
         Check(values.resolution_factor.GetValue() == 3 && values.use_integer_scaling.GetValue(),
               "resolution changed");
+        // CodexAstraUlt: Verify capabilities against persisted IDs, not the helper's own result.
+        const auto id = static_cast<u32>(mode);
+        Check(UsesReadyGpuVertices(mode) == (id == 3 || id == 4), "vertex capability changed");
+        Check(AllowsSpecializedFragments(mode) == (id == 3), "fragment capability changed");
+        Check(UsesAutomaticCompute(mode) == (id == 3 || id == 4), "compute selector changed");
+        Check(AllowsComputeRendering(mode) == (id >= 2), "compute capability changed");
+        Check(!values.async_shader_compilation.GetValue() &&
+                  !values.uberhar_cpu_vertex_bridge.GetValue(),
+              "preset introduced skip-on-pending or legacy bridge behavior");
+        using namespace Vulkan::ReadyVertexPolicy;
+        const auto admission = Classify(UsesReadyGpuVertices(mode), false, true, false,
+            Pica::PipelineRegs::TriangleTopology::List, 96, false, true);
+        Check(IsEligible(admission) == (id == 3 || id == 4), "eligible GPU draw lost route");
+        // CodexAstraUlt: New mode must retain pending/failed/mismatched CPU recovery guards.
+        Check(!CanSelect(false, false, 7, 7) && !CanSelect(true, true, 7, 7) &&
+                  !CanSelect(true, false, 7, 8) && CanSelect(true, false, 7, 7),
+              "ready GPU selection bypasses completion/failure/identity");
     }
     // AstraEH: Config::ReadValues reloads original INI values before applying a
     // mode.
@@ -48,6 +74,12 @@ int main() {
     ApplyUberharTestProfile();
     Check(values.uberhar_test_mode.GetValue() == UberharTestMode::Custom,
           "invalid profile accepted");
-    std::puts("PASS: three native profiles, preserved resolution/custom values, "
-              "invalid-mode handling");
+    // CodexAstraUlt: Unknown/Custom modes cannot accidentally enable diagnostic capabilities.
+    for (const auto mode : {UberharTestMode::Custom, static_cast<UberharTestMode>(99)}) {
+        Check(!IsUberharTestProfile(mode) && !UsesReadyGpuVertices(mode) &&
+                  !AllowsSpecializedFragments(mode) && !AllowsComputeRendering(mode),
+              "invalid/custom mode gained preset capabilities");
+    }
+    std::puts("PASS: four native profiles, stable IDs, independent route matrix, ready guards, "
+              "preserved resolution/custom values and invalid-mode handling");
 }

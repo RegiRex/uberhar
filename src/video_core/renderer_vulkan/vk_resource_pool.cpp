@@ -20,7 +20,9 @@ ResourcePool::ResourcePool(MasterSemaphore* master_semaphore_, std::size_t grow_
 
 std::size_t ResourcePool::CommitResource() {
     u64 gpu_tick = master_semaphore->KnownGpuTick();
-    const auto search = [this, gpu_tick](std::size_t begin,
+    // CodexAstraUlt: Replace the inherited copied tick: refresh must make completed
+    // slots reusable in this search instead of retaining an unnecessary pool batch.
+    const auto search = [this, &gpu_tick](std::size_t begin,
                                          std::size_t end) -> std::optional<std::size_t> {
         for (std::size_t iterator = begin; iterator < end; ++iterator) {
             if (gpu_tick >= ticks[iterator]) {
@@ -79,7 +81,14 @@ CommandPool::CommandPool(const Instance& instance, MasterSemaphore* master_semap
     }
 }
 
-CommandPool::~CommandPool() = default;
+CommandPool::~CommandPool() {
+    // CodexAstraUlt: Retire the successful handle count after destroying its owner;
+    // these diagnostics describe retained capacity, not in-flight work or bytes.
+    cmd_pool.reset();
+    if (allocated_command_buffers != 0) {
+        instance.RecordCommandBufferFree(allocated_command_buffers);
+    }
+}
 
 void CommandPool::Allocate(std::size_t begin, std::size_t end) {
     cmd_buffers.resize(end);
@@ -94,6 +103,11 @@ void CommandPool::Allocate(std::size_t begin, std::size_t end) {
     const auto result =
         device.allocateCommandBuffers(&buffer_alloc_info, cmd_buffers.data() + begin);
     ASSERT(result == vk::Result::eSuccess);
+    // CodexAstraUlt: Publish once per successful batch, never per resource reuse.
+    if (result == vk::Result::eSuccess) {
+        allocated_command_buffers += COMMAND_BUFFER_POOL_SIZE;
+        instance.RecordCommandBufferAllocation(COMMAND_BUFFER_POOL_SIZE);
+    }
 
     if (instance.HasDebuggingToolAttached()) {
         for (std::size_t i = begin; i < end; ++i) {
@@ -113,7 +127,8 @@ constexpr u32 DESCRIPTOR_MULTIPLIER = 4; // Increase capacity of each pool
 DescriptorHeap::DescriptorHeap(const Instance& instance, MasterSemaphore* master_semaphore,
                                std::span<const vk::DescriptorSetLayoutBinding> bindings,
                                u32 descriptor_heap_count_)
-    : ResourcePool{master_semaphore, DESCRIPTOR_SET_BATCH}, device{instance.GetDevice()},
+    : ResourcePool{master_semaphore, DESCRIPTOR_SET_BATCH}, instance{instance},
+      device{instance.GetDevice()},
       descriptor_heap_count{descriptor_heap_count_ * DESCRIPTOR_MULTIPLIER} { // Increase pool size
     // Create descriptor set layout.
     const vk::DescriptorSetLayoutCreateInfo layout_ci = {
@@ -140,7 +155,19 @@ DescriptorHeap::DescriptorHeap(const Instance& instance, MasterSemaphore* master
     AppendDescriptorPool();
 }
 
-DescriptorHeap::~DescriptorHeap() = default;
+DescriptorHeap::~DescriptorHeap() {
+    // CodexAstraUlt: Pool destruction frees its sets. Null entries from failed
+    // creation were never counted; release only successfully created owners.
+    for (auto& pool : pools) {
+        if (pool) {
+            pool.reset();
+            instance.RecordDescriptorPoolFree();
+        }
+    }
+    if (allocated_descriptor_sets != 0) {
+        instance.RecordDescriptorSetFree(allocated_descriptor_sets);
+    }
+}
 
 void DescriptorHeap::Allocate(std::size_t begin, std::size_t end) {
     ASSERT(end - begin == DESCRIPTOR_SET_BATCH);
@@ -162,6 +189,9 @@ void DescriptorHeap::Allocate(std::size_t begin, std::size_t end) {
         const auto result =
             device.allocateDescriptorSets(&alloc_info, descriptor_sets.data() + begin);
         if (result == vk::Result::eSuccess) {
+            // CodexAstraUlt: Retained set capacity excludes unsuccessful resized slots.
+            allocated_descriptor_sets += DESCRIPTOR_SET_BATCH;
+            instance.RecordDescriptorSetAllocation(DESCRIPTOR_SET_BATCH);
             break;
         }
         // eErrorFragmentedPool: pool has space but is too fragmented to allocate.
@@ -192,6 +222,8 @@ void DescriptorHeap::AppendDescriptorPool() {
     };
     auto& pool = pools.emplace_back();
     pool = device.createDescriptorPoolUnique(pool_info);
+    // CodexAstraUlt: Publish only after Vulkan returns an owned pool successfully.
+    instance.RecordDescriptorPoolAllocation();
 }
 
 } // namespace Vulkan

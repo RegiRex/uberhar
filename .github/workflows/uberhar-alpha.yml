@@ -5,9 +5,22 @@ name: Uberhar ARM64 prerelease
 on:
   workflow_dispatch:
   push:
-    # CodexAstraUlt: Validate the parallel comparison branch with the same gates;
-    # its APK remains a run artifact so concurrent work cannot claim one release.
-    branches: [uberhar/hybrid-shaders, uberhar/codexastra-diag-comparison]
+    # CodexAstraUlt: Replace comparison push builds, which cannot see a sibling's
+    # signing cache, with the trusted PR path below. Preserve release-branch pushes.
+    branches: [uberhar/hybrid-shaders]
+    paths:
+      - src/**
+      - CMakeModules/**
+      - .github/workflows/uberhar-alpha.yml
+      - .github/workflows/uberhar-shaders.yml
+      - tools/uberhar/**
+      - UBERHAR_VERSION
+      - docs/releases/**
+  # CodexAstraUlt: A PR may restore its base branch's existing cache if retained.
+  # Both jobs reject forks/other heads; this is never a pull_request_target workflow.
+  pull_request:
+    branches: [uberhar/hybrid-shaders]
+    types: [opened, synchronize, reopened]
     paths:
       - src/**
       - CMakeModules/**
@@ -31,9 +44,34 @@ concurrency:
 jobs:
   # AstraEH: Reuse the shader gate and require its success before publishing any pre-release.
   shaders:
+    # CodexAstraUlt: Only the owner's exact same-repository comparison PR can run
+    # these jobs. Retain main pushes and deliberate main/comparison manual runs.
+    if: >-
+      (github.event_name == 'pull_request' &&
+       github.event.pull_request.base.ref == 'uberhar/hybrid-shaders' &&
+       github.event.pull_request.head.repo.full_name == github.repository &&
+       github.event.pull_request.head.ref == 'uberhar/codexastra-diag-comparison') ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/uberhar/hybrid-shaders') ||
+      (github.event_name == 'workflow_dispatch' &&
+       (github.ref == 'refs/heads/uberhar/hybrid-shaders' ||
+        github.ref == 'refs/heads/uberhar/codexastra-diag-comparison'))
     uses: ./.github/workflows/uberhar-shaders.yml
+    with:
+      # CodexAstraUlt: Test the exact comparison head, not GitHub's synthetic merge.
+      checkout_ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
   android:
+    # CodexAstraUlt: Repeat the trust guard on the signing job itself; it must not
+    # depend on a shader-job result to exclude untrusted branches and fork PRs.
+    if: >-
+      (github.event_name == 'pull_request' &&
+       github.event.pull_request.base.ref == 'uberhar/hybrid-shaders' &&
+       github.event.pull_request.head.repo.full_name == github.repository &&
+       github.event.pull_request.head.ref == 'uberhar/codexastra-diag-comparison') ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/uberhar/hybrid-shaders') ||
+      (github.event_name == 'workflow_dispatch' &&
+       (github.ref == 'refs/heads/uberhar/hybrid-shaders' ||
+        github.ref == 'refs/heads/uberhar/codexastra-diag-comparison'))
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     outputs:
@@ -41,6 +79,9 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
+          # CodexAstraUlt: Keep concurrent base changes out of the comparison APK;
+          # the existing git rev-parse provenance records this checked-out SHA.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
           submodules: recursive
           persist-credentials: false
@@ -69,7 +110,18 @@ jobs:
             baseline-android-v1-
 
       - name: Reuse development signing key when available
+        # CodexAstraUlt: Preserve inherited main-branch cache saving only on main.
+        if: github.ref == 'refs/heads/uberhar/hybrid-shaders'
         uses: actions/cache@v5
+        with:
+          path: ~/.android/debug.keystore
+          key: uberhar-development-signing-v1
+
+      # CodexAstraUlt: Comparison jobs only restore the existing cache; they do not
+      # create a private-key cache or artifact. A missing/evicted key still fails closed.
+      - name: Restore existing comparison signing key
+        if: github.ref != 'refs/heads/uberhar/hybrid-shaders'
+        uses: actions/cache/restore@v5
         with:
           path: ~/.android/debug.keystore
           key: uberhar-development-signing-v1
@@ -79,10 +131,10 @@ jobs:
       - name: Prepare development signing key
         run: |
           mkdir -p "$HOME/.android"
-          # CodexAstraUlt: Replace inherited key generation on the comparison branch
-          # with an early check of the existing approved key. A fresh branch-scoped
-          # key cannot satisfy the retained APK certificate gate or update owner installs.
-          if [ "$GITHUB_REF" = refs/heads/uberhar/codexastra-diag-comparison ]; then
+          # CodexAstraUlt: Extend the existing comparison preflight to PR merge refs;
+          # only main retains inherited key generation. Every comparison must restore
+          # the approved key and pass the retained final APK certificate gate.
+          if [ "$GITHUB_REF" != refs/heads/uberhar/hybrid-shaders ]; then
             if [ ! -f "$HOME/.android/debug.keystore" ]; then
               echo '::error title=Comparison signing key unavailable::The approved development signing key was not restored. No replacement key was generated.'
               exit 1

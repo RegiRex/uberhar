@@ -5,14 +5,15 @@
   use `CodexAstraUlt Log Line`. Preserve historical markers. When replacing an
   attributed block, explain the removed behavior, reason and replacement in a new
   adjacent comment, and keep the code map current.
-- The owner supplied 0.1.17/0.1.18 device logs and authorized continued Dark Moon
-  diagnosis and emulator refinement. This follow-up adds reproduced input-parity
-  fallbacks and bounds confirmed repeated applet warnings, retaining the prior
-  optional-progress delivery work. Preserve draw order and reliable error context;
-  host input tests do not establish the cause of the device corruption or exit.
+- The owner requested a full architecture review and a next build that fixes proven
+  resource defects and supplies missing Dark Moon memory/route evidence. Follow the
+  reviewed sequence: pool/allocation ownership fixes, bounded memory attribution,
+  and an explicit Combo generic-fragment control before broader specialization.
+  Preserve draw order and reliable error context; neither host regressions nor
+  system-wide memory loss establish the title's allocation owner or graphical cause.
 - The owner is comparing concurrent development sessions. This follow-up uses
   `uberhar/codexastra-diag-comparison`; run the same build gates and retain artifacts
-  without publishing a shared release. Version 0.1.20 is a comparison candidate;
+  without publishing a shared release. Version 0.1.21 is a comparison candidate;
   check the release branch and assign the next available version before integration.
 - Use the existing isolated checkout in cloud tasks; do not create a worktree unless
   requested. Cloud checks do not simulate handheld performance. Thor Max Vulkan is

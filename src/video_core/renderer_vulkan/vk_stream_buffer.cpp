@@ -100,15 +100,40 @@ StreamBuffer::StreamBuffer(const Instance& instance_, Scheduler& scheduler_,
                            vk::BufferUsageFlags usage_, u64 size, BufferType type_)
     : instance{instance_}, scheduler{scheduler_}, device{instance.GetDevice()},
       stream_buffer_size{size}, usage{usage_}, type{type_} {
-    CreateBuffers(size);
-    ReserveWatches(current_watches, WATCHES_INITIAL_RESERVE);
-    ReserveWatches(previous_watches, WATCHES_INITIAL_RESERVE);
+    // CodexAstraUlt: Replace unguarded construction: a failed watch allocation
+    // or non-Vulkan exception after buffer creation does not run our destructor.
+    // Release partial raw ownership before preserving the original exception.
+    try {
+        CreateBuffers(size);
+        ReserveWatches(current_watches, WATCHES_INITIAL_RESERVE);
+        ReserveWatches(previous_watches, WATCHES_INITIAL_RESERVE);
+    } catch (...) {
+        DestroyBuffers();
+        throw;
+    }
 }
 
 StreamBuffer::~StreamBuffer() {
-    device.unmapMemory(memory);
-    device.destroyBuffer(buffer);
-    device.freeMemory(memory);
+    // CodexAstraUlt: Share complete teardown with partial-attempt recovery so
+    // raw Vulkan allocations have exactly one release and accounting decrement.
+    DestroyBuffers();
+}
+
+void StreamBuffer::DestroyBuffers() noexcept {
+    if (mapped) {
+        device.unmapMemory(memory);
+        mapped = nullptr;
+    }
+    if (buffer) {
+        device.destroyBuffer(buffer);
+        buffer = VK_NULL_HANDLE;
+    }
+    if (memory) {
+        device.freeMemory(memory);
+        memory = VK_NULL_HANDLE;
+        instance.RecordRawStreamFree(allocation_bytes);
+        allocation_bytes = 0;
+    }
 }
 
 std::tuple<u8*, u32, bool> StreamBuffer::Map(u32 size, u64 alignment) {
@@ -226,6 +251,10 @@ void StreamBuffer::CreateBuffers(u64 preferred_size) {
                     .memoryTypeIndex = preferred_type,
                 });
             }
+            // CodexAstraUlt: Record successful ownership before bind/map can fail;
+            // updates happen only on allocation/free, never on per-draw ring use.
+            allocation_bytes = requirements.memoryRequirements.size;
+            instance.RecordRawStreamAllocation(allocation_bytes);
 
             // Allocation succeeded, bind and map
             device.bindBufferMemory(buffer, memory, 0);
@@ -249,11 +278,12 @@ void StreamBuffer::CreateBuffers(u64 preferred_size) {
 
             return;
         } catch (const vk::SystemError& err) {
-            // Allocation failed, clean up and retry smaller
-            if (buffer) {
-                device.destroyBuffer(buffer);
-                buffer = VK_NULL_HANDLE;
-            }
+            // CodexAstraUlt: Replace inherited buffer-only retry cleanup, which
+            // leaked successful memory allocations when bind/map failed. Unmap
+            // when needed, destroy the buffer before freeing memory, then retain
+            // the same halving policy for the next attempt.
+            instance.RecordRawStreamFailure();
+            DestroyBuffers();
 
             attempt_size /= 2;
         }

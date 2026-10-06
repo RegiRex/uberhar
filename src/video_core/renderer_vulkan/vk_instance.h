@@ -5,9 +5,11 @@
 #pragma once
 
 #include <span>
+#include <string_view> // CodexAstraUlt: Bounded memory report phase labels.
 
 #include "video_core/pica/regs_pipeline.h"
 #include "video_core/rasterizer_cache/pixel_format.h"
+#include "video_core/renderer_vulkan/vk_memory_diagnostics.h" // CodexAstraUlt: Event-only counters.
 #include "video_core/renderer_vulkan/vk_platform.h"
 
 namespace Frontend {
@@ -78,6 +80,25 @@ public:
     VmaAllocator GetAllocator() const {
         return allocator;
     }
+
+    // CodexAstraUlt: Raw allocations bypass VMA. Update only when ownership changes;
+    // compiler/command workers may call these without taking a diagnostic mutex.
+    void RecordRawStreamAllocation(u64 bytes) const noexcept { raw_stream_memory.Allocate(bytes); }
+    void RecordRawStreamFree(u64 bytes) const noexcept { raw_stream_memory.Free(bytes); }
+    void RecordRawStreamFailure() const noexcept {
+        raw_stream_failures.fetch_add(1, std::memory_order_relaxed);
+    }
+    void RecordDescriptorPoolAllocation() const noexcept { descriptor_pools.Allocate(1); }
+    void RecordDescriptorPoolFree() const noexcept { descriptor_pools.Free(1); }
+    void RecordDescriptorSetAllocation(u64 count) const noexcept { descriptor_sets.Allocate(count); }
+    void RecordDescriptorSetFree(u64 count) const noexcept { descriptor_sets.Free(count); }
+    void RecordCommandBufferAllocation(u64 count) const noexcept { command_buffers.Allocate(count); }
+    void RecordCommandBufferFree(u64 count) const noexcept { command_buffers.Free(count); }
+
+    // CodexAstraUlt: Renderer-owner thread only, and orderly teardown after its dependents
+    // drain. Reads VMA's fixed heap counters; adds no driver budget query or GPU wait.
+    void ReportMemoryUsage(std::string_view kind, u64 title_id, u64 session,
+                           u64 current_tick = 0, u64 known_gpu_tick = 0) const;
 
     /// Returns a list of the available physical devices
     std::span<const vk::PhysicalDevice> GetPhysicalDevices() const {
@@ -312,6 +333,13 @@ protected:
     DebugCallback debug_callback;
     std::string vendor_name;
     VmaAllocator allocator{};
+    // CodexAstraUlt: Reset with each allocator lifetime; last scope and sampled VMA peak
+    // have one renderer owner. Event counters alone are shared across worker threads.
+    u64 memory_generation{};
+    mutable u64 memory_last_title{}, memory_last_session{}, vma_sampled_peak_bytes{};
+    mutable MemoryDiagnosticCounter raw_stream_memory, descriptor_pools, descriptor_sets,
+        command_buffers;
+    mutable std::atomic<u64> raw_stream_failures{};
     vk::Queue present_queue;
     vk::Queue graphics_queue;
     std::vector<vk::PhysicalDevice> physical_devices;

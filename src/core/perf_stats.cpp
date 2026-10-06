@@ -16,6 +16,7 @@
 #include "common/logging/log.h" // AstraEH: Bounded run/frame diagnostics.
 #include "common/scm_rev.h" // AstraEH: Identify the exact build in each run snapshot.
 #include "common/settings.h"
+#include "common/uberhar_test_profile.h" // CodexAstraUlt: Report effective route capabilities.
 #include "core/core_timing.h"
 #include "core/perf_stats.h"
 #include "video_core/gpu.h"
@@ -288,7 +289,8 @@ void PerfStats::LogUberharSettings(const char* event) {
     const auto& values = Settings::values;
     const auto mode = values.uberhar_test_mode.GetValue();
     const auto api = Settings::GetWorkingGraphicsAPI();
-    const std::array mode_names{"Custom", "Native", "Compute", "Automatic"};
+    // CodexAstraUlt: Append the persisted diagnostic mode without relabeling older log modes.
+    const std::array mode_names{"Custom", "Native", "Compute", "Automatic", "ComboGeneric"};
     const std::array api_names{"Software", "OpenGL", "Vulkan"};
     const auto mode_index = static_cast<std::size_t>(mode);
     const auto api_index = static_cast<std::size_t>(api);
@@ -315,11 +317,12 @@ void PerfStats::LogUberharSettings(const char* event) {
         static_cast<u32>(values.texture_sampling.GetValue()), values.custom_textures.GetValue(),
         values.preload_textures.GetValue(), values.use_skip_duplicate_frames.GetValue(),
         values.delay_game_render_thread_us.GetValue(), values.simulate_3ds_gpu_timings.GetValue(),
-        // AstraPro: Name the expanded policy; selected routes are separate counters.
-        mode == Settings::UberharTestMode::Automatic ? "independent_lists_v2" : "disabled",
-        // AstraPro: Snapshot the new choice, not an assertion of measured GPU use.
-        mode == Settings::UberharTestMode::Automatic
-            ? (values.uberhar_force_tev.GetValue() ? "generic_control" : "specialized_ready_v1")
+        // CodexAstraUlt: Replace AstraPro's Automatic-only labels with the shared policies;
+        // ID4 retains GPU vertices but cannot warm/select optional specialized fragments.
+        Settings::UsesReadyGpuVertices(mode) ? "independent_lists_v2" : "disabled",
+        Settings::UsesReadyGpuVertices(mode)
+            ? (Settings::AllowsSpecializedFragments(mode) && !values.uberhar_force_tev.GetValue()
+                   ? "specialized_ready_v1" : "generic_control")
             : "disabled");
     const bool changed = text != uberhar_settings;
     if (changed && !uberhar_settings.empty())

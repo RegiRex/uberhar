@@ -140,6 +140,10 @@ public:
     void SetAccurateMul(bool accurate_mul);
 
 private:
+    // CodexAstraUlt: One gate covers optional fragment warming, binding and transport;
+    // mandatory unsupported-state recovery continues through UseFragmentShader independently.
+    bool PreferReadySpecializedFragment(const Pica::Shader::UserConfig& user) const;
+
     // AstraEH: Only the serial TEV worker reads/writes generic modules; reports use atomics.
     // AstraEH: Compiler workers receive the exact options/path captured with their profile.
     std::vector<u32> LoadOrCompileTevModule(std::string_view source, bool disable_optimizer,
@@ -307,6 +311,8 @@ private:
     std::array<u64, 7> tev_loop_histogram{}, tev_active_histogram{};
     const bool hybrid_tev;
     const bool force_tev;
+    // CodexAstraUlt: Captured with the preset; changing this diagnostic choice requires restart.
+    const bool allow_specialized_fragments;
     // AstraEH: A/B switch captured at startup, effective only in normal hybrid mode.
     const bool cpu_vertex_bridge;
     // AstraEH: Draw counters belong to the render thread; wait counters belong to the scheduler.

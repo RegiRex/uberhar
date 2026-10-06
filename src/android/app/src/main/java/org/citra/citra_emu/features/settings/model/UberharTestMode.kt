@@ -3,10 +3,13 @@
 
 package org.citra.citra_emu.features.settings.model
 
-// AstraEH: A single persisted value makes the three test switches mutually exclusive.
-// The lower settings remain untouched, so returning to CUSTOM restores them exactly.
+// CodexAstraUlt: Extend AstraEH's single persisted mode with a generic-fragment Combo control.
+// IDs 0–3 and saved custom values retain their meanings; no independent conflicting toggles.
 enum class UberharTestMode(val id: Int) {
-    CUSTOM(0), NATIVE(1), COMPUTE(2), AUTOMATIC(3);
+    CUSTOM(0), NATIVE(1), COMPUTE(2), AUTOMATIC(3), COMBO_GENERIC(4);
+
+    // CodexAstraUlt: Match common/uberhar_test_profile.h for the locked effective display.
+    val allowsSpecializedFragments: Boolean get() = this == AUTOMATIC
 
     companion object {
         fun from(value: Int) = entries.firstOrNull { it.id == value } ?: CUSTOM

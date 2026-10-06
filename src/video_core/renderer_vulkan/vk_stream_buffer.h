@@ -53,6 +53,10 @@ private:
     /// Creates Vulkan buffer handles committing the required the required memory.
     void CreateBuffers(u64 prefered_size);
 
+    // CodexAstraUlt: Release partial failed attempts and complete owned buffers
+    // through the same ordered cleanup, including their raw allocation ledger.
+    void DestroyBuffers() noexcept;
+
     /// Increases the amount of watches available.
     void ReserveWatches(std::vector<Watch>& watches, std::size_t grow_size);
 
@@ -67,6 +71,9 @@ private:
     vk::DeviceMemory memory;  ///< Memory allocation.
     u8* mapped{};             ///< Pointer to the mapped memory
     u64 stream_buffer_size{}; ///< Stream buffer size.
+    // CodexAstraUlt: Actual VkDeviceMemory requirement size, not requested buffer
+    // capacity; VMA does not own these allocations.
+    u64 allocation_bytes{};
     vk::BufferUsageFlags usage{};
     BufferType type;
 

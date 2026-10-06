@@ -9,6 +9,7 @@
 #include "common/math_util.h"
 #include "common/microprofile.h"
 #include "common/settings.h"
+#include "common/uberhar_activity.h" // CodexAstraUlt: Existing atomic run correlation.
 #include "common/scope_exit.h" // AstraPro: Clear speculative draw state on every exit.
 #include "core/core.h"
 #include "core/loader/loader.h"
@@ -172,6 +173,11 @@ RasterizerVulkan::~RasterizerVulkan() {
         compute_rect->Poll();
         compute_rect->Report();
     }
+    // CodexAstraUlt: Members still own their resources here. The Instance emits a
+    // second sample after those members die, without adding a shutdown GPU wait.
+    instance.ReportMemoryUsage("before_dependents", pipeline_cache.GetProgramID(),
+                               Common::UberharActivity::session.load(std::memory_order_relaxed),
+                               scheduler.CurrentTick(), scheduler.GetMasterSemaphore()->KnownGpuTick());
 }
 
 void RasterizerVulkan::TickFrame() {
@@ -180,6 +186,20 @@ void RasterizerVulkan::TickFrame() {
     // AstraEH: Read only completed GPU queries; do not add a per-frame GPU wait.
     if (compute_rect)
         compute_rect->Poll();
+    // CodexAstraUlt: Reuse the renderer owner's frame cadence. Idle/stalled rendering
+    // may delay a native sample; Android process health keeps its existing IO cadence.
+    if ((memory_diagnostic_frames++ & 63) == 0) {
+        const auto now = std::chrono::steady_clock::now();
+        if (now >= next_memory_snapshot) {
+            instance.ReportMemoryUsage(next_memory_snapshot == std::chrono::steady_clock::time_point{}
+                                           ? "start" : "progress",
+                                       pipeline_cache.GetProgramID(),
+                                       Common::UberharActivity::session.load(std::memory_order_relaxed),
+                                       scheduler.CurrentTick(),
+                                       scheduler.GetMasterSemaphore()->KnownGpuTick());
+            next_memory_snapshot = now + std::chrono::seconds{30};
+        }
+    }
 }
 
 void RasterizerVulkan::LoadDefaultDiskResources(

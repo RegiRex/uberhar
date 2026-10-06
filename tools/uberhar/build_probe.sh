@@ -50,6 +50,12 @@ c++ -std=c++20 -O2 -pthread -Isrc tools/uberhar/test_shader_failure.cpp \
 timeout 30s build/uberhar-probe/test-shader-failure
 # CodexAstraUlt-2: Terminal readback errors must leave noexcept cleanup safely.
 python3 tools/uberhar/test_download_recovery.py
+# CodexAstraUlt: Verify real resource reuse/failed-allocation cleanup and event-only memory counters.
+python3 tools/uberhar/test_resource_pool_reuse.py
+python3 tools/uberhar/test_stream_buffer_ownership.py
+c++ -std=c++20 -O2 -pthread -Isrc tools/uberhar/test_memory_diagnostics.cpp \
+  -o build/uberhar-probe/test-memory-diagnostics
+timeout 30s build/uberhar-probe/test-memory-diagnostics
 # AstraEH: Real primitive assembly must match native topology and leave no bridge tail.
 c++ -std=c++20 -O2 -DFMT_HEADER_ONLY -Isrc -Iexternals/fmt/include -Iexternals/boost \
   tools/uberhar/test_bridge_assembly.cpp src/video_core/pica/primitive_assembly.cpp \
@@ -86,6 +92,8 @@ c++ -std=c++20 -O2 -DENABLE_VULKAN -DFMT_HEADER_ONLY -Isrc -Ibuild/uberhar-profi
   -Iexternals/fmt/include -Iexternals/boost tools/uberhar/test_graphics_profile.cpp \
   -o build/uberhar-probe/test-graphics-profile
 build/uberhar-probe/test-graphics-profile
+# CodexAstraUlt: Execute production route control with the generated setting keys.
+python3 tools/uberhar/test_combo_generic_route.py
 
 # AstraEH: Exact CPU cache/stack behavior and safe generic-module reuse gate the next build.
 c++ -std=c++20 -O2 -Isrc -Iexternals/boost tools/uberhar/test_vertex_runtime.cpp \

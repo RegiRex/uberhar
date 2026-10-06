@@ -9,9 +9,9 @@
 #include "video_core/pica/regs_shader.h"
 
 namespace Vulkan::ReadyVertexPolicy {
-// AstraPro: Automatic alone opts into this new experiment. Only complete lists
-// with an empty CPU assembler are safe to move without inheriting strip/fan tail
-// loss. Small batches remain on CPU; bound uploads and speculative cache growth.
+// CodexAstraUlt: Replace AstraPro's obsolete Automatic-only description: both Combo presets
+// use the same existing guards. Only complete lists with an empty CPU assembler can move
+// without strip/fan tail loss; small batches, uploads and speculative caches remain bounded.
 constexpr u32 MinVertices = 96;
 constexpr u32 MaxVertices = 65535;
 constexpr u32 MaxUploadBytes = 4 * 1024 * 1024;

@@ -7,16 +7,20 @@ Baseline: Azahar 2126.1.2, commit
 
 ## Current status
 
-<!-- CodexAstraUlt: Replace the 0.1.19 current summary with the device-evidence follow-up; retain that candidate's release history. -->
-**The 0.1.20 comparison candidate adds three reproduced GPU input-parity guards
-and bounds repeated applet warnings.** It retains 0.1.19's optional-progress delivery.
-The uploaded crash reports identify low-memory exits, but neither allocation
-ownership nor Dark Moon's graphical-fault cause is established. All attached gameplay
-logs identify 0.1.17. See the [device analysis](docs/UBERHAR_LOG_ANALYSIS_0.1.17_0.1.18.md),
-[release notes](docs/releases/0.1.20.md) and [validation status](docs/UBERHAR_PROGRESS.md).
+<!-- CodexAstraUlt: Replace the current 0.1.20 summary after the full architecture review; its input guards/logging changes remain. -->
+**The 0.1.21 comparison fixes two resource-management defects and adds bounded
+memory attribution plus Combo (generic fragments).** This isolates optional fragment
+specialization while preserving Combo's vertex/compute policy and complete CPU
+fallback. It retains previous input guards and lean logging. Dark Moon's allocation
+owner, visual-fault cause and device performance remain unverified. See the
+[architecture review](docs/UBERHAR_ARCHITECTURE_0.1.20.md),
+[release/test notes](docs/releases/0.1.21.md) and [validation status](docs/UBERHAR_PROGRESS.md).
 It is isolated on `uberhar/codexastra-diag-comparison`; its workflow retains artifacts
 only after package/signing checks and does not publish or reserve a shared release.
-The inherited [0.1.18 workflow](https://github.com/RegiRex/uberhar/actions/runs/37382914237)
+The comparison now builds through a narrowly restricted PR into the release branch
+so it can restore that base's existing signing cache if retained; it tests the exact
+comparison head and cannot publish a shared release. The inherited
+[0.1.18 workflow](https://github.com/RegiRex/uberhar/actions/runs/37382914237)
 completed successfully; this does not establish device correctness or performance.
 
 <!-- CodexAstraUlt-2: Separate 0.1.18 implementation and publication from device acceptance. -->
