@@ -154,6 +154,18 @@ RasterizerVulkan::~RasterizerVulkan() {
              "Uberhar fixed attributes totals: max_bytes={} over_legacy_reservation={} "
              "reserved_bytes=272 scope=rasterizer_lifetime",
              fixed_attribute_max_bytes, fixed_attribute_over_legacy);
+    // CodexAstraUlt Log Line: One reliable lifetime total complements the bounded
+    // input-fallback records; a killed process may never reach this destructor.
+    LOG_INFO(Render_Vulkan,
+             "Uberhar GPU input fallback totals: zero_stride={} short_stride={} "
+             "default_attribute={} register_alias={} scope=rasterizer_lifetime action=cpu",
+             ready_vertex_zero_stride_rejections,
+             ready_vertex_layout_rejections[static_cast<std::size_t>(
+                 ReadyVertexPolicy::InputLayoutIssue::ShortStride)],
+             ready_vertex_layout_rejections[static_cast<std::size_t>(
+                 ReadyVertexPolicy::InputLayoutIssue::DefaultAttribute)],
+             ready_vertex_layout_rejections[static_cast<std::size_t>(
+                 ReadyVertexPolicy::InputLayoutIssue::RegisterAlias)]);
     if (compute_rect) {
         // AstraEH: Queued compute/timestamp commands must finish before their owners die.
         scheduler.Finish();
@@ -483,6 +495,23 @@ bool RasterizerVulkan::AccelerateDrawBatchReady(bool is_indexed) {
                      "ordinal={} vertices={} action=cpu limit=4",
                      pipeline_cache.GetProgramID(), ready_vertex_zero_stride_rejections,
                      regs.pipeline.num_vertices);
+        }
+        return false;
+    }
+    // CodexAstraUlt: Extend the CodexAstraUlt-2 early input-parity fallback without
+    // replacing its zero-stride accounting. Reject reproduced default, alias and
+    // copied-tail differences before any speculative reads, pipelines or uploads.
+    const auto input_issue = ReadyVertexPolicy::ClassifyInputLayout(regs.pipeline, regs.vs);
+    if (input_issue != ReadyVertexPolicy::InputLayoutIssue::None) {
+        auto& rejections = ready_vertex_layout_rejections[static_cast<std::size_t>(input_issue)];
+        if (++rejections <= 4) {
+            // CodexAstraUlt Log Line: Four records per reason per rasterizer;
+            // coverage evidence only, not proof of a title's corruption or crash cause.
+            LOG_INFO(Render_Vulkan,
+                     "Uberhar GPU input fallback: reason={} title={:016X} "
+                     "ordinal={} vertices={} action=cpu limit=4",
+                     ReadyVertexPolicy::InputLayoutIssueName(input_issue),
+                     pipeline_cache.GetProgramID(), rejections, regs.pipeline.num_vertices);
         }
         return false;
     }

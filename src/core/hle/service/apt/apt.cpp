@@ -2,6 +2,9 @@
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
 
+// CodexAstraUlt: Power-of-two census points and saturated counters bound repeated utility diagnostics.
+#include <bit>
+#include <limits>
 #include <boost/serialization/shared_ptr.hpp>
 #include <boost/serialization/vector.hpp>
 #include "common/archives.h"
@@ -721,6 +724,40 @@ void Module::APTInterface::CancelApplication(Kernel::HLERequestContext& ctx) {
     rb.Push(apt->applet_manager->CancelApplication());
 }
 
+// CodexAstraUlt: Replace the inherited per-call warning only for the two exact signatures that
+// produced 17,981 duplicate lines in the owner's MSR log. Keep four initial records and powers of
+// two, matching FRD's census; unknown commands, changed sizes and malformed buffers still warn.
+void Module::LogAppletUtilityCall(u32 command, u32 input_size, u32 output_size,
+                                  std::size_t actual_input_size) {
+    const bool bounded_signature =
+        output_size == 1 && actual_input_size == input_size &&
+        ((command == 0x4 && input_size == 1) || (command == 0x7 && input_size == 4));
+    if (bounded_signature) {
+        const std::size_t slot = command == 0x4 ? 0 : 1;
+        auto& requests = applet_utility_requests[slot];
+        if (requests == std::numeric_limits<u64>::max()) {
+            return;
+        }
+        ++requests;
+        if (requests > 4 && !std::has_single_bit(requests)) {
+            return;
+        }
+        const u64 logged = ++applet_utility_logs[slot];
+        // CodexAstraUlt Log Line: At most 65 records per known signature per Module lifetime;
+        // cumulative suppressed counts retain recurrence evidence without a worker or timer.
+        LOG_WARNING(Service_APT,
+                    "(STUBBED) called command={:#010X}, input_size={:#010X}, output_size={:#010X} "
+                    "requests={} suppressed={} scope=apt_module_lifetime",
+                    command, input_size, output_size, requests, requests - logged);
+        return;
+    }
+    // CodexAstraUlt Log Line: Preserve every inherited warning for signatures outside the two
+    // observed valid-buffer cases; this path deliberately has no new diagnostic suppression.
+    LOG_WARNING(Service_APT,
+                "(STUBBED) called command={:#010X}, input_size={:#010X}, output_size={:#010X}",
+                command, input_size, output_size);
+}
+
 void Module::APTInterface::AppletUtility(Kernel::HLERequestContext& ctx) {
     IPC::RequestParser rp(ctx);
 
@@ -728,11 +765,9 @@ void Module::APTInterface::AppletUtility(Kernel::HLERequestContext& ctx) {
     const auto utility_command = rp.Pop<u32>();
     const auto input_size = rp.Pop<u32>();
     const auto output_size = rp.Pop<u32>();
-    [[maybe_unused]] const auto input = rp.PopStaticBuffer();
-
-    LOG_WARNING(Service_APT,
-                "(STUBBED) called command={:#010X}, input_size={:#010X}, output_size={:#010X}",
-                utility_command, input_size, output_size);
+    // CodexAstraUlt: Inspect the existing input length only for logging; preserve all IPC replies.
+    const auto input = rp.PopStaticBuffer();
+    apt->LogAppletUtilityCall(utility_command, input_size, output_size, input.size());
 
     std::vector<u8> out(output_size);
     if (utility_command == 0x6 && output_size > 0) {
@@ -1577,7 +1612,23 @@ Module::Module(Core::System& system) : system(system) {
                           .Unwrap();
 }
 
-Module::~Module() {}
+Module::~Module() {
+    // CodexAstraUlt: Retain final request/omission totals for at most two known signatures;
+    // counters reset with the next Module and never become save-state or guest service data.
+    for (std::size_t slot = 0; slot < applet_utility_requests.size(); ++slot) {
+        const u64 requests = applet_utility_requests[slot];
+        if (requests == 0) {
+            continue;
+        }
+        // CodexAstraUlt Log Line: One normal-teardown summary per used signature. Abrupt process
+        // termination may lose this final record; earlier power-of-two records preserve context.
+        LOG_INFO(Service_APT,
+                 "Uberhar applet utility totals: command={:#010X} input_size={} output_size=1 "
+                 "requests={} logged={} suppressed={} scope=apt_module_lifetime counter_saturated={}",
+                 slot == 0 ? 0x4 : 0x7, slot == 0 ? 1 : 4, requests, applet_utility_logs[slot],
+                 requests - applet_utility_logs[slot], requests == std::numeric_limits<u64>::max());
+    }
+}
 
 std::shared_ptr<AppletManager> Module::GetAppletManager() const {
     return applet_manager;

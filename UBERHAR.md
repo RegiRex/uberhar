@@ -7,12 +7,13 @@ Baseline: Azahar 2126.1.2, commit
 
 ## Current status
 
-<!-- CodexAstraUlt: Distinguish optional progress delivery from critical evidence and device performance. -->
-**The 0.1.19 comparison candidate targets logging pressure during periodic renderer reporting.** Optional
-progress records use nonblocking queue admission with an aggregated omission count;
-game/session boundaries, final totals and failures retain reliable delivery. This
-adds no worker, live-log copy, or renderer policy change. See the
-[release notes](docs/releases/0.1.19.md) and [validation status](docs/UBERHAR_PROGRESS.md).
+<!-- CodexAstraUlt: Replace the 0.1.19 current summary with the device-evidence follow-up; retain that candidate's release history. -->
+**The 0.1.20 comparison candidate adds three reproduced GPU input-parity guards
+and bounds repeated applet warnings.** It retains 0.1.19's optional-progress delivery.
+The uploaded crash reports identify low-memory exits, but neither allocation
+ownership nor Dark Moon's graphical-fault cause is established. All attached gameplay
+logs identify 0.1.17. See the [device analysis](docs/UBERHAR_LOG_ANALYSIS_0.1.17_0.1.18.md),
+[release notes](docs/releases/0.1.20.md) and [validation status](docs/UBERHAR_PROGRESS.md).
 It is isolated on `uberhar/codexastra-diag-comparison`; its workflow retains artifacts
 only after package/signing checks and does not publish or reserve a shared release.
 The inherited [0.1.18 workflow](https://github.com/RegiRex/uberhar/actions/runs/37382914237)

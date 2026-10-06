@@ -1,4 +1,38 @@
-# Uberhar progress — 0.1.19
+# Uberhar progress — 0.1.20 comparison candidate
+
+<!-- CodexAstraUlt: Replace the current 0.1.19 summary with the owner-authorized device-evidence follow-up; retain its validation record below. -->
+- **Branch/base:** `uberhar/codexastra-diag-comparison`, following `c1516360b`
+  (0.1.19) and release `27b4ccbd8` (0.1.18). No shared release publication or
+  version reservation; identify comparisons by source commit.
+- **Evidence:** seven uploaded files, six distinct. All gameplay logs are 0.1.17;
+  0.1.18 has an OS exit report and a startup-only log. Android classified both
+  reported exits as low memory. Dark Moon Combo loses 8,651 MiB of **system**
+  available memory over 330 seconds; allocation ownership remains unknown.
+  See [analysis and marker-bounded Sonic results](UBERHAR_LOG_ANALYSIS_0.1.17_0.1.18.md).
+- **Implemented:** three additional CPU fallbacks for reproduced GPU input
+  differences: short copied strides, default/stream conflicts and register aliases.
+  Guarding happens before speculative reads/uploads. Original zero-stride handling,
+  Custom mode, all draws and ordering remain. Affected draws can cost more CPU.
+- **Logging:** bound two observed valid AppletUtility signatures using four initial
+  warnings and powers of two, plus final totals. Unknown or malformed signatures
+  retain warnings; IPC responses are unchanged. Keep 0.1.19 optional-progress delivery.
+- **Validation:** focused production-input tests pass optimized and ASan/UBSan;
+  old source fails the new admission regression. Existing admission/assembly tests
+  pass. APT production-body response/census test passes 109,538 checks, including
+  replay of 17,981 observed requests. Native build of core, Vulkan renderer, tests
+  and room passes; CTest has 62 passing entries and five firmware-dependent skips,
+  no failures. Eight manifest tests pass. Independent source/test review found no
+  actionable issue. No shader algorithm or Android source changed: the prior local
+  pixel/JVM results below remain historical, and CI reruns the full existing gates.
+- **Publication:** preparing 0.1.20. Comparison runs queue without canceling the
+  prior candidate requested by the owner. No APK is claimed ready.
+- **Limits/next:** the game upload failed; no cutscene or physical Adreno execution
+  occurred here. These guards are confirmed correctness fixes, not a demonstrated
+  Dark Moon cure. Short route-isolation and process/GPU memory attribution come
+  before broader performance work. Existing cloud/Android tooling is usable;
+  cloud CPU/software Vulkan cannot mimic Thor Max throughput.
+
+## Previous 0.1.19 comparison record
 
 <!-- CodexAstraUlt: Current follow-up inherits the successful 0.1.18 build; historical local-tool limitations below describe that earlier session. -->
 - **Base:** `27b4ccbd8e18fedd630700a31a70311c03d16002`, version 0.1.18.

@@ -9,8 +9,8 @@ ubershader renderer and screen-synchronization changes are not implemented yet.
 The upstream project information and download links below describe Azahar.
 Uberhar builds are produced by this repository's **Uberhar ARM64 prerelease** workflow.
 
-<!-- CodexAstraUlt: Replace the previous current-release pointer after inheriting 0.1.18; its release record remains unchanged. -->
-Comparison candidate: **[0.1.19 bounded progress logging](docs/releases/0.1.19.md)**.
+<!-- CodexAstraUlt: Replace the current candidate pointer for the uploaded-log investigation; preserve prior release records. -->
+Comparison candidate: **[0.1.20 input parity and bounded applet warnings](docs/releases/0.1.20.md)**.
 Follow [build/device status](docs/UBERHAR_PROGRESS.md) and the
 [roadmap](docs/Uberhar_Roadmap.html). Older milestones below retain their original evidence.
 

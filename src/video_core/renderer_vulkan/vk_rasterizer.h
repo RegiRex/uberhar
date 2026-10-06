@@ -148,6 +148,10 @@ private:
     u64 fixed_attribute_over_legacy{}, diagnostic_draws{};
     // CodexAstraUlt-2: Count input fallbacks; only the first four emit a record.
     u64 ready_vertex_zero_stride_rejections{};
+    // CodexAstraUlt: Count each additional input-parity fallback separately, with
+    // four records per reason and one reliable summary at rasterizer teardown.
+    std::array<u64, static_cast<std::size_t>(ReadyVertexPolicy::InputLayoutIssue::Count)>
+        ready_vertex_layout_rejections{};
     std::chrono::steady_clock::time_point next_draw_snapshot{};
     bool ready_vertex_attempt{};
     GraphicsPipeline* ready_vertex_pipeline{};

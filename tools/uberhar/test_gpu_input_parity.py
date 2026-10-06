@@ -5,6 +5,8 @@ Real PICA register types, NativeVertexInputPlan and ShaderUnit supply CPU inputs
 Only the rasterizer/device/buffer shell and unused serialization/logging interfaces
 are modeled. This regression proves input transport and fallback ordering, not
 GPU shader execution, Dark Moon scene coverage, or device image parity.
+CodexAstraUlt: Also reproduce default/stream conflicts, incomplete copied vertex
+tails and aliased input-register ordering before testing the early CPU fallback.
 """
 import argparse
 import os
@@ -79,7 +81,10 @@ struct TestMemory {
 struct TestStream {
     std::array<u8,32768> bytes{};
     u32 cursor{}, mapped{};
+    // CodexAstraUlt: Observe even an uncommitted speculative upload reservation.
+    u32 maps{};
     std::tuple<u8*,u64,bool> Map(u32 size,u32 alignment) {
+        ++maps;
         mapped=alignment ? Common::AlignUp(cursor,alignment) : cursor;
         if (mapped+size > bytes.size()) throw std::runtime_error("stream capacity");
         return {bytes.data()+mapped,mapped,false};
@@ -116,6 +121,9 @@ struct RasterizerVulkan {
     void* ready_vertex_pipeline{};
     std::vector<u32> vertex_batch;
     u64 ready_vertex_zero_stride_rejections{};
+    // CodexAstraUlt: Match the production per-reason accounting without device plumbing.
+    std::array<u64, static_cast<std::size_t>(ReadyVertexPolicy::InputLayoutIssue::Count)>
+        ready_vertex_layout_rejections{};
     u32 accelerated{};
     bool AccelerateDrawBatchReady(bool indexed);
     bool AccelerateDrawBatch(bool) {
@@ -133,6 +141,183 @@ struct RasterizerVulkan {
 
 void Check(bool result,const char* why) {
     if (!result) throw std::runtime_error(why);
+}
+
+// CodexAstraUlt: These fixtures use real CPU input conversion and the extracted
+// GPU uploader. Read staged float attributes with Vulkan's missing-component
+// defaults; no GPU execution or title-specific coverage is implied.
+using Float4 = std::array<float,4>;
+void InitInputFixture(Vulkan::RasterizerVulkan& renderer,u32 count) {
+    using Format=Pica::PipelineRegs::VertexAttributeFormat;
+    auto& attrs=renderer.regs.pipeline.vertex_attributes;
+    attrs.base_address.Assign(Vulkan::TestMemory::Base/16);
+    attrs.max_attribute_index.Assign(count-1);
+    attrs.format0.Assign(Format::FLOAT); attrs.size0.Assign(3);
+    attrs.format1.Assign(Format::FLOAT); attrs.size1.Assign(3);
+    renderer.regs.vs.max_input_attribute_index.Assign(count-1);
+    renderer.regs.vs.input_attribute_to_register_map_low=0x10;
+    renderer.regs.pipeline.num_vertices=96;
+    renderer.vertex_info.vs_input_size=16*96*count;
+    auto& loader=attrs.attribute_loaders[0];
+    loader.component_count.Assign(1); loader.comp0.Assign(0); loader.byte_count.Assign(16);
+}
+Float4 ReadCpu(Vulkan::RasterizerVulkan& renderer,
+               std::span<const Pica::NativeInputAttribute> descriptions,u32 reg,u32 vertex) {
+    Pica::NativeVertexInputPlan plan;
+    Check(plan.Prepare(renderer.regs.vs,descriptions.size(),Vulkan::TestMemory::Base,95,
+        [&](u32 attribute){return descriptions[attribute];},
+        [&](PAddr address)->std::span<const u8>{
+            auto ref=renderer.memory.GetPhysicalRef(address);
+            return {ref.GetPtr(),ref.GetSize()};
+        })==Pica::NativeVertexInputPlan::Result::Ready,"CPU rejected parity fixture");
+    Pica::ShaderUnit cpu;
+    plan.Load(cpu,renderer.pica.input_default_attributes,vertex);
+    const auto& result=cpu.input[reg];
+    return {result.x.ToFloat32(),result.y.ToFloat32(),result.z.ToFloat32(),result.w.ToFloat32()};
+}
+Float4 ReadGpu(Vulkan::RasterizerVulkan& renderer,u32 reg,u32 vertex) {
+    const auto& layout=renderer.pipeline_info.state.vertex_layout;
+    const auto& attribute=layout.attributes[reg];
+    const auto& binding=layout.bindings[attribute.binding];
+    Check(attribute.type==static_cast<u32>(Pica::PipelineRegs::VertexAttributeFormat::FLOAT),
+          "Fixture reader only models float attributes");
+    const u32 address=renderer.binding_offsets[attribute.binding]+attribute.offset+
+        (binding.fixed ? 0 : vertex*static_cast<u32>(binding.byte_count));
+    Float4 result{0,0,0,1};
+    std::memcpy(result.data(),renderer.stream_buffer.bytes.data()+address,attribute.size*sizeof(float));
+    return result;
+}
+void CheckRejected(Vulkan::RasterizerVulkan& renderer,Vulkan::ReadyVertexPolicy::InputLayoutIssue issue) {
+    renderer.memory.reads=0;
+    const u32 cursor=renderer.stream_buffer.cursor, maps=renderer.stream_buffer.maps;
+    const u32 records=TestLog::info_lines;
+    for (u32 retry=0;retry<10;retry++) {
+        Check(!renderer.AccelerateDrawBatchReady(retry%2),"Unsafe input reached optional GPU route");
+        Check(!renderer.ready_vertex_attempt && !renderer.ready_vertex_pipeline,
+              "Input fallback latched speculative state");
+    }
+    Check(renderer.memory.reads==0 && renderer.pipeline_cache.preflights==0 &&
+          renderer.accelerated==0 && renderer.stream_buffer.cursor==cursor &&
+          renderer.stream_buffer.maps==maps,"Input fallback performed speculative GPU work");
+    Check(renderer.ready_vertex_layout_rejections[static_cast<std::size_t>(issue)]==10 &&
+          renderer.ready_vertex_zero_stride_rejections==0 && TestLog::info_lines-records==4,
+          "Input reason accounting or four-record limit changed");
+}
+void CheckOrdinary(Vulkan::RasterizerVulkan& renderer,
+                   std::span<const Pica::NativeInputAttribute> descriptions) {
+    const auto counters=renderer.ready_vertex_layout_rejections;
+    const u32 records=TestLog::info_lines;
+    Check(renderer.AccelerateDrawBatchReady(false),"Ordinary input layout lost GPU eligibility");
+    Check(renderer.accelerated==1 && renderer.pipeline_cache.preflights==1 &&
+          !renderer.ready_vertex_attempt && !renderer.ready_vertex_pipeline,
+          "Ordinary input changed acceleration or speculative cleanup");
+    Check(renderer.ready_vertex_layout_rejections==counters && TestLog::info_lines==records,
+          "Ordinary input changed fallback accounting");
+    for (u32 attr=0;attr<=renderer.regs.vs.max_input_attribute_index;attr++) {
+        const auto reg=renderer.regs.vs.GetRegisterForAttribute(attr);
+        for (u32 vertex=0;vertex<96;vertex++)
+            Check(ReadCpu(renderer,descriptions,reg,vertex)==ReadGpu(renderer,reg,vertex),
+                  "Ordinary CPU/GPU input parity changed");
+    }
+}
+
+// CodexAstraUlt: Each unsafe fixture first proves the existing uploader diverges,
+// then checks production optional routing rejects it before work. Its repaired
+// ordinary counterpart must still accelerate with all 96 CPU/GPU inputs equal.
+void TestAdditionalInputLayouts() {
+    using Format=Pica::PipelineRegs::VertexAttributeFormat;
+    using Issue=Vulkan::ReadyVertexPolicy::InputLayoutIssue;
+    {
+        Vulkan::RasterizerVulkan renderer;
+        InitInputFixture(renderer,1);
+        auto& attrs=renderer.regs.pipeline.vertex_attributes;
+        attrs.attribute_mask.Assign(1);
+        renderer.pica.input_default_attributes[0].x=Pica::f24::FromFloat32(9);
+        const float source=2;
+        std::memcpy(renderer.memory.bytes.data(),&source,sizeof(source));
+        std::array descriptions{Pica::NativeInputAttribute{0,16,4,Format::FLOAT,true}};
+        const auto cpu=ReadCpu(renderer,descriptions,0,0);
+        renderer.SetupVertexArray();
+        Check(cpu[0]==9 && ReadGpu(renderer,0,0)[0]==2,
+              "Default/stream conflict no longer reproduces; revisit fallback");
+        CheckRejected(renderer,Issue::DefaultAttribute);
+        attrs.attribute_mask.Assign(0); descriptions[0].is_default=false;
+        CheckOrdinary(renderer,descriptions);
+    }
+    {
+        Vulkan::RasterizerVulkan renderer;
+        InitInputFixture(renderer,1);
+        auto& attrs=renderer.regs.pipeline.vertex_attributes;
+        attrs.attribute_loaders[0].byte_count.Assign(12);
+        renderer.vertex_info.vs_input_size=12*96;
+        const Float4 source{2,3,4,5};
+        std::memcpy(renderer.memory.bytes.data()+95*12,source.data(),sizeof(source));
+        std::array descriptions{Pica::NativeInputAttribute{0,12,4,Format::FLOAT,false}};
+        const auto cpu=ReadCpu(renderer,descriptions,0,95);
+        renderer.SetupVertexArray();
+        Check(cpu==source && ReadGpu(renderer,0,95)==Float4{2,3,4,0},
+              "Short-stride copied-tail conflict no longer reproduces; revisit fallback");
+        CheckRejected(renderer,Issue::ShortStride);
+        attrs.size0.Assign(2); descriptions[0].elements=3;
+        CheckOrdinary(renderer,descriptions);
+    }
+    {
+        Vulkan::RasterizerVulkan renderer;
+        InitInputFixture(renderer,2);
+        auto& attrs=renderer.regs.pipeline.vertex_attributes;
+        attrs.attribute_loaders[0].comp0.Assign(1);
+        auto& second=attrs.attribute_loaders[1];
+        second.component_count.Assign(1); second.comp0.Assign(0); second.byte_count.Assign(16);
+        second.data_offset.Assign(8192);
+        renderer.regs.vs.input_attribute_to_register_map_low=0;
+        const float one=1, two=2;
+        std::memcpy(renderer.memory.bytes.data(),&one,sizeof(one));
+        std::memcpy(renderer.memory.bytes.data()+8192,&two,sizeof(two));
+        const std::array descriptions{Pica::NativeInputAttribute{8192,16,4,Format::FLOAT,false},
+                                      Pica::NativeInputAttribute{0,16,4,Format::FLOAT,false}};
+        const auto cpu=ReadCpu(renderer,descriptions,0,0);
+        renderer.SetupVertexArray();
+        Check(cpu[0]==1 && ReadGpu(renderer,0,0)[0]==2,
+              "Reversed-loader register conflict no longer reproduces; revisit fallback");
+        CheckRejected(renderer,Issue::RegisterAlias);
+        renderer.regs.vs.input_attribute_to_register_map_low=0x10;
+        CheckOrdinary(renderer,descriptions);
+    }
+    {
+        Vulkan::RasterizerVulkan renderer;
+        InitInputFixture(renderer,2);
+        renderer.regs.vs.max_input_attribute_index.Assign(0);
+        renderer.regs.vs.input_attribute_to_register_map_low=0;
+        auto& second=renderer.regs.pipeline.vertex_attributes.attribute_loaders[1];
+        second.component_count.Assign(1); second.comp0.Assign(1); second.byte_count.Assign(16);
+        second.data_offset.Assign(8192);
+        const float one=1, two=2;
+        std::memcpy(renderer.memory.bytes.data(),&one,sizeof(one));
+        std::memcpy(renderer.memory.bytes.data()+8192,&two,sizeof(two));
+        const std::array descriptions{Pica::NativeInputAttribute{0,16,4,Format::FLOAT,false},
+                                      Pica::NativeInputAttribute{8192,16,4,Format::FLOAT,false}};
+        const auto cpu=ReadCpu(renderer,descriptions,0,0);
+        renderer.SetupVertexArray();
+        Check(cpu[0]==1 && ReadGpu(renderer,0,0)[0]==2,
+              "Unrequested-loader register conflict no longer reproduces; revisit fallback");
+        CheckRejected(renderer,Issue::RegisterAlias);
+        renderer.regs.vs.input_attribute_to_register_map_low=0x10;
+        CheckOrdinary(renderer,descriptions);
+    }
+    {
+        // CodexAstraUlt: Leading alignment padding and unused trailing padding
+        // are safe when all decoded attribute bytes fit the copied stride.
+        Vulkan::RasterizerVulkan renderer;
+        InitInputFixture(renderer,1);
+        auto& loader=renderer.regs.pipeline.vertex_attributes.attribute_loaders[0];
+        loader.comp0.Assign(12); loader.comp1.Assign(0); loader.comp2.Assign(15);
+        loader.component_count.Assign(3); loader.byte_count.Assign(20);
+        renderer.vertex_info.vs_input_size=20*96;
+        const Float4 source{2,3,4,5};
+        std::memcpy(renderer.memory.bytes.data()+95*20+4,source.data(),sizeof(source));
+        const std::array descriptions{Pica::NativeInputAttribute{4,20,4,Format::FLOAT,false}};
+        CheckOrdinary(renderer,descriptions);
+    }
 }
 int main() {
     using Format=Pica::PipelineRegs::VertexAttributeFormat;
@@ -235,6 +420,11 @@ int main() {
     std::printf("PASS: %u input-layout cases; %u CPU vertices retained; "
                 "zero-stride GPU mismatch quarantined before uploads; four diagnostic records\n",
                 cases,recovered);
+    // CodexAstraUlt: Keep historical zero-stride assertions independent of the
+    // additional fallback records and report only completed differential checks.
+    TestAdditionalInputLayouts();
+    std::printf("PASS: four additional CPU/GPU divergences quarantined before GPU work; "
+                "three reasons with four-record limits; five ordinary layouts retain parity\n");
 }
 '''
     args.output.parent.mkdir(parents=True, exist_ok=True)

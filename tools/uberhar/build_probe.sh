@@ -167,6 +167,8 @@ build/uberhar-probe/test-fragment-promotion
 python3 tools/uberhar/test_fixed_attribute_reserve.py
 # CodexAstraUlt-2: Compare real Native/GPU input packing and quarantine zero-stride promotion.
 python3 tools/uberhar/test_gpu_input_parity.py
+# CodexAstraUlt: Exercise production APT responses and bounded repeated-warning delivery.
+python3 tools/uberhar/test_applet_utility_logs.py
 c++ -std=c++20 -O2 -DFMT_HEADER_ONLY -Isrc -Iexternals/fmt/include -Iexternals/boost \
   tools/uberhar/test_vertex_plan_cache.cpp src/video_core/pica/output_vertex.cpp \
   src/video_core/pica/shader_unit.cpp src/video_core/pica/primitive_assembly.cpp \

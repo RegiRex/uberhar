@@ -1,6 +1,20 @@
 <!-- AstraEH: Attribution index for the Uberhar implementation, tests, packaging and documentation. -->
 # Uberhar code map
 
+<!-- CodexAstraUlt: Index the additional verified input guards and observed log-noise reduction. -->
+## 0.1.20 input parity and bounded applet warnings
+
+| Files | Purpose and limits |
+| --- | --- |
+| `renderer_vulkan/uberhar_gpu_vertex_policy.h`, `vk_rasterizer.cpp/.h` | Allocation-free raw-register classification rejects short copied strides, default/stream conflicts and shader-register aliases before optional GPU work. First four records per reason and orderly-teardown totals. Existing zero-stride handling and Custom uploader remain. |
+| `core/hle/service/apt/apt.cpp/.h` | Replace inherited per-call warnings only for two observed valid-buffer signatures with initial/power-of-two census and module-lifetime totals. Fixed host-only counters; no IPC or save-state change. |
+| `tools/uberhar/test_gpu_input_parity.py`, `test_applet_utility_logs.py`, `build_probe.sh` | Production input/routing and APT-response regressions, positive controls, malformed-buffer warning preservation and teardown/reset accounting. New input test fails on old route. |
+| `.github/workflows/uberhar-alpha.yml` | Restore noncanceling comparison queue so the owner's prior candidate remains available; retain shared-release isolation and all gates. |
+| `UBERHAR_LOG_ANALYSIS_0.1.17_0.1.18.md`, derived SVG | Deduplicated provenance, memory/correlation limits, marker-bounded Sonic measurements and next diagnosis order. No raw game or device log included. |
+
+See [notes](releases/0.1.20.md) and [current validation](UBERHAR_PROGRESS.md).
+These fallbacks may cost CPU time; host defects are not a demonstrated Dark Moon cause.
+
 <!-- CodexAstraUlt: Map optional progress delivery without relabeling earlier work. -->
 ## 0.1.19 bounded progress logging
 

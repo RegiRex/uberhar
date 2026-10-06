@@ -1,6 +1,25 @@
 <!-- AstraEH: Bounded troubleshooting and removal map for the hybrid renderer. -->
 # Renderer diagnostics, schema 17
 
+<!-- CodexAstraUlt: Additional bounded records retain the existing diagnostic schema and worker. -->
+## Input fallbacks and applet repetition (0.1.20)
+
+`Uberhar GPU input fallback` adds `short_stride`, `default_attribute` and
+`register_alias` reasons beside the existing `zero_stride`. Each new reason emits
+at most four reliable records per rasterizer lifetime. Checks occur before optional
+GPU setup and keep the complete draw on the CPU. `GPU input fallback totals` emits
+all reason counts at normal teardown. Counters record the first matching reason,
+not every potential issue in one layout; a killed process can lose the final total.
+
+APT bounds only command 4/input 1/output 1 and command 7/input 4/output 1 when actual
+input length equals the declared length. The first four requests and later powers
+of two emit warnings (at most 65 per signature across a u64 counter lifetime).
+Intermediate `requests`/`suppressed` and one final `applet utility totals` record
+per used signature retain recurrence information. Counts are per APT module,
+saturate at u64 max, and are not serialized guest state. All other/malformed
+signatures keep per-call warnings; response bytes are unchanged. This addresses
+the observed Metroid warning flood without weakening unknown-error reporting.
+
 <!-- CodexAstraUlt: Replace potentially blocking delivery only for selected progress calls; totals/failure context remain reliable. -->
 ## Optional progress delivery (0.1.19)
 

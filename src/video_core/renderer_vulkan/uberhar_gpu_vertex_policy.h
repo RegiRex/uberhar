@@ -3,8 +3,10 @@
 #pragma once
 
 #include <cstddef>
+#include "common/alignment.h"
 #include "common/common_types.h"
 #include "video_core/pica/regs_pipeline.h"
+#include "video_core/pica/regs_shader.h"
 
 namespace Vulkan::ReadyVertexPolicy {
 // AstraPro: Automatic alone opts into this new experiment. Only complete lists
@@ -52,6 +54,60 @@ inline bool HasActiveZeroStrideLoader(const Pica::PipelineRegs& pipeline) {
             return true;
     }
     return false;
+}
+// CodexAstraUlt: Complement the CodexAstraUlt-2 zero-stride fallback with
+// reproduced CPU/GPU input differences. The inherited uploader copies stride
+// bytes, ignores default flags on loaded attributes, and resolves register aliases
+// in loader order instead of ascending attribute order. Keep those draws on CPU;
+// this classifier does not alter the inherited Custom-mode uploader.
+enum class InputLayoutIssue : u32 { None, ShortStride, DefaultAttribute, RegisterAlias, Count };
+
+constexpr const char* InputLayoutIssueName(InputLayoutIssue issue) {
+    switch (issue) {
+    case InputLayoutIssue::ShortStride: return "short_stride";
+    case InputLayoutIssue::DefaultAttribute: return "default_attribute";
+    case InputLayoutIssue::RegisterAlias: return "register_alias";
+    default: return "none";
+    }
+}
+
+inline InputLayoutIssue ClassifyInputLayout(const Pica::PipelineRegs& pipeline,
+                                          const Pica::ShaderRegs& shader) {
+    const u32 requested = shader.max_input_attribute_index + 1;
+    u32 requested_registers = 0;
+    for (u32 attribute = 0; attribute < requested; ++attribute) {
+        const u32 bit = 1U << shader.GetRegisterForAttribute(attribute);
+        if (requested_registers & bit)
+            return InputLayoutIssue::RegisterAlias;
+        requested_registers |= bit;
+    }
+
+    const auto& attributes = pipeline.vertex_attributes;
+    for (const auto& loader : attributes.attribute_loaders) {
+        if (loader.component_count == 0 || loader.byte_count == 0)
+            continue; // CodexAstraUlt: Active zero strides retain their existing guard/accounting.
+        u32 offset = 0;
+        for (u32 component = 0; component < loader.component_count && component < 12; ++component) {
+            const u32 attribute = loader.GetComponent(component);
+            if (attribute >= 12) {
+                offset = Common::AlignUp(offset, 4);
+                offset += (attribute - 11) * 4;
+                continue;
+            }
+            offset = Common::AlignUp(offset, attributes.GetElementSizeInBytes(attribute));
+            offset += attributes.GetStride(attribute);
+            if (offset > loader.byte_count)
+                return InputLayoutIssue::ShortStride;
+            if (attribute < requested && attributes.IsDefaultAttribute(attribute))
+                return InputLayoutIssue::DefaultAttribute;
+            // CodexAstraUlt: A loader outside the CPU's requested attribute range
+            // can still overwrite a requested GPU register; it is also an alias.
+            if (attribute >= requested &&
+                (requested_registers & (1U << shader.GetRegisterForAttribute(attribute))))
+                return InputLayoutIssue::RegisterAlias;
+        }
+    }
+    return InputLayoutIssue::None;
 }
 // AstraPro: Only a completed, successful, exact-state pipeline can replace CPU
 // execution. Pending/failed/mismatched handles always retain the original draw.

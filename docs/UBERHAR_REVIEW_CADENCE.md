@@ -1,5 +1,14 @@
 # Architecture review ledger
 
+<!-- CodexAstraUlt: New device evidence triggers focused early diagnosis without claiming a completed full architecture review. -->
+The [0.1.17/0.1.18 attachment review](UBERHAR_LOG_ANALYSIS_0.1.17_0.1.18.md) confirms
+Android-classified low-memory exits and sustained Sonic/Dark Moon limitations.
+0.1.20 follows the isolated 0.1.19 comparison with three reproduced input-parity
+guards and bounded applet warnings. This is a focused audit, not a reset of the
+0.1.17 anchor. Continued Dark Moon corruption calls for early route isolation and
+memory attribution before broader performance qualification. Comparison candidates
+are not shared published alphas; retain the established review window.
+
 <!-- CodexAstraUlt: Logging-delivery follow-up does not reset the completed 0.1.17 architecture anchor. -->
 0.1.18's gated workflow completed successfully. The 0.1.19 follow-up adds explicitly
 optional progress-record delivery and omission accounting, while retaining its

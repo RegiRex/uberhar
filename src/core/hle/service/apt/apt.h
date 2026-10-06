@@ -1086,6 +1086,13 @@ private:
     bool LoadSharedFont();
     bool LoadLegacySharedFont();
 
+    // CodexAstraUlt: Two fixed host-only counters follow this Module's lifetime; they are not
+    // serialized guest state. Other utility commands and changed buffer sizes remain unbounded logs.
+    void LogAppletUtilityCall(u32 command, u32 input_size, u32 output_size,
+                              std::size_t actual_input_size);
+    std::array<u64, 2> applet_utility_requests{};
+    std::array<u64, 2> applet_utility_logs{};
+
     Core::System& system;
 
     /// Handle to shared memory region designated to for shared system font

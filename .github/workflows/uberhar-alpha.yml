@@ -24,9 +24,9 @@ concurrency:
   # CodexAstraUlt: Preserve the release queue while comparison jobs use their own
   # queue, so this parallel experiment cannot delay the owner's other builds.
   group: ${{ github.ref == 'refs/heads/uberhar/hybrid-shaders' && 'uberhar-alpha' || 'uberhar-alpha-comparison' }}
-  # CodexAstraUlt: Replace unconditional comparison queueing so an obsolete failed
-  # run does not delay its correction; preserve AstraEH's queueing for release alphas.
-  cancel-in-progress: ${{ github.ref == 'refs/heads/uberhar/codexastra-diag-comparison' }}
+  # CodexAstraUlt: Replace the failed-run supersession policy with queueing again:
+  # the owner wants the preceding comparison APK, so preserve its active build.
+  cancel-in-progress: false
 
 jobs:
   # AstraEH: Reuse the shader gate and require its success before publishing any pre-release.
