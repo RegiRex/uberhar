@@ -3,6 +3,7 @@
 // AstraEH: Check the actual timed queue used by the logger, including idle and
 // shutdown cases.
 #include "common/bounded_threadsafe_queue.h"
+#include "common/logging/diagnostic_queue.h" // CodexAstraUlt: Test actual optional delivery.
 #include <array>
 #include <cassert>
 #include <chrono>
@@ -41,10 +42,21 @@ static void TestContendedProducer() {
       std::async(std::launch::async, [&] { return queue.TryEmplace(11); });
   const bool returned_without_producer =
       attempt.wait_for(1s) == std::future_status::ready;
+  // CodexAstraUlt: Optional diagnostics must also return while a producer owns
+  // the mutex, including when the synchronous debug option would normally write.
+  Common::Log::DiagnosticDropCounter omissions;
+  auto diagnostic = std::async(std::launch::async, [&] {
+    Common::Log::SubmitEntry(queue, GatedEntry{12}, Common::Log::Delivery::Diagnostic,
+                            true, omissions, [](const auto&) { assert(false); });
+  });
+  const bool diagnostic_returned =
+      diagnostic.wait_for(1s) == std::future_status::ready;
   release.set_value();
   producer.get();
+  diagnostic.get();
   const bool inserted = attempt.get();
   assert(returned_without_producer && !inserted);
+  assert(diagnostic_returned && omissions.Pending() == 1);
   GatedEntry value;
   assert(queue.TryPop(value) && value.value == 7);
   assert(!queue.TryPop(value));
@@ -92,10 +104,73 @@ static void TestTryOwnershipAndOrder() {
   assert(!queue.TryPop(value));
 }
 
+// CodexAstraUlt: Use the production routing policy against a stopped consumer;
+// only opted-in records are omitted, while reliable records/barriers retain FIFO.
+static void TestDiagnosticDelivery() {
+  using Common::Log::Delivery;
+  using Common::Log::SubmitEntry;
+  Common::MPSCQueue<int, 2> queue;
+  Common::Log::DiagnosticDropCounter omissions;
+  int synchronous_value = 0;
+  auto synchronous_write = [&](int value) { synchronous_value = value; };
+  SubmitEntry(queue, 1, Delivery::Reliable, false, omissions, synchronous_write);
+  SubmitEntry(queue, 2, Delivery::Diagnostic, false, omissions, synchronous_write);
+  SubmitEntry(queue, 3, Delivery::Diagnostic, false, omissions, synchronous_write);
+  assert(omissions.Pending() == 1);
+
+  // CodexAstraUlt: Reliable records still wait rather than disappearing when full;
+  // optional attempts and unsuccessful flush barriers cannot steal their entries.
+  std::promise<void> entered;
+  auto reliable = std::async(std::launch::async, [&] {
+    entered.set_value();
+    SubmitEntry(queue, 4, Delivery::Reliable, false, omissions, synchronous_write);
+  });
+  entered.get_future().wait();
+  assert(reliable.wait_for(50ms) == std::future_status::timeout);
+  auto optional = std::async(std::launch::async, [&] {
+    SubmitEntry(queue, 5, Delivery::Diagnostic, true, omissions, synchronous_write);
+  });
+  const bool returned = optional.wait_for(1s) == std::future_status::ready;
+  assert(!queue.TryEmplace(6));
+  int value = 0;
+  assert(queue.TryPop(value) && value == 1);
+  reliable.get();
+  optional.get();
+  assert(returned && omissions.Pending() == 2 && synchronous_value == 0);
+  assert(queue.TryPop(value) && value == 2);
+  assert(queue.TryPop(value) && value == 4);
+  assert(!queue.TryPop(value));
+
+  // CodexAstraUlt: Synchronous mode remains an explicit reliable-message option;
+  // diagnostics always use the bounded queue, even when there is room to enqueue.
+  SubmitEntry(queue, 7, Delivery::Reliable, true, omissions, synchronous_write);
+  assert(synchronous_value == 7 && !queue.TryPop(value));
+  SubmitEntry(queue, 8, Delivery::Diagnostic, true, omissions, synchronous_write);
+  assert(synchronous_value == 7 && queue.TryPop(value) && value == 8);
+  assert(queue.TryEmplace(9));
+  assert(queue.TryPop(value) && value == 9);
+
+  // CodexAstraUlt: Exercise cadence, forced export and writes racing new drops.
+  // A failed/unavailable sink does not acknowledge its snapshot and can retry.
+  const auto now = Common::Log::DiagnosticDropCounter::Clock::now();
+  const auto snapshot = omissions.Due(now, false);
+  assert(snapshot == 2);
+  omissions.RecordDrop();
+  omissions.Acknowledge(snapshot);
+  assert(omissions.Pending() == 1);
+  assert(omissions.Due(now + 1s, false) == 0);
+  assert(omissions.Due(now + 1s, true) == 1);
+  assert(omissions.Pending() == 1);
+  assert(omissions.Due(now + 6s, false) == 1);
+  omissions.Acknowledge(1);
+  assert(omissions.Pending() == 0 && omissions.Due(now + 7s, true) == 0);
+}
+
 int main() {
   TestContendedProducer();
   TestSaturatedQueue();
   TestTryOwnershipAndOrder();
+  TestDiagnosticDelivery(); // CodexAstraUlt: Opt-in loss never changes reliable delivery.
   Common::MPSCQueue<int> queue;
   std::stop_source stop;
   int value = 42;
@@ -120,6 +195,8 @@ int main() {
   assert(!queue.PopWaitFor(value, stop.get_token(), 1s));
   assert(queue.TryPop(value) &&
          value == 19); // Shutdown drain retains pending messages.
+  // CodexAstraUlt: Extend the unchanged -2 queue guarantees with optional-delivery checks.
   puts("PASS: production logger queue handles bounded barrier insertion, "
-       "saturation, ownership, FIFO, idle, wakeup, cancellation and drain");
+       "optional diagnostics, omission accounting, synchronous policy, saturation, "
+       "ownership, FIFO, idle, wakeup, cancellation and drain");
 }

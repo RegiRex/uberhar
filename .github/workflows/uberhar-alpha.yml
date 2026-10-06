@@ -5,7 +5,9 @@ name: Uberhar ARM64 prerelease
 on:
   workflow_dispatch:
   push:
-    branches: [uberhar/hybrid-shaders]
+    # CodexAstraUlt: Validate the parallel comparison branch with the same gates;
+    # its APK remains a run artifact so concurrent work cannot claim one release.
+    branches: [uberhar/hybrid-shaders, uberhar/codexastra-diag-comparison]
     paths:
       - src/**
       - CMakeModules/**
@@ -19,7 +21,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: uberhar-alpha
+  # CodexAstraUlt: Preserve the release queue while comparison jobs use their own
+  # queue, so this parallel experiment cannot delay the owner's other builds.
+  group: ${{ github.ref == 'refs/heads/uberhar/hybrid-shaders' && 'uberhar-alpha' || 'uberhar-alpha-comparison' }}
   # AstraEH: Queue follow-up alphas without discarding an already compiling/validating build.
   cancel-in-progress: false
 
@@ -185,6 +189,8 @@ jobs:
 
   # AstraEH: Only the publishing job can write releases; compilation keeps read-only permissions.
   publish:
+    # CodexAstraUlt: Comparison artifacts do not publish or reserve a shared version.
+    if: github.ref == 'refs/heads/uberhar/hybrid-shaders'
     needs: [android, shaders]
     runs-on: ubuntu-24.04
     timeout-minutes: 10

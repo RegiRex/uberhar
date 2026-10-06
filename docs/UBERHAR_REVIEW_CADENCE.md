@@ -1,5 +1,12 @@
 # Architecture review ledger
 
+<!-- CodexAstraUlt: Logging-delivery follow-up does not reset the completed 0.1.17 architecture anchor. -->
+0.1.18's gated workflow completed successfully. The 0.1.19 follow-up adds explicitly
+optional progress-record delivery and omission accounting, while retaining its
+renderer/recovery fixes. This is a focused reliability change, not a full review
+or new device evidence. Keep the 0.1.17 review anchor and require earlier review if
+device results invalidate its assumptions; no Dark Moon correctness gate is waived.
+
 <!-- CodexAstraUlt-2: Completed 0.1.17 source/evidence/alternatives review and accepted 0.1.18 order. -->
 The [0.1.17 full review](UBERHAR_ARCHITECTURE_0.1.17.md) was completed October 5,
 2026 against `fe7d1b8a0`, using the owner's current Thor symptom report and the

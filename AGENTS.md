@@ -1,5 +1,22 @@
 # Uberhar development instructions
 
+<!-- CodexAstraUlt: Current-session owner instructions govern this follow-up; retain prior attribution below as history. -->
+- New logical sections in this follow-up use `CodexAstraUlt`; new optional log calls
+  use `CodexAstraUlt Log Line`. Preserve historical markers. When replacing an
+  attributed block, explain the removed behavior, reason and replacement in a new
+  adjacent comment, and keep the code map current.
+- The owner approved preparing the active branch and Android toolchain, then fixing
+  confirmed logging stalls. Keep this follow-up focused on optional progress-record
+  delivery; preserve reliable lifecycle/error context and all renderer decisions.
+- The owner is comparing concurrent development sessions. This follow-up uses
+  `uberhar/codexastra-diag-comparison`; run the same build gates and retain artifacts
+  without publishing a shared release. Version 0.1.19 is a comparison candidate;
+  check the release branch and assign the next available version before integration.
+- Use the existing isolated checkout in cloud tasks; do not create a worktree unless
+  requested. Cloud checks do not simulate handheld performance. Thor Max Vulkan is
+  primary; the exact secondary Retroid model remains unconfirmed. GammaOS must
+  tolerate unavailable optional diagnostic services.
+
 <!-- CodexAstraUlt-2: Owner-approved 0.1.18 attribution and implementation scope, 2026-10-05. -->
 - New and changed logical sections, tests, documentation and experimental log comments
   use `CodexAstraUlt-2`; new log markers use `CodexAstraUlt-2 Log Line`. Preserve all

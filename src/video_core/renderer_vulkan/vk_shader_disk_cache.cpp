@@ -2,6 +2,7 @@
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
 
+#include <cstring> // CodexAstraUlt: Classify periodic delivery without allocating strings.
 #include "common/common_paths.h"
 #include "common/file_util.h"
 #include "common/scm_rev.h"
@@ -461,8 +462,13 @@ GraphicsPipeline* ShaderDiskCache::GetPipeline(const PipelineInfo& info) {
 
 // AstraEH: No new per-draw strings or sets: existing maps provide the census.
 void ShaderDiskCache::ReportUberharStats(const char* kind) const {
-    // AstraPro Log Line: Existing five-second/final cadence, not per draw.
-    LOG_INFO(Render_Vulkan,
+    // CodexAstraUlt: Only repeated progress is optional; every final report stays reliable.
+    const auto delivery = std::strcmp(kind, "progress") == 0
+                              ? Common::Log::Delivery::Diagnostic
+                              : Common::Log::Delivery::Reliable;
+    // AstraPro: Existing five-second/final cadence, not per draw.
+    // CodexAstraUlt Log Line: Replace AstraPro's blocking progress enqueue; totals stay reliable.
+    LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
              "Uberhar ready GPU fragments {}: schema=1 scope=title requests={} ready_hits={} "
              "cold_demand={} busy={} capped={} mismatches={} failed_hits={} unsupported={} "
              "modules={} builds={} failures={} compile_ms={:.3f} max_compile_ms={:.3f} "
@@ -474,8 +480,9 @@ void ShaderDiskCache::ReportUberharStats(const char* kind) const {
              ready_fragment_compile_ns.load() / 1e6, ready_fragment_max_compile_ns.load() / 1e6,
              ready_fragment_demand.Replacements(), ReadyFragmentPolicy::MaxModules,
              ReadyFragmentPolicy::WarmupDraws);
-    // AstraPro Log Line: Existing bounded cadence; counts don't imply GPU timings.
-    LOG_INFO(Render_Vulkan,
+    // AstraPro: Existing bounded cadence; counts don't imply GPU timings.
+    // CodexAstraUlt Log Line: Replace AstraPro's blocking progress enqueue; totals stay reliable.
+    LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
              "Uberhar GPU shader admission {}: schema=1 vs_deferred={} vs_capped={} gs_capped={} "
              "failures={} max_vs_configs=128 max_gs_configs=128",
              kind, ready_vs_deferred, ready_vs_capped, ready_gs_capped,

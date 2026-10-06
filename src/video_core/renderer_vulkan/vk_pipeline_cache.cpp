@@ -1457,9 +1457,14 @@ void PipelineCache::ClearTevFallbacks() {
 // AstraEH: Ordered worker snapshots avoid per-draw atomics or a reporting stall.
 // Progress is queued; the destructor reads directly only after WaitWorker().
 void PipelineCache::ReportTevPushStats(const char* kind) {
+    // CodexAstraUlt: Only repeated progress is optional; every final report stays reliable.
+    const auto delivery = std::strcmp(kind, "progress") == 0
+                              ? Common::Log::Delivery::Diagnostic
+                              : Common::Log::Delivery::Reliable;
     const auto& stats = tev_push_constants.Stats();
-    // AstraEH Log Line: Same five-second/final cadence; completed worker commands only.
-    LOG_INFO(Render_Vulkan,
+    // AstraEH: Same five-second/final cadence; completed worker commands only.
+    // CodexAstraUlt Log Line: Replace AstraEH's blocking progress enqueue; totals stay reliable.
+    LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
              "Uberhar push constants {}: schema=1 scope=current_title requests={} uploads={} "
              "reuses={} invalidations={} bytes_per_upload={} saved_bytes={} "
              "observation=command_worker timing=not_measured",
@@ -1469,8 +1474,13 @@ void PipelineCache::ReportTevPushStats(const char* kind) {
 
 // AstraEH: These are draw observations and CPU wait durations, not GPU timings or frame counts.
 void PipelineCache::ReportUberharStats(const char* kind) {
-    // AstraPro Log Line: Existing five-second/final cadence; no per-draw strings.
-    LOG_INFO(Render_Vulkan,
+    // CodexAstraUlt: Only repeated progress is optional; every final report stays reliable.
+    const auto delivery = std::strcmp(kind, "progress") == 0
+                              ? Common::Log::Delivery::Diagnostic
+                              : Common::Log::Delivery::Reliable;
+    // AstraPro: Existing five-second/final cadence; no per-draw strings.
+    // CodexAstraUlt Log Line: Replace AstraPro's blocking progress enqueue; totals stay reliable.
+    LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
              "Uberhar ready GPU vertices {}: schema=1 scope=renderer_lifetime requests={} selected={} dependency_misses={} "
              "deferred={} capped={} failed_draw_attempts={} key_mismatches={} pipelines={} "
              "builds={} driver_ms={:.3f} driver_max_ms={:.3f} max_pipelines=256 "
@@ -1503,8 +1513,9 @@ void PipelineCache::ReportUberharStats(const char* kind) {
             scheduler.Record([this](vk::CommandBuffer) { ReportTevPushStats("progress"); });
         }
         const auto& preparation = tev_preparation.Stats();
-        // AstraEH Log Line: Aggregate at the existing five-second/final cadence only.
-        LOG_INFO(Render_Vulkan,
+        // AstraEH: Aggregate at the existing five-second/final cadence only.
+        // CodexAstraUlt Log Line: Replace AstraEH's blocking progress enqueue; totals stay reliable.
+        LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
                  "Uberhar preparation {}: schema=1 scope=current_title requests={} hits={} "
                  "misses={} evictions={} invalidations={} capacity={} storage_bytes={} "
                  "sample_period_requests=1024 hit_samples={} hit_sample_ns={} miss_samples={} "
@@ -1523,9 +1534,10 @@ void PipelineCache::ReportUberharStats(const char* kind) {
                  Settings::values.disable_spirv_optimizer.GetValue());
     }
     if (Settings::values.uberhar_test_mode.GetValue() != Settings::UberharTestMode::Custom) {
-        // AstraEH Log Line: Foreground generic waits must not disappear from measured stutter.
+        // AstraEH: Foreground generic waits must not disappear from measured stutter.
         // AstraPro: CPU and optional GPU vertices may share these fragment-route counts.
-        LOG_INFO(Render_Vulkan,
+        // CodexAstraUlt Log Line: Replace AstraEH's blocking progress enqueue; totals stay reliable.
+        LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
                  "Uberhar virtual native {}: generic_draws={} recovery_draws={} generic_waits={} "
                  "generic_wait_ms={:.3f} generic_max_wait_ms={:.3f} vertex_engine={} "
                  "complete_ready_bank=false optimized_gpu_draws={}",
@@ -1536,8 +1548,9 @@ void PipelineCache::ReportUberharStats(const char* kind) {
     // AstraEH Log Line: One exclusive route-reason summary at the existing cadence.
     // Counts describe draw-path choices, never GPU cost or lost visuals.
     if (Settings::values.uberhar_test_mode.GetValue() != Settings::UberharTestMode::Custom) {
-        // AstraPro Log Line: GPU transport bypass is not unsupported-fragment recovery.
-        LOG_INFO(Render_Vulkan,
+        // AstraPro: GPU transport bypass is not unsupported-fragment recovery.
+        // CodexAstraUlt Log Line: Replace AstraPro's blocking progress enqueue; totals stay reliable.
+        LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
                  "Uberhar recovery reasons {}: schema=1 spirv_incompatible={} shadow2d={} "
                  "gas_fog={} custom_user={} light_count={} lighting_lut={} add_signed={} "
                  "generic_failed={} generic_unavailable={} disabled_or_other={} "
@@ -1567,16 +1580,17 @@ void PipelineCache::ReportUberharStats(const char* kind) {
         }
         const auto& loop = tev_loop_histogram;
         const auto& active = tev_active_histogram;
-        // AstraEH Log Line: Seven fixed bins each (0..6), all selected Native generic draws.
-        LOG_INFO(Render_Vulkan,
+        // AstraEH: Seven fixed bins each (0..6), all selected Native generic draws.
+        // CodexAstraUlt Log Line: Replace AstraEH's blocking progress enqueue; totals stay reliable.
+        LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
                  "Uberhar TEV plan {}: loop_stages=[{},{},{},{},{},{},{}] "
                  "active_stages=[{},{},{},{},{},{},{}] weighting=draws",
                  kind, loop[0], loop[1], loop[2], loop[3], loop[4], loop[5], loop[6], active[0],
                  active[1], active[2], active[3], active[4], active[5], active[6]);
     }
-    // AstraEH Log Line: bounded renderer diagnostics; see docs/UBERHAR_DIAGNOSTICS.md.
-    LOG_INFO(
-        Render_Vulkan,
+    // AstraEH: bounded renderer diagnostics; see docs/UBERHAR_DIAGNOSTICS.md.
+    // CodexAstraUlt Log Line: Replace AstraEH's blocking progress enqueue; totals stay reliable.
+    LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
         "Uberhar {}: draws={} specialized_pending={} fallback_draws={} "
         "fallback_warming={} fallback_unavailable={} skipped={} families={} fallback_pipelines={} "
         "scheduler_pipeline_waits={} scheduler_pipeline_wait_ms={:.3f} "
@@ -1608,8 +1622,9 @@ void PipelineCache::ReportUberharStats(const char* kind) {
     };
     if (hybrid_tev) {
         const auto histogram = wait_diagnostics.Histogram();
-        // AstraEH Log Line: one aggregate covers every wait, including late-session events.
-        LOG_INFO(Render_Vulkan,
+        // AstraEH: one aggregate covers every wait, including late-session events.
+        // CodexAstraUlt Log Line: Replace AstraEH's blocking progress enqueue; totals stay reliable.
+        LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
                  "Uberhar wait histogram {}: lt1ms={} lt16_667ms={} lt50ms={} lt100ms={} "
                  "lt250ms={} lt500ms={} lt1000ms={} ge1000ms={}",
                  kind, histogram[0], histogram[1], histogram[2], histogram[3], histogram[4],
@@ -1634,8 +1649,9 @@ void PipelineCache::ReportUberharStats(const char* kind) {
         const auto& admission = cpu_bridge_admission;
         const auto& topology = cpu_bridge_topology;
         const auto& selected = cpu_bridge_selected_topology;
-        // AstraEH Log Line: bounded coverage reasons; all are observations, not unique programs.
-        LOG_INFO(Render_Vulkan,
+        // AstraEH: bounded coverage reasons; all are observations, not unique programs.
+        // CodexAstraUlt Log Line: Replace AstraEH's blocking progress enqueue; totals stay reliable.
+        LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
                  "Uberhar bridge coverage {}: eligible={} too_small={} input_limit={} "
                  "incomplete_list={} output_limit={} unsupported_topology={} "
                  "seen_list={} seen_strip={} seen_fan={} seen_shader_list={} seen_unknown={} "
@@ -1643,9 +1659,9 @@ void PipelineCache::ReportUberharStats(const char* kind) {
                  kind, admission[0], admission[1], admission[2], admission[3], admission[4],
                  admission[5], topology[0], topology[1], topology[2], topology[3], topology[4],
                  selected[0], selected[1], selected[2], selected[3]);
-        // AstraEH Log Line: aggregate bridge utility and CPU cost; no per-draw output.
-        LOG_INFO(
-            Render_Vulkan,
+        // AstraEH: aggregate bridge utility and CPU cost; no per-draw output.
+        // CodexAstraUlt Log Line: Replace AstraEH's blocking progress enqueue; totals stay reliable.
+        LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
             "Uberhar CPU bridge {}: pending={} selected={} warming={} ineligible_draws={} draws={} "
             "mismatches={} batches={} vertices={} cpu_ms={:.3f} cpu_max_ms={:.3f}",
             kind, cpu_bridge_pending, cpu_bridge_selected, cpu_bridge_warming, cpu_bridge_limited,
@@ -1658,9 +1674,9 @@ void PipelineCache::ReportUberharStats(const char* kind) {
         report_builds("fallback_compact", fallback_build_stats);
         // AstraEH: Capped counts are lower bounds. Fixed-state counts describe raw
         // candidates even when a device can make some of those states dynamic.
-        // AstraEH Log Line: bounded renderer diagnostics; see docs/UBERHAR_DIAGNOSTICS.md.
-        LOG_INFO(
-            Render_Vulkan,
+        // AstraEH: bounded renderer diagnostics; see docs/UBERHAR_DIAGNOSTICS.md.
+        // CodexAstraUlt Log Line: Replace AstraEH's blocking progress enqueue; totals stay reliable.
+        LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
             "Uberhar variant census {}: scope=current_title_candidates raw_families={} "
             "canonical_families={} raw_pipelines={} canonical_pipelines={} vertex_programs={} "
             "geometry_programs={} vertex_layouts={} attachments={} blending={} rasterization={} "
@@ -1692,8 +1708,9 @@ void PipelineCache::ReportUberharStats(const char* kind) {
                 unused_driver_ns += pipeline->DriverBuildNs();
             }
         }
-        // AstraEH Log Line: bounded renderer diagnostics; see docs/UBERHAR_DIAGNOSTICS.md.
-        LOG_INFO(Render_Vulkan,
+        // AstraEH: bounded renderer diagnostics; see docs/UBERHAR_DIAGNOSTICS.md.
+        // CodexAstraUlt Log Line: Replace AstraEH's blocking progress enqueue; totals stay reliable.
+        LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
                  "Uberhar fallback utility {}: used_pipelines={} unused_pipelines={} "
                  "unused_driver_ms={:.3f}",
                  kind, used, unused, unused_driver_ns / 1000000.0);

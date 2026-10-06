@@ -3,6 +3,7 @@
 // Refer to the license.txt file included.
 
 #include <chrono>
+#include <mutex> // CodexAstraUlt: Serialize worker and explicit synchronous sink access.
 #include <boost/regex.hpp>
 
 #include <fmt/format.h>
@@ -26,6 +27,8 @@
 #include "common/file_util.h"
 #include "common/literals.h"
 #include "common/logging/backend.h"
+#include "common/logging/backend_access.h" // CodexAstraUlt: Signal-aware sink serialization.
+#include "common/logging/diagnostic_queue.h" // CodexAstraUlt: Explicit optional delivery policy.
 #include "common/logging/log.h"
 #include "common/logging/log_entry.h"
 #include "common/logging/text_formatter.h"
@@ -104,6 +107,12 @@ public:
     void Close() override {}
 
     void EnableForStacktrace() override {}
+
+    // CodexAstraUlt: Libretro's callback is its only sink; an intentionally absent
+    // file backend cannot determine whether omission records were delivered.
+    bool Available() const {
+        return callback != nullptr;
+    }
 
 private:
     retro_log_printf_t callback = nullptr;
@@ -403,21 +412,23 @@ public:
     }
 
     void PushEntry(Class log_class, Level log_level, const char* filename, unsigned int line_num,
-                   const char* function, std::string message) {
+                   const char* function, std::string message, Delivery delivery) {
         Entry new_entry = CreateEntry(log_class, log_level, filename, line_num, function,
                                       std::move(message), time_origin);
         if (!regex_filter.empty() &&
             !boost::regex_search(FormatLogMessage(new_entry), regex_filter)) {
             return;
         }
-        if (Settings::values.instant_debug_log.GetValue()) {
-            ForEachBackend([&new_entry](Backend& backend) {
-                backend.Write(new_entry);
-                backend.Flush();
-            });
-        } else {
-            message_queue.EmplaceWait(new_entry);
-        }
+        // CodexAstraUlt: Optional progress records cannot stall a rendering producer
+        // behind slow sinks. Reliable messages keep existing FIFO/synchronous behavior.
+        SubmitEntry(message_queue, std::move(new_entry), delivery,
+                    Settings::values.instant_debug_log.GetValue(), diagnostic_omissions,
+                    [this](const Entry& entry) {
+                        ForEachBackend([&entry](Backend& backend) {
+                            backend.Write(entry);
+                            backend.Flush();
+                        });
+                    });
     }
 
     static Entry CreateEntry(Class log_class, Level log_level, const char* filename,
@@ -508,11 +519,48 @@ private:
 #endif
     }
 
+    // CodexAstraUlt: Report optional omissions directly from the existing log worker,
+    // never through a producer or an extra thread. An unavailable primary sink retains
+    // its pending count; acknowledgement excludes any new omissions during this write.
+    void ReportDiagnosticOmissions(bool force) {
+        // CodexAstraUlt: Check the actual primary sink on each platform; a null
+        // libretro callback retains counts just like an unavailable ordinary file.
+        const auto sink_available = [this] {
+#ifdef HAVE_LIBRETRO
+            return libretro_backend.Available();
+#else
+            return file_backend.Healthy();
+#endif
+        };
+        if (!diagnostic_omissions.Pending() || !sink_available()) {
+            return;
+        }
+        const auto count = diagnostic_omissions.Due(std::chrono::steady_clock::now(), force);
+        if (!count) {
+            return;
+        }
+        // CodexAstraUlt Log Line: At most one per five seconds plus explicit flush/stop;
+        // only opted-in diagnostics were omitted, not lifecycle/error records or draws.
+        const auto report = CreateEntry(
+            Class::Log, Level::Warning, TrimSourcePath(__FILE__), __LINE__, __func__,
+            fmt::format("Uberhar log omissions: schema=1 optional_records={} "
+                        "reason=queue_full_or_contended scope=since_previous_report",
+                        count),
+            time_origin);
+        ForEachBackend([&report](Backend& backend) { backend.Write(report); });
+        if (sink_available()) {
+            diagnostic_omissions.Acknowledge(count);
+        }
+    }
+
     void StartBackendThread() {
         backend_thread = std::jthread([this](std::stop_token stop_token) {
             Common::SetCurrentThreadName("citra:Log");
             Entry entry;
             const auto write_logs = [this, &entry]() {
+                // CodexAstraUlt: A flush/export includes pending omission evidence
+                // before its barrier acknowledges; ordinary records keep the cadence.
+                ReportDiagnosticOmissions(static_cast<bool>(entry.flush_request));
                 // AstraEH: Barriers are control messages, never formatted as log lines.
                 if (entry.flush_request) {
                     ForEachBackend([](Backend& backend) { backend.Flush(); });
@@ -526,6 +574,11 @@ private:
                 // previous entry so shutdown cannot acknowledge a flush barrier twice.
                 entry = {};
                 if (!message_queue.PopWaitFor(entry, stop_token, std::chrono::seconds{1})) {
+                    // CodexAstraUlt: Reuse the existing quiet-tail wakeup for summaries.
+                    ReportDiagnosticOmissions(false);
+                    // CodexAstraUlt: Optional records remain queued in synchronous debug
+                    // mode, so its producers and this idle flush share the sink lock.
+                    BackendAccessGuard lock{backend_mutex};
                     file_backend.Flush();
                     continue;
                 }
@@ -541,6 +594,8 @@ private:
             while (max_logs_to_write-- && message_queue.TryPop(entry)) {
                 write_logs();
             }
+            // CodexAstraUlt: Final accounting precedes the existing backend flush/close.
+            ReportDiagnosticOmissions(true);
         });
     }
 
@@ -557,6 +612,9 @@ private:
     }
 
     void ForEachBackend(auto lambda) {
+        // CodexAstraUlt: Protect sink state from explicit synchronous producers and
+        // the async worker. Never enqueue or wait for queue capacity under this lock.
+        BackendAccessGuard lock{backend_mutex};
 #ifdef HAVE_LIBRETRO
         lambda(static_cast<Backend&>(libretro_backend));
 #else
@@ -577,6 +635,13 @@ private:
     [[noreturn]] static void HandleSignal(int sig) {
         signal(SIGABRT, SIG_DFL);
         signal(SIGSEGV, SIG_DFL);
+        // CodexAstraUlt: A thread faulting while acquiring/holding the sink lock
+        // cannot park for a helper that joins/locks the same backend. Abort on the
+        // original thread without any IO; this exceptional path loses the custom
+        // text backtrace but leaves OS/core collection possible, never guaranteed.
+        if (backend_access_active) {
+            abort();
+        }
         if (sig <= 0) {
             abort();
         }
@@ -618,6 +683,8 @@ private:
 #endif
 
     MPSCQueue<Entry> message_queue{};
+    DiagnosticDropCounter diagnostic_omissions; // CodexAstraUlt: Fixed-size optional-loss evidence.
+    std::mutex backend_mutex; // CodexAstraUlt: Optional producers never acquire this mutex.
     std::chrono::steady_clock::time_point time_origin{std::chrono::steady_clock::now()};
     std::jthread backend_thread;
 
@@ -679,6 +746,17 @@ void SetColorConsoleBackendEnabled(bool enabled) {
 void FmtLogMessageImpl(Class log_class, Level log_level, const char* filename,
                        unsigned int line_num, const char* function, fmt::string_view format,
                        const fmt::format_args& args) {
+    // CodexAstraUlt: Retain the original reliable ABI used by existing callers and
+    // host probe stubs; the delivery extension does not replace their entry point.
+    FmtLogMessageWithDeliveryImpl(log_class, log_level, filename, line_num, function, format, args,
+                                  Delivery::Reliable);
+}
+
+// CodexAstraUlt: Filtering and record formatting remain shared by both deliveries.
+void FmtLogMessageWithDeliveryImpl(Class log_class, Level log_level, const char* filename,
+                                   unsigned int line_num, const char* function,
+                                   fmt::string_view format, const fmt::format_args& args,
+                                   Delivery delivery) {
     if (initialization_in_progress_suppress_logging && log_level < Level::Critical) [[unlikely]] {
         return;
     }
@@ -688,7 +766,7 @@ void FmtLogMessageImpl(Class log_class, Level log_level, const char* filename,
             return;
         }
         Impl::Instance().PushEntry(log_class, log_level, filename, line_num, function,
-                                   fmt::vformat(format, args));
+                                   fmt::vformat(format, args), delivery);
     } else {
         // In the rare case that logging occurs before initialization, write the
         // message to stderr to preserve useful debug information.

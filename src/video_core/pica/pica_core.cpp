@@ -2,6 +2,7 @@
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
 
+#include <cstring> // CodexAstraUlt: Classify periodic delivery without allocating strings.
 #include <limits> // AstraPro: Checked index address arithmetic.
 #include <chrono> // AstraEH: Bounded virtual-PICA stage timing.
 #include "common/arch.h"
@@ -102,9 +103,14 @@ PicaCore::~PicaCore() {
 // AstraEH: Windowed CPU work identifies sustained geometry cost despite unequal run lengths.
 // Human absence is not inferred: a game can continue rendering while its player steps away.
 void PicaCore::ReportVirtualVertices(const char* kind, std::chrono::steady_clock::time_point now) {
-    // AstraPro Log Line: Existing five-second/final reporting gate. Periodic
+    // CodexAstraUlt: Only repeated progress is optional; every final report stays reliable.
+    const auto delivery = std::strcmp(kind, "progress") == 0
+                              ? Common::Log::Delivery::Diagnostic
+                              : Common::Log::Delivery::Reliable;
+    // AstraPro: Existing five-second/final reporting gate. Periodic
     // samples can alias recurring draw patterns; never extrapolate a GPU budget.
-    LOG_INFO(Render_Vulkan,
+    // CodexAstraUlt Log Line: Replace AstraPro's blocking progress enqueue; totals stay reliable.
+    LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
              "Uberhar GPU host attempts {}: schema=1 success_samples={} fallback_samples={} "
              "success_ms={:.3f} fallback_ms={:.3f} sample_max_ms={:.3f} period_attempts=1024 "
              "scope=sampled_host_acceleration_prepare_submit timing=host_wall_gpu_execution_unknown",
@@ -116,8 +122,9 @@ void PicaCore::ReportVirtualVertices(const char* kind, std::chrono::steady_clock
         virtual_window_start == std::chrono::steady_clock::time_point{}
             ? 0.0
             : std::chrono::duration<double, std::milli>(now - virtual_window_start).count();
-    // AstraEH Log Line: At most once per five seconds plus shutdown; never per vertex.
-    LOG_INFO(Render_Vulkan,
+    // AstraEH: At most once per five seconds plus shutdown; never per vertex.
+    // CodexAstraUlt Log Line: Replace AstraEH's blocking progress enqueue; totals stay reliable.
+    LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
              "Uberhar virtual vertices {}: batches={} input_vertices={} stage_wall_ms={:.3f} "
              "stage_max_wall_ms={:.3f} engine={} shader_invocations={} cache_hits={} "
              "window_wall_ms={:.3f} window_stage_ms={:.3f} window_inputs={} window_invocations={}",
@@ -126,8 +133,9 @@ void PicaCore::ReportVirtualVertices(const char* kind, std::chrono::steady_clock
              virtual_vertex_hits, window_ms, (virtual_vertex_ns - virtual_last_ns) / 1e6,
              virtual_vertex_inputs - virtual_last_inputs,
              virtual_vertex_invocations - virtual_last_invocations);
-    // AstraEH Log Line: Same five-second cadence/shutdown as the existing vertex summary.
-    LOG_INFO(Render_Vulkan,
+    // AstraEH: Same five-second cadence/shutdown as the existing vertex summary.
+    // CodexAstraUlt Log Line: Replace AstraEH's blocking progress enqueue; totals stay reliable.
+    LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
              "Uberhar native vertices {}: schema=2 batches={} inputs={} conversions={} "
              "conversion_reuses={} mapping_fallbacks={} geometry_fallbacks={} debug_fallbacks={} "
              "sample_misses={} sample_hits={} sample_input_ms={:.6f} sample_shader_ms={:.6f} "
@@ -143,8 +151,9 @@ void PicaCore::ReportVirtualVertices(const char* kind, std::chrono::steady_clock
              native_samples.batch_inputs, native_samples.batch_invocations,
              native_samples.setup_ns / 1e6, native_samples.vertex_ns / 1e6,
              native_samples.draw_ns / 1e6, native_samples.draw_max_ns / 1e6);
-    // AstraEH Log Line: Reuse the existing five-second/shutdown cadence; no per-vertex logs.
-    LOG_INFO(Render_Vulkan,
+    // AstraEH: Reuse the existing five-second/shutdown cadence; no per-vertex logs.
+    // CodexAstraUlt Log Line: Replace AstraEH's blocking progress enqueue; totals stay reliable.
+    LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
              "Uberhar vertex input {}: schema=1 ready_batches={} missing_attribute={} "
              "unconfigured={} address_wrap={} short_mapping={} mapped_attributes={} "
              "fused_vertices={} legacy_vertices={} scope=no_gs_native_transport "
@@ -152,23 +161,26 @@ void PicaCore::ReportVirtualVertices(const char* kind, std::chrono::steady_clock
              kind, native_input_results[0], native_input_results[1], native_input_results[2],
              native_input_results[3], native_input_results[4], native_input_maps,
              native_input_fused_vertices, native_input_legacy_vertices);
-    // AstraPro Log Line: Existing five-second/final cadence; no per-index clocks.
-    LOG_INFO(Render_Vulkan,
+    // AstraPro: Existing five-second/final cadence; no per-index clocks.
+    // CodexAstraUlt Log Line: Replace AstraPro's blocking progress enqueue; totals stay reliable.
+    LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
              "Uberhar index bounds {}: schema=1 retries={} scanned_indices={} rescued_batches={} "
              "rescued_vertices={} escaped_vertices={} scan_cap=262144 memory_reuse=within_batch_only",
              kind, native_index_retries, native_scanned_indices, native_index_rescues,
              native_rescued_vertices, native_index_escapes);
-    // AstraPro Log Line: Existing cadence/final; GPU inputs are submitted indices,
+    // AstraPro: Existing cadence/final; GPU inputs are submitted indices,
     // not a count of actual driver shader invocations or measured GPU time.
-    LOG_INFO(Render_Vulkan,
+    // CodexAstraUlt Log Line: Replace AstraPro's blocking progress enqueue; totals stay reliable.
+    LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
              "Uberhar PICA routes {}: schema=1 cpu_batches={} gpu_batches={} gpu_inputs={} "
              "gpu_attempts={} auto_topologies=[{},{},{},{},{}] gpu_invocations=unknown",
              kind, virtual_vertex_batches, ready_gpu_vertex_batches, ready_gpu_vertex_inputs,
              ready_gpu_vertex_attempts, ready_gpu_topologies[0], ready_gpu_topologies[1],
              ready_gpu_topologies[2], ready_gpu_topologies[3], ready_gpu_topologies[4]);
-    // AstraPro Log Line: Same 4096-batch/five-second cadence, plus final totals.
+    // AstraPro: Same 4096-batch/five-second cadence, plus final totals.
     // Draw-weighted admission is not vertex, pixel or GPU-time coverage.
-    LOG_INFO(Render_Vulkan,
+    // CodexAstraUlt Log Line: Replace AstraPro's blocking progress enqueue; totals stay reliable.
+    LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
              "Uberhar GPU admission {}: schema=1 scope=pica_title eligible_list={} "
              "eligible_shader_list={} disabled={} debugger={} geometry={} assembly={} "
              "winding={} topology={} small={} large={} incomplete={} "
@@ -179,9 +191,10 @@ void PicaCore::ReportVirtualVertices(const char* kind, std::chrono::steady_clock
              ready_gpu_admissions[9], ready_gpu_admissions[10], ready_gpu_selected_topologies[0],
              ready_gpu_selected_topologies[1], ready_gpu_selected_topologies[2],
              ready_gpu_selected_topologies[3], ready_gpu_selected_topologies[4]);
-    // AstraPro Log Line: Same five-second/final gate; hits are preparation reuse,
+    // AstraPro: Same five-second/final gate; hits are preparation reuse,
     // not vertex-cache hits or a measured speedup. No game data is retained.
-    LOG_INFO(Render_Vulkan,
+    // CodexAstraUlt Log Line: Replace AstraPro's blocking progress enqueue; totals stay reliable.
+    LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
              "Uberhar native plan {}: schema=1 hits={} builds={} capacity=1 "
              "scope=pica_lifetime reuse=register_semantics_only",
              kind, native_plan_cache.Hits(), native_plan_cache.Builds());

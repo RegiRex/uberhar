@@ -1,8 +1,26 @@
 <!-- AstraEH: Bounded troubleshooting and removal map for the hybrid renderer. -->
 # Renderer diagnostics, schema 17
 
-Every Uberhar renderer log call has an adjacent **`AstraEH Log Line`** comment.
-Find it with `rg -n 'AstraEH Log Line' src`. These markers identify diagnostic
+<!-- CodexAstraUlt: Replace potentially blocking delivery only for selected progress calls; totals/failure context remain reliable. -->
+## Optional progress delivery (0.1.19)
+
+Selected periodic virtual-vertex, pipeline/cache and TEV-push reports opt into
+diagnostic delivery. Full queues and producer/notification-lock contention can omit
+snapshots without waiting. One atomic omission count is reported directly by the
+existing logger worker at most once per five seconds; explicit flush/shutdown also
+attempt to report pending omissions. An unhealthy primary file backend retains the
+pending count for a later attempt. No new polling worker or log file is created.
+
+Final/totals and ordinary lifecycle, settings, build, warning/error and crash records
+retain reliable delivery; therefore not every log call is nonblocking. Instant-debug
+mode behaves as before for reliable records; optional records always use the queue.
+Filtered records are excluded before admission and do not count as omissions. An
+omission warning prevents claims of complete progress-window coverage. This policy
+does not imply skipped graphics work or a measured speed gain.
+
+<!-- CodexAstraUlt: Replace the historical single-author search with all retained log markers so new diagnostics remain discoverable. -->
+Uberhar renderer log calls carry adjacent author **`Log Line`** comments.
+Find them with `rg -n '(AstraEH|AstraPro|CodexAstraUlt(-2)?) Log Line' src`. These markers identify diagnostic
 output; deleting them must not remove completion signaling, failure recovery,
 admission limits or state validation. They do not attribute inherited Azahar
 logging to this fork. Android session/title/export records remain functional

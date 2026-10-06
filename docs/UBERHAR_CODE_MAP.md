@@ -1,6 +1,25 @@
 <!-- AstraEH: Attribution index for the Uberhar implementation, tests, packaging and documentation. -->
 # Uberhar code map
 
+<!-- CodexAstraUlt: Map optional progress delivery without relabeling earlier work. -->
+## 0.1.19 bounded progress logging
+
+New sections use **CodexAstraUlt**. Logging API/backend and delivery-policy tests
+make explicitly selected periodic records optional under pressure, aggregate
+omissions, and retain reliable lifecycle/error/totals records.
+`PicaCore::ReportVirtualVertices`, `PipelineCache::ReportUberharStats`,
+`PipelineCache::ReportTevPushStats` and `ShaderDiskCache::ReportUberharStats` select
+optional delivery only for progress snapshots. Renderer decisions are unchanged.
+`BackendAccessGuard` serializes queued and synchronous sink writes. Linux faults
+inside a guarded sink operation terminate directly because waiting for the custom
+backtrace helper could deadlock; Libretro omission reporting uses its callback
+availability. Extracted production probes cover both platform-specific branches.
+The comparison branch runs the existing build gates and retains artifacts while
+the shared release branch alone may publish a prerelease.
+See [notes](releases/0.1.19.md) and [progress](UBERHAR_PROGRESS.md).
+
+Earlier attribution rules below apply to the historical work they describe.
+
 <!-- CodexAstraUlt-2: Current owner-selected attribution for the 0.1.18 work; historical entries follow. -->
 New 0.1.18 sections use **CodexAstraUlt-2**. Search with
 `rg -n 'CodexAstraUlt-2|AstraEH|AstraPro' src tools/uberhar docs`.

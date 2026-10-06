@@ -27,11 +27,28 @@ void FmtLogMessageImpl(Class log_class, Level log_level, const char* filename,
                        unsigned int line_num, const char* function, fmt::string_view format,
                        const fmt::format_args& args);
 
+// CodexAstraUlt: Keep the original reliable entry point/source-compatible probe
+// stubs; only explicitly opted-in callers need the additional delivery interface.
+void FmtLogMessageWithDeliveryImpl(Class log_class, Level log_level, const char* filename,
+                                   unsigned int line_num, const char* function,
+                                   fmt::string_view format, const fmt::format_args& args,
+                                   Delivery delivery);
+
 template <typename... Args>
 void FmtLogMessage(Class log_class, Level log_level, const char* filename, unsigned int line_num,
                    const char* function, fmt::format_string<Args...> format, const Args&... args) {
     FmtLogMessageImpl(log_class, log_level, filename, line_num, function, format,
                       fmt::make_format_args(args...));
+}
+
+// CodexAstraUlt: Shared progress/totals format strings select delivery explicitly;
+// Reliable keeps the record, while Diagnostic permits counted omission under load.
+template <typename... Args>
+void FmtLogMessageWithDelivery(Delivery delivery, Class log_class, Level log_level,
+                               const char* filename, unsigned int line_num, const char* function,
+                               fmt::format_string<Args...> format, const Args&... args) {
+    FmtLogMessageWithDeliveryImpl(log_class, log_level, filename, line_num, function, format,
+                                  fmt::make_format_args(args...), delivery);
 }
 
 } // namespace Common::Log
@@ -58,6 +75,14 @@ void FmtLogMessage(Class log_class, Level log_level, const char* filename, unsig
     Common::Log::FmtLogMessage(Common::Log::Class::log_class, Common::Log::Level::Info,            \
                                Common::Log::TrimSourcePath(__FILE__), __LINE__, __func__,          \
                                __VA_ARGS__)
+// CodexAstraUlt: Opt-in Info diagnostics retain their ordinary text/filtering.
+// Existing LOG_INFO calls, lifecycle markers, warnings and errors remain reliable.
+#define LOG_INFO_WITH_DELIVERY(log_class, delivery, ...)                                            \
+    Common::Log::FmtLogMessageWithDelivery(                                                        \
+        delivery, Common::Log::Class::log_class, Common::Log::Level::Info,                          \
+        Common::Log::TrimSourcePath(__FILE__), __LINE__, __func__, __VA_ARGS__)
+#define LOG_INFO_DIAGNOSTIC(log_class, ...)                                                         \
+    LOG_INFO_WITH_DELIVERY(log_class, Common::Log::Delivery::Diagnostic, __VA_ARGS__)
 #define LOG_WARNING(log_class, ...)                                                                \
     Common::Log::FmtLogMessage(Common::Log::Class::log_class, Common::Log::Level::Warning,         \
                                Common::Log::TrimSourcePath(__FILE__), __LINE__, __func__,          \

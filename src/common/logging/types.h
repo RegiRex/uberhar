@@ -8,6 +8,10 @@
 
 namespace Common::Log {
 
+// CodexAstraUlt: Delivery is independent of severity. Only explicitly optional
+// diagnostics may be omitted when the existing logging queue cannot accept them.
+enum class Delivery : u8 { Reliable, Diagnostic };
+
 /// Specifies the severity or level of detail of the log message.
 enum class Level : u8 {
     Trace, ///< Extremely detailed and repetitive debugging information that is likely to
