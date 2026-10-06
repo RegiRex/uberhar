@@ -11,9 +11,10 @@
 - **Current scope:** explicitly optional periodic renderer/vertex/cache progress
   records, nonblocking admission and bounded omission reporting. Reliable totals,
   lifecycle/error context and all renderer decisions are preserved.
-- **Build/publication:** source prepared for the comparison workflow. No 0.1.19 APK
-  is claimed ready; full Android/package/signing gates remain required, and shared
-  release publication is disabled on this branch.
+- **Build/publication:** source `350675a2a65ec2035e7f5ec7529bac0816e2eea3`
+  is pushed and [comparison run 37399196834](https://github.com/RegiRex/uberhar/actions/runs/37399196834)
+  started. No APK is claimed ready; full Android/package/signing gates remain
+  required, and shared release publication is disabled on this branch.
 - **Environment:** active development branch, pinned JDK 17/Android SDK/NDK tools,
   host CMake/Ninja, glslang/SPIR-V tools and Mesa offscreen context are installed.
   Complete reusable installation and repeat installation passed.
@@ -24,8 +25,14 @@
   complete host renderer probes; focused queue/backend concurrency, omission,
   storage-fault, Libretro and Linux signal checks; 1,000 completion races;
   eight manifest tests; 1,066 Vulkan modules in each optimizer mode.
-- **Still running locally:** Mesa TEV, full-fragment and compute pixel comparisons.
-  These reference checks do not execute the full Android Vulkan renderer.
+- **Pixel checks passed:** 208,896 exact TEV RGBA8 comparisons and texture-use
+  checks across 816 programs; 1,081,344 exact color and depth/discard comparisons
+  each across 1,056 full-fragment states; 256 compute/native pixel comparisons.
+  These use Mesa llvmpipe OpenGL plus Vulkan module validation, not the full
+  Android Vulkan renderer or handheld performance measurements.
+- **Review:** independent source review completed. It caught and resolved Libretro
+  omission reporting and Linux locked-sink fatal-handler behavior before publication.
+  Workflow review confirmed comparison isolation and unchanged package/signing gates.
 - **Device:** no new Thor Max or Retroid results. This follow-up is not a Dark Moon
   renderer fix or a demonstrated speed increase. Exact secondary Retroid model is
   still unconfirmed.
