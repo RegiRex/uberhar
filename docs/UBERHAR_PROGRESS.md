@@ -17,7 +17,8 @@
   Libretro test's pinned header dependency. The same failure was reproduced in
   an isolated minimal fixture; fetching that dependency corrects the fixture.
   CI now fetches it and supersedes obsolete comparison runs while preserving the
-  main release queue. A replacement build will run after this correction is pushed.
+  main release queue. [Replacement run 37400199457](https://github.com/RegiRex/uberhar/actions/runs/37400199457)
+  started from `a08a7fd78878fc7b1bd0f01569deed0ca5b948ca` with that correction.
   No APK is claimed ready; full Android/package/signing gates remain required,
   and shared release publication is disabled on this branch.
 - **Environment:** active development branch, pinned JDK 17/Android SDK/NDK tools,
