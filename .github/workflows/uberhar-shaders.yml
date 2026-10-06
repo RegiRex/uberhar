@@ -27,7 +27,9 @@ jobs:
           timeout 30s build/uberhar-tests/test-async-completion
       - name: Get generator dependencies
         # AstraEH: The production interpreter test also includes MicroProfile's disabled header.
-        run: git submodule update --init --depth 1 externals/fmt externals/xxHash externals/boost externals/nihstro externals/vulkan-headers externals/microprofile
+        # CodexAstraUlt: The real Libretro logger regression also needs its pinned API header;
+        # a full local checkout already has it, but this narrow CI checkout must fetch it.
+        run: git submodule update --init --depth 1 externals/fmt externals/xxHash externals/boost externals/nihstro externals/vulkan-headers externals/microprofile externals/libretro-common/libretro-common
       - name: Install validation tools
         run: |
           sudo apt-get update
