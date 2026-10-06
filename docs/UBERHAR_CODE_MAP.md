@@ -9,7 +9,7 @@
 | `renderer_vulkan/uberhar_gpu_vertex_policy.h`, `vk_rasterizer.cpp/.h` | Allocation-free raw-register classification rejects short copied strides, default/stream conflicts and shader-register aliases before optional GPU work. First four records per reason and orderly-teardown totals. Existing zero-stride handling and Custom uploader remain. |
 | `core/hle/service/apt/apt.cpp/.h` | Replace inherited per-call warnings only for two observed valid-buffer signatures with initial/power-of-two census and module-lifetime totals. Fixed host-only counters; no IPC or save-state change. |
 | `tools/uberhar/test_gpu_input_parity.py`, `test_applet_utility_logs.py`, `build_probe.sh` | Production input/routing and APT-response regressions, positive controls, malformed-buffer warning preservation and teardown/reset accounting. New input test fails on old route. |
-| `.github/workflows/uberhar-alpha.yml` | Restore noncanceling comparison queue so the owner's prior candidate remains available; retain shared-release isolation and all gates. |
+| `.github/workflows/uberhar-alpha.yml` | Restore noncanceling comparison queue; verify the comparison key's public certificate before building; expose fixed failure-stage annotations. Retain shared-release isolation, the final APK signing gate, and main-branch key preparation. |
 | `UBERHAR_LOG_ANALYSIS_0.1.17_0.1.18.md`, derived SVG | Deduplicated provenance, memory/correlation limits, marker-bounded Sonic measurements and next diagnosis order. No raw game or device log included. |
 
 See [notes](releases/0.1.20.md) and [current validation](UBERHAR_PROGRESS.md).

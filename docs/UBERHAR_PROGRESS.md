@@ -24,8 +24,15 @@
   no failures. Eight manifest tests pass. Independent source/test review found no
   actionable issue. No shader algorithm or Android source changed: the prior local
   pixel/JVM results below remain historical, and CI reruns the full existing gates.
-- **Publication:** preparing 0.1.20. Comparison runs queue without canceling the
-  prior candidate requested by the owner. No APK is claimed ready.
+- **Publication:** source `6a98d0049` is pushed and
+  [0.1.20 run 37401646321](https://github.com/RegiRex/uberhar/actions/runs/37401646321)
+  started. The previous 0.1.19 run completed with successful Android compilation,
+  JVM tests and all shader gates, but **failed package/provenance validation** and
+  uploaded no validated APK. Public GitHub exposes only exit code 1 for that step;
+  authenticated error details are needed to identify the failing subcheck. The
+  branch-scoped signing-key cache is a hypothesis, not an established cause.
+  A follow-up adds fixed-stage failure annotations and a comparison certificate
+  preflight while preserving the final package/signing gates. No APK is ready.
 - **Limits/next:** the game upload failed; no cutscene or physical Adreno execution
   occurred here. These guards are confirmed correctness fixes, not a demonstrated
   Dark Moon cure. Short route-isolation and process/GPU memory attribution come
@@ -53,8 +60,9 @@
   CI now fetches it and supersedes obsolete comparison runs while preserving the
   main release queue. [Replacement run 37400199457](https://github.com/RegiRex/uberhar/actions/runs/37400199457)
   started from `a08a7fd78878fc7b1bd0f01569deed0ca5b948ca` with that correction.
-  No APK is claimed ready; full Android/package/signing gates remain required,
-  and shared release publication is disabled on this branch.
+  It subsequently passed Android compilation/JVM tests and the full shader job,
+  then failed package/provenance validation. No validated APK was uploaded.
+  Shared release publication is disabled on this branch.
 - **Environment:** active development branch, pinned JDK 17/Android SDK/NDK tools,
   host CMake/Ninja, glslang/SPIR-V tools and Mesa offscreen context are installed.
   Complete reusable installation and repeat installation passed.

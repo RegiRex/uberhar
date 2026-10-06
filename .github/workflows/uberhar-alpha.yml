@@ -79,6 +79,32 @@ jobs:
       - name: Prepare development signing key
         run: |
           mkdir -p "$HOME/.android"
+          # CodexAstraUlt: Replace inherited key generation on the comparison branch
+          # with an early check of the existing approved key. A fresh branch-scoped
+          # key cannot satisfy the retained APK certificate gate or update owner installs.
+          if [ "$GITHUB_REF" = refs/heads/uberhar/codexastra-diag-comparison ]; then
+            if [ ! -f "$HOME/.android/debug.keystore" ]; then
+              echo '::error title=Comparison signing key unavailable::The approved development signing key was not restored. No replacement key was generated.'
+              exit 1
+            fi
+            # CodexAstraUlt: Export only the public certificate, remove its temporary
+            # file on every exit, and compare the existing pin without exposing key data.
+            comparison_certificate="$(mktemp)"
+            trap 'rm -f "$comparison_certificate"' EXIT
+            if ! "$JAVA_HOME_17_X64/bin/keytool" -exportcert \
+              -keystore "$HOME/.android/debug.keystore" -storepass android \
+              -alias androiddebugkey -file "$comparison_certificate"; then
+              echo '::error title=Comparison signing key unreadable::The restored development key could not supply its public certificate. No replacement key was generated.'
+              exit 1
+            fi
+            comparison_digest="$(sha256sum "$comparison_certificate" | cut -d ' ' -f 1)"
+            if [ "$comparison_digest" != "$(cat tools/uberhar/development-certificate.sha256)" ]; then
+              echo '::error title=Comparison signing key mismatch::The restored development key does not match the approved certificate. The pinned certificate and final APK gate remain unchanged.'
+              exit 1
+            fi
+            rm -f "$comparison_certificate"
+            trap - EXIT
+          fi
           if [ ! -f "$HOME/.android/debug.keystore" ]; then
             "$JAVA_HOME_17_X64/bin/keytool" -genkeypair -noprompt \
               -keystore "$HOME/.android/debug.keystore" -storepass android \
@@ -125,37 +151,57 @@ jobs:
       - name: Validate package and record provenance
         run: |
           set -o pipefail
+          # CodexAstraUlt: Replace the opaque aggregate-step failure with fixed gate
+          # annotations. Preserve every gate and its exit status; never print commands
+          # or environment values, and keep APK upload conditional on full success.
+          validation_gate='artifact directory'
+          trap 'validation_status=$?; printf "::error title=APK validation gate failed::%s (exit %s)\n" "$validation_gate" "$validation_status"; exit "$validation_status"' ERR
           mkdir -p artifacts
+          validation_gate='native APK integrity, ABI and dependencies'
           python3 tools/uberhar/validate_apk.py src/android/app/build artifacts | tee artifacts/native-validation.txt
+          validation_gate='APK discovery and package metadata'
           APK="$(find artifacts -name '*.apk' -print -quit)"
           "$ANDROID_SDK_ROOT/build-tools/35.0.0/aapt" dump badging "$APK" > artifacts/package.txt
+          validation_gate='package identity'
           grep "package: name='org.uberhar.uberhar_emu'" artifacts/package.txt
           # AstraEH: Verify beta launcher branding without changing the install identity.
+          validation_gate='launcher label'
           grep -F "application-label:'Uberhar Beta'" artifacts/package.txt
           # AstraEH: Signatures can verify even when Android refuses normal installation.
           # aapt emits this marker only for test-only apps; reject before publishing.
           if grep -q '^testOnly=' artifacts/package.txt; then
-            echo 'Refusing to publish a test-only APK: normal Android installation would fail' >&2
+            # CodexAstraUlt: Explicit exits bypass ERR; retain the rejection with a visible annotation.
+            echo '::error title=APK validation gate failed::Refusing a test-only APK: normal Android installation would fail' >&2
             exit 1
           fi
           # AstraEH: Inspect the final merged manifest, including third-party dependency declarations.
           export JAVA_HOME="$JAVA_HOME_17_X64"
+          validation_gate='merged manifest extraction'
           "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/apkanalyzer" manifest print "$APK" > artifacts/AndroidManifest.xml
+          validation_gate='merged manifest install requirements'
           python3 tools/uberhar/validate_manifest.py artifacts/AndroidManifest.xml "$UBERHAR_VERSION" > artifacts/install-validation.txt
+          validation_gate='APK alignment'
           "$ANDROID_SDK_ROOT/build-tools/35.0.0/zipalign" -c -P 16 -v 4 "$APK" > artifacts/alignment.txt
+          validation_gate='APK signature verification'
           "$ANDROID_SDK_ROOT/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK" > artifacts/signature.txt
           # AstraEH: Reject a changed signing key instead of releasing an APK that cannot update.
+          validation_gate='approved signing certificate'
           grep -F "Signer #1 certificate SHA-256 digest: $(cat tools/uberhar/development-certificate.sha256)" artifacts/signature.txt
+          validation_gate='source revision provenance'
           git rev-parse HEAD > artifacts/uberhar-commit.txt
           # AstraEH: Native tombstones are useful only with symbols from this exact build.
+          validation_gate='native debug symbols'
           SYMBOLS="src/android/app/build/outputs/native-debug-symbols/uberharRelease/native-debug-symbols.zip"
           test -s "$SYMBOLS"
           cp "$SYMBOLS" "artifacts/uberhar-$UBERHAR_VERSION-native-symbols.zip"
+          validation_gate='Android obfuscation mapping'
           test -s src/android/app/build/outputs/mapping/uberharRelease/mapping.txt
           cp src/android/app/build/outputs/mapping/uberharRelease/mapping.txt artifacts/android-mapping.txt
+          validation_gate='submodule and release-note provenance'
           git submodule status --recursive > artifacts/submodules.txt
           cp UBERHAR.md artifacts/
           cp "docs/releases/$UBERHAR_VERSION.md" artifacts/release-notes.md
+          validation_gate='validation report archive'
           python3 -m zipfile -c "artifacts/uberhar-$UBERHAR_VERSION-validation.zip" \
             artifacts/package.txt artifacts/AndroidManifest.xml artifacts/install-validation.txt \
             artifacts/native-validation.txt artifacts/alignment.txt artifacts/signature.txt \
