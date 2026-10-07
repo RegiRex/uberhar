@@ -15,17 +15,23 @@ import sys
 import time
 from pathlib import Path
 
+# CodexAstraLocal: Fix the package and socket-output ceiling independently of
+# caller input; serial syntax validation prevents transport-service injection.
 PACKAGE = "org.uberhar.uberhar_emu"
 MAX_OUTPUT = 128 * 1024
 SERIAL = re.compile(r"[A-Za-z0-9._:-]{1,256}\Z")
 
 
+# CodexAstraLocal: Structured failure categories keep raw service output and
+# host exception details out of the readiness report.
 class ProbeError(Exception):
     # CodexAstraUlt: Errors expose categories, never raw command output or exception text.
     def __init__(self, code):
         self.code = code
 
 
+# CodexAstraLocal: Use the existing loopback server directly so observation does
+# not start, restart or replace its daemon or establish a new remote connection.
 class LocalAdb:
     """CodexAstraUlt: Minimal read-only smart-socket client; loopback only, no daemon lifecycle."""
 
@@ -33,6 +39,8 @@ class LocalAdb:
         self.timeout = timeout
         self.port = port
 
+    # CodexAstraLocal: Exact-length protocol reads share one query deadline;
+    # a stalled or truncated response cannot hold the caller indefinitely.
     def _receive(self, connection, count, deadline):
         result = bytearray()
         while len(result) < count:
@@ -46,6 +54,8 @@ class LocalAdb:
             result.extend(part)
         return bytes(result)
 
+    # CodexAstraLocal: Send the smart-socket service frame and require acceptance
+    # before consuming data; server rejection payloads remain private.
     def _request(self, connection, service, deadline):
         data = service.encode("ascii")
         connection.settimeout(max(0.001, deadline - time.monotonic()))
@@ -54,6 +64,8 @@ class LocalAdb:
         if self._receive(connection, 4, deadline) != b"OKAY":
             raise ProbeError("adb_request_rejected")
 
+    # CodexAstraLocal: Scope every query to one connection and selected transport.
+    # Both length-prefixed listings and EOF-terminated shell replies have byte caps.
     def _query(self, service, serial=None):
         deadline = time.monotonic() + self.timeout
         try:
@@ -89,6 +101,8 @@ class LocalAdb:
         except OSError:
             raise ProbeError("local_adb_io_error") from None
 
+    # CodexAstraLocal: List first, then expose only fixed metadata services; no
+    # caller-supplied shell body is accepted by these production entry points.
     def devices(self):
         return self._query("host:devices-l")
 
@@ -105,6 +119,8 @@ class LocalAdb:
         return self._query("shell:dumpsys package " + PACKAGE, serial)
 
 
+# CodexAstraLocal: Restrict retained field values even when the bounded raw
+# response contains unrelated detail or terminal control characters.
 def safe_value(value):
     # CodexAstraUlt: JSON contains only short printable metadata, never full dumpsys output.
     value = value.strip()
@@ -122,6 +138,8 @@ def probe(serial=None, timeout=5.0, client=None):
     try:
         if serial is not None and not SERIAL.fullmatch(serial):
             raise ProbeError("invalid_serial")
+        # CodexAstraLocal: Check the installed tool's version under a subprocess
+        # timeout, then use the socket client for all device observations.
         adb = shutil.which("adb")
         if not adb:
             raise ProbeError("adb_not_on_path")
@@ -139,6 +157,8 @@ def probe(serial=None, timeout=5.0, client=None):
             raise ProbeError("adb_version_failed")
         report["adb_version"] = version.group(1).decode("ascii")
         client = client or LocalAdb(timeout)
+        # CodexAstraLocal: Validate listing identities and normalize states before
+        # choosing a device; ambiguous lists require an explicit matching serial.
         devices = []
         for line in client.devices().splitlines():
             if not line.strip():
@@ -163,16 +183,22 @@ def probe(serial=None, timeout=5.0, client=None):
             if len(matches) != 1:
                 raise ProbeError("serial_not_found")
             selected = matches[0]
+        # CodexAstraLocal: Retain the selected identity but open no device queries
+        # until the existing server reports this transport as authorized/online.
         report["selected_serial"] = selected["serial"]
         if selected["state"] != "device":
             raise ProbeError("device_" + selected["state"])
         serial = selected["serial"]
+        # CodexAstraLocal: Manufacturer/model/API help the operator identify the
+        # intended Thor; they do not silently select another device or grant access.
         report["manufacturer"] = safe_value(client.property(serial, "ro.product.manufacturer"))
         report["model"] = safe_value(client.property(serial, "ro.product.model"))
         api = safe_value(client.property(serial, "ro.build.version.sdk"))
         if not api.isascii() or not api.isdecimal() or len(api) > 3:
             raise ProbeError("invalid_metadata")
         report["android_api"] = int(api)
+        # CodexAstraLocal: Confirm an exact installed package before reading its
+        # version fields; retain extracted metadata, never the full package dump.
         packages = client.package_list(serial).splitlines()
         installed = "package:" + PACKAGE in (line.strip() for line in packages)
         report["package_installed"] = installed
@@ -191,6 +217,9 @@ def probe(serial=None, timeout=5.0, client=None):
     return report
 
 
+# CodexAstraLocal: The CLI bounds each query timeout and optionally creates one
+# local report exclusively. A persistence error returns failure without replacing
+# existing evidence or changing device state.
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--serial", help="Exact existing ADB serial; required when multiple devices exist")
@@ -213,5 +242,7 @@ def main():
     return 0 if report["status"] == "ready" and not report.get("report_write_error") else 1
 
 
+# CodexAstraLocal: Importing this module exposes the probe without contacting ADB;
+# only explicit script execution invokes the operator-facing command.
 if __name__ == "__main__":
     sys.exit(main())

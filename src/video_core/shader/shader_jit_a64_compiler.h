@@ -18,6 +18,7 @@
 #include <oaknut/oaknut.hpp>
 #include "common/common_types.h"
 #include "video_core/pica/shader_setup.h"
+#include "video_core/shader/shader.h" // CodexAstraLocal: Exact typed draw-call tuple.
 
 using nihstro::Instruction;
 using nihstro::OpCode;
@@ -30,8 +31,9 @@ struct ShaderUnit;
 
 namespace Pica::Shader {
 
+// CodexAstraLocal: Correct the inherited backend label; generated code is unchanged.
 /**
- * This class implements the shader JIT compiler. It recompiles a Pica shader program into x86_64
+ * This class implements the shader JIT compiler. It recompiles a Pica shader program into ARM64
  * code that can be executed on the host machine directly.
  */
 class JitShader : public oaknut::VectorCodeGenerator {
@@ -42,6 +44,14 @@ public:
         program(&setup.uniforms, &state,
                 reinterpret_cast<const std::byte*>(code_mem->ptr()) +
                     instruction_labels[offset].offset());
+    }
+
+    // CodexAstraLocal: Bind the same live uniform address and existing entry
+    // expression as Run. The typed assignment preserves the backend call ABI;
+    // no code, prologue/END, shader state or helper behavior is changed.
+    ShaderRunContext BindForDraw(const ShaderSetup& setup, u32 offset) const {
+        return {program, &setup.uniforms, reinterpret_cast<const std::byte*>(code_mem->ptr()) +
+                instruction_labels[offset].offset()};
     }
 
     void Compile(const std::array<u32, MAX_PROGRAM_CODE_LENGTH>* program_code,

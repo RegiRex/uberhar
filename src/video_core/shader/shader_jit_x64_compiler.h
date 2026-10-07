@@ -15,6 +15,7 @@
 #include <xbyak/xbyak.h>
 #include "common/common_types.h"
 #include "video_core/pica/shader_setup.h"
+#include "video_core/shader/shader.h" // CodexAstraLocal: Exact typed draw-call tuple.
 
 using nihstro::Instruction;
 using nihstro::OpCode;
@@ -40,6 +41,13 @@ public:
 
     void Run(const ShaderSetup& setup, ShaderUnit& state, u32 offset) const {
         program(&setup.uniforms, &state, instruction_labels[offset].getAddress());
+    }
+
+    // CodexAstraLocal: Bind the same live uniform address and existing entry
+    // expression as Run. The typed assignment preserves the backend call ABI;
+    // no code, prologue/END, shader state or helper behavior is changed.
+    ShaderRunContext BindForDraw(const ShaderSetup& setup, u32 offset) const {
+        return {program, &setup.uniforms, instruction_labels[offset].getAddress()};
     }
 
     void Compile(const std::array<u32, MAX_PROGRAM_CODE_LENGTH>* program_code,

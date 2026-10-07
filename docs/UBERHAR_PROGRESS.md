@@ -1,15 +1,87 @@
-# Uberhar progress — 0.1.28 validated locally; release gates next
+# Uberhar progress — 0.1.29 host candidate; 0.1.28 visual discriminator
 
-<!-- CodexAstraLocal: Advance two independently reviewed changes while retaining installed .27 evidence and the revised owner acceptance scope. -->
+<!-- CodexAstraLocal: Advance the reviewed per-draw call candidate without declaring pending release or device gates complete. -->
+**0.1.29 is implemented and passes local host validation.** Eligible CPU draws now bind
+the existing shader function/live uniforms/entry once, preserving generated code,
+register carry, FIFO and assembly. Independent source review, the real native
+integration build and CTest pass. The focused regression passes 1,920 complete
+draw comparisons with profiler off and another 1,920 with it on. The full host
+probe passes; Android, shader, signing and publication gates have not run.
+No candidate APK or device gain is claimed. See [0.1.29 notes](releases/0.1.29.md).
+The existing-.28 overlay-isolation opening completed a normal return; all 405
+moon frames show no comparable event with performance text hidden. Slightly
+shifted scene progression and a single repeat prevent a causal or cure claim.
+Touch controls stayed enabled; ghost review remains independent.
+
+<!-- CodexAstraLocal: Replace pending gates with verified publication and a compatible data-preserving upgrade; device acceptance remains separate. -->
 **0.1.28** groups exact contiguous CPU output copies after resolving final
-semantics and repairs Android performance-overlay callback ownership. Focused
-production output/plan-cache checks and the actual-method Kotlin lifecycle
-regression pass. Full host probes and the native core/video/tests/room build pass;
-67 CTest entries complete with zero failures and five existing firmware skips.
-Android/shader/signing/publication gates are next. The
-Thor still runs 0.1.27. No device speedup is claimed. Both Native and Combo require
-cold testing because the output path is shared. See
+semantics and repairs Android performance-overlay callback ownership. Host
+production-path and lifecycle checks passed, followed by every shader, Android,
+signing and publication gate in
+[run 37682868970](https://github.com/RegiRex/uberhar/actions/runs/37682868970).
+The [prerelease](https://github.com/RegiRex/uberhar/releases/tag/0.1.28) APK SHA-256 is
+`128f25a5f3630e0cefc3d3ca4553f572a856ebf3cfcb51b9cdf2701a64a7b30a`.
+Exact-source provenance, asset digests and signing identity passed verification;
+cryptographic APK verification passed in CI. The data-preserving upgrade installed
+**0.1.28 / 33979906**. Cold Native, Combo and owner-requested calculated-mode
+controls completed normal return. No device speedup is established. See
 [candidate notes](releases/0.1.28.md).
+
+<!-- CodexAstraLocal: Close the two measured controls and use complete vertex-window brackets without assigning residual wall time to the GPU. -->
+The 0.1.28 Native and Combo openings averaged **28.424% and 21.799%** normal
+speed across 40 and 39 complete windows respectively, with every window below
+99%. Each launch verified Vulkan 2x, the 100% limiter, File 1 Empty and complete
+zero saved application-cache inventory. Draw/fallback/shader failure checks pass.
+These unlike scene mixtures, recording intervals and display conditions are not
+a controlled speedup comparison. Direct complete reporting-window brackets place
+**83.92% Native / 57.71% Combo** wall time inside CPU `LoadVertices`; this includes
+its setup, decoding, execution and assembly, and is neither thread CPU time nor
+a function-specific share. The remaining time is not a GPU measurement.
+
+All 439 Native moon frames were reviewed, finding four isolated one-frame
+rectangular events. All 415 Combo moon frames show no observed recurrence of the
+earlier segment flashing or distinct rectangular events. The reviewed near,
+foreground and book-holder ghost sequences show none of the old dense irregular
+patches. The .27 rear-ghost event was not observed in the .28 Native counterpart;
+bounded observations cannot establish a cure or full-game correctness.
+
+<!-- CodexAstraLocal: Preserve the owner's exact temporal priority rule and the calculated mode's limited implemented scope. -->
+Moon events become a fix priority above five occurrences, if any lasts more than
+two consecutive decoded frames, or if at least three each last two or more.
+The observed Native singles remain reference data. Ghost corruption is scored
+separately. The calculated baseline must report actual eligible/computed/fallback
+draw counts: its present compute path supports solid rectangles, with other work
+falling back to Native. Zero computed draws cannot qualify general 3D compute.
+
+<!-- CodexAstraLocal: Close the calculated control using actual route counters; do not describe native fallback as a 3D compute benchmark. -->
+Calculated mode averaged **27.337%** across 40 complete normal-limit windows,
+all below 99%, with a 20.623% lower fifth-percentile window average and 244.165 ms
+worst observed interval. All **5,087,963** considered lifecycle draws were
+rejected by the narrow compute state contract and rendered through Native;
+eligible rectangles and computed draws were both zero. These counts include
+setup/exit and are not opening-only coverage. Complete reporting windows put
+83.87% of elapsed time inside `LoadVertices`. During-opening GPU allocations
+remained around 1,072 MiB at both readings, with battery temperature 29 C;
+thermal headroom is unavailable.
+
+<!-- CodexAstraLocal: Apply the owner's occurrence threshold to new consecutive-frame evidence without assigning a rendering or recording cause. -->
+Calculated moon review found **seven isolated one-frame rectangular/band events**
+across 424 decoded frames; each clears on the following frame. This crosses the
+owner's greater-than-five threshold and is now a priority for a bounded visual
+discriminator. The run selected zero compute draws; that fact does not identify
+the cause. Rendering, presentation and recording remain to be separated. Ghost
+review stays independent, and the clean bounded Combo clip is not overwritten.
+
+<!-- CodexAstraLocal: Record a fresh Native baseline and keep brief tolerated moon events distinct from a longer rear-ghost disturbance. -->
+A fresh cold 0.1.27 Native/Vulkan/2x opening averaged **27.976%** across 40 complete
+normal-limit windows; every selected window remained below 99%. All cache,
+settings and complete-draw checks passed. Consecutive moon review found five
+separate single-frame rectangular events, each followed immediately by a coherent
+frame. The owner accepts brief one- or two-frame loading flashes. A separate
+rear-ghost rectangle spans four decoded frames (about 0.276 seconds); it remains
+under investigation and is not included in that tolerance. These bounded video
+observations do not establish their rendering/recording cause or full-game
+correctness, and unlike Native/Combo scene mixtures cannot prove a speedup.
 
 The owner now accepts sustained **99%+ normal speed** with the limiter at 100%,
 correct graphics and zero skipped draws. Qualify 2x first, with 4x the long-term

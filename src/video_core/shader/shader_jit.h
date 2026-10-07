@@ -29,6 +29,9 @@ public:
     void SetupBatch(ShaderSetup& setup, u32 entry_point) override;
     void Run(const ShaderSetup& setup, ShaderUnit& state) const override;
 
+    // CodexAstraLocal: Bind after unchanged SetupBatch; no generated instructions change.
+    ShaderRunContext BindForDraw(const ShaderSetup& setup) const override;
+
 private:
     std::unordered_map<u64, std::unique_ptr<JitShader>> cache;
     // AstraEH: Count only actual compilation; cached SetupBatch calls do not read clocks.

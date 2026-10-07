@@ -1,6 +1,52 @@
 <!-- AstraEH: Attribution index for the Uberhar implementation, tests, packaging and documentation. -->
 # Uberhar code map
 
+<!-- CodexAstraLocal: Map the complete per-draw execution change and its durable gate; comment-free version metadata is explained here. -->
+## 0.1.29 candidate — draw-local CPU shader calls
+
+- `shader/shader.h` defines the borrowed, exact-typed program/uniform/entry tuple
+  and empty base-engine fallback. `shader_jit.{h,cpp}` binds after existing setup,
+  retaining unprepared and profiler-enabled behavior.
+- `shader_jit_{x64,a64}_compiler.h` binds the exact existing backend call arguments;
+  emitted shader code and ABI remain unchanged.
+- `pica/pica_core.cpp` chooses the ordinary FIFO loop once per eligible draw;
+  sampled/timed routes share a fixed adapter whose overhead remains in diagnostics.
+- `tools/uberhar/test_shader_draw_context.{cpp,py}` exercises real engines,
+  output/FIFO/assembly and extracted binding/adapter sites with profiler off/on.
+  `build_probe.sh` includes the fail-closed regression in the existing gate.
+- `UBERHAR_VERSION` advances to the candidate alpha `0.1.29`; release notes and
+  progress distinguish host validation from pending CI and device qualification.
+
+
+<!-- CodexAstraLocal: Close confirmed historical attribution gaps without relabeling the original author or changing the already published 0.1.28 behavior. -->
+## Post-0.1.22 purpose-comment audit
+
+The compiler-policy audit adds adjacent `CodexAstraLocal` explanations to
+`renderer_vulkan/uberhar_shader_compile_policy.h` and the queued VS, optional FS,
+GS and policy-reporting sections of `vk_shader_disk_cache.cpp`. The comments
+explain frozen worker inputs, required-versus-optional compiler settings,
+clip-distance lifetime and the limits of the diagnostic policy label. Existing
+`CodexAstraUlt` attribution remains intact; executable C++ tokens are unchanged.
+
+<!-- CodexAstraLocal: Add missing purpose explanations to the bounded timing collector and historical host regressions without modifying their behavior. -->
+The follow-up covers `pica/uberhar_vertex_timing.cpp` sidecar validation, bounded
+serialization, owner-clock identity, finite cohort accounting and partial-record
+retention. `tools/uberhar/device_testing/test_device_probe.py` now explains its
+isolated fake transport and read/report failure cases;
+`tools/uberhar/test_shader_compile_policy.py` explains extraction of actual worker
+bodies and recording-double limits. C++ noncomment tokens and Python ASTs remain
+identical, including the embedded C++ fixture strings and historical attribution.
+
+<!-- CodexAstraLocal: Cover the post-0.1.22 operator probe itself while retaining its older authorship and exact behavior. -->
+`tools/uberhar/device_testing/device_probe.py` additionally explains its existing
+loopback-only transport, response deadlines/byte caps, explicit serial selection,
+metadata-only readiness and exclusive optional local report. Its Python AST and
+historical docstrings are unchanged; no device action accompanies this audit.
+
+This is a focused comment-only checkpoint. The separate review of post-0.1.22
+purpose coverage, computed-value consumers and redundant runtime preparation
+continues; it does not close the architecture audit due after 0.1.29.
+
 <!-- CodexAstraLocal: Index exact output transport and per-view overlay ownership separately from unproven device performance. -->
 ## 0.1.28 grouped output transport and overlay lifecycle
 

@@ -77,6 +77,20 @@ void JitEngine::SetupBatch(ShaderSetup& setup, u32 entry_point) {
     }
 }
 
+// CodexAstraLocal: Resolve only the call arguments that the inherited Run would
+// look up per miss. Keep profiler-enabled builds on the inherited scoped Run and
+// leave null/unprepared state to that existing recovery/assertion contract.
+ShaderRunContext JitEngine::BindForDraw(const ShaderSetup& setup) const {
+#if MICROPROFILE_ENABLED
+    return {};
+#else
+    if (!setup.cached_shader)
+        return {};
+    const auto* shader = static_cast<const JitShader*>(setup.cached_shader);
+    return shader->BindForDraw(setup, setup.entry_point);
+#endif
+}
+
 MICROPROFILE_DECLARE(GPU_Shader);
 
 void JitEngine::Run(const ShaderSetup& setup, ShaderUnit& state) const {

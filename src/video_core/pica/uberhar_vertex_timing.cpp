@@ -20,6 +20,8 @@
 #include "common/android_utils.h"
 #endif
 
+// CodexAstraLocal: Standalone host fixtures identify their unstamped build;
+// production CMake supplies the release version recorded beside the source revision.
 #ifndef UBERHAR_TIMING_VERSION
 #define UBERHAR_TIMING_VERSION "unversioned-host-probe"
 #endif
@@ -27,6 +29,8 @@
 namespace Pica::VertexTiming {
 namespace {
 using Json = nlohmann::json;
+// CodexAstraLocal: Stable names describe terminal causes and compact stage arrays
+// to the independent reader; changing their order would change the report schema.
 constexpr std::array<std::string_view, 9> StopNames{
     "none", "window_elapsed", "budget_exhausted", "arm_timeout", "identity_changed",
     "phase_changed", "clock_unavailable", "teardown", "policy_changed"};
@@ -54,6 +58,8 @@ u64 Resolution(clockid_t id) noexcept {
 }
 #endif
 
+// CodexAstraLocal: Require an exact title identity, avoiding numeric coercion or
+// partial hexadecimal parsing before a sidecar can select this title's observations.
 u64 Hex(const Json& value) {
     if (!value.is_string()) throw std::runtime_error("hex type");
     const auto& s = value.get_ref<const std::string&>();
@@ -64,6 +70,8 @@ u64 Hex(const Json& value) {
         throw std::runtime_error("hex value");
     return result;
 }
+// CodexAstraLocal: Optional limits use explicit defaults; supplied values must be
+// unsigned integers inside their individual cap, never floats, booleans or negatives.
 u32 Number(const Json& root, const char* key, u32 fallback, u32 low, u32 high) {
     if (!root.contains(key)) return fallback;
     const auto& value = root.at(key);
@@ -82,6 +90,8 @@ u64 Mix(u64 value) noexcept {
     return value ^ (value >> 31);
 }
 
+// CodexAstraLocal: Format into caller-owned bounded storage and escape report
+// strings. Overflow makes the whole serialization unavailable, not truncated JSON.
 struct Writer {
     std::span<char> bytes;
     std::size_t used{};
@@ -194,8 +204,13 @@ Session::Session(Config config_, Clock clock_, std::string engine_)
         !config.max_vertices || config.max_vertices > MaxVertices || engine.size() > 64)
         summary.stop = Stop::Policy;
 }
+// CodexAstraLocal: One owner closes selection before its one teardown export;
+// neither an unfinished record nor a write failure starts a retry worker.
 Session::~Session() { Close(); Export(); }
 
+// CodexAstraLocal: Missing, malformed or unsupported sidecars leave diagnostics
+// disabled. Cap the read before parsing; final exclusive creation still guards
+// the initially unused evidence filename against a later collision.
 std::unique_ptr<Session> Session::Load(u64 title, const char* engine) noexcept {
     try {
         const std::string file = FileUtil::GetUserPath(FileUtil::UserPath::ConfigDir) +
@@ -224,15 +239,21 @@ std::unique_ptr<Session> Session::Load(u64 title, const char* engine) noexcept {
     } catch (...) { return {}; }
 }
 
+// CodexAstraLocal: Retain the first terminal cause and invalidate any in-flight
+// timing record while the surrounding renderer continues the actual draw.
 void Session::Fail(Stop reason) noexcept {
     if (summary.stop == Stop::None) summary.stop = reason;
     measuring = false;
     if (current < summary.records) records[current].clocks_valid = false;
 }
+// CodexAstraLocal: Thread CPU endpoints are comparable only on the original
+// owner; a changed execution thread terminates this observation session.
 bool Session::Owner() noexcept {
     if (std::this_thread::get_id() == owner) return true;
     ++summary.identity_failures; Fail(Stop::Identity); return false;
 }
+// CodexAstraLocal: Count every attempted clock read, including failed reads.
+// Missing clocks invalidate the diagnostic instead of substituting another clock.
 bool Session::Wall(u64& value) noexcept {
     ++summary.wall_reads;
     if (clock.wall && clock.wall(clock.context, value)) return true;
@@ -243,6 +264,8 @@ bool Session::Cpu(u64& value) noexcept {
     if (clock.cpu && clock.cpu(clock.context, value)) return true;
     ++summary.clock_failures; Fail(Stop::Clock); return false;
 }
+// CodexAstraLocal: Bracket each owner CPU sample with wall samples so the reader
+// retains endpoint uncertainty and can reject reversed clock observations.
 bool Session::ReadPoint(Point& point) noexcept {
     if (!Wall(point.wall_before) || !Cpu(point.cpu) || !Wall(point.wall_after)) return false;
     if (point.wall_after >= point.wall_before) return true;
@@ -291,9 +314,13 @@ void Session::Poll(u64 now, Common::UberharActivity::Snapshot activity) noexcept
     else ++summary.waiting_batches;
 }
 
+// CodexAstraLocal: Count unsupported CPU batches separately from eligible draws;
+// absence from the selected cohort must not imply that these draws did not occur.
 void Session::Unsupported() noexcept {
     if (Polling()) ++summary.unsupported_batches;
 }
+// CodexAstraLocal: Reserve one contiguous range after the phase/window/period
+// gates, charging both its timed inputs and the full selected draw's work.
 std::optional<Range> Session::Select(const Draw& draw) noexcept {
     if (!Polling()) return {};
     ++summary.eligible_batches;
@@ -346,6 +373,8 @@ bool Session::Calibrate() noexcept {
     return true;
 }
 
+// CodexAstraLocal: Revalidate identity at the actual range boundary after any
+// untimed prefix; calibration stays outside the retained chunk and runs only once.
 bool Session::Begin(Common::UberharActivity::Snapshot activity) noexcept {
     if (!Polling() || current >= summary.records || !Owner()) return false;
     auto& row = records[current];
@@ -379,6 +408,8 @@ void Session::Mark(Stage stage) noexcept {
     row.stage_ns[index] += now - last_mark;
     last_mark = now;
 }
+// CodexAstraLocal: Keep actual FIFO and transport counts even after a clock
+// failure, allowing completed rendering to remain distinct from valid timing.
 void Session::Input(bool hit) noexcept {
     if (current >= summary.records) return;
     auto& row = records[current];
@@ -389,6 +420,8 @@ void Session::InputRoute(bool fused) noexcept {
     if (current < summary.records)
         ++(fused ? records[current].fused_misses : records[current].legacy_misses);
 }
+// CodexAstraLocal: Finish the original range normally, then retain completeness,
+// phase stability and window overhang separately instead of censoring its draw.
 void Session::End(Common::UberharActivity::Snapshot activity) noexcept {
     if (current >= summary.records) return;
     auto& row = records[current];
@@ -409,10 +442,15 @@ void Session::End(Common::UberharActivity::Snapshot activity) noexcept {
                      summary.reserved_vertices == config.max_vertices))
         Fail(Stop::Budget);
 }
+// CodexAstraLocal: Teardown closes only still-active selection, preserving an
+// earlier clock, identity, phase or budget reason for the final report.
 void Session::Close() noexcept {
     if (Polling()) Fail(Stop::Teardown);
 }
 
+// CodexAstraLocal: Publish raw endpoints, counts and validity flags without
+// subtracting calibration or extrapolating the cohort. Preserve partial records
+// for reader exclusion; a bounded-format failure cannot escape normal teardown.
 std::optional<std::size_t> Session::Serialize(std::span<char> bytes) const noexcept {
     try {
         if (config.mode != Mode::Boundary && config.mode != Mode::Detailed) return {};
@@ -524,5 +562,7 @@ void Session::Export() noexcept {
         }
     }
 }
+// CodexAstraLocal: Bound retained session storage plus the temporary export buffer
+// together, rather than accounting for only the serialized report bytes.
 static_assert(sizeof(Session) + MaxOutputBytes < 128 * 1024);
 } // namespace Pica::VertexTiming

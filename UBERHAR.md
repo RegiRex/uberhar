@@ -7,6 +7,35 @@ Baseline: Azahar 2126.1.2, commit
 
 ## Current status
 
+<!-- CodexAstraLocal: Replace the stale .24 current snapshot with exact installed and candidate states; retain that snapshot below as history. -->
+**0.1.28 is published and installed; 0.1.29 is a locally validated candidate.**
+The candidate binds CPU shader execution once per eligible draw, preserving the
+existing generated program, live state, FIFO and assembly. Its focused regression
+and native integration/CTest gates and the full host probe pass; subsequent
+Android/shader/signing/publication gates remain separate. See the [candidate notes](docs/releases/0.1.29.md)
+and [live progress record](docs/UBERHAR_PROGRESS.md).
+
+Cold .28 Native, Combo and calculated openings averaged 28.424%, 21.799% and
+27.337% normal speed in their bounded measured windows. Calculated selected zero
+compute draws and used Native fallback throughout. Different scene mixtures do
+not establish a mode speedup. The target is sustained **99%+** with a 100% limiter,
+correct graphics and complete draws, at 2x before 4x. Reset File 1 and the tested
+title's shader cache for every opening; preserve other saves and app data.
+
+Seven isolated one-frame moon events in the calculated clip cross the owner's
+occurrence threshold and are under bounded investigation; ghost disturbances
+remain independently scored. Expected gameplay memory growth is acceptable;
+focus on continuing growth/pressure rather than requiring an exit sweep every run.
+One agent owns the Thor. The bottom panel stays off outside needed game testing.
+
+The full-review anchor is **0.1.26**, with two successful successors (.27/.28).
+Audit architecture and code cleanliness separately after the third successful
+successor. Continue toward evidence-qualified 0.2.0 under the corrected autonomous
+handoff; no old four-hour stop or publication hold applies. All releases remain
+gated in `RegiRex/uberhar`, with no signing bypass or universal qualification claim.
+
+## Archived 0.1.24 status snapshot
+
 <!-- CodexAstraLocal: Supersede the earlier pending mode-4 and bounded-batch snapshot with the reviewed 0.1.24 candidate and actual validation, while retaining historical authorship below. -->
 **0.1.24 is a reviewed candidate; Android release gates and Thor testing are
 pending.** The installed release remains 0.1.23. The new narrow GPU-output guard

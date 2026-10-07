@@ -1434,7 +1434,10 @@ void PicaCore::LoadVertices(bool is_indexed, std::chrono::steady_clock::time_poi
             u64 escaped_input_vertices = 0;
             // AstraEH: Compile out per-vertex clocks from ordinary batches. A sampled
             // vertex partitions input loading, shader execution and output conversion.
-            const auto shade = [&]<bool Sample>(u32 vertex, u32 index) {
+            // CodexAstraLocal: Share input/output source while specializing only
+            // the ordinary call policy. No FIFO, state-carry or transport behavior changes.
+            const auto shade_with_run = [&]<bool Sample>(u32 vertex, u32 index,
+                                                         const auto& run_shader) {
                 using Clock = NativeVertexSamples::Clock;
                 Clock::time_point start, loaded, shaded;
                 if constexpr (Sample)
@@ -1449,7 +1452,7 @@ void PicaCore::LoadVertices(bool is_indexed, std::chrono::steady_clock::time_poi
                 }
                 if constexpr (Sample)
                     loaded = Clock::now();
-                shader_engine->Run(vs_setup, shader_unit);
+                run_shader(shader_unit);
                 if constexpr (Sample)
                     shaded = Clock::now();
                 auto output = plan.Convert(shader_unit);
@@ -1470,6 +1473,21 @@ void PicaCore::LoadVertices(bool is_indexed, std::chrono::steady_clock::time_poi
             const auto submit = [&](const OutputVertex& output) {
                 primitive_assembler.SubmitVertex(output, triangle);
             };
+            // CodexAstraLocal: Resolve only positive, eligible draws after the
+            // existing SetupBatch. Contexts borrow code and live uniforms strictly
+            // within this synchronous draw; fallback preserves inherited Run.
+            const auto context = pipeline.num_vertices
+                ? shader_engine->BindForDraw(vs_setup) : ShaderRunContext{};
+            const auto run_inherited = [&](ShaderUnit& state) {
+                shader_engine->Run(vs_setup, state);
+            };
+            const auto run_prepared = [&](ShaderUnit& state) { context.Run(state); };
+            const auto inherited_shade = [&]<bool Sample>(u32 vertex, u32 index) {
+                return shade_with_run.template operator()<Sample>(vertex, index, run_inherited);
+            };
+            const auto prepared_shade = [&]<bool Sample>(u32 vertex, u32 index) {
+                return shade_with_run.template operator()<Sample>(vertex, index, run_prepared);
+            };
             NativeVertexCounts counts;
             const u64 samples = native_samples.misses + native_samples.hits;
             native_batch_sampled = native_sample_budget.Admit(batch_start, pipeline.num_vertices);
@@ -1480,6 +1498,24 @@ void PicaCore::LoadVertices(bool is_indexed, std::chrono::steady_clock::time_poi
                     pipeline.num_vertices, static_cast<u32>(regs.internal.vs.max_input_attribute_index) + 1,
                     static_cast<u32>(primitive_assembler.GetTopology()), is_indexed, input_plan.Ready()});
             }
+            // CodexAstraLocal: Instrumented paths share one compiled loop via
+            // an allocation-free adapter selected once per draw. They execute
+            // the same prepared call when available, retaining live state. Their
+            // shader wall spans include this extra adapter call; never subtract
+            // that cost or treat sparse timings as uninstrumented workload shares.
+            using DiagnosticCall = void (*)(const ShaderEngine&, const ShaderSetup&,
+                                             const ShaderRunContext&, ShaderUnit&);
+            const DiagnosticCall diagnostic_call = context
+                ? +[](const ShaderEngine&, const ShaderSetup&, const ShaderRunContext& call,
+                      ShaderUnit& state) { call.Run(state); }
+                : +[](const ShaderEngine& engine, const ShaderSetup& setup,
+                      const ShaderRunContext&, ShaderUnit& state) { engine.Run(setup, state); };
+            const auto run_diagnostic = [&](ShaderUnit& state) {
+                diagnostic_call(*shader_engine, vs_setup, context, state);
+            };
+            const auto diagnostic_shade = [&]<bool Sample>(u32 vertex, u32 index) {
+                return shade_with_run.template operator()<Sample>(vertex, index, run_diagnostic);
+            };
             if (timing_range) {
                 // CodexAstraLocal: Preserve the old sparse-admission cadence but
                 // suppress its whole batch consistently in boundary/detail modes.
@@ -1487,8 +1523,9 @@ void PicaCore::LoadVertices(bool is_indexed, std::chrono::steady_clock::time_poi
                 vertex_timing->SuppressSparse(native_batch_sampled);
                 native_batch_sampled = false;
                 // CodexAstraLocal: Only the explicit diagnostic route exposes
-                // separate callbacks. The inherited ordinary shade body above
-                // remains unchanged, and both routes call the same input plans.
+                // separate callbacks. Both routes retain the same input plans.
+                // CodexAstraLocal: The shader callback now uses the prepared or
+                // inherited adapter selected for this draw; its overhead is measured.
                 const auto load_input = [&](u32 vertex, u32 index) {
                     const bool fused = input_plan.CanLoad(vertex);
                     if (fused) {
@@ -1502,7 +1539,7 @@ void PicaCore::LoadVertices(bool is_indexed, std::chrono::steady_clock::time_poi
                     return fused;
                 };
                 counts = RunTimedNativeVertexBatch(pipeline.num_vertices, is_indexed, vertex_at,
-                    load_input, [&] { shader_engine->Run(vs_setup, shader_unit); },
+                    load_input, [&] { run_diagnostic(shader_unit); },
                     [&] { return plan.Convert(shader_unit); }, submit, *vertex_timing, *timing_range);
             } else if (native_batch_sampled) {
                 // AstraEH: Include loader/JIT/map setup before the loop without timing every draw.
@@ -1512,13 +1549,18 @@ void PicaCore::LoadVertices(bool is_indexed, std::chrono::steady_clock::time_poi
                 const u32 sample_index =
                     (static_cast<u32>(samples + 1) * 2654435761U) % pipeline.num_vertices;
                 counts = RunNativeVertexBatch<true>(pipeline.num_vertices, is_indexed, vertex_at,
-                                                    shade, submit, native_samples, sample_index);
+                                                    diagnostic_shade, submit, native_samples, sample_index);
                 ++native_samples.batches;
                 native_samples.batch_inputs += pipeline.num_vertices;
                 native_samples.batch_invocations += counts.invocations;
+            } else if (context) {
+                // CodexAstraLocal: Ordinary loops have no adapter or per-miss
+                // policy branch; choose the complete FIFO specialization once.
+                counts = RunNativeVertexBatch<false>(pipeline.num_vertices, is_indexed, vertex_at,
+                                                     prepared_shade, submit, native_samples);
             } else {
                 counts = RunNativeVertexBatch<false>(pipeline.num_vertices, is_indexed, vertex_at,
-                                                     shade, submit, native_samples);
+                                                     inherited_shade, submit, native_samples);
             }
             // AstraPro: Separate recovered invocation coverage from batch counts.
             if (rescued_input)

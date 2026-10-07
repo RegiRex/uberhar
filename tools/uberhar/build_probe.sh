@@ -119,6 +119,9 @@ python3 tools/uberhar/test_gpu_output_guard.py
 # CodexAstraLocal: Exercise actual JIT and production-generated ordered dots;
 # shader CI separately verifies mixed depth coverage and both SPIR-V policies.
 python3 tools/uberhar/test_gpu_dot_depth.py
+# CodexAstraLocal: Execute real draw-local dispatch, FIFO/state carry and the
+# extracted diagnostic call sites with profiler disabled and enabled.
+python3 tools/uberhar/test_shader_draw_context.py
 
 # AstraEH: Exact CPU cache/stack behavior and safe generic-module reuse gate the next build.
 c++ -std=c++20 -O2 -Isrc -Iexternals/boost tools/uberhar/test_vertex_runtime.cpp \

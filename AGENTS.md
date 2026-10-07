@@ -1,5 +1,39 @@
 # Uberhar development instructions
 
+<!-- CodexAstraLocal: The owner expands the current .28 controls to include calculated rendering. -->
+- Add a calculated-mode (mode 2) Dark Moon cold opening baseline alongside
+  Native and full Combo, using the same File 1/cache reset, Vulkan 2x and 100%
+  limiter. Report actual computed and fallback draw coverage; zero compute draws
+  cannot establish general 3D compute performance. This explicitly expands the
+  earlier Native/Combo-only comparison scope.
+
+<!-- CodexAstraLocal: The owner turns off the bottom Thor panel between games to reduce screen wear. -->
+- Keep the bottom screen off outside games. Enable it during a game only when
+  testing needs it; avoid implicit global wake commands during idle navigation.
+  Record actual panel state with conditions because changed display use can affect
+  comparisons. Do not assume an unverified display-power API controls one panel.
+
+<!-- CodexAstraLocal: The owner accepts isolated one- or two-frame loading flashes; retain honest counts and separate longer ghost disturbances. -->
+- Record isolated one-frame moon flashes as reference data, without prioritizing
+  investigation. In comparable opening captures, make them a fix priority if
+  there are more than five occurrences, any event exceeds two consecutive frames,
+  or at least three events each last two or more frames. Track counts and durations
+  across updates; these thresholds do not waive separate ghost-corruption review
+  or qualify unobserved scenes. Retain decoded-frame and capture-scope limits.
+
+<!-- CodexAstraLocal: The owner requires independent code-cleanliness and purpose-comment review alongside each architecture audit. -->
+- At each full audit, assign separate architecture/correctness and code-cleanliness
+  reviewers. The latter checks purpose comments for every changed logical section,
+  traces computed results to actual consumers, and identifies dead paths, redundant
+  preparation and unnecessary runtime work, especially in hot loops. Intentional
+  diagnostics and safeguards require a documented purpose. Remove work only after
+  proving it unnecessary under supported configurations and validating behavior;
+  do not confuse missing timing evidence with a proven performance cost.
+- CodexAstraLocal: Every code change must be covered by an adjacent
+  `CodexAstraLocal` purpose comment, including why replaced behavior changes.
+  Preserve existing author markers; keep comment-free data formats valid and
+  explain their changes in the accompanying code map or documentation.
+
 <!-- CodexAstraLocal: The owner's October 7 performance and memory update supersedes earlier stricter throughput wording and per-run cleanup sampling. -->
 - Target sustained **99% or better normal emulation speed** with the limiter at
   100%, correct graphics and zero skipped draws on cold application caches.

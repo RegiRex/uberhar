@@ -14,18 +14,24 @@ import time
 import unittest
 from unittest.mock import patch
 
+# CodexAstraLocal: Load the actual adjacent probe so the fake transport exercises
+# production validation, rather than a duplicate implementation of its decisions.
 HERE = Path(__file__).resolve().parent
 SPEC = importlib.util.spec_from_file_location("device_probe", HERE / "device_probe.py")
 PROBE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(PROBE)
 
 
+# CodexAstraLocal: Bind only an ephemeral loopback fixture; no request reaches a
+# real ADB daemon or connected device, including authorization-failure tests.
 class FakeAdbServer(socketserver.ThreadingTCPServer):
     # CodexAstraUlt: Ephemeral loopback test port cannot replace the user's real ADB server.
     allow_reuse_address = True
     daemon_threads = True
 
 
+# CodexAstraLocal: Model the limited length-prefixed transport and record every
+# requested service, making unexpected device reads visible to the assertions.
 class Handler(socketserver.BaseRequestHandler):
     def read_service(self):
         header = self.request.recv(4)
@@ -65,6 +71,8 @@ class Handler(socketserver.BaseRequestHandler):
             pass  # CodexAstraUlt: Expected when the bounded client rejects a timeout/oversized reply.
 
 
+# CodexAstraLocal: Each case owns its fake executable, response bank and server;
+# teardown restores PATH and releases the fixture even after an assertion fails.
 class DeviceProbeTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
@@ -100,9 +108,13 @@ class DeviceProbeTests(unittest.TestCase):
         self.environment.stop()
         self.temporary.cleanup()
 
+    # CodexAstraLocal: Inject the fixture port while retaining real probe code,
+    # serial selection and timeout handling.
     def run_probe(self, serial=None, timeout=.5):
         return PROBE.probe(serial, timeout, PROBE.LocalAdb(timeout, self.server.server_address[1]))
 
+    # CodexAstraLocal: Readiness must expose only validated public metadata and
+    # the small read allowlist, excluding unrelated package dump details.
     def test_ready_and_only_allowlisted_reads(self):
         report = self.run_probe()
         self.assertEqual(report["status"], "ready")
@@ -113,6 +125,8 @@ class DeviceProbeTests(unittest.TestCase):
                             ("host:devices-l", "host:transport:THOR123")
                             for service in self.server.services))
 
+    # CodexAstraLocal: Authorization and ambiguous/wrong serials must stop before
+    # opening a device transport; explicit selection may choose the authorized one.
     def test_unauthorized_device_never_queries_phone(self):
         self.server.listing = "THOR123\tunauthorized\n"
         self.assertEqual(self.run_probe()["reason"], "device_unauthorized")
@@ -132,6 +146,8 @@ class DeviceProbeTests(unittest.TestCase):
         self.assertEqual(self.run_probe("OTHER")["reason"], "serial_not_found")
         self.assertEqual(self.server.services, ["host:devices-l"])
 
+    # CodexAstraLocal: Installation and version availability are separate gates;
+    # neither an absent package nor missing version text may invent readiness.
     def test_missing_package(self):
         self.server.replies["shell:pm list packages " + PROBE.PACKAGE] = ""
         report = self.run_probe()
@@ -143,6 +159,8 @@ class DeviceProbeTests(unittest.TestCase):
         self.server.replies["shell:dumpsys package " + PROBE.PACKAGE] = "unavailable\n"
         self.assertEqual(self.run_probe()["reason"], "package_version_unavailable")
 
+    # CodexAstraLocal: Bound both socket and executable-version waits, and retain
+    # explicit missing-tool/permission/device reasons instead of attempting repair.
     def test_socket_timeout_is_bounded(self):
         self.server.delay = .4
         start = time.monotonic()
@@ -166,6 +184,8 @@ class DeviceProbeTests(unittest.TestCase):
         self.server.listing = ""
         self.assertEqual(self.run_probe()["reason"], "no_devices")
 
+    # CodexAstraLocal: Reject oversized or control-bearing metadata and unsafe
+    # serial input before it can reach a report or an unintended command.
     def test_oversized_device_output_is_rejected(self):
         self.server.replies["shell:getprop ro.product.model"] = "X" * (PROBE.MAX_OUTPUT + 1)
         self.assertEqual(self.run_probe()["reason"], "output_limit")
@@ -178,6 +198,8 @@ class DeviceProbeTests(unittest.TestCase):
         self.assertEqual(self.run_probe("bad; command")["reason"], "invalid_serial")
         self.assertEqual(self.server.services, [])
 
+    # CodexAstraLocal: Optional report persistence is create-only; failure must
+    # report the conflict while preserving the owner's existing evidence bytes.
     def test_optional_report_preserves_existing_file(self):
         path = Path(self.temporary.name) / "report.json"
         path.write_text("keep me")
@@ -189,5 +211,6 @@ class DeviceProbeTests(unittest.TestCase):
         self.assertEqual(path.read_text(), "keep me")
 
 
+# CodexAstraLocal: Direct execution runs only the isolated host unittest suite.
 if __name__ == "__main__":
     unittest.main(verbosity=2)

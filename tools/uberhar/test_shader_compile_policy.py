@@ -10,6 +10,8 @@ from pathlib import Path
 import subprocess
 
 
+# CodexAstraLocal: Extract the real queued job and its frozen option preparation;
+# an older source can therefore fail the same behavioral policy assertions.
 def job(source: str, signature: str, indent: str, options: bool) -> str:
     start = source.index(signature)
     queue = source.index("parent.shader_workers.QueueWork(", start)
@@ -20,6 +22,8 @@ def job(source: str, signature: str, indent: str, options: bool) -> str:
     return source[option if options and option >= 0 else queue:end]
 
 
+# CodexAstraLocal: Recording compiler/device doubles defer execution explicitly
+# and expose success/failure publication without claiming a real driver result.
 HEADER = r'''
 #include <atomic>
 #include <chrono>
@@ -95,6 +99,8 @@ struct Cache {
         auto& shader = output; const vk::Device device = 1; const u64 spirv_id = 7;
 '''
 
+# CodexAstraLocal: Exercise all stages, optional/required routes, optimizer values,
+# compile outcomes and intervening setting changes through the extracted jobs.
 TESTS = r'''
 };
 void Check(bool value, const char* why) { if (!value) throw std::runtime_error(why); }
@@ -147,6 +153,8 @@ int main() {
 '''
 
 
+# CodexAstraLocal: Compile those production job bodies into the host fixture and
+# fail on compiler or assertion errors; generated shader validation is a separate gate.
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--source", type=Path,
@@ -175,5 +183,6 @@ def main() -> None:
     subprocess.run([str(args.output)], check=True)
 
 
+# CodexAstraLocal: Keep direct invocation suitable for the existing probe gate.
 if __name__ == "__main__":
     main()

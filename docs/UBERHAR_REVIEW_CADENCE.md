@@ -13,12 +13,21 @@ ownership/failure debts remain explicit in the audit.
 
 <!-- CodexAstraLocal: Count the actual successful .27 release as one successor; focused delivery review does not reset the full audit anchor. -->
 The new source-audit anchor is **0.1.26**. Gated **0.1.27 is successor one**.
-<!-- CodexAstraLocal: Focused .28 review does not prematurely increment the completed-build count or reset the full audit. -->
-Implemented **0.1.28** passes focused independent review, full host probes and
-native integration/CTest. Release gates are next; it counts as successor two after successful
-delivery. Its shared exact-output transport requires Native and Combo tests.
+<!-- CodexAstraLocal: Count verified gated delivery without treating focused review or incomplete device acceptance as a full architecture audit. -->
+Gated **0.1.28 is successor two**: all shader, Android, signing and publication
+checks passed, published assets were verified, and the compatible data-preserving
+upgrade installed. Cold Native and Combo controls completed at 28.424% and
+21.799% mean normal speed; unlike scene mixtures cannot prove a speedup. The
+owner-requested calculated baseline completed at 27.337%, with zero computed draws
+and complete Native fallback. The source-audit anchor remains
+0.1.26; focused control/comment reviews do not reset it.
 The next full audit remains due after the third successful successor (.29 if
 numbering continues).
+<!-- CodexAstraLocal: Record focused .29 review and local gates without prematurely advancing the successful-build audit count. -->
+The .29 per-draw shader-call candidate passes independent source review, real
+production regression, native integration/CTest and the complete host probe.
+Release gates and Native/Combo cold device tests remain separate; the full
+three-successor audit stays due after successful .29 delivery.
 Continue the owner's audit every three completed successor builds,
 or sooner when evidence contradicts an architectural assumption or two candidates
 produce neither improvement nor useful discrimination. Existing-build tests,

@@ -9,7 +9,7 @@
 #include "common/settings.h"
 #include "common/static_lru_cache.h"
 #include "common/zstd_compression.h"
-#include "video_core/renderer_vulkan/uberhar_shader_compile_policy.h"
+#include "video_core/renderer_vulkan/uberhar_shader_compile_policy.h" // CodexAstraLocal: Freeze explicit worker compile options.
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_pipeline_cache.h"
 #include "video_core/renderer_vulkan/vk_shader_disk_cache.h"
@@ -176,6 +176,9 @@ std::optional<std::pair<u64, Shader* const>> ShaderDiskCache::UseProgrammableVer
             // CodexAstraUlt: Replace the inherited mutable/global compiler choice for
             // this queued job with a frozen option. Only ready-only VS jobs optimize;
             // their renderer-scoped maps never load/write Custom's vkch files (Init).
+            // CodexAstraLocal: Capture the resolved option before queueing so a later
+            // settings change cannot alter this module. Required VS jobs still use
+            // their requested setting; readiness/failure handling remains below.
             const bool disable_optimizer =
                 DisableShaderOptimizer(ready_only, parent.profile.vk_disable_spirv_optimizer != 0);
             if (ready_only)
@@ -340,6 +343,9 @@ std::optional<std::pair<u64, Shader* const>> ShaderDiskCache::UseReadyFragmentSh
             // CodexAstraUlt: Replace AstraPro's inherited generic-latency compiler
             // option for this optional job. Full requested-profile equality still
             // guards the cache; every entry has this same fixed optimization policy.
+            // CodexAstraLocal: The cache entry owns this profile snapshot for the
+            // queued job. Apply the optional-only override to compilation, preserving
+            // profile identity and complete CPU fallback while the module is absent.
             const auto spirv = CompileGLSL(code, vk::ShaderStageFlagBits::eFragment, "",
                 DisableShaderOptimizer(true, profile.vk_disable_spirv_optimizer != 0));
             if (spirv.empty()) throw std::runtime_error("empty optional fragment module");
@@ -403,6 +409,9 @@ std::optional<std::pair<u64, Shader* const>> ShaderDiskCache::UseFixedGeometrySh
 
             // CodexAstraUlt: Replace mutable worker reads with the same frozen optional
             // policy as VS. Mandatory/Custom geometry jobs retain the requested option.
+            // CodexAstraLocal: Freeze clip-distance generation with the compiler
+            // option from the same producer-side profile; neither setting is read
+            // from the mutable parent when this delayed geometry job executes.
             const bool disable_optimizer =
                 DisableShaderOptimizer(ready_only, parent.profile.vk_disable_spirv_optimizer != 0);
             const bool use_clip_planes = parent.profile.has_clip_planes;
@@ -517,6 +526,8 @@ void ShaderDiskCache::ReportUberharStats(const char* kind) const {
     // AstraPro: Existing bounded cadence; counts don't imply GPU timings.
     // CodexAstraUlt Log Line: Retain bounded reporting and identify the effective optional
     // compiler policy separately from the generic/Custom requested optimizer setting.
+    // CodexAstraLocal Log Line: This fixed policy label describes optional jobs,
+    // not successful compilation, GPU memory savings or the global optimizer toggle.
     LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
              "Uberhar GPU shader admission {}: schema=1 vs_deferred={} vs_capped={} gs_capped={} "
              "failures={} max_vs_configs=128 max_gs_configs=128 "
