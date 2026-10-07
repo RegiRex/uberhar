@@ -19,6 +19,7 @@
 #include "video_core/pica/shader_unit.h"
 #include "video_core/pica/uberhar_vertex_plan_cache.h"
 #include "video_core/pica/uberhar_vertex_output.h" // AstraEH: Prepared native output and sparse samples.
+#include "video_core/pica/uberhar_vertex_timing.h" // CodexAstraLocal: Finite opt-in CPU chunks.
 
 // AstraPro: A shared typed admission query lets Vulkan recheck the real PICA
 // assembler/debugger state, rather than substituting assumed-safe booleans.
@@ -458,6 +459,9 @@ private:
     // AstraEH: Host-only admission state; ordinary batches add no diagnostic clock reads.
     NativeVertexSampleBudget native_sample_budget;
     bool native_batch_sampled{};
+    // CodexAstraLocal: Loaded once only for Combo modes; host observations never
+    // enter a save state, another title, or the ordinary Native/Custom runner.
+    std::unique_ptr<VertexTiming::Session> vertex_timing;
     u64 native_vertex_batches{}, native_vertex_inputs{}, native_vertex_conversions{},
         native_vertex_reuses{}, native_mapping_fallbacks{}, native_geometry_fallbacks{},
         native_debug_fallbacks{};

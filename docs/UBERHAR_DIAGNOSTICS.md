@@ -1,6 +1,33 @@
 <!-- AstraEH: Bounded troubleshooting and removal map for the hybrid renderer. -->
 # Renderer diagnostics, schema 17
 
+<!-- CodexAstraLocal: Document the complete-chunk observer separately from ordinary sparse logs so readers cannot expand its selected population to the full workload. -->
+## Finite CPU vertex timing (0.1.27 candidate)
+
+An absent `config/uberhar_vertex_timing.json` keeps this diagnostic off.
+Only Combo/ComboGeneric may load it. A validated title-specific request and a
+new explicit Gameplay transition enable one bounded window. Boundary-only and
+detailed modes preserve full draws, FIFO order and register carry; selected draws
+use a separate runner with one continuous cache across prefix/chunk/suffix.
+Larger-than-4,096-input draws retain the ordinary runner. At most 64 chunks,
+4,096 measured inputs and 262,144 selected full-draw inputs are covered.
+
+Normal exit retains one exclusive report of at most 64 KiB under
+`dump/uberhar_vertex_timing/`. It includes source/version, clock brackets, raw
+calibration, actual lookup/hit/miss/load-route/assembly counts and stop/coverage
+status. No guest shader, uniform or vertex payload is recorded. Detailed stage
+durations are instrumented wall time; only chunk endpoints read the owning
+thread's CPU clock. Reported zero interior durations in boundary mode are
+unmeasured, not free operations. The reader exposes them as null.
+
+Selected draws suppress any overlapping old sparse sample. Off/on controls
+measure the net observer change, including suppression and different loop code
+across that full draw. Matching seed/delay alone does not match guest work:
+async readiness can change which CPU draws are eligible. Compare actual
+program/entry/count/route coverage and scene evidence. Never extrapolate timing
+to unseen work, subtract calibration as truth or rename wall-minus-CPU as GPU
+time. See the [protocol and independent reader](../tools/uberhar/VERTEX_TIMING.md).
+
 <!-- CodexAstraLocal: A separate private diagnostic protocol does not increment the ordinary health/log schema or create a periodic capture stream. -->
 ## Opt-in vertex capture (0.1.25)
 

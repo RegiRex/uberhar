@@ -32,13 +32,21 @@ gameplay remain unqualified. The retained
 including the 2x FEA baseline, exact output and profiling-supported architecture,
 is not waived by audit completion.
 
-<!-- CodexAstraLocal: Select only a finite existing-build measurement; denied perf access does not authorize a platform-control workaround or an unmeasured renderer change. -->
-The next discriminator uses the installed .26 with fresh File 1/cache preparation:
-two ten-second moon/early-ghost windows with finite `/proc` process/thread CPU
-endpoint readings and no video. Retain PID/TID/starttime identity, observed
-USER_HZ, actual timestamps and missing-thread coverage. This can separate broad
-thread CPU costs; it cannot split loader/JIT/assembly within one thread or measure
-blocked/GPU time. No renderer optimization or new .27 build is selected.
+<!-- CodexAstraLocal: Advance from completed finite installed-build observations to a narrowly scoped measurement candidate after both external profiling routes proved unusable. -->
+The finite installed-.26 thread-counter experiment completed on another cold
+opening. Its 34 complete timing windows average 22.863%; main-thread CPU deltas
+of 9.80 and 6.43 seconds were observed over approximately ten-second intervals.
+Endpoint-query skew and uncertain scene boundaries prevent precise rates or
+function attribution. A one-second idle scheduler-trace check then hit a fatal
+vendor-event parser incompatibility in the stock producer and yielded no events;
+the producer restarted. Do not retry unchanged ftrace initialization.
+
+The next candidate, **0.1.27, passed implementation, focused review and local
+validation; delivery/device gates remain pending**. It adds default-off
+bounded timing of complete contiguous CPU vertex chunks, with boundary-only and
+detailed controls, exact coverage and explicit observer limits. It is a
+discriminator, not a renderer optimization or achieved speedup. A prospective
+version does not increment the completed-build count or reset this audit anchor.
 The `simpleperf stat` attempt was denied; root restored its internally changed
 `security.perf_harden` property from 0 to the original 1 and verified the result
 at 08:26:47 UTC. Do not repeat that tool or weaken platform controls.

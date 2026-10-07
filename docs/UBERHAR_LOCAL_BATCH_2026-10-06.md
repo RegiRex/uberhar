@@ -1,7 +1,7 @@
 # Local autonomous batch — October 6, 2026
 
 <!-- CodexAstraLocal: Advance the durable resume point only after exact .26 delivery, two cold runs and the required integrated three-build audit have completed. -->
-## Current checkpoint — 0.1.26 audit complete, October 7 UTC
+## Current checkpoint — 0.1.27 locally validated, October 7 UTC
 
 Released source **`e83e8f4f1738d4883829cc06689ce1ab075a5ac0`** passed all shader,
 Android/package/signing and publication gates in
@@ -41,23 +41,42 @@ the first prelaunch status was not charging, then both runs' gameplay samples
 reported charging. Battery temperature was 25 C in the first run, 26 C during
 the second and 27 C after its return. SoC thermal headroom remains unknown.
 
-<!-- CodexAstraLocal: The next authorized work measures broad CPU costs on the existing APK without selecting an optimization or weakening denied perf-event controls. -->
-## Next discriminator on the installed build
+<!-- CodexAstraLocal: Record the completed installed-build discriminator and failed platform tracing capability before selecting the next finite app diagnostic. -->
+## Completed discriminator and next candidate
 
-Root remains the only device operator. Reset File 1 and the title's saved Vulkan
-cache for another cold opening, verify Empty and zero application-cache files,
-and use two finite ten-second moon/early-ghost windows without video. Collect
-bounded `/proc` process/thread CPU endpoint counters with actual timestamps,
-PID/TID/starttime identity, observed USER_HZ and missing-thread coverage. Compare
-ordinary timing with the retained cold evidence while preserving scene and
-observation-overhead limits. Thread CPU totals cannot split loader/JIT/assembly
-within one thread or measure blocked/GPU time. No renderer optimization, new
-instrumentation or .27 implementation has been selected.
+The third cold .26 opening completed without video: 34 complete timing windows
+average 22.863%, with zero named skipped/failure counters and KGSL 13.39 MiB
+after normal return. Two finite thread-counter intervals retained stable identities
+for all 59 observed threads. Main-thread CPU deltas were 9.80 and 6.43 seconds;
+the roughly ten-second intervals have substantial sequential-query skew and no
+exclusive-scene proof. They establish CPU work, not JIT/loader/assembly shares.
+One memory reading overlapped the later interval and remains part of its observer
+conditions. This run adds no new graphics claim or matched speedup.
+
+The approved six-document .26 audit checkpoint was published as `69c4723a5`.
+After resumption, a one-second idle scheduler capability check produced only
+metadata. The stock tracing producer fatally rejected a vendor f2fs field format
+while initializing its known-event table, before applying scheduler-only filters;
+it restarted automatically. No game was running. Changing trace events or buffers
+cannot bypass that initialization defect; no further unchanged trace is planned.
+
+**0.1.27 source is implemented, independently reviewed and locally validated:**
+optional bounded complete vertex-chunk
+timing, with owner-thread CPU/wall boundaries and a detailed operation mode.
+Boundary-only and request-free controls will expose net measurement effects.
+Actual chunk counts and coverage remain explicit; sparse timings will not be
+expanded into workload shares. Rendering semantics and normal diagnostic-off
+behavior remain the constraints. No .27 APK, optimization or speed gain exists
+at this checkpoint. The production suite passed 5,833 checks, seven actual report
+roundtrips and eight reader methods; full host probes, native integration and
+CTest passed with five existing firmware skips. Delivery/device gates remain
+separate. Root remains the sole device operator; other agents implement
+and independently review source and evidence.
 
 The actual `simpleperf stat` attachment was denied. Its capability invocation
 changed `security.perf_harden` from 1 to 0; root restored the original 1 and
 verified it at **08:26:47 UTC**. Do not repeat that tool or weaken platform
-controls. No new APK is needed for the selected endpoint measurement.
+controls. The original property value was reverified after resumption.
 
 Continue toward 0.2.0 with full audits after every three completed successor
 builds, not the superseded four-hour stop. Sustained normal speed and broader

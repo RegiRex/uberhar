@@ -35,6 +35,10 @@ add_library(video_core STATIC EXCLUDE_FROM_ALL
     pica/uberhar_vertex_cache.h
     pica/uberhar_vertex_output.h # AstraEH: Prepared native output and bounded CPU samples.
     pica/uberhar_vertex_plan_cache.h # AstraPro: Value-only Native mapping reuse.
+    # CodexAstraLocal: Default-off finite owner-CPU/contiguous-loop observation.
+    pica/uberhar_vertex_timing.h
+    pica/uberhar_vertex_timing.cpp
+    pica/uberhar_vertex_timing_batch.h
     pica/output_vertex.cpp
     pica/output_vertex.h
     pica/primitive_assembly.cpp
@@ -241,6 +245,18 @@ if (ENABLE_VULKAN)
     set_source_files_properties(renderer_vulkan/vk_vertex_capture.cpp PROPERTIES
         COMPILE_DEFINITIONS "UBERHAR_CAPTURE_VERSION=\"${UBERHAR_CAPTURE_VERSION}\"")
 endif()
+
+# CodexAstraLocal: CPU diagnostics also compile without Vulkan. Preserve the
+# capture version stamp while giving this independent owner its own source define.
+file(READ "${CMAKE_SOURCE_DIR}/UBERHAR_VERSION" UBERHAR_TIMING_VERSION LIMIT 64)
+string(STRIP "${UBERHAR_TIMING_VERSION}" UBERHAR_TIMING_VERSION)
+if (NOT UBERHAR_TIMING_VERSION MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$")
+    message(FATAL_ERROR "Invalid UBERHAR_VERSION for vertex timing metadata")
+endif()
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${CMAKE_SOURCE_DIR}/UBERHAR_VERSION")
+set_source_files_properties(pica/uberhar_vertex_timing.cpp PROPERTIES
+    COMPILE_DEFINITIONS "UBERHAR_TIMING_VERSION=\"${UBERHAR_TIMING_VERSION}\"")
 
 if(ENABLE_SDL2)
     target_link_libraries(video_core PRIVATE SDL2::SDL2)

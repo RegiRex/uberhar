@@ -1,6 +1,24 @@
 <!-- AstraEH: Attribution index for the Uberhar implementation, tests, packaging and documentation. -->
 # Uberhar code map
 
+<!-- CodexAstraLocal: Index the finite opt-in CPU discriminator without attributing unmeasured work or changing the completed audit anchor. -->
+## 0.1.27 complete CPU vertex chunks
+
+| Files | Purpose and limits |
+| --- | --- |
+| `pica/uberhar_vertex_timing.cpp/.h` | One title-specific bounded sidecar, explicit phase arm, same-thread clock brackets, fixed record/input/time bounds, raw calibration and exclusive normal-exit report. No timer worker or signal handler. |
+| `pica/uberhar_vertex_timing_batch.h`, `pica_core.cpp/.h` | Separate enabled-Combo full-draw runner preserves one FIFO and shader/assembler state across prefix, measured chunk and suffix. Ordinary runner remains intact. Count actual hit/miss and fused/legacy inputs; suppress overlapping old sparse samples consistently. |
+| `src/video_core/CMakeLists.txt` | Compile the independent owner and stamp the fork version, including configurations without Vulkan. |
+| `tools/uberhar/vertex_timing.py`, `test_vertex_timing_reader.py`, `VERTEX_TIMING.md` | Independently validate bounded reports, exclude invalid/partial/phase-mixed/overhanging observations and retain only measured-population totals. Boundary/empty durations are unknown, and calibration is never subtracted. |
+| `test_vertex_timing.cpp/.py`, `build_probe.sh` | Actual collector and full-draw runner tests with injected clocks/provider faults, stateful indexed FIFO/output/assembly differentials and seven real writer-to-reader artifacts. Synthetic inputs only; host clocks do not measure Thor overhead. |
+
+See [candidate notes](releases/0.1.27.md) and the
+[current implementation and validation status](UBERHAR_PROGRESS.md). No graphics
+or speed improvement follows from adding this diagnostic. Its selected chunks
+exclude draw setup, other emulator CPU work and GPU time. Default-off behavior,
+actual operation parity and the existing release gates require validation before
+device use.
+
 <!-- CodexAstraLocal: Index the narrowly scoped mixed-route arithmetic correction and distinguish its host regression from unresolved title qualification. -->
 ## 0.1.26 ordered Combo DP4/DPH
 

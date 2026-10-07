@@ -13,11 +13,13 @@
 #include "common/uberhar_test_profile.h" // CodexAstraUlt: Shared Combo admission policy.
 #include "core/core.h"
 #include "core/memory.h"
+#include "core/loader/loader.h" // CodexAstraLocal: Bind the opt-in sidecar to this title.
 #include "video_core/debug_utils/debug_utils.h"
 #include "video_core/pica/pica_core.h"
 #include "video_core/pica/uberhar_vertex_cache.h" // AstraEH: Exact FIFO with indexed lookup.
 #include "video_core/pica/vertex_loader.h"
 #include "video_core/pica/uberhar_index_bounds.h" // AstraPro: Exact bounded retry.
+#include "video_core/pica/uberhar_vertex_timing_batch.h" // CodexAstraLocal: Separate diagnostic loop.
 #include "video_core/renderer_vulkan/uberhar_gpu_vertex_policy.h" // AstraPro: Pure admission.
 #include "video_core/rasterizer_interface.h"
 #include "video_core/shader/shader.h"
@@ -94,6 +96,20 @@ PicaCore::PicaCore(Memory::MemorySystem& memory_, std::shared_ptr<DebugContext> 
     geometry_pipeline.SetVertexHandler(submit_vertex);
 
     primitive_assembler.Reconfigure(PipelineRegs::TriangleTopology::List);
+
+    // CodexAstraLocal: Native/Custom never read this sidecar or construct clocks.
+    // PerfStats starts later, so actual run/thread identity binds at the first draw.
+    if (Settings::UsesReadyGpuVertices(Settings::values.uberhar_test_mode.GetValue())) {
+        try {
+            u64 title{};
+            if (Core::System::GetInstance().GetAppLoader().ReadProgramId(title) ==
+                Loader::ResultStatus::Success)
+                vertex_timing = VertexTiming::Session::Load(title, shader_engine->EngineName());
+        } catch (...) {
+            // CodexAstraLocal: Optional title lookup/provider failure cannot
+            // introduce a new failure of ordinary emulation initialization.
+        }
+    }
 }
 
 PicaCore::~PicaCore() {
@@ -1318,6 +1334,17 @@ void PicaCore::DrawArrays(bool is_indexed) {
 }
 
 void PicaCore::LoadVertices(bool is_indexed, std::chrono::steady_clock::time_point batch_start) {
+    // CodexAstraLocal: Reuse the existing batch wall timestamp; a terminal or
+    // absent owner performs no new clock or phase reads on the ordinary path.
+    if (vertex_timing && vertex_timing->Polling()) {
+        if (Settings::UsesReadyGpuVertices(Settings::values.uberhar_test_mode.GetValue())) {
+            const u64 now = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                batch_start.time_since_epoch()).count();
+            vertex_timing->Poll(now, Common::UberharActivity::Capture());
+        } else {
+            vertex_timing->PolicyChanged();
+        }
+    }
     // Read and validate vertex information from the loaders
     const auto& pipeline = regs.internal.pipeline;
     const PAddr base_address = pipeline.vertex_attributes.GetPhysicalBaseAddress();
@@ -1330,6 +1357,7 @@ void PicaCore::LoadVertices(bool is_indexed, std::chrono::steady_clock::time_poi
     if (index_address_8 == nullptr) {
         // Mario & Luigi: Superstar Saga sets an invalid base address
         // for the vertex attributes. Return early if that is the case.
+        if (vertex_timing) vertex_timing->Unsupported();
         return;
     }
     const u16* index_address_16 = reinterpret_cast<const u16*>(index_address_8);
@@ -1445,7 +1473,38 @@ void PicaCore::LoadVertices(bool is_indexed, std::chrono::steady_clock::time_poi
             NativeVertexCounts counts;
             const u64 samples = native_samples.misses + native_samples.hits;
             native_batch_sampled = native_sample_budget.Admit(batch_start, pipeline.num_vertices);
-            if (native_batch_sampled) {
+            std::optional<VertexTiming::Range> timing_range;
+            if (vertex_timing && vertex_timing->Polling()) {
+                timing_range = vertex_timing->Select({vs_setup.GetProgramCodeHash(),
+                    vs_setup.GetSwizzleDataHash(), regs.internal.vs.main_offset,
+                    pipeline.num_vertices, static_cast<u32>(regs.internal.vs.max_input_attribute_index) + 1,
+                    static_cast<u32>(primitive_assembler.GetTopology()), is_indexed, input_plan.Ready()});
+            }
+            if (timing_range) {
+                // CodexAstraLocal: Preserve the old sparse-admission cadence but
+                // suppress its whole batch consistently in boundary/detail modes.
+                // No old setup/vertex/draw counters receive partial new samples.
+                vertex_timing->SuppressSparse(native_batch_sampled);
+                native_batch_sampled = false;
+                // CodexAstraLocal: Only the explicit diagnostic route exposes
+                // separate callbacks. The inherited ordinary shade body above
+                // remains unchanged, and both routes call the same input plans.
+                const auto load_input = [&](u32 vertex, u32 index) {
+                    const bool fused = input_plan.CanLoad(vertex);
+                    if (fused) {
+                        input_plan.Load(shader_unit, input_default_attributes, vertex);
+                    } else {
+                        escaped_input_vertices += input_plan.Ready();
+                        AttributeBuffer input;
+                        loader.LoadVertex(base_address, index, vertex, input, input_default_attributes);
+                        plan.LoadInput(shader_unit, input);
+                    }
+                    return fused;
+                };
+                counts = RunTimedNativeVertexBatch(pipeline.num_vertices, is_indexed, vertex_at,
+                    load_input, [&] { shader_engine->Run(vs_setup, shader_unit); },
+                    [&] { return plan.Convert(shader_unit); }, submit, *vertex_timing, *timing_range);
+            } else if (native_batch_sampled) {
                 // AstraEH: Include loader/JIT/map setup before the loop without timing every draw.
                 native_samples.setup_ns +=
                     NativeVertexSamples::Nanoseconds(batch_start, std::chrono::steady_clock::now());
@@ -1487,6 +1546,8 @@ void PicaCore::LoadVertices(bool is_indexed, std::chrono::steady_clock::time_poi
         else
             ++native_geometry_fallbacks;
     }
+
+    if (vertex_timing) vertex_timing->Unsupported();
 
     // AstraEH: Preserve the original attribute cache and geometry pipeline for recovery.
     VertexCacheIndex vertex_index;

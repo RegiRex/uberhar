@@ -1,4 +1,37 @@
-# Uberhar progress — 0.1.26 repeated visual improvement; throughput unqualified
+# Uberhar progress — 0.1.27 locally validated; release/device gates pending
+
+<!-- CodexAstraLocal: Record the completed installed-build discriminator and its platform limit before developing an opt-in measurement candidate. -->
+The approved .26 audit checkpoint is published at
+[`69c4723a5`](https://github.com/RegiRex/uberhar/commit/69c4723a5d3c6784371d218c3026b298382a028f).
+A third cold .26 opening, without video, averaged **22.863%** over 34 complete
+timing windows. Two bounded thread-counter observations found the main emulation
+thread consumed 9.80 and 6.43 CPU seconds in approximately ten-second intervals;
+sequential query duration limits their time precision and neither interval proves
+an exclusive scene or a particular costly function. Normal-return KGSL was
+13.39 MiB. No new graphics conclusion follows from that profiling run.
+
+An idle one-second scheduler-trace capability check produced no scheduler data:
+the stock Android tracing producer crashed on an unsupported vendor f2fs event
+format before applying the requested scheduler-only filter, then restarted.
+The title was stopped throughout. Further ftrace retries and security changes
+are not part of this experiment. **0.1.27 source is implemented and independently
+reviewed**, with no APK or performance improvement claimed yet: a default-off,
+bounded diagnostic will
+measure complete vertex chunks, separate operation wall times from owner-thread
+CPU time, and provide lighter boundary-only controls for observer overhead.
+Unmeasured work will remain unknown; sparse vertex timings will not be expanded
+into workload shares. Rendering order, complete draws and cold-test requirements
+remain the acceptance constraints.
+
+The production diagnostic suite passed **5,833 checks**, with seven actual
+producer reports accepted/classified by the independent reader and eight reader
+test methods. The largest report is 44,714 bytes within its 65,536-byte cap.
+The full host probe suite and native integration build passed; all 67 CTest
+entries passed or retained their five existing firmware-dependent skips.
+Ordinary shader generation/cache identity and the original vertex runner remain
+unchanged. Existing shader, Android, package/signing and publication gates are
+still required before device installation. A completed .27 will be successor one
+after the .26 audit; its device observer cost remains unmeasured.
 
 <!-- CodexAstraLocal: Integrate two independent cold confirmations and the three-build audit while preserving limited visual coverage and unmet performance gates. -->
 All 0.1.26 shader, Android, package/signing and publication gates passed in
@@ -24,12 +57,11 @@ headroom remains unknown. See the [two-run report](UBERHAR_DEVICE_TEST_2026-10-0
 
 The [full .24–.26 architecture audit](UBERHAR_ARCHITECTURE_0.1.26.md) integrates
 parallel renderer, performance, delivery and visual review. Released .26 is the
-new source audit anchor; a completed .27 will be successor one. Existing-build
-finite thread CPU-counter observations are selected next, without video or new
-rendering changes, to distinguish the broad CPU vertex-stage cost before an
-optimization. The raw perf-event/stat access probe was denied; its internally changed
-security property was restored to its original value and verified. No new APK
-is needed for this next measurement. The 0.2.0 evidence gate, including the retained 2x FEA baseline,
+new source audit anchor; a completed .27 will be successor one. The installed-build
+thread-counter observation is complete, with the scope limits recorded above.
+The raw perf-event/stat access probe was denied; its internally changed security
+property was restored to its original value and verified. The 0.2.0 evidence gate,
+including the retained 2x FEA baseline,
 remains open. No 4x or broader-title qualification follows from this opening.
 
 ## Pre-publication implementation checkpoint

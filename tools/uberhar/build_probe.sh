@@ -131,6 +131,10 @@ c++ -std=c++20 -O2 -DFMT_HEADER_ONLY -Isrc -Iexternals/fmt/include -Iexternals/b
   src/video_core/pica/shader_unit.cpp src/video_core/pica/primitive_assembly.cpp \
   -o build/uberhar-probe/test-vertex-output
 build/uberhar-probe/test-vertex-output
+# CodexAstraLocal: Finite CPU observation must preserve the complete FIFO/carry
+# and assembler path under clock/phase failures; strict reports cannot invent time.
+python3 tools/uberhar/test_vertex_timing.py
+python3 tools/uberhar/test_vertex_timing_reader.py
 c++ -std=c++20 -O2 -DXXH_INLINE_ALL -Isrc -Iexternals/xxHash \
   tools/uberhar/test_spirv_cache.cpp -o build/uberhar-probe/test-spirv-cache
 build/uberhar-probe/test-spirv-cache

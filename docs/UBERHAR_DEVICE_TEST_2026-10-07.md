@@ -1213,3 +1213,78 @@ bounds, then replay production CPU/GPU contracts before assigning a cause.
 Capture must identify the scene and draw within it; a program hash or a single
 clean frame is insufficient. Treat packet recording, queue acceptance and GPU
 completion separately, and keep moon versus ghost conclusions independent.
+
+
+## 0.1.26 third cold run: finite CPU counters
+
+<!-- CodexAstraLocal: Separate the profiling opening from the two clean visual repeats and retain its endpoint skew, observer overlap and long menu setup. -->
+
+A third full-Combo/Vulkan/2x/100% opening used the same verified 0.1.26 APK,
+reset File 1, verified Empty and started after title Vulkan-cache deletion with
+zero application-cache inventory. The capture sidecar was absent and no video
+was recorded. Preparation remained in menus for approximately 18 minutes;
+this is a diagnostic run, not a matched benchmark against the two visual runs.
+The actual opening input was **08:55:28.536101 UTC** and first exit Back was
+**08:58:23.827480 UTC**, a 175.291379-second interval. Normal library return was
+visually verified afterward; the first Back is the performance boundary.
+
+Thirty-four complete timing windows cover 171.284403 seconds and average
+**22.862701%** normal speed. The fifth-percentile window speed is 16.723%; the
+worst reported frame interval is 369.617 ms. Named skipped/fallback-failure
+counters remain zero and scoped settings are unchanged. These are window-level
+and reported-frame statistics, not a per-frame speed distribution or measured
+recorder-overhead comparison.
+
+Both finite endpoint pairs retained stable process/thread lifetimes for all 59
+observed threads, with observed USER_HZ 100 and no read errors or cap exhaustion:
+
+| Nominal opening interval | Main emulation thread CPU | Whole-process CPU | Endpoint elapsed-time bounds |
+| --- | ---: | ---: | ---: |
+| +30 to +40 seconds | 9.80 s | 10.90 s | 8.4947–11.5221 s |
+| +115 to +125 seconds | 6.43 s | 8.32 s | 8.5417–11.4387 s |
+
+The process totals already include the main thread; do not add them. Sequential
+endpoint queries each take approximately 1.44–1.52 seconds, so nominal ten-second
+labels are not exact denominators. A memory reading began at +115.243 seconds
+and overlapped the second pair. The post-first-pair still already shows E. Gadd;
+neither interval is confirmed to contain exclusively one scene. The measurements
+establish substantial main-thread CPU work, not a split among loader, JIT,
+conversion or assembly. Zero logger ticks mean below counter resolution, not
+proof of no logging cost. CPU counters cannot identify sleeping, runnable delay
+or GPU execution.
+
+Same-process KGSL samples were 11.05 MiB before launch, 2,012.22 MiB before the
+opening, 2,811.33 MiB during and 2,955.76 MiB afterward, then **13.39 MiB** after
+normal return. Returned RSS was 469.86 MiB and system available memory 11,788.05
+MiB. These are sequential sampled scopes, not peaks or additive allocations.
+Battery readings were 25 C before launch and 27 C later, with AC/80% and charging
+reported. Thermal HAL/headroom and driver-private cache state remain unknown.
+The protected .22 emulator-state hash was reverified unchanged after the run.
+
+## Installed-build profiling capability after resumption
+
+<!-- CodexAstraLocal: A successful tool exit and nonempty trace file do not establish scheduler coverage; retain the exact failure before selecting app-side evidence. -->
+
+At 17:15 UTC USB authorization and installed .26/code33975176 were reverified;
+the device remained at the library. The original 60-second screen timeout and
+security property value 1 were confirmed. No new opening was launched during
+this capability check.
+
+One finite one-second Perfetto request returned a 1,023-byte file and exit code
+zero, but independent analysis found **zero scheduler slices, thread states or
+useful trace bounds**. All 30 relevant central-buffer counters were zero. Scoped
+producer logs show a SIGTRAP at initialization after the stock v25 parser could
+not infer the vendor `f2fs_truncate_partial_nodes.nid` field (`nid_t[3]`, unsigned,
+12 bytes). The service restarted its producer automatically. Source review shows
+that initialization parses compiled-in known event formats before the requested
+scheduler-only filter, so trimming event names or changing buffer sizes cannot
+bypass this failure. The successful final flush is not evidence that the failed
+producer emitted data. No game was running; tracing was off after recovery.
+
+The earlier raw perf-event/stat attempt was denied and had internally changed a
+security property; root restored its original value and later reverified it.
+Neither unusable platform probe will be repeated unchanged, and no security
+control will be weakened. A bounded default-off app-side complete-chunk timing
+candidate is the next discriminator. It adds no measured speed improvement or
+new visual qualification at this checkpoint. Raw logs, traces, metadata, hashes
+and source proofs remain in the ignored private evidence directory.
