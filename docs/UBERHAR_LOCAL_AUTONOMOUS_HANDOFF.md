@@ -65,20 +65,25 @@ runs end at 32 ready pipelines, while sampled maxima differ by about 772.5 MiB
 the actual populations and sample timing, not a per-pipeline measurement or causal
 conclusion from unmatched maxima.
 
-Moon facets also occur in the inspected Native reference. Do not call them
-Combo-exclusive or assume Native is hardware-correct. The strongest remaining
-reported difference is the dark ghost patch in
-`candidate-opening-04/screen.png`; the comparison poses are not identical.
+<!-- CodexAstraUlt: Replace the local report's shared-facets inference with the owner's direct correction; static facets do not establish the temporal flashing defect. -->
+The owner explicitly corrects the moon interpretation: **Native shows no moon
+glitch; many moon segments flash in Combo.** Use Native as the owner's nonflashing
+reference for this symptom. The report's inference about shared facets from selected
+stills is superseded; it did not establish flashing in Native. This is a direct
+owner observation, not a new cloud video analysis or proof of the underlying cause.
+The dark ghost patch in `candidate-opening-04/screen.png` is a separate remaining
+Combo diagnostic target. The comparison poses are not identical.
 
 **First inspect that evidence, then test existing 0.1.23 Combo with generic
-fragments (mode 4)** at Vulkan, 2x and the 100% limit. Reuse matched visible
+fragments (mode 4)** at Vulkan, 2x and the 100% limit. Reuse matched moon and
 ghost/camera checkpoints and confirm the effective mode/routes in the log.
 This needs no new APK. Change modes only with the title stopped.
 
-If the ghost difference disappears, prioritize optional specialized-fragment
-behavior and its state transport. If it persists, prioritize the remaining
-GPU vertex/rectangle paths and other Combo differences. This is route isolation,
-not causal proof: mode 4 retains eligible GPU vertices and rectangle rendering,
+Record **moon flashing and ghost corruption independently**. For each symptom,
+if it disappears, prioritize optional specialized-fragment behavior and its state
+transport; if it persists, prioritize the remaining GPU vertex/rectangle paths and
+other Combo differences. Improvement in one does not clear the other. This is
+route isolation, not causal proof: mode 4 retains eligible GPU vertices and rectangle rendering,
 and unsupported fragment states still have accurate recovery. Use matched
 controls where the first run does not discriminate between explanations.
 
@@ -178,9 +183,12 @@ speed, lower-tail intervals, time below 95% where available, and worst stalls;
 an average near 100% cannot hide recurring pauses. Do not infer gameplay results
 from turbo, loading menus or an unsupported frame-counter interpretation.
 
-Compare matching ghost/moon scene phases over time. Native is a differential
-reference, not the sole ground truth. Separate brief visual recording from timing
-runs if recording materially changes performance. Record charging, hardware mode,
+Compare matching ghost/moon scene phases over time. Evaluate the moon's flashing
+across consecutive frames; individual stills or ordinary changes in scene lighting
+cannot establish parity. Native is the owner's nonflashing reference for the moon,
+without claiming hardware-perfect output for every other case. Separate brief
+visual recording from timing runs if recording materially changes performance.
+Record charging, hardware mode,
 fan policy and available thermal indicators; missing thermal HAL readings mean
 unknown headroom. Avoid sustained 2x/4x qualification under changing power conditions.
 

@@ -4,6 +4,16 @@ The current [local autonomous handoff](../UBERHAR_LOCAL_AUTONOMOUS_HANDOFF.md)
 supersedes this report's earlier instruction to wait for cloud source work.
 The original laptop report remains at `docs/UBERHAR_DEVICE_TEST_2026-10-06.md`.
 
+<!-- CodexAstraUlt: Append the owner's direct correction to the published archive; preserve the original laptop/attachment and distinguish dynamic flashing from the earlier still-frame interpretation. -->
+**Owner correction after this report:** “I see no graphical glitches in the moon
+during the native run. ... The moon has many segments flashing during the combo
+run and there is no such flashing from shader issues in Native.”
+This supersedes the report's inference that the moon problem is shared by Native.
+Selected still-frame facets did not establish the temporal flashing defect.
+Treat Combo moon flashing and ghost corruption as separate targets, using matching
+clips and the owner's nonflashing Native reference. The historical visual paragraphs
+below are annotated accordingly; the recorded measurements are unchanged.
+
 ---
 
 # Thor local device test — October 6, 2026
@@ -20,9 +30,11 @@ were **3,823.86 MiB**, **3,051.37 MiB** and **1,076.11 MiB**, respectively; GPU
 accounting recovered after each exit. These observations do not establish a
 matched improvement or bounded full-gameplay memory.
 
-Native is the owner's visual reference, not a playable-performance target. Moon
-facets also appear in Native, while one 0.1.23 Combo laboratory image retains an
-unresolved ghost-patch discrepancy. Different camera/animation phases prevent
+Native is the owner's visual reference, not a playable-performance target. The
+owner's subsequent correction identifies flashing moon segments in Combo and no
+moon glitch in Native, superseding the original shared-facets interpretation.
+One 0.1.23 Combo laboratory image also retains an unresolved ghost-patch discrepancy.
+Different camera/animation phases prevent
 exact image parity or a rendering-cause conclusion.
 
 **0.1.23 remains installed with app data preserved.** At **21:02:42 EDT** the
@@ -207,9 +219,10 @@ the moon or a ghost's particular pixels.
 Both versions have brief moon and ghost clips, with reviewed frames at one and
 eight seconds. The moon retains conspicuous dark internal triangular edges and
 translucent-looking facets; the green ghost and laboratory are visible. The
-completed Native comparison below shows that the moon facets also occur in that
-reference. Camera and animation instants differ; no graphical fix or cause is
-established by these appearances.
+original Native comparison below interpreted static facets as shared. That
+inference is superseded by the owner's correction: the actual symptom is segments
+flashing in Combo, absent in Native. Camera and animation instants differ; no
+graphical fix or cause is established by the selected stills.
 
 <!-- CodexAstraUlt: Explicitly retain operational and capture confounds so the handoff cannot turn shorter-run observations into a matched performance or memory claim. -->
 The 0.1.22 setup took several minutes and included the 849.169 ms save-state
@@ -279,14 +292,16 @@ skipped draws, fallback failures, key mismatches or vertex-input defects are
 recorded. Conditions remained **80% battery, external power, 30°C battery,
 power-save off**, thermal status 0 and thermal HAL unavailable.
 
-<!-- CodexAstraUlt: Distinguish a shared moon appearance from a retained ghost discrepancy, using independent visual review without labeling unmatched poses as exact parity or a version regression. -->
+<!-- CodexAstraUlt: Correct the original shared-moon interpretation after direct owner feedback; preserve clip times and the separate ghost observation without claiming a new video review. -->
 The Native moon clip covers approximately **20:51:57–20:52:09**; the ghost clip
-covers **20:53:21–20:53:33**. Retained stills and independent visual review show:
+covers **20:53:21–20:53:33**. The original report's visual review and the subsequent
+owner correction are recorded below:
 
-- Dark triangular moon facets/seams also occur in Native. The early bright
-  Native flare and later dimmer Combo moon are different animation phases and
-  must not be treated as a shader defect comparison. The owner-reported moon
-  issue remains unresolved, but the facets alone are not unique to Combo.
+- **Superseded interpretation:** selected stills were described as showing shared
+  moon facets/seams. The owner clarifies that the actual fault is many moon segments
+  flashing in Combo, with no moon glitch in Native. Different animation phases or
+  static facets do not establish shared flashing. Compare consecutive-frame clips
+  at matching phases; retain the moon as a Combo-specific diagnostic target.
 - `candidate-opening-04/screen.png` shows dense irregular near-black patches
   across the crown, face and upper body of the right book-holding ghost in
   0.1.23 Combo. Comparable dense patches were not seen on visible ghosts in the
@@ -455,8 +470,9 @@ setup with playback.
 All three completed runs now establish the limited scene reached, application
 cache state, logged routes, sampled memory growth and normal-return recovery.
 Cross-build state loading was rejected; no resumed-state test is used. The
-Native reference distinguishes shared moon facets from an unresolved Combo
-ghost-patch observation, while differing poses prevent exact parity conclusions.
+owner's subsequent correction establishes Native as the reported nonflashing moon
+reference; Combo moon flashing and ghost-patch observations remain separate targets.
+Differing poses prevent exact parity conclusions from the retained stills.
 Remaining work is the cloud developer's focused draw/output investigation and
 later device validation of any correction; no rendering fix is claimed here.
 

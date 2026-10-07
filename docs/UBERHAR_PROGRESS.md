@@ -11,11 +11,13 @@
   sampled KGSL maxima were 3,823.86, 3,051.37 and 1,076.11 MiB. All returned
   normally and recovered GPU accounting. These unmatched samples do not establish
   a speedup, bounded gameplay memory or an optimizer-caused reduction.
-- **Visual direction:** inspected Native frames in the local report also show
-  moon facets; stop describing those facets as exclusively Combo-related. The
-  Combo ghost patch remains the focused unresolved difference. Inspect the retained
-  local captures and try mode 4 on the same scene before choosing the next source
-  experiment. The cloud read the report, not the private raw captures.
+- **Corrected visual direction:** the owner sees no moon glitch in Native and
+  many flashing moon segments in Combo. This supersedes the local report's inference
+  about shared facets from selected stills; those stills do not establish a shared
+  temporal fault. Keep moon flashing and ghost corruption as separate Combo targets.
+  Inspect the retained clips over matching scene phases and try mode 4 before
+  choosing the next source experiment. The cloud read the report and the owner's
+  correction, not the private raw captures. This correction starts no APK build.
 
 ## 0.1.23 implementation and earlier evidence
 

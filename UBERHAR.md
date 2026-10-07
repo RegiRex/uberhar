@@ -12,8 +12,10 @@ Baseline: Azahar 2126.1.2, commit
 Read the [autonomous handoff](docs/UBERHAR_LOCAL_AUTONOMOUS_HANDOFF.md) and
 [submitted local device report](docs/device_reports/UBERHAR_DEVICE_TEST_2026-10-06.md).
 USB testing and the compatible install are recorded, but full-speed correctness
-remains open. Native also shows the reported moon facets, while a Combo ghost-patch
-discrepancy still needs matched evidence. The cloud session pauses concurrent source
+remains open. The owner clarifies that the moon is visually clean in Native while
+many moon segments flash in Combo; the earlier report's still-frame interpretation
+did not establish shared flashing. Both Combo moon flashing and ghost corruption
+remain targets for matched video evidence. The cloud session pauses concurrent source
 work after this handoff. Earlier pending-build statements below are historical.
 
 <!-- CodexAstraUlt: Replace the pending comparison-only summary with measured 0.1.22 cleanup and the scoped 0.1.23 work; earlier implementation history remains below and in progress records. -->
