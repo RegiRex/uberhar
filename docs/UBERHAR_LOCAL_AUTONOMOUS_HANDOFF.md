@@ -1,5 +1,38 @@
 # Local Codex takeover: Dark Moon correctness and performance
 
+<!-- CodexAstraLocal: The owner resumed after a permissions/session interruption; make the current scope explicit while retaining prior instructions and evidence as history. -->
+**Resumed-session instructions (October 6 EDT / October 7 UTC):** use
+`CodexAstraLocal` for new explanatory comments and missing purpose comments on
+post-0.1.22 additions, retaining historical author markers. Continue toward 0.2.0
+and audit every three builds; the old four-hour/three-candidate stop below is
+superseded. One coordinator owns all device operations, with source review and
+evidence analysis in parallel. The original report and ignored artifacts are
+preserved. The existing-build mode-4 experiment has already completed; review its
+retained consecutive frames and ordinary logs before deciding whether to repeat it.
+Native has no observed moon glitch; Combo moon flashing and ghost corruption
+remain separate diagnostic targets.
+
+<!-- CodexAstraLocal: Direct owner confirmation in the resumed conversation resolves the report-only authorization gap and makes cold application-cache testing mandatory. -->
+**Confirmed test setup:** before every run reset only Dark Moon's in-game File 1
+and delete only its title-specific Vulkan shader cache, verifying the empty slot
+and the next launch's empty application-cache inventory. Preserve other saves
+and the existing 0.1.22 emulator state. The owner also requires every tested
+title's shader cache to be deleted before its test; preserving other titles'
+caches is not a requirement. The owner's project goal is
+near-original-hardware correctness with good performance and no draw skipping on
+the first run with **zero saved shader cache available**. This target is not met
+by warmed runs; driver-private cache state must still be reported as unknown.
+
+<!-- CodexAstraUlt: Record the newer direct owner instruction above the original handoff so a resumed session does not reimpose a superseded time/build boundary. -->
+**Owner update, October 6 local session:** continue toward 0.2.0 until credits run
+out, the beta threshold is reached, or a genuine blocker intervenes. The initial
+three-build/four-hour limit below is historical. Test Combo Dark Moon only unless
+the Native process changes; then test both modes. Audit the codebase every three
+builds. Versions are Full Release.Beta.Alpha; alphas are prereleases and betas are
+full GitHub releases, retaining all existing gates. Active tool permissions must
+still be respected; a request for autonomy does not change the client sandbox.
+The [local experiment ledger](UBERHAR_LOCAL_BATCH_2026-10-06.md) records progress.
+
 <!-- CodexAstraUlt: Transfer the owner's directly authorized development loop to the laptop with Thor access, replacing the earlier device-only reporting hold without claiming a live cloud bridge. -->
 
 Prepared October 6, 2026 EDT. The owner now asks the **local Codex session on

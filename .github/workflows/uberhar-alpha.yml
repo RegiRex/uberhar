@@ -310,7 +310,7 @@ jobs:
 
       # AstraEH: Attach assets to a draft first; publish only when all uploads succeed.
       # Existing versions are never overwritten: increment UBERHAR_VERSION for the next iteration.
-      - name: Publish GitHub pre-release
+      - name: Publish GitHub release
         run: |
           if gh release view "$UBERHAR_VERSION" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
             echo 'This version already exists; increment UBERHAR_VERSION before publishing again' >&2
@@ -320,11 +320,19 @@ jobs:
           if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$UBERHAR_VERSION" > existing-tag.json 2>/dev/null; then
             test "$(jq -r '.object.sha' existing-tag.json)" = "$GITHUB_SHA"
           fi
+          # CodexAstraLocal: Replace the unconditional prerelease flag with the owner's
+          # Full Release.Beta.Alpha rule: a zero alpha component publishes a full release.
+          # Apply the same classification to draft creation and publication; all prior
+          # correctness/signing/provenance gates and latest=false remain mandatory.
+          release_prerelease=true
+          if [[ "${UBERHAR_VERSION##*.}" =~ ^0+$ ]]; then
+            release_prerelease=false
+          fi
           gh release create "$UBERHAR_VERSION" --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" --title "Uberhar $UBERHAR_VERSION" \
-            --draft --prerelease --latest=false --notes-file artifacts/release-notes.md \
+            --draft "--prerelease=$release_prerelease" --latest=false --notes-file artifacts/release-notes.md \
             "artifacts/uberhar-$UBERHAR_VERSION-arm64.apk" artifacts/apk-sha256.txt \
             "artifacts/uberhar-$UBERHAR_VERSION-validation.zip" \
             "artifacts/uberhar-$UBERHAR_VERSION-native-symbols.zip"
           gh release edit "$UBERHAR_VERSION" --repo "$GITHUB_REPOSITORY" \
-            --draft=false --prerelease --latest=false
+            --draft=false "--prerelease=$release_prerelease" --latest=false

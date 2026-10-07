@@ -7,6 +7,8 @@
 #include <chrono> // AstraEH: CPU bridge batch timing.
 
 #include "video_core/rasterizer_accelerated.h"
+// CodexAstraLocal: Keep the recovered optional output guard owned by the renderer.
+#include "video_core/renderer_vulkan/uberhar_gpu_output_policy.h"
 #include "video_core/renderer_vulkan/vk_compute_rect.h" // AstraEH: Bounded compute test path.
 #include "video_core/renderer_vulkan/vk_descriptor_update_queue.h"
 #include "video_core/renderer_vulkan/vk_pipeline_cache.h"
@@ -155,6 +157,13 @@ private:
     // CodexAstraUlt: Count lit draws lacking GPU quaternion correction; only four
     // detail records per rasterizer, followed by one existing teardown summary.
     u64 ready_vertex_quaternion_rejections{};
+    // CodexAstraUlt: Optional-only output-default containment; no shader/register
+    // mutation. Exact program memoization is lazy and bounded to 128 entries.
+    // CodexAstraLocal: This memo and its counters die with the rasterizer; no
+    // app cache files, Native shader state or cross-title verdicts are persisted.
+    ReadyVertexPolicy::OutputWriteMemo<> ready_vertex_output_writes;
+    u64 ready_vertex_output_checks{}, ready_vertex_output_w_checks{},
+        ready_vertex_output_rejections{};
     std::chrono::steady_clock::time_point next_draw_snapshot{};
     // CodexAstraUlt: Existing TickFrame owner samples memory at most every 30 seconds;
     // the clock is checked once per 64 completed frames, never once per draw.

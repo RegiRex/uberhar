@@ -1,5 +1,24 @@
 # Architecture review ledger
 
+<!-- CodexAstraLocal: Complete the required three-successor audit before the next candidate; this source/evidence review resets cadence but does not qualify the device. -->
+The [October 7 recovery architecture audit](UBERHAR_AUDIT_2026-10-07.md) is
+complete against released 0.1.23 (`99fe4a885`) and guidance `814de4d60`, including
+the recovered candidate, post-0.1.22 change inventory, renderer/output contracts,
+ownership, lifecycle/logging, release gates and the retained 0.2 throughput gate.
+Independent output-guard review found no blocking correctness issue; candidate
+build/device results remain separate. The new anchor is **0.1.23 audited source**.
+Count 0.1.24 as successor one only after its successful gated publication, 0.1.25
+as two and 0.1.26 as three if numbering continues. Audit again after those three,
+before starting 0.1.27, or earlier for failed architectural assumptions/two
+uninformative candidates. The old three-to-five range below is historical.
+
+<!-- CodexAstraUlt: The owner's new fixed three-build audit cadence supersedes the older three-to-five range without treating a documentation update as a completed audit. -->
+**Owner update: audit every three builds.** The 0.1.20 anchor has three completed
+successors (0.1.21, 0.1.22, 0.1.23); a full audit is in progress before the next
+candidate publication. Review source/contracts, device temporal evidence, resource
+ownership, performance alternatives and the documented 0.2 beta gate. Record the
+completed audit separately before resetting the count.
+
 <!-- CodexAstraUlt: Count successful 0.1.23 publication and retain the same source-review anchor during local takeover. -->
 0.1.23 [run 37551055615](https://github.com/RegiRex/uberhar/actions/runs/37551055615)
 passed shaders, Android/package/signing and publication. It is successor three
@@ -11,10 +30,18 @@ reviews after 0.1.24, and must review before a sixth successor (0.1.26 if consec
 Earlier pending-publication statements below are historical.
 
 <!-- CodexAstraUlt: Reconcile successful comparison builds with the owner's resumed prerelease route without erasing the completed source review or claiming a new one. -->
+<!-- CodexAstraUlt: Replace the conditional third-successor count because 0.1.23's complete release gates now pass; record publication and compatible installation while leaving device acceptance and the 0.1.20 source-review anchor separate. -->
 **Current anchor remains the completed 0.1.20 source review.** The successful
-0.1.21 and 0.1.22 builds are successors one and two. The latter passed all shader,
+0.1.21, 0.1.22 and 0.1.23 builds are successors one, two and three. 0.1.22 passed all shader,
 Android and signing/package gates in
 [run 37524017429](https://github.com/RegiRex/uberhar/actions/runs/37524017429).
+0.1.23 passed shader, Android, signing/package and publication gates in
+[run 37551055615](https://github.com/RegiRex/uberhar/actions/runs/37551055615),
+was [published as a prerelease](https://github.com/RegiRex/uberhar/releases/tag/0.1.23)
+from `99fe4a8851ff696219dddda58fb154fbf8ce1149`, and is installed on the Thor
+as a signing-compatible update preserving app data. The APK checksum matches
+the published checksum and asset digest; its certificate matches the installed
+0.1.22 certificate and repository pin.
 The owner now authorizes normal repository prereleases; changing publication route
 does not reset that review count or remove earlier evidence.
 
@@ -25,12 +52,38 @@ continued ghost and moon glitches, more visible glitches overall, and a
 significant perceived speed improvement; these are not matched throughput data.
 The 0.1.23 focused follow-up is implemented to optimize
 optional background GPU shader compilation, preserving the cold generic and
-Custom policies. Source review and local validation passed; CI and device acceptance
-remain separate gates. No memory cure or speedup has been measured. The fitted
+Custom policies. Source review, local validation and CI passed; device acceptance
+remains a separate gate. No memory cure or controlled speedup has been established. The fitted
 96/72 MiB increments are associated with GPU pipeline counts grouped by attachment
 format, not image size calculations or direct driver allocation-type observations.
 
-Count 0.1.23 as successor three only after its gates pass. Repeat the full review
+<!-- CodexAstraUlt: Record the owner-directed local protocol without turning a Native visual reference or preliminary cleanup observation into a performance or image qualification. -->
+<!-- CodexAstraUlt: Replace pending Combo/Native assessment with the completed bounded captures and recovery evidence; unmatched poses and slow playback still prevent image or performance qualification. -->
+The [local Thor checkpoint](UBERHAR_DEVICE_TEST_2026-10-06.md) records a 0.1.22
+opening through the initial moon and laboratory ghosts, followed by normal exit:
+its sampled KGSL peak was 3,824 MiB and returned to 12 MiB. This is separate
+from the earlier supplied two-run log. The 0.1.23 full Combo and Native visual
+reference openings are now complete, each with a cold application Vulkan cache,
+manual in-game File 1 reset, normal return and no recorded skips or failures.
+Combo KGSL was 11.06 MiB before the run, peaked at 3,051.37 MiB in the exit
+drawer, and returned to 11.57 MiB in external samples. Native mode 1 recorded
+zero GPU batches and 43.37 → 1,076.11 → 16.97 MiB in its before-native-run,
+sampled-peak and after-native-run records. About six minutes later, an external
+sample showed 11.43 MiB KGSL and 11,889.11 MiB system available memory.
+
+Scene-only Combo playback averaged 13.231 game FPS / 22.165% speed; Native
+averaged 15.317 / 25.649%. Native is a visual reference, not a playable standard,
+and these captures do not establish a matched speedup. Moon facets appear in
+both modes. One Combo book-ghost frame has dense irregular near-black patches
+not seen in inspected Native frames, but their poses differ: image correctness
+remains unqualified and no graphical cause or cure is established. The short
+runs show recovery, not bounded full-gameplay memory. Cross-build state loading
+was rejected; the owner has discontinued save-state creation/loading for this
+comparison. At 21:02:42 EDT the operator restored full Combo, 2×, 100% and the
+game list. No emulator source changes, new build or public push were made;
+the cloud thread was not visible, so the prepared handoff remains pending.
+
+0.1.23 is now successful successor three. Repeat the full review
 after three to five successful successors, normally four (0.1.24 if versions
 advance consecutively), or earlier if new evidence invalidates the design.
 This focused follow-up does not claim that a full review has been completed.

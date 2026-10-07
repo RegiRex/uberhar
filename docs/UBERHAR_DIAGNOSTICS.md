@@ -1,6 +1,25 @@
 <!-- AstraEH: Bounded troubleshooting and removal map for the hybrid renderer. -->
 # Renderer diagnostics, schema 17
 
+<!-- CodexAstraLocal: Document the optional output guard's bounded coverage records without treating admission, transported semantics or hash identities as observed image correctness. -->
+## Output-default containment (0.1.24)
+
+`Uberhar GPU output fallback` reports the first eight rejected optional batches
+per renderer lifetime. `consumed_w` is the mask of physical W components feeding
+final emitted semantics; `possible_w` is the union of all decoded possible output
+W writes, and `missing_w` is their difference. Unknown instruction words cancel
+the absence proof. `proof=missing_write_union_only` excludes conditional/carry,
+temporary/address/condition-register parity and fragment-input liveness claims.
+Each rejection returns before index access, speculative upload and pipeline work,
+retaining the normal complete CPU draw.
+
+One `Uberhar GPU output fallback totals` record at orderly teardown gives checked,
+consumed-W and rejected batch counts plus memo entries/hits/scans. The memo holds
+at most 128 exact immutable program/swizzle snapshots; hits compare full words,
+so hashes are hints rather than a collision-based correctness decision. A killed
+process can lose teardown totals. No per-frame timer, worker or guest-payload log
+is added. Counters describe coverage and possible overhead, not a Dark Moon cure.
+
 <!-- CodexAstraUlt: Add independently scoped driver/kernel evidence without changing existing native accounting or claiming total GPU residency. -->
 ## Quaternion eligibility and kernel memory (0.1.22)
 
@@ -106,7 +125,7 @@ does not imply skipped graphics work or a measured speed gain.
 
 <!-- CodexAstraUlt: Replace the historical single-author search with all retained log markers so new diagnostics remain discoverable. -->
 Uberhar renderer log calls carry adjacent author **`Log Line`** comments.
-Find them with `rg -n '(AstraEH|AstraPro|CodexAstraUlt(-2)?) Log Line' src`. These markers identify diagnostic
+Find them with `rg -n '(AstraEH|AstraPro|CodexAstraUlt(-2)?|CodexAstraLocal) Log Line' src`. These markers identify diagnostic
 output; deleting them must not remove completion signaling, failure recovery,
 admission limits or state validation. They do not attribute inherited Azahar
 logging to this fork. Android session/title/export records remain functional

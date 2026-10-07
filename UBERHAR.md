@@ -7,6 +7,59 @@ Baseline: Azahar 2126.1.2, commit
 
 ## Current status
 
+<!-- CodexAstraLocal: Supersede the earlier pending mode-4 and bounded-batch snapshot with the reviewed 0.1.24 candidate and actual validation, while retaining historical authorship below. -->
+**0.1.24 is a reviewed candidate; Android release gates and Thor testing are
+pending.** The installed release remains 0.1.23. The new narrow GPU-output guard
+keeps a complete draw on the CPU when a consumed output W is provably never
+written and would disagree with CPU initialization. Host reproduction supports
+this containment; no captured Dark Moon draw yet connects it to either visual
+fault. See the [candidate notes](docs/releases/0.1.24.md) and
+[completed architecture audit](docs/UBERHAR_AUDIT_2026-10-07.md).
+
+The complete host probe/shader suite, exact fragment comparisons, vertex and
+compute render checks, and native build pass. Native CTest passed **61 distinct
+Catch cases / 1,096 assertions**, with five existing firmware-dependent DSP/audio
+cases skipped and zero failures; its aggregate is not an additional distinct
+case. Host success does not qualify Adreno images, sustained speed or memory.
+Android, shader CI, package/signing and gated publication must pass before the
+candidate APK is ready. The [progress record](docs/UBERHAR_PROGRESS.md) tracks
+those release gates.
+
+The [existing-build mode-4 control](docs/UBERHAR_MODE4_ANALYSIS_2026-10-07.md)
+retains moon flashing with zero optional fragment modules, narrowing the route
+investigation. **Native has no observed moon glitch; Combo has flashing segments.**
+Evaluate consecutive moon frames and track ghost corruption separately using
+matched poses. The next candidate test is cold **full Combo, Vulkan, 2x, 100%**
+through the opening, followed by a normal return to the game list and before,
+during and after memory readings. Correct 2x first; 4x and broader gameplay
+remain later gates.
+
+<!-- CodexAstraLocal: Record the owner's per-game cold-cache requirement and new review cadence; these replace cache preservation and four-hour stopping instructions in historical snapshots. -->
+Reset only Dark Moon's in-game **File 1 before every opening** and delete **each
+tested game's shader cache before testing that game**. Preserve other saves,
+unrelated app data and the existing 0.1.22 emulator state. The target is correct,
+performant first-run play with **zero saved application shader cache and zero
+skipped draws**; warmed runs do not qualify it. Driver-private cache state remains
+unknown. One coordinator owns device operations; source and evidence review may
+proceed in parallel.
+
+Continue toward 0.2.0 under the [corrected autonomous
+handoff](docs/UBERHAR_LOCAL_AUTONOMOUS_HANDOFF.md), with a full architecture audit
+**every three builds** and earlier when evidence contradicts an assumption.
+This completed audit resets the source-review anchor to 0.1.23; 0.1.24 becomes
+successor one only after its gates pass. The former four-hour/three-candidate
+stop is superseded. The [0.2 beta gate](docs/UBERHAR_ARCHITECTURE_0.1.6.md#roadmap-and-version-gates),
+including the retained 2x FEA baseline, still requires evidence. Numeric
+`Full Release.Beta.Alpha` versions with nonzero alpha publish as prereleases;
+zero-alpha versions publish as full releases through the same gates in
+`RegiRex/uberhar` only. Neither versioning nor this review establishes beta readiness.
+
+## Historical implementation and evidence
+
+<!-- CodexAstraLocal: Preserve earlier status snapshots as history; current scope, release gates and temporal diagnosis above take precedence. -->
+The following snapshots retain their original authorship and describe the status
+at the time they were written.
+
 <!-- CodexAstraUlt: The owner's full local takeover follows completed 0.1.23 publication and real-device testing; preserve the implementation history below. -->
 **0.1.23 is published; local Codex now owns the next development/test batch.**
 Read the [autonomous handoff](docs/UBERHAR_LOCAL_AUTONOMOUS_HANDOFF.md) and

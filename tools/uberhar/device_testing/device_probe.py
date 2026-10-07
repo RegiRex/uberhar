@@ -113,6 +113,9 @@ def safe_value(value):
     return value
 
 
+# CodexAstraLocal: "ready" confirms one authorized transport and readable package
+# metadata. The caller still identifies the intended Thor and verifies signing,
+# effective game settings and scene control before claiming test readiness.
 def probe(serial=None, timeout=5.0, client=None):
     report = {"schema": 1, "status": "not_ready", "package": PACKAGE,
               "scope": "local_device_readiness_only"}

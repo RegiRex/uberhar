@@ -1,20 +1,45 @@
 <!-- AstraEH: Attribution index for the Uberhar implementation, tests, packaging and documentation. -->
 # Uberhar code map
 
+<!-- CodexAstraLocal: Index the recovered and independently reviewed candidate without relabeling earlier changes or treating tests as device acceptance. -->
+## 0.1.24 output-default containment and recovery audit
+
+| Files | Purpose and limits |
+| --- | --- |
+| `renderer_vulkan/uberhar_gpu_output_policy.h`, `vk_rasterizer.cpp/.h` | Optional Combo fallback for transported physical W lanes absent from the conservative possible-write union. Exact bounded memo, eight detail records and teardown total; complete CPU draws remain. Does not prove general output/carry parity or Dark Moon symptom attribution. |
+| `tools/uberhar/test_gpu_output_guard.cpp/.py`, `test_gpu_input_parity.py`, `build_probe.sh` | Production CPU/output/generator/admission regression, old-code failure and existing input-guard integration. GPU execution on Mesa is host evidence, not Adreno qualification. |
+| `.github/workflows/uberhar-alpha.yml`, `test_release_publication.py` | Alpha prereleases and zero-alpha full releases after existing gates; eleven offline executions of actual publication shell verify classification and existing draft/version/tag behavior. |
+| `UBERHAR_AUDIT_2026-10-07.md` | Architecture review and complete post-0.1.22 logical change inventory, preserving authorship and unmodified original evidence. |
+| `UBERHAR_MODE4_ANALYSIS_2026-10-07.md`, `UBERHAR_LOCAL_BATCH_2026-10-06.md` | Consecutive-frame moon result, separate unmatched ghost evidence, normal-limit timing and memory recovery; durable local checkpoints and explicit cache/save scope. |
+
+All new purpose comments use `CodexAstraLocal`. Historical markers remain. Raw
+game-derived/device artifacts stay ignored; the original local report is preserved.
+See [0.1.24 notes](releases/0.1.24.md) and the [live progress record](UBERHAR_PROGRESS.md).
+
 <!-- CodexAstraUlt: Map the ongoing optional-shader memory follow-up and newly published device tooling; avoid presenting pending validation as complete. -->
 ## 0.1.23 optional shader optimization and device setup
 
 | Files | Purpose and limits |
 | --- | --- |
-| `renderer_vulkan/uberhar_shader_compile_policy.h`, `vk_shader_disk_cache.cpp` | Work in progress: freeze the optional background vertex/geometry/fragment optimizer policy when jobs are queued, retaining generic/required shader policy, Custom settings and accurate fallback/draw-order requirements. No device memory reduction or speedup is established. |
-| `tools/uberhar/test_shader_compile_policy.py`, `build_probe.sh` | Planned focused worker-job policy regressions with compiler stubs; execution and independent shader validation are recorded in progress once complete. This is not Adreno memory testing. |
+| `renderer_vulkan/uberhar_shader_compile_policy.h`, `vk_shader_disk_cache.cpp` | Freeze the optional background vertex/geometry/fragment optimizer policy when jobs are queued, retaining generic/required shader policy, Custom settings and accurate fallback/draw-order requirements. The gated 0.1.23 build is installed and its policy is observed in the Thor log; no controlled memory reduction or speedup is established. |
+| `tools/uberhar/test_shader_compile_policy.py`, `build_probe.sh` | Worker-job policy regressions and independent shader validation passed as recorded in progress and release artifacts. Host correctness checks are separate from Adreno memory and image evidence. |
 | `UBERHAR_LOG_ANALYSIS_0.1.22.md` | Two-run evidence: Combo own-process KGSL reaches about 4,232 MiB versus roughly 1,081 MiB in Native; normal exits return to about 12/15 MiB and system availability recovers. Owner reports continued ghost/moon glitches and perceived speed improvement; neither correct output nor matched throughput is established. Attachment examples are size models, not measured allocation ownership. |
 | [`tools/uberhar/device_testing/`](../tools/uberhar/device_testing/README.md) | Nobara USB readiness probe, 16 fake-ADB tests and local Codex handoff. Read-only bounded metadata queries; no installer, game runner or cloud connection. Repository/raw downloads replace the inaccessible chat bundle. |
 | `AGENTS.md`, `UBERHAR.md`, progress/review/roadmap docs | Owner-confirmed normal prereleases in RegiRex/uberhar through the existing release branch; previous comparison-only publication restriction is superseded. Literal upstream-master integration is unnecessary for this request and deferred for separate review. |
 
+<!-- CodexAstraUlt: Replace the planned policy/test status above with completed gates and observed device policy, and index the bounded local handoff without making the readiness helper an automated game runner. -->
+[The October 6 Thor test record](UBERHAR_DEVICE_TEST_2026-10-06.md) documents
+verified USB access, gated 0.1.23 installation, actual input controls, per-run
+Dark Moon Vulkan cache and File 1 resets, and opening/memory evidence. Native
+is an owner-requested visual reference, not a playable-speed target. Raw logs,
+visual captures and private identifiers stay in ignored local artifacts; no
+emulator source or unattended replay service is added.
+
 The existing `uberhar/hybrid-shaders` workflow retains its shader, Android,
 package, provenance and pinned-certificate gates. 0.1.22 passed those gates in
 [run 37524017429](https://github.com/RegiRex/uberhar/actions/runs/37524017429).
+0.1.23 passed its gates and publication in
+[run 37551055615](https://github.com/RegiRex/uberhar/actions/runs/37551055615).
 See [candidate notes](releases/0.1.23.md) and
 [current implementation/validation status](UBERHAR_PROGRESS.md).
 

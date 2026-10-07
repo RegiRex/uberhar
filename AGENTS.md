@@ -1,5 +1,50 @@
 # Uberhar development instructions
 
+<!-- CodexAstraLocal: Restore the owner's resumed-session attribution and operating scope without relabeling historical authorship or trusting lost conversational state. -->
+- The resumed local coordinator uses **CodexAstraLocal** for all new logical
+  sections and explanatory comments; new optional log comments use
+  `CodexAstraLocal Log Line`. Preserve historical markers and explain replacement
+  behavior beside the change. Audit all additions after the 0.1.22 source anchor
+  `d742cd5e9e90b7ba3f67367460ef2c7d3f27b5bc`; add missing purpose comments,
+  keeping machine-readable version/checksum data valid and original evidence intact.
+- Continue toward **0.2.0**, with a full architecture/code audit every **three
+  builds**. The former three-candidate/four-hour stop is superseded. Keep durable
+  checkpoints and stop for a genuine blocker or the documented beta threshold;
+  actual tool permissions and account limits still apply.
+- The root coordinator exclusively operates the Thor. Parallel agents may inspect
+  source, implement assigned changes and analyze retained private evidence; they
+  must not issue device commands. Evaluate moon flashing across consecutive frames
+  independently of ghost corruption. Native has no observed moon glitch.
+- CodexAstraLocal: The owner directly reconfirmed that **every opening test must
+  reset Dark Moon's in-game File 1 and delete its title-specific Vulkan shader
+  cache**. Use the title/game confirmation UI and verify Empty plus the next
+  launch's application-cache inventory. Preserve other saves and the existing
+  0.1.22 emulator state. The owner additionally requires **each tested game's
+  shader cache to be deleted before testing that game**; cache preservation is
+  not a constraint for other titles. The project target is correct, performant
+  first-run play with **zero saved shader cache available and zero skipped draws**;
+  warm-cache performance cannot qualify that target. Driver-internal cache state
+  remains unknown unless separately measured.
+
+<!-- CodexAstraUlt: The owner's October 6 local-session update supersedes the initial bounded batch and older review cadence; retain earlier instructions as history below. -->
+- Continue the authorized local development/build/test loop toward **0.2.0** until
+  credits are exhausted, the beta threshold is reached, or a genuine blocker
+  prevents progress. The prior three-candidate/four-hour batch limit is superseded.
+  Keep durable checkpoints; do not create an endless relaunch service or bypass
+  actual session permissions/account limits.
+- Device qualification currently targets **Combo Luigi's Mansion Dark Moon**.
+  Changes to the Native process require testing **both Native and Combo**;
+  otherwise do not repeat Native or broaden titles without a new scope update.
+- Perform a full codebase/architecture audit **every three builds**. The completed
+  0.1.20 review has three successors (0.1.21–0.1.23), so audit before the next
+  candidate. Keep the review ledger, development plan and roadmap current.
+- Versions mean **Full Release.Beta.Alpha**, written `#.#.#`. Every alpha gets a
+  GitHub prerelease; every beta gets a full GitHub release, through the existing
+  correctness/Android/package/signing gates in `RegiRex/uberhar` only. Beta status
+  is earned by documented evidence, not the number of builds. The 0.2 throughput
+  gate is recorded in `docs/UBERHAR_ARCHITECTURE_0.1.6.md`; current narrowed title
+  coverage does not silently satisfy its retained FEA baseline requirement.
+
 <!-- CodexAstraUlt: The owner now delegates the complete iteration loop to local Codex with real Thor access; this replaces the earlier device-only reporting hold and prevents competing cloud writes. -->
 - Follow [the local autonomous handoff](docs/UBERHAR_LOCAL_AUTONOMOUS_HANDOFF.md).
   The Nobara Codex coordinator owns source changes, gated fork prereleases and

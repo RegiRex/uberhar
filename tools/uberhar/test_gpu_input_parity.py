@@ -46,6 +46,8 @@ def main() -> None:
 #include "common/logging/log.h"
 #include "video_core/pica/uberhar_vertex_input.h"
 #include "video_core/renderer_vulkan/uberhar_gpu_vertex_policy.h"
+// CodexAstraLocal: The extracted admission now also contains the production output guard.
+#include "video_core/renderer_vulkan/uberhar_gpu_output_policy.h"
 
 namespace Common::Log { void Stop() {} }
 
@@ -95,6 +97,8 @@ struct RasterizerVulkan {
     struct {
         Pica::PipelineRegs pipeline{};
         Pica::ShaderRegs vs{};
+        // CodexAstraLocal: Existing input fixtures consume no output semantics.
+        Pica::RasterizerRegs rasterizer{};
         // CodexAstraUlt: Existing transport fixtures are unlit; new cases vary this explicitly.
         struct { bool disable{true}; } lighting;
     } regs;
@@ -102,6 +106,8 @@ struct RasterizerVulkan {
         // CodexAstraUlt: Observe that Custom bypasses optional admission before capability checks.
         bool automatic{true};
         Pica::AttributeBuffer input_default_attributes{};
+        // CodexAstraLocal: Real shader storage keeps the new guard link-compatible.
+        Pica::ShaderSetup vs_setup;
         auto GetReadyGpuVertexAdmission() const {
             return ReadyVertexPolicy::Classify(automatic,false,true,false,
                 Pica::PipelineRegs::TriangleTopology::List,96,false,true);
@@ -136,6 +142,10 @@ struct RasterizerVulkan {
     u64 ready_vertex_zero_stride_rejections{};
     // CodexAstraUlt: Match the production quaternion fallback's bounded counter.
     u64 ready_vertex_quaternion_rejections{};
+    // CodexAstraLocal: Match recovered output-guard state without changing input cases.
+    ReadyVertexPolicy::OutputWriteMemo<> ready_vertex_output_writes;
+    u64 ready_vertex_output_checks{}, ready_vertex_output_w_checks{},
+        ready_vertex_output_rejections{};
     // CodexAstraUlt: Match the production per-reason accounting without device plumbing.
     std::array<u64, static_cast<std::size_t>(ReadyVertexPolicy::InputLayoutIssue::Count)>
         ready_vertex_layout_rejections{};
@@ -499,6 +509,9 @@ int main() {
         "boost/serialization/base_object.hpp":
             "#pragma once\nnamespace boost::serialization { template<typename Base,typename Derived> "
             "Base& base_object(Derived& d) { return static_cast<Base&>(d); } }\n",
+        # CodexAstraLocal: ShaderSetup's packed-uniform type includes this unused interface.
+        "boost/serialization/binary_object.hpp":
+            "#pragma once\n#include <boost/serialization/access.hpp>\n",
         "common/logging/log.h":
             "#pragma once\n#include <stdexcept>\n"
             "namespace TestLog { inline unsigned info_lines{}; }\n"
@@ -511,9 +524,12 @@ int main() {
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text)
     flags = ["-O1", "-g", "-fsanitize=address,undefined", "-fno-omit-frame-pointer"] if args.sanitize else ["-O2"]
+    # CodexAstraLocal: Link real shader storage/hashing for the newly extracted output guard.
     subprocess.run([os.environ.get("CXX", "c++"), "-std=c++20", *flags,
-                    f"-I{stubs}", "-Isrc", str(cpp),
-                    "src/video_core/pica/shader_unit.cpp", "-o", str(args.output)], check=True)
+                    f"-I{stubs}", "-Isrc", "-Iexternals/nihstro/include",
+                    "-Iexternals/xxHash", "-DXXH_INLINE_ALL", str(cpp),
+                    "src/video_core/pica/shader_unit.cpp",
+                    "src/video_core/pica/shader_setup.cpp", "-o", str(args.output)], check=True)
     subprocess.run([str(args.output)], check=True)
 
 

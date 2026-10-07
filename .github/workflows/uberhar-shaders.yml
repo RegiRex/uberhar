@@ -73,6 +73,12 @@ jobs:
         env:
           LIBGL_ALWAYS_SOFTWARE: '1'
         run: /tmp/uberhar-test-env/bin/python tools/uberhar/test_gpu_attribute_padding.py --render-only
+      # CodexAstraLocal: Execute the emitted missing-W divergence and written-W
+      # control after the production CPU/admission probe; host Mesa is not Thor parity.
+      - name: Compare mapped vertex output defaults with CPU
+        env:
+          LIBGL_ALWAYS_SOFTWARE: '1'
+        run: /tmp/uberhar-test-env/bin/python tools/uberhar/test_gpu_output_guard.py --render-only
       # AstraEH: Native-vs-compute pixels plus Vulkan/SPIR-V validation gate publication.
       - name: Compare compute rasterization with native triangles
         env:

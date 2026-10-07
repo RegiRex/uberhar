@@ -1,4 +1,74 @@
-# Uberhar progress — 0.1.23 Combo shader-memory follow-up
+# Uberhar progress — 0.1.24 output guard, cold-cache device qualification pending
+
+<!-- CodexAstraLocal: Record the reviewed candidate and completed host gates without promoting synthetic parity or a built host binary into Android/title qualification. -->
+- **Candidate 0.1.24 implemented and reviewed:** Combo rejects a complete optional
+  GPU vertex draw when a final mapped W component has no possible write in the
+  guest program. Exact, bounded program/swizzle memoization contains repeated
+  scans; existing CPU execution preserves its register carry. This is a narrow
+  proven CPU/GPU difference, not an established Dark Moon fix. Native and Custom
+  production paths and shader generation are unchanged.
+- **Host gates passed:** production admission/interpreter/output conversion and
+  generated GPU regression (old admission fails), independent review, eight manifest
+  regressions, complete
+  build probes, all shader/TEV/full-fragment parity gates, and native core/Vulkan/
+  tests/room build. CTest passed 61 distinct cases and 1,096 assertions; five
+  existing audio cases require absent firmware and were skipped. The new GPU
+  regression is also included in the reusable shader workflow.
+  Android/package/signing/publication remain separate release gates.
+- **Audit completed:** the [October 7 architecture/change audit](UBERHAR_AUDIT_2026-10-07.md)
+  covers the three successors to 0.1.20 and additions after 0.1.22. Candidate
+  0.1.24 will be successor one after this audit when published. Audit again after
+  three builds; continue toward the documented 0.2.0 threshold.
+- **Device work:** 0.1.23 remains installed. A fresh full-Combo/Vulkan/2x baseline
+  is collecting the earlier book-holder scene to address the unmatched ghost
+  footage. Moon flashing is assessed across consecutive frames, independently.
+  Every opening resets File 1 and starts with the title's Vulkan cache deleted;
+  all tested titles follow the same zero-saved-cache requirement. Warm runs
+  cannot qualify the project goal. Only the root coordinator operates the Thor.
+- **Publication status:** local review and host validation are complete; Android,
+  signing and release publication for 0.1.24 have not yet run. No new APK is ready.
+  The existing gated fork workflow retains all gates and now correctly classifies
+  alpha versions as prereleases and a zero alpha component as a full release.
+
+## Preserved recovery and earlier checkpoints
+
+<!-- CodexAstraLocal: Older pending-status and timed-batch paragraphs below are historical; the current candidate, every-three-build cadence and cold-cache scope above supersede them. -->
+
+<!-- CodexAstraLocal: Reconcile the resumed checkout and live device/release checks before continuing the interrupted candidate; preserve earlier checkpoints below. -->
+- **Recovered:** origin fetched at `814de4d60`; the local branch already matches
+  the latest release guidance. Staged/unstaged changes, original report and all
+  344 retained private artifacts are preserved, with an external recovery backup
+  and SHA-256 inventory. New comments use `CodexAstraLocal`; historic attribution
+  and the original device report remain unchanged.
+- **Ready:** the explicitly selected AYN Thor is authorized, Android API 33,
+  installed Uberhar **0.1.23 / 33972593**. Live GitHub metadata reconfirms shader,
+  Android and publication success for run **37551055615** at `99fe4a885`; the
+  retained APK matches its published checksum and release asset digest. No update
+  or data reset was needed. Setup battery is 80%, AC powered, 27°C, power saver
+  off; hardware performance/fan policy and SoC headroom remain unverified.
+- **Work underway:** independent architecture/post-0.1.22 audit, output-W guard
+  regression/review and retained temporal-evidence analysis run in parallel.
+  Only the root coordinator operates the device. Mode 4 already reproduced moon
+  flashing; no need to repeat unchanged setup. No new APK has been produced.
+- **Current authority:** continue toward 0.2.0 with a full audit every three
+  builds, replacing the initial timed batch. Source/release ownership is local;
+  the former cloud publication hold is historical. Qualification still requires
+  the documented correctness, throughput, memory and retained baseline evidence.
+
+<!-- CodexAstraUlt: New owner scope and completed route-isolation evidence supersede the initial batch boundary and repeat-Native plan below. -->
+- **Current loop:** continue toward 0.2.0 until credits, beta qualification or a
+  genuine blocker; the initial three-build/four-hour cap is superseded. Audit every
+  three builds, with the 0.1.21–0.1.23 audit now due. Test Combo Dark Moon only
+  unless the Native process changes, requiring both modes. Alpha versions receive
+  prereleases; beta milestones receive full releases after the same gates.
+- **New existing-build result:** 0.1.23 mode 4 retains moon flashing in consecutive
+  frames with zero optional specialized-fragment requests. Observed ghosts are
+  cleaner, with unmatched-phase limits; that is a separate result. Normal exit
+  recovers KGSL to about 11 MiB. See the [experiment ledger](UBERHAR_LOCAL_BATCH_2026-10-06.md).
+- **Next candidate:** a narrow optional-GPU fallback for a source-proven consumed
+  output-W lane that no instruction writes; implementation/review underway.
+  No new APK has been built. This does not establish the cause of either title
+  symptom and may increase CPU work. Native production behavior remains unchanged.
 
 <!-- CodexAstraUlt: Completed publication and the attached local device report supersede earlier pending status; local Codex now owns the next implementation/test batch. -->
 - **Current owner:** [local Codex on Nobara](UBERHAR_LOCAL_AUTONOMOUS_HANDOFF.md)
@@ -18,6 +88,57 @@
   Inspect the retained clips over matching scene phases and try mode 4 before
   choosing the next source experiment. The cloud read the report and the owner's
   correction, not the private raw captures. This correction starts no APK build.
+
+<!-- CodexAstraUlt: Reconcile upstream takeover authority with preserved local observations; the original report is unchanged, while temporal review supersedes the old still-frame interpretation and cloud-publication hold. -->
+- **Active local batch:** started October 6 at 21:32:55 EDT (October 7
+  01:32:55 UTC), ending by 01:32:55 EDT / 05:32:55 UTC or three new
+  candidate builds. Current candidate count: **0**. The existing-build mode-4
+  experiment comes first; no new APK is needed for route isolation.
+- **Evidence correction verified locally:** consecutive retained Combo frames
+  show repeated abrupt moon-segment brightness reversals; reviewed Native
+  sequences provide the owner's nonflashing reference. Ghost corruption is a
+  separate target. Static shared facets did not test flashing. The original
+  local report and ignored evidence are preserved, with a pre-integration backup.
+- **Source continuity:** fetched and fast-forwarded to `814de4d60`, restored
+  local documentation, and retained both the original report and the cloud's
+  distinct archive. Local ownership supersedes the previous publication hold.
+
+## Preserved local checkpoint before autonomous takeover
+
+<!-- CodexAstraUlt: The following checkpoint remains historical evidence; its still-frame inference and unavailable-cloud hold are superseded above and must not direct the active batch. -->
+<!-- CodexAstraUlt: Replace the preliminary USB/pending-build checkpoint with verified publication, update installation and bounded device evidence; retain the cloud implementation record below. -->
+- **Local Thor testing, October 6:** USB authorization and the installed **0.1.23**
+  package are verified. The isolated local `uberhar/thor-device-testing` branch
+  tracks release-branch source `7a1b2717db24cf913f3b63852a6b7b7b4acd2b34`;
+  the comparison branch is preserved. The 0.1.22 full Combo/Vulkan/2×,
+  100%-limit run reached the initial moon and laboratory ghosts and returned
+  normally. Own-process KGSL reached about 3,824 MiB during that session and
+  returned to about 12 MiB. The 0.1.23 Combo and Native reference runs also
+  reached the initial moon and laboratory ghosts and returned normally.
+  Their sampled live KGSL peaks were about **3,051 / 1,076 MiB**, falling to
+  **12 / 17 MiB** immediately afterward. Native later reached about 11 MiB.
+  System available memory recovered. These short, differently timed captures
+  establish cleanup, not a controlled speedup or a memory cure.
+  Delete only Dark Moon's Vulkan shader cache and in-game **File 1** before
+  each run. The owner abandoned save-state reuse after the cross-build mismatch;
+  the existing 0.1.22 Slot 1 remains preserved. See the
+  [local test record](UBERHAR_DEVICE_TEST_2026-10-06.md).
+- **Image and speed limits:** the 0.1.23 Combo wide laboratory sample contains
+  dense dark patches on a ghost that were not seen in the inspected Native
+  frames. Camera/animation phases differ, so no exact pixel or causal claim is
+  made. Moon facets occur in both modes. Selected scene windows averaged
+  **22.2% emulation speed in Combo / 25.6% in Native**; Native is a visual
+  reference, not a playable-performance standard. No skipped draws or pipeline
+  failures were recorded. Full Combo/Vulkan/2×/100% settings are restored and
+  the Thor is left at the game list. This covers the initial moon and laboratory
+  sequence, not the complete introduction or later moon destruction.
+- **Release verified:** [0.1.23 run 37551055615](https://github.com/RegiRex/uberhar/actions/runs/37551055615)
+  passed shader, Android, signing/package and publication gates. The release APK
+  checksum and installed/candidate signing identity match; `adb install -r`
+  succeeded without uninstalling or clearing app data. No emulator changes or
+  additional build are needed for this device-testing turn. Local findings await
+  cloud-session handoff before any emulator-change publication; no public push
+  has been made. The following cloud record predates this local checkpoint.
 
 ## 0.1.23 implementation and earlier evidence
 

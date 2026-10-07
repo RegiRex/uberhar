@@ -169,6 +169,19 @@ RasterizerVulkan::~RasterizerVulkan() {
              ready_vertex_layout_rejections[static_cast<std::size_t>(
                  ReadyVertexPolicy::InputLayoutIssue::RegisterAlias)],
              ready_vertex_quaternion_rejections);
+    if (ready_vertex_output_checks != 0) {
+        // CodexAstraUlt Log Line: One optional-route coverage summary; neither
+        // an un-rejected shader nor this count establishes general output parity.
+        // CodexAstraLocal Log Line: Retain the recovered bounded summary so real
+        // route coverage and memo reuse can be checked after normal game exit.
+        LOG_INFO(Render_Vulkan,
+                 "Uberhar GPU output fallback totals: checked={} consumed_w={} "
+                 "never_written_w={} memo_entries={} memo_hits={} memo_scans={} "
+                 "scope=rasterizer_lifetime action=cpu guard=missing_write_union_only",
+                 ready_vertex_output_checks, ready_vertex_output_w_checks,
+                 ready_vertex_output_rejections, ready_vertex_output_writes.Size(),
+                 ready_vertex_output_writes.Hits(), ready_vertex_output_writes.Scans());
+    }
     if (compute_rect) {
         // AstraEH: Queued compute/timestamp commands must finish before their owners die.
         scheduler.Finish();
@@ -554,6 +567,41 @@ bool RasterizerVulkan::AccelerateDrawBatchReady(bool is_indexed) {
                      regs.pipeline.num_vertices);
         }
         return false;
+    }
+    // CodexAstraUlt: Contain the reproduced mapped-output W=0/W=1 difference
+    // before any uploads. A never-written consumed W stays zero throughout the
+    // CPU batch; retaining that whole batch also preserves register carry/FIFO.
+    // This leaves generated defaults and Native/Custom execution unchanged.
+    // CodexAstraLocal: LoadVertices constructs a zeroed ShaderUnit for each draw,
+    // then keeps it for that draw's FIFO misses. Reject before index reads and
+    // GPU setup; any possible W write leaves conditional/carry parity unresolved.
+    ++ready_vertex_output_checks;
+    const u16 consumed_w = ReadyVertexPolicy::ConsumedOutputW(regs.vs, regs.rasterizer);
+    if (consumed_w != 0) {
+        ++ready_vertex_output_w_checks;
+        const u64 program_hash = pica.vs_setup.GetProgramCodeHash();
+        const u64 swizzle_hash = pica.vs_setup.GetSwizzleDataHash();
+        const u16 written_w = ready_vertex_output_writes.Get(
+            pica.vs_setup.GetProgramCode(), pica.vs_setup.GetSwizzleData(), program_hash,
+            swizzle_hash);
+        const u16 missing_w = consumed_w & ~written_w;
+        if (missing_w != 0) {
+            if (++ready_vertex_output_rejections <= 8) {
+                // CodexAstraUlt Log Line: Eight details per rasterizer, no guest
+                // words/vertices and no attribution to a particular visible fault.
+                // CodexAstraLocal Log Line: Revalidate this early-return coverage
+                // independently of the moon flashing and ghost-corruption results.
+                LOG_INFO(Render_Vulkan,
+                         "Uberhar GPU output fallback: reason=consumed_w_never_written "
+                         "title={:016X} ordinal={} program={:016X} swizzle={:016X} entry={} "
+                         "consumed_w={:04X} possible_w={:04X} missing_w={:04X} vertices={} "
+                         "action=cpu limit=8 proof=missing_write_union_only",
+                         pipeline_cache.GetProgramID(), ready_vertex_output_rejections,
+                         program_hash, swizzle_hash, regs.vs.main_offset.Value(), consumed_w,
+                         written_w, missing_w, regs.pipeline.num_vertices);
+            }
+            return false;
+        }
     }
     // AstraPro: The stock accelerator assumes a valid index range. Validate it
     // before its min/max scan; malformed optional input retains legacy handling.

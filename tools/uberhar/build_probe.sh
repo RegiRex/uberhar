@@ -4,6 +4,9 @@
 set -euo pipefail
 mkdir -p build/uberhar-probe
 python3 tools/uberhar/check_android_keys.py
+# CodexAstraLocal: Exercise alpha/beta release classification with the real shell
+# block and a local gh substitute; this gate performs no repository publication.
+python3 tools/uberhar/test_release_publication.py
 # AstraPro: A deferred GPU attempt must not erase an unuploaded vertex uniform block.
 python3 tools/uberhar/test_uniform_retry.py
 # AstraPro: Preserve current/old/older logs under restarts and filesystem faults.
@@ -101,6 +104,9 @@ python3 tools/uberhar/test_combo_generic_route.py
 python3 tools/uberhar/test_gpu_quaternion_parity.py
 # CodexAstraUlt: The wider Vulkan fetch must retain CPU defaults before guest code.
 python3 tools/uberhar/test_gpu_attribute_padding.py
+# CodexAstraLocal: Never-written consumed output W must retain the complete CPU
+# batch before GPU reads/uploads; also exercise real output lifetime and mapping.
+python3 tools/uberhar/test_gpu_output_guard.py
 
 # AstraEH: Exact CPU cache/stack behavior and safe generic-module reuse gate the next build.
 c++ -std=c++20 -O2 -Isrc -Iexternals/boost tools/uberhar/test_vertex_runtime.cpp \
