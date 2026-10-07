@@ -49,6 +49,9 @@
   upstream `master` is unnecessary here and deferred for separate review.
   [0.1.23 notes](releases/0.1.23.md) describe the locally validated candidate;
   no 0.1.23 APK is ready until its gates pass.
+  Source `99fe4a885` is published on that release branch and
+  [run 37551055615](https://github.com/RegiRex/uberhar/actions/runs/37551055615)
+  is **in progress** with shader, Android and prerelease publication jobs.
 - **Device setup:** the [Nobara/Thor readiness guide](../tools/uberhar/device_testing/README.md)
   and [local Codex handoff](../tools/uberhar/device_testing/LOCAL_CODEX_HANDOFF.md)
   are now ordinary repository files. Changing the Thor's **USB controlled by**
