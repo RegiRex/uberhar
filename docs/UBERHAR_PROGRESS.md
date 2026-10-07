@@ -1,5 +1,24 @@
 # Uberhar progress — 0.1.23 Combo shader-memory follow-up
 
+<!-- CodexAstraUlt: Completed publication and the attached local device report supersede earlier pending status; local Codex now owns the next implementation/test batch. -->
+- **Current owner:** [local Codex on Nobara](UBERHAR_LOCAL_AUTONOMOUS_HANDOFF.md)
+  takes over the complete build/review/device-test loop. The first batch is up to
+  three candidate builds or four hours; cloud source development pauses after this
+  handoff. This documentation update starts no APK build.
+- **Latest reported device evidence:** the [submitted local report](device_reports/UBERHAR_DEVICE_TEST_2026-10-06.md)
+  records completed 0.1.22 Combo and 0.1.23 Combo/Native runs, with 0.1.23 still
+  installed. Opening speeds were 19.542%, 22.165% and 25.649%, respectively;
+  sampled KGSL maxima were 3,823.86, 3,051.37 and 1,076.11 MiB. All returned
+  normally and recovered GPU accounting. These unmatched samples do not establish
+  a speedup, bounded gameplay memory or an optimizer-caused reduction.
+- **Visual direction:** inspected Native frames in the local report also show
+  moon facets; stop describing those facets as exclusively Combo-related. The
+  Combo ghost patch remains the focused unresolved difference. Inspect the retained
+  local captures and try mode 4 on the same scene before choosing the next source
+  experiment. The cloud read the report, not the private raw captures.
+
+## 0.1.23 implementation and earlier evidence
+
 <!-- CodexAstraUlt: Replace the pending comparison-only milestone with measured 0.1.22 cleanup and the owner's normal-prerelease authorization; retain prior records below. -->
 - **New device evidence:** the supplied 0.1.22 log contains full Combo and Native
   Dark Moon runs. Combo reaches approximately **4,232 MiB** in own-process KGSL
@@ -47,16 +66,19 @@
   gates in **RegiRex/uberhar only**, never the upstream Azahar repository. The
   owner confirmed this publication path; literal integration of divergent
   upstream `master` is unnecessary here and deferred for separate review.
-  [0.1.23 notes](releases/0.1.23.md) describe the locally validated candidate;
-  no 0.1.23 APK is ready until its gates pass.
+  [0.1.23 notes](releases/0.1.23.md) describe the implementation.
   Source `99fe4a885` is published on that release branch and
   [run 37551055615](https://github.com/RegiRex/uberhar/actions/runs/37551055615)
-  is **in progress** with shader, Android and prerelease publication jobs.
+  completed **successfully**, including shader, Android and publication jobs.
+  The [normal 0.1.23 prerelease](https://github.com/RegiRex/uberhar/releases/tag/0.1.23)
+  contains the APK, checksum, validation and native-symbol assets. The cloud checked
+  this publication independently; the local report also records a compatible install.
 - **Device setup:** the [Nobara/Thor readiness guide](../tools/uberhar/device_testing/README.md)
   and [local Codex handoff](../tools/uberhar/device_testing/LOCAL_CODEX_HANDOFF.md)
   are now ordinary repository files. Changing the Thor's **USB controlled by**
   selection is not a prerequisite; check its state with `adb devices -l`.
-  Readiness-helper tests pass with fake ADB; actual USB access remains unverified.
+  Readiness-helper tests pass with fake ADB; the latest local report now also records
+  authorized USB access and completed physical-device runs.
 
 ## Previous 0.1.22 comparison record
 

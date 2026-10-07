@@ -7,6 +7,15 @@ Baseline: Azahar 2126.1.2, commit
 
 ## Current status
 
+<!-- CodexAstraUlt: The owner's full local takeover follows completed 0.1.23 publication and real-device testing; preserve the implementation history below. -->
+**0.1.23 is published; local Codex now owns the next development/test batch.**
+Read the [autonomous handoff](docs/UBERHAR_LOCAL_AUTONOMOUS_HANDOFF.md) and
+[submitted local device report](docs/device_reports/UBERHAR_DEVICE_TEST_2026-10-06.md).
+USB testing and the compatible install are recorded, but full-speed correctness
+remains open. Native also shows the reported moon facets, while a Combo ghost-patch
+discrepancy still needs matched evidence. The cloud session pauses concurrent source
+work after this handoff. Earlier pending-build statements below are historical.
+
 <!-- CodexAstraUlt: Replace the pending comparison-only summary with measured 0.1.22 cleanup and the scoped 0.1.23 work; earlier implementation history remains below and in progress records. -->
 **0.1.22 now shows a large live Combo GPU footprint that is released on exit.**
 The owner's Dark Moon log contains Combo and Native runs: own-process KGSL reaches

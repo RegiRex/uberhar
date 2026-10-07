@@ -1,5 +1,15 @@
 # Architecture review ledger
 
+<!-- CodexAstraUlt: Count successful 0.1.23 publication and retain the same source-review anchor during local takeover. -->
+0.1.23 [run 37551055615](https://github.com/RegiRex/uberhar/actions/runs/37551055615)
+passed shaders, Android/package/signing and publication. It is successor three
+after the completed 0.1.20 source review. The new
+[local report](device_reports/UBERHAR_DEVICE_TEST_2026-10-06.md) records persistent
+visual and throughput limits; it does not reset the review count. The
+[local coordinator](UBERHAR_LOCAL_AUTONOMOUS_HANDOFF.md) may review now, normally
+reviews after 0.1.24, and must review before a sixth successor (0.1.26 if consecutive).
+Earlier pending-publication statements below are historical.
+
 <!-- CodexAstraUlt: Reconcile successful comparison builds with the owner's resumed prerelease route without erasing the completed source review or claiming a new one. -->
 **Current anchor remains the completed 0.1.20 source review.** The successful
 0.1.21 and 0.1.22 builds are successors one and two. The latter passed all shader,
