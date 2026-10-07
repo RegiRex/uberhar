@@ -1,4 +1,38 @@
-# Uberhar progress — 0.1.26 ordered-dot candidate; local gates passed
+# Uberhar progress — 0.1.26 repeated visual improvement; throughput unqualified
+
+<!-- CodexAstraLocal: Integrate two independent cold confirmations and the three-build audit while preserving limited visual coverage and unmet performance gates. -->
+All 0.1.26 shader, Android, package/signing and publication gates passed in
+[run 37587379116](https://github.com/RegiRex/uberhar/actions/runs/37587379116)
+for `e83e8f4f1738d4883829cc06689ce1ab075a5ac0`. The exact release APK checksum
+and compatible signing identity were verified before installing version code
+33975176 with app data and the protected emulator state preserved.
+
+Both clean full-Combo/Vulkan/2x openings reset File 1, verified Empty and
+started with all application shader-cache inventories complete and zero. No
+capture sidecar or diagnostic menu interrupted the scene. Independent consecutive
+frame review found no earlier flashing in the recorded fully visible moon
+interval and no earlier dense irregular corruption in the three matched ghost
+intervals in both runs. Root corroborated selected consecutive sequences in both.
+This is repeated bounded improvement, not a full-game cure. Complete opening
+timing windows average **23.227% and 22.339% of normal speed**; every selected
+window is below 95%. Both record zero named skipped draws/fallback failures.
+The unlike scene mixtures do not establish a speedup or recorder cost.
+Same-process KGSL returns to **13.32 MiB** after both verified normal exits;
+short cleanup observations do not bound long-game memory. Battery readings were
+25 C in run one, 26 C during run two and 27 C after its return; SoC thermal
+headroom remains unknown. See the [two-run report](UBERHAR_DEVICE_TEST_2026-10-07.md).
+
+The [full .24–.26 architecture audit](UBERHAR_ARCHITECTURE_0.1.26.md) integrates
+parallel renderer, performance, delivery and visual review. Released .26 is the
+new source audit anchor; a completed .27 will be successor one. Existing-build
+finite thread CPU-counter observations are selected next, without video or new
+rendering changes, to distinguish the broad CPU vertex-stage cost before an
+optimization. The raw perf-event/stat access probe was denied; its internally changed
+security property was restored to its original value and verified. No new APK
+is needed for this next measurement. The 0.2.0 evidence gate, including the retained 2x FEA baseline,
+remains open. No 4x or broader-title qualification follows from this opening.
+
+## Pre-publication implementation checkpoint
 
 <!-- CodexAstraLocal: Advance the focused correction independently of installed title evidence, retaining all prior capture findings below. -->
 0.1.26 is implemented and independently reviewed. Combo's optional GPU path
@@ -8,9 +42,9 @@ numerical cases and two opposite mixed-depth failure/repair witnesses pass;
 SPIR-V under both optimizer policies. Ten unflagged/native shader sources
 remain byte-identical to 0.1.25. Full probes, native integration, CTest and
 existing shader/render gates pass. The source-derived cache identity was
-refreshed and verified after CMake configuration. Android/signing/publication
-and the cold Thor comparison remain pending. Installed 0.1.25 still has both
-visual faults; sustained normal speed and 2x qualification remain unmet.
+refreshed and verified after CMake configuration. At this earlier checkpoint,
+Android/signing/publication and cold Thor comparison were pending; installed
+0.1.25 still had both visual faults. The current delivery/device result is above.
 
 <!-- CodexAstraLocal: Advance the diagnostic candidate independently of the unchanged device-qualification result and retain previous checkpoints below. -->
 - **0.1.25 implemented and independently reviewed:** default-off, finite Combo

@@ -1,5 +1,80 @@
 # Local autonomous batch — October 6, 2026
 
+<!-- CodexAstraLocal: Advance the durable resume point only after exact .26 delivery, two cold runs and the required integrated three-build audit have completed. -->
+## Current checkpoint — 0.1.26 audit complete, October 7 UTC
+
+Released source **`e83e8f4f1738d4883829cc06689ce1ab075a5ac0`** passed all shader,
+Android/package/signing and publication gates in
+[run 37587379116](https://github.com/RegiRex/uberhar/actions/runs/37587379116).
+The checksum-verified, signing-compatible 0.1.26 APK, code **33975176**, is
+installed with app data and the protected 0.1.22 emulator state preserved.
+Three new gated builds have completed since the 0.1.23 review: .24, .25 and .26.
+The [integrated three-build audit](UBERHAR_ARCHITECTURE_0.1.26.md) is complete and
+sets **0.1.26 / `e83e8f4f1`** as the new source anchor. A completed gated .27 will
+be successor one; repeated tests on the installed APK add no build.
+
+<!-- CodexAstraLocal: Keep the positive visual observations bounded and separate from unmatched timing, sampled cleanup and the still-open product gates. -->
+Two clean full-Combo/Vulkan/2x/100% openings each reset File 1, verified Empty and
+started with complete zero-file application shader-cache inventories. The capture
+sidecar was absent and no diagnostic menu interrupted either scene. Independent
+consecutive-frame review found no prior abrupt moon-segment reversal in the
+fully visible recorded intervals and no prior dense irregular corruption in
+each run's three matched ghost intervals. Coherent facets and transparency bands
+remain distinct from those faults. See the exact reviewed scopes in the
+[new device report](UBERHAR_DEVICE_TEST_2026-10-07.md); this is repeated bounded
+improvement, not full-game correctness or proven title causality.
+
+Complete selected timing windows average **23.227% and 22.339% of normal speed**;
+all selected windows are below 95%. Menus, post-first-Back timing and uncertain
+boundary windows are excluded. Selected primary frame records are complete,
+while reported optional omissions total 38/42 over the two session lifecycles
+and 16/17 by report timestamps within the respective opening bounds. Their exact
+event times and counter families are unknown. Unlike scene mixtures prevent a
+matched speedup or recording-overhead claim.
+
+Both verified normal returns recover same-process KGSL to **13.32 MiB**. The
+second after-ghost sample, 2,787.19 MiB, is not a peak: ordinary health samples
+reach 2,955.35 MiB within the opening and 3,342.75 MiB over the full lifecycle,
+including the post-first-Back tail. Short recovery observations do not establish
+a long-game memory bound. AC power and 80% battery were sampled throughout;
+the first prelaunch status was not charging, then both runs' gameplay samples
+reported charging. Battery temperature was 25 C in the first run, 26 C during
+the second and 27 C after its return. SoC thermal headroom remains unknown.
+
+<!-- CodexAstraLocal: The next authorized work measures broad CPU costs on the existing APK without selecting an optimization or weakening denied perf-event controls. -->
+## Next discriminator on the installed build
+
+Root remains the only device operator. Reset File 1 and the title's saved Vulkan
+cache for another cold opening, verify Empty and zero application-cache files,
+and use two finite ten-second moon/early-ghost windows without video. Collect
+bounded `/proc` process/thread CPU endpoint counters with actual timestamps,
+PID/TID/starttime identity, observed USER_HZ and missing-thread coverage. Compare
+ordinary timing with the retained cold evidence while preserving scene and
+observation-overhead limits. Thread CPU totals cannot split loader/JIT/assembly
+within one thread or measure blocked/GPU time. No renderer optimization, new
+instrumentation or .27 implementation has been selected.
+
+The actual `simpleperf stat` attachment was denied. Its capability invocation
+changed `security.perf_harden` from 1 to 0; root restored the original 1 and
+verified it at **08:26:47 UTC**. Do not repeat that tool or weaken platform
+controls. No new APK is needed for the selected endpoint measurement.
+
+Continue toward 0.2.0 with full audits after every three completed successor
+builds, not the superseded four-hour stop. Sustained normal speed and broader
+correctness/memory qualification are unmet; qualify 2x before 4x or broader
+gameplay. Retain the explicit 0.2 beta gate, including the 2x FEA baseline and
+profiling-supported architecture. Preserve the original report, private raw
+artifacts, unrelated saves and protected emulator state. New explanations use
+CodexAstraLocal; no private game-derived payload belongs in publication.
+
+<!-- CodexAstraLocal: Keep recovered historical snapshots intact, including their then-current version, count, pending gates and superseded next actions. -->
+<details>
+<summary>Historical batch checkpoints through 0.1.25 and the initial recovery</summary>
+
+The following snapshots describe their original checkpoint. Their installed
+versions, candidate counts and pending actions are superseded by the current
+0.1.26 checkpoint above.
+
 <!-- CodexAstraLocal: Keep a durable implementation checkpoint before publication and real-device capture; do not count pending gates as a completed successor. -->
 ## 0.1.25 diagnostic candidate — October 7 UTC
 
@@ -301,3 +376,5 @@ sustained 100% normal speed, repeated-content memory bounds, 4x and broader game
 remain unqualified. Source review and local shader-validation setup run in parallel
 with serialized device work. The autonomous handoff supersedes the former cloud
 publication hold; only the existing gated `RegiRex/uberhar` workflow is authorized.
+
+</details>

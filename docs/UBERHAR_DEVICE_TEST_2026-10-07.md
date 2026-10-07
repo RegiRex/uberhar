@@ -1,5 +1,206 @@
 # Thor device testing — October 7, 2026 UTC
 
+
+## Candidate 0.1.26: repeated bounded visual improvement; 2x throughput unqualified
+
+<!-- CodexAstraLocal: Record two clean cold-cache runs of the gated arithmetic candidate while separating observed target improvements from whole-title correctness and sustained-speed qualification. -->
+**The earlier moon flashing and dense irregular corruption on three matched
+opening ghosts were not observed in either of two bounded consecutive-frame
+reviews. Sustained normal speed remains unqualified:** selected opening windows
+averaged **23.227%** and **22.339%**, with every selected window below 95%.
+These are repeated observations of the recorded targets, not proof of a full-game
+cure, exact shader causality, hardware parity or a matched performance gain.
+Native remains the owner's no-observed-moon-glitch reference; no new Native run
+was performed. Root alone operated the Thor; source, temporal and timing review
+used retained evidence independently. All times in this checkpoint are UTC.
+
+### Released identity and repeatable preparation
+
+<!-- CodexAstraLocal: Identify the exact fully gated, compatible installation and verify cold application-cache state independently for both runs. -->
+[Run 37587379116](https://github.com/RegiRex/uberhar/actions/runs/37587379116)
+passed shaders, Android/package/signing and publication for source
+`e83e8f4f1738d4883829cc06689ce1ab075a5ac0`.
+The [0.1.26 prerelease](https://github.com/RegiRex/uberhar/releases/tag/0.1.26)
+APK SHA-256 is
+`0215110ac382958c55d5aa96c0b5aac3d860041593620f036f9b91c1c2d29d1c`.
+Its published checksum was independently recomputed; exact tag/source, retained
+CI package/alignment/cryptographic signing reports, local native/manifest checks
+and embedded certificate identity agree. The certificate matches the repository
+pin and live installed .25 APK pulled during preflight. Local certificate
+extraction is not an independent local cryptographic signature verification.
+
+A data-preserving replacement succeeded, and the post-install authorized probe
+reports **0.1.26 / code 33975176** on AYN Thor, Android API 33. No uninstall or
+app-data clear was used. The protected .22 emulator state hash and original owner
+report remain unchanged. The two tests are sessions **1 and 2**, both PID **4159**.
+
+Before **each** test, root deleted the title-specific Vulkan cache with the title
+stopped, reset only in-game File 1 through its confirmation UI and verified
+**Empty**. Both next-launch inventories report complete generic, driver and
+specialized application-cache counts/bytes of zero. Driver-private cache remains
+unknown. Capture sidecar was removed before testing; no capture session is logged.
+Other saves and the protected emulator state were not part of the reset.
+
+Start/final effective settings agree in both runs: **full Combo (Automatic,
+mode 3), Vulkan, fixed 2x, CPU clock 100%, enabled normal 100% frame limit, CPU JIT
+and accurate multiplication**. Both record zero settings changes and no temporary
+limit frames. Eligible independent-list GPU vertices and specialized-ready GPU
+fragments remain enabled; quaternion recovery remains active. Whole-session
+teardown totals, which include setup and exit navigation, report **zero skipped
+draws and zero fallback failures** in both runs. The output-W guard has zero
+never-written-W rejections; this is its coverage limit, not an explanation for
+the visual result.
+
+### Separate consecutive-frame graphics results
+
+<!-- CodexAstraLocal: State exact presentation-order evidence and visibility boundaries for the moon and each ghost, preserving the difference between ordinary faceting/transparency and previous temporal defects. -->
+The first moon recording is **07:53:08.606968–07:53:20.960749**; the second is
+**08:04:58.733121–08:05:24.098486**. They contain 259 / 533 decoded frames over
+12.033211 / 25.039022 encoded seconds. The first early-ghost recording is
+**07:54:30.607628–07:55:16.125015**; the second is
+**08:06:28.732435–08:07:14.161253**, each with 496 decoded frames over
+43.751678 / 43.902244 encoded seconds. No diagnostic dialog interrupts these
+clips. Ordinary controls and the performance overlay are excluded from scoring.
+
+Indices below are zero-based decoded presentation order, inclusive; PTS is
+relative to the corresponding clip. **Every frame in each listed core was viewed.**
+
+| Target | First run: core frames / PTS seconds | Second run: core frames / PTS seconds | Observed result in both |
+| --- | --- | --- | --- |
+| Complete visible moon | 0–154 / 0–7.130900 | 0–350 / 0–16.326978 | No earlier abrupt local dark-segment reversal |
+| Near ghost after camera cut | 64–119 / 5.758622–10.036144 | 86–145 / 7.764378–12.363100 | No earlier dense irregular dark patches |
+| Foreground dip over apparatus | 360–389 / 30.595867–33.402478 | 380–409 / 32.588433–35.406744 | No earlier dense irregular dark patches |
+| Right book-holder in early wide view | 410–449 / 35.435611–39.194200 | 430–469 / 37.532189–41.403533 | No earlier patched reversal |
+
+The moon review additionally covered every frame through 179 / 379; later
+movement toward and across the top edge is excluded from the conservative full
+visibility score. The second clip includes both the large moon view and the
+pullback; small distant features have lower visibility. Coherent facets, glow
+and cloud movement remain distinct from the prior .25 sequence that abruptly
+darkened at frames 213–214 and cleared at 215.
+
+Additional ghost context was reviewed consecutively: first run near 60–119,
+foreground 350–429 and right 410–489; second run near 80–159, foreground 370–449
+and right 430–495. Earlier cuts and later partial crops are not promoted to full
+visibility. Expanded near-ghost crops and full-frame anchors retain context.
+Broad coherent background/transparency bands and actual props remain and are
+not scored as the prior irregular black fragmentation. Sparse whole-clip
+contact sheets provide context; neither ghost clip was reviewed in its entirety
+at consecutive-frame resolution.
+
+Root independently corroborated selected sheets in both runs, rather than duplicating
+the complete review. Scene/camera matching does not identify identical guest
+frames or an implicated draw. Lossy screenrecord can omit emulated frames; this
+is not Adreno readback or calibrated flashing-frequency measurement. Two cold
+runs support repeated absence in these recorded targets while broader gameplay
+and other faults remain unqualified.
+
+### Opening timing and measurement limits
+
+<!-- CodexAstraLocal: Use the independent timing audit's complete normal-limit windows, preserve host/device-clock uncertainty and keep video, setup and exit tails separate. -->
+Run 1 is bounded by opening A **07:52:40.567591** and first Back
+**07:55:32.759116**: **172.191525 seconds**. Run 2 is bounded by opening A
+**08:04:38.692323** and first Back **08:08:27.596257**: **228.903934 seconds**.
+The second includes more post-clip play because exit began later. Pre-opening
+setup, all subsequent drawer/confirmation time and mixed/paused/temporary-limit
+intervals are excluded. Full-session totals are not opening benchmarks.
+
+| Run / complete window group | Windows | Wall seconds | Wall-weighted speed | Wall-weighted p05 window speed |
+| --- | ---: | ---: | ---: | ---: |
+| 1: all selected | 33 | 166.293 | 23.227% | 16.829% |
+| 1: no video overlap | 20 | 100.762 | 23.869% | 17.961% |
+| 1: no video/readings/action overlap | 18 | 90.708 | 22.516% | 17.691% |
+| 1: possible video overlap | 13 | 65.531 | 22.240% | 16.558% |
+| 2: all selected | 44 | 221.617 | 22.339% | 16.649% |
+| 2: no video overlap | 28 | 140.999 | 21.266% | 16.649% |
+| 2: no video/readings/action overlap | 28 | 140.999 | 21.266% | 16.649% |
+| 2: possible video overlap | 16 | 80.618 | 24.215% | 16.574% |
+
+All selected **166.293 / 221.617 seconds** fall in windows averaging below 95%.
+Worst observed included intervals are **225.751 / 233.936 ms**. The p05 and
+below-target duration describe aggregate window averages, not frame percentiles
+or exact per-frame time below target. Whole windows cover 96.574% / 96.817% of
+the operator intervals; **5.898460 / 7.287116 seconds** remain unscored at the
+boundaries. One uncertain trailing window per run is excluded; none is trimmed.
+
+Whole-second device dates permit constant device-minus-host offsets of
+0.637275–1.558702 seconds in run 1 and 0.565487–1.518448 in run 2. Selection is
+conservative over these compatibility ranges, not subsecond clock calibration;
+logging latency remains unknown. Selected primary frame/limit records are
+complete. Optional diagnostic coverage is less complete: 29 / 39 omission
+warnings report **38 / 42 optional records** over each lifecycle, with **16 / 17**
+reported during the opening scope. Reporting time does not identify exact
+omission time or record family. Run 1 has optional CPU progress gaps; other
+optional families may also be incomplete.
+
+The unlike scene mixtures, different recording spans, temperatures and extended
+second-run play do **not** establish a speed change or recorder cost. Sustained
+100% is far from met; this is no 2x playability qualification or 4x readiness.
+
+### Memory, charging and verified normal return
+
+<!-- CodexAstraLocal: Report matched accounting scopes and real cleanup separately from live peaks, charging status, thermal headroom and long-game bounds. -->
+Both runs returned normally to the library/title panel and retained PID 4159.
+Before/after-native records and independent returned-screen review corroborate
+cleanup. Values below are MiB; KGSL, RSS and system availability overlap and must
+not be added.
+
+| Run / point | Own-process KGSL | RSS | System available |
+| --- | ---: | ---: | ---: |
+| 1: before launch | 10.38 | 204.72 | 12,255.86 |
+| 1: before opening | 1,939.10 | 933.96 | 9,567.02 |
+| 1: after moon | 2,445.46 | 967.77 | 9,019.66 |
+| 1: after ghost | 2,834.73 | 990.26 | 8,650.33 |
+| 1: verified return, 07:56:54.805 | 13.32 | 319.32 | 12,028.63 |
+| 2: before launch | 10.65 | 307.80 | 12,000.02 |
+| 2: before opening | 1,941.40 | 956.15 | 9,525.61 |
+| 2: after moon | 2,446.86 | 975.81 | 8,983.37 |
+| 2: after ghost | 2,787.19 | 984.23 | 8,628.11 |
+| 2: verified return, 08:11:55.807 | 13.32 | 478.22 | 11,816.13 |
+
+The second opening's later ordinary-health samples reach **2,955.35 MiB KGSL**,
+above its after-ghost reading. The full second lifecycle, including the excluded
+post-first-Back tail, later samples **3,342.75 MiB**. These are differently scoped
+sampled maxima, not actual phase peaks. Both returns release most observed live
+GPU allocation, while RSS/system availability do not exactly return to their
+initial values. This is no bound on growth across repeated content or extended
+play, and no demonstrated post-exit leak.
+
+AC power and 80% battery were reported throughout, with power-save off. Run 1
+battery status changes from **3 before launch to 2 before opening**, then remains
+2; battery temperature is **25°C** at all samples. Run 2 reports **status 2**,
+**26°C** through gameplay and **27°C** after return. AC presence is distinct from
+battery charging status. Thermal status 0 coexists with HAL not ready and unknown
+headroom; fan/hardware performance policy and GPU clock are unobserved. Battery
+temperature does not measure SoC/GPU temperature or establish thermal headroom.
+
+### Preserved evidence and remaining work
+
+<!-- CodexAstraLocal: Retain reproducible private provenance and the three-build review boundary without publishing game-derived payloads or treating visual progress as beta promotion. -->
+Under ignored `build/device-testing/20261007-recovery/`, release/install proofs
+are in `candidate-026/` and `candidate026-preflight/`; temporal notes, exact PTS,
+raw/derived hashes, expanded sheets and originals are in
+`analysis/clean026-visual/` and `analysis/clean026b-visual/`. Independent timing
+reproduction and source-line/clock/omission records are in
+`audit026-performance/clean026*-audit.json` and the corresponding summary/scripts.
+The delivery audit is in `audit026-delivery/`. Raw footage, screenshots, logs and
+game-derived captures remain private; historical reports are preserved.
+
+First final-log SHA-256:
+`6694c66fd58b8f0d156e7cf8c49f86b9519612b7fbe6dbad025a9bd49352b2c4`.
+The second cumulative final log contains both sessions; session 2 begins at
+lifecycle line 2941. Its SHA-256 is
+`cdd5aba7694f8ea13fbcad702bb908cb8ad4c79e86d1ae3086f28baf56f08003`.
+The performance audit excludes session 1 counters from session 2 results.
+
+.24–.26 are three completed gated successors to the .23 audit anchor. Their
+independent portions are integrated in the completed
+[architecture audit](UBERHAR_ARCHITECTURE_0.1.26.md). The next engineering decision must
+retain complete draws, quaternion recovery and the observed correctness
+improvement while addressing measured throughput costs. This checkpoint does
+not close that architectural review by itself, establish whole-opening/full-game
+correctness, qualify sustained cold 2x or waive the retained 0.2.0 evidence gates.
+
 <!-- CodexAstraLocal: Record the resumed baseline separately from the original October 6 report, retaining private evidence and the distinction between two visual symptoms. -->
 ## Baseline 1: released 0.1.23, full Combo, 2x
 

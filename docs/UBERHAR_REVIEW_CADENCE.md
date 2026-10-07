@@ -1,5 +1,56 @@
 # Architecture review ledger
 
+<!-- CodexAstraLocal: Close the three completed successors with an integrated source/evidence audit while keeping product qualification separate. -->
+## Current review anchor — released 0.1.26
+
+The [full 0.1.24–0.1.26 architecture review](UBERHAR_ARCHITECTURE_0.1.26.md)
+is complete against released **0.1.26, `e83e8f4f1`**, after the three completed
+successors to the 0.1.23 audit: 0.1.24, 0.1.25 and 0.1.26. It integrates
+independent renderer/contracts, diagnostics/Android/delivery, performance and
+temporal-evidence reviews, including actual .26 release gates and two cold Thor
+runs. No new release-blocking defect was found; recorded diagnostic and inherited
+ownership/failure debts remain explicit in the audit.
+
+The new source-audit anchor is **0.1.26**. A completed gated 0.1.27 build will be
+successor one. Continue the owner's audit every three completed successor builds,
+or sooner when evidence contradicts an architectural assumption or two candidates
+produce neither improvement nor useful discrimination. Existing-build tests,
+documentation checkpoints and retries do not increment the build count. The old
+four-hour boundary and three-to-five-successor cadence are superseded.
+
+<!-- CodexAstraLocal: Record the repeated bounded visual result and failed throughput gate without claiming a full-game cure, matched speedup or lifetime bound. -->
+Both .26 full-Combo/Vulkan/2x openings verified File 1 Empty and zero saved
+application shader-cache inventory. Consecutive review of the fully visible moon
+interval and three matched ghost intervals in each run found none of the prior
+flashing or dense irregular patches. These are separately scored, bounded
+observations. The selected complete timing windows average **23.227% and 22.339%
+of normal speed**; their differing scene mixtures do not establish a speedup.
+Same-process KGSL returns to 13.32 MiB after each verified normal exit, which does
+not bound long-game memory. Full correctness, sustained 100% speed, 4x and broader
+gameplay remain unqualified. The retained
+[0.2 beta evidence gate](UBERHAR_ARCHITECTURE_0.1.6.md#roadmap-and-version-gates),
+including the 2x FEA baseline, exact output and profiling-supported architecture,
+is not waived by audit completion.
+
+<!-- CodexAstraLocal: Select only a finite existing-build measurement; denied perf access does not authorize a platform-control workaround or an unmeasured renderer change. -->
+The next discriminator uses the installed .26 with fresh File 1/cache preparation:
+two ten-second moon/early-ghost windows with finite `/proc` process/thread CPU
+endpoint readings and no video. Retain PID/TID/starttime identity, observed
+USER_HZ, actual timestamps and missing-thread coverage. This can separate broad
+thread CPU costs; it cannot split loader/JIT/assembly within one thread or measure
+blocked/GPU time. No renderer optimization or new .27 build is selected.
+The `simpleperf stat` attempt was denied; root restored its internally changed
+`security.perf_harden` property from 0 to the original 1 and verified the result
+at 08:26:47 UTC. Do not repeat that tool or weaken platform controls.
+
+<!-- CodexAstraLocal: Preserve every prior checkpoint and author attribution as historical state rather than current instructions or an active audit anchor. -->
+<details>
+<summary>Historical review and release checkpoints before the completed 0.1.26 audit</summary>
+
+The entries below preserve their status at the time, including pending gates,
+earlier anchors and superseded review intervals. The current anchor and next
+action are above.
+
 <!-- CodexAstraLocal: Complete the required three-successor audit before the next candidate; this source/evidence review resets cadence but does not qualify the device. -->
 The [October 7 recovery architecture audit](UBERHAR_AUDIT_2026-10-07.md) is
 complete against released 0.1.23 (`99fe4a885`) and guidance `814de4d60`, including
@@ -380,3 +431,5 @@ stage/state diagnostics. Neither patch is declared the Dark Moon crash cure.
 This focused review does NOT reset the full 0.1.9 anchor. 0.1.13 becomes successor
 four only after publication; default full review remains after its evidence,
 allowed after 0.1.12–0.1.14 and before 0.1.15. No performance gate is waived.
+
+</details>
