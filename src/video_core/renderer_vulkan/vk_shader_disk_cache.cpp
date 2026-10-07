@@ -9,6 +9,7 @@
 #include "common/settings.h"
 #include "common/static_lru_cache.h"
 #include "common/zstd_compression.h"
+#include "video_core/renderer_vulkan/uberhar_shader_compile_policy.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_pipeline_cache.h"
 #include "video_core/renderer_vulkan/vk_shader_disk_cache.h"
@@ -156,11 +157,18 @@ std::optional<std::pair<u64, Shader* const>> ShaderDiskCache::UseProgrammableVer
 
             shader.program = std::move(program);
             const vk::Device device = parent.instance.GetDevice();
+            // CodexAstraUlt: Replace the inherited mutable/global compiler choice for
+            // this queued job with a frozen option. Only ready-only VS jobs optimize;
+            // their renderer-scoped maps never load/write Custom's vkch files (Init).
+            const bool disable_optimizer =
+                DisableShaderOptimizer(ready_only, parent.profile.vk_disable_spirv_optimizer != 0);
             if (ready_only)
                 warming_ready_vs = &shader;
-            parent.shader_workers.QueueWork([device, &shader, this, spirv_id, ready_only] {
+            parent.shader_workers.QueueWork([device, &shader, this, spirv_id, ready_only,
+                                             disable_optimizer] {
                 const auto compile = [&] {
-                    auto spirv = CompileGLSL(shader.program, vk::ShaderStageFlagBits::eVertex);
+                    auto spirv = CompileGLSL(shader.program, vk::ShaderStageFlagBits::eVertex,
+                                            "", disable_optimizer);
                     if (spirv.empty())
                         throw std::runtime_error("empty vertex module");
                     AppendVSSPIRV(vs_cache, spirv, spirv_id);
@@ -313,8 +321,11 @@ std::optional<std::pair<u64, Shader* const>> ShaderDiskCache::UseReadyFragmentSh
             // specialization used by the existing full-fragment pixel oracle.
             // This does not change the normal/custom renderer's SPIR-V choice.
             const auto code = GLSL::GenerateFragmentShader(fs, {}, profile);
+            // CodexAstraUlt: Replace AstraPro's inherited generic-latency compiler
+            // option for this optional job. Full requested-profile equality still
+            // guards the cache; every entry has this same fixed optimization policy.
             const auto spirv = CompileGLSL(code, vk::ShaderStageFlagBits::eFragment, "",
-                                           profile.vk_disable_spirv_optimizer != 0);
+                DisableShaderOptimizer(true, profile.vk_disable_spirv_optimizer != 0));
             if (spirv.empty()) throw std::runtime_error("empty optional fragment module");
             entry->shader.module = CompileSPV(spirv, device);
             if (!entry->shader.module) throw std::runtime_error("null optional fragment module");
@@ -374,13 +385,20 @@ std::optional<std::pair<u64, Shader* const>> ShaderDiskCache::UseFixedGeometrySh
         if (new_shader) {
             LOG_NEW_OBJECT(Render_Vulkan, "New GS config {:016X}", gs_config_hash);
 
-            parent.shader_workers.QueueWork([gs_config, this, &shader, gs_config_hash, ready_only]() {
+            // CodexAstraUlt: Replace mutable worker reads with the same frozen optional
+            // policy as VS. Mandatory/Custom geometry jobs retain the requested option.
+            const bool disable_optimizer =
+                DisableShaderOptimizer(ready_only, parent.profile.vk_disable_spirv_optimizer != 0);
+            const bool use_clip_planes = parent.profile.has_clip_planes;
+            parent.shader_workers.QueueWork([gs_config, this, &shader, gs_config_hash, ready_only,
+                                             disable_optimizer, use_clip_planes]() {
                 const auto compile = [&] {
                     ExtraFixedGSConfig extra;
-                    extra.use_clip_planes = parent.profile.has_clip_planes;
+                    extra.use_clip_planes = use_clip_planes;
                     extra.separable_shader = true;
                     const auto code = GLSL::GenerateFixedGeometryShader(gs_config, extra);
-                    const auto spirv = CompileGLSL(code, vk::ShaderStageFlagBits::eGeometry);
+                    const auto spirv = CompileGLSL(code, vk::ShaderStageFlagBits::eGeometry,
+                                                   "", disable_optimizer);
                     if (spirv.empty())
                         throw std::runtime_error("empty geometry module");
                     shader.module = CompileSPV(spirv, parent.instance.GetDevice());
@@ -481,10 +499,12 @@ void ShaderDiskCache::ReportUberharStats(const char* kind) const {
              ready_fragment_demand.Replacements(), ReadyFragmentPolicy::MaxModules,
              ReadyFragmentPolicy::WarmupDraws);
     // AstraPro: Existing bounded cadence; counts don't imply GPU timings.
-    // CodexAstraUlt Log Line: Replace AstraPro's blocking progress enqueue; totals stay reliable.
+    // CodexAstraUlt Log Line: Retain bounded reporting and identify the effective optional
+    // compiler policy separately from the generic/Custom requested optimizer setting.
     LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
              "Uberhar GPU shader admission {}: schema=1 vs_deferred={} vs_capped={} gs_capped={} "
-             "failures={} max_vs_configs=128 max_gs_configs=128",
+             "failures={} max_vs_configs=128 max_gs_configs=128 "
+             "ready_compiler_policy=optimized_background_v1 ready_optimizer_disabled=false",
              kind, ready_vs_deferred, ready_vs_capped, ready_gs_capped,
              ready_shader_failures.load());
     // AstraEH Log Line: Same bounded report cadence; counts objects, not completed compiles.

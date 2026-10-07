@@ -1,5 +1,34 @@
 # Architecture review ledger
 
+<!-- CodexAstraUlt: Reconcile successful comparison builds with the owner's resumed prerelease route without erasing the completed source review or claiming a new one. -->
+**Current anchor remains the completed 0.1.20 source review.** The successful
+0.1.21 and 0.1.22 builds are successors one and two. The latter passed all shader,
+Android and signing/package gates in
+[run 37524017429](https://github.com/RegiRex/uberhar/actions/runs/37524017429).
+The owner now authorizes normal repository prereleases; changing publication route
+does not reset that review count or remove earlier evidence.
+
+The [0.1.22 device log](UBERHAR_LOG_ANALYSIS_0.1.22.md) now places the much larger
+live Combo footprint in own-process KGSL accounting, with recovery after normal
+exit. It does not demonstrate a persistent post-exit leak. The owner reports
+continued ghost and moon glitches, more visible glitches overall, and a
+significant perceived speed improvement; these are not matched throughput data.
+The 0.1.23 focused follow-up is implemented to optimize
+optional background GPU shader compilation, preserving the cold generic and
+Custom policies. Source review and local validation passed; CI and device acceptance
+remain separate gates. No memory cure or speedup has been measured. The fitted
+96/72 MiB increments are associated with GPU pipeline counts grouped by attachment
+format, not image size calculations or direct driver allocation-type observations.
+
+Count 0.1.23 as successor three only after its gates pass. Repeat the full review
+after three to five successful successors, normally four (0.1.24 if versions
+advance consecutively), or earlier if new evidence invalidates the design.
+This focused follow-up does not claim that a full review has been completed.
+Use the owner-confirmed `uberhar/hybrid-shaders` release workflow in
+`RegiRex/uberhar` only. Literal integration into divergent upstream `master` is
+unnecessary for repository prereleases and deferred for separate review.
+Previous entries below preserve the publication and evidence state at the time.
+
 <!-- CodexAstraUlt: Record the first successful successor and the new focused correction without falsely resetting the completed full review. -->
 0.1.21 comparison CI passed all Android, signing/package and shader gates in
 [run 37436727334](https://github.com/RegiRex/uberhar/actions/runs/37436727334),

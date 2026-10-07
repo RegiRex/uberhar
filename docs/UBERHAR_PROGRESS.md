@@ -1,4 +1,61 @@
-# Uberhar progress — 0.1.22 Dark Moon lighting and memory follow-up
+# Uberhar progress — 0.1.23 Combo shader-memory follow-up
+
+<!-- CodexAstraUlt: Replace the pending comparison-only milestone with measured 0.1.22 cleanup and the owner's normal-prerelease authorization; retain prior records below. -->
+- **New device evidence:** the supplied 0.1.22 log contains full Combo and Native
+  Dark Moon runs. Combo reaches approximately **4,232 MiB** in own-process KGSL
+  accounting and falls to **12 MiB** after normal exit; Native stays around
+  **1,081 MiB** and returns to **15 MiB**. System available memory recovers.
+  This identifies a much larger live Combo GPU allocation footprint in these
+  runs, with cleanup on exit; it does not demonstrate a persistent post-exit leak.
+  The owner still sees ghost and moon glitches, reports more visible glitches,
+  and perceives a significant speed improvement over earlier builds. This is
+  useful owner feedback, not a matched speed measurement. See the
+  [0.1.22 log analysis](UBERHAR_LOG_ANALYSIS_0.1.22.md).
+- **Implemented:** optional background vertex/geometry and specialized fragment
+  jobs now optimize, with compiler options frozen before queueing. The cold generic
+  path, Custom policy, draw order and existing fallbacks remain. Existing bounded
+  reporting identifies the selected policy. This corrects an inappropriate compiler
+  setting; it is not a confirmed driver-memory cure or device speedup.
+- **Validation passed:** native core/Vulkan/tests/room build; complete host probes;
+  62 passing CTest entries and five firmware-dependent skips; eight manifest tests;
+  16 simulated device-probe tests. All 48 production queued compiler cases pass;
+  the old source fails the policy assertion. Actual SPIR-V execution on Mesa matches
+  CPU results for 42 vertex cases and produces identical color/depth/discard for
+  75 representative fragment pairs (76,800 pixels). Separate generated Vulkan
+  modules pass SPIR-V validation. Independent source/cache review found no blocker.
+  No Android source changed; the fresh Android package and full shader gates run in CI.
+- **Accounting limits:** a model of **96 MiB per GPU pipeline with color format 0**
+  and **72 MiB per GPU pipeline without a color attachment** closely follows the
+  measured KGSL staircase, leaving a stable approximately 1,086–1,088 MiB baseline.
+  These are fitted pipeline-associated increments, not image size calculations or
+  direct observations of individual driver allocation types.
+- **Remaining visual investigation:** a separate synthetic guest shader reproduces
+  a partial-output difference (CPU alpha 0 versus GPU alpha 1). The current game log
+  lacks its shader instructions/component masks, so Dark Moon attribution remains
+  open. Preserve within-batch CPU state in any future correction; changing every
+  GPU register's default alone would not establish parity.
+- **Verified prior build:** 0.1.22
+  [run 37524017429](https://github.com/RegiRex/uberhar/actions/runs/37524017429)
+  passed Android, signing/package and shader gates; artifact
+  `uberhar-0.1.22-arm64` is available. This is the second successful successor to
+  the completed 0.1.20 source review. The new device log does not qualify every
+  title or a controlled performance comparison; the owner's visual report
+  confirms that Dark Moon remains incorrect.
+- **Publication:** the owner now authorizes normal repository prereleases and
+  will use a side branch for parallel work. The existing
+  `uberhar/hybrid-shaders` workflow preserves signing continuity and release
+  gates in **RegiRex/uberhar only**, never the upstream Azahar repository. The
+  owner confirmed this publication path; literal integration of divergent
+  upstream `master` is unnecessary here and deferred for separate review.
+  [0.1.23 notes](releases/0.1.23.md) describe the locally validated candidate;
+  no 0.1.23 APK is ready until its gates pass.
+- **Device setup:** the [Nobara/Thor readiness guide](../tools/uberhar/device_testing/README.md)
+  and [local Codex handoff](../tools/uberhar/device_testing/LOCAL_CODEX_HANDOFF.md)
+  are now ordinary repository files. Changing the Thor's **USB controlled by**
+  selection is not a prerequisite; check its state with `adb devices -l`.
+  Readiness-helper tests pass with fake ADB; actual USB access remains unverified.
+
+## Previous 0.1.22 comparison record
 
 <!-- CodexAstraUlt: New owner-supplied 0.1.21 device evidence supersedes the pending comparison status; retain prior records below. -->
 - **Evidence:** the owner supplied one `e72209ba6` full Combo/Vulkan/2x Dark Moon

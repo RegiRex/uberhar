@@ -48,6 +48,8 @@ timeout 30s build/uberhar-probe/test-pipeline-policy
 c++ -std=c++20 -O2 -pthread -Isrc tools/uberhar/test_shader_failure.cpp \
   -o build/uberhar-probe/test-shader-failure
 timeout 30s build/uberhar-probe/test-shader-failure
+# CodexAstraUlt: Execute the real queued compiler jobs with frozen optional/required inputs.
+python3 tools/uberhar/test_shader_compile_policy.py
 # CodexAstraUlt-2: Terminal readback errors must leave noexcept cleanup safely.
 python3 tools/uberhar/test_download_recovery.py
 # CodexAstraUlt: Verify real resource reuse/failed-allocation cleanup and event-only memory counters.

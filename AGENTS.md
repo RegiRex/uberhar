@@ -5,18 +5,27 @@
   use `CodexAstraUlt Log Line`. Preserve historical markers. When replacing an
   attributed block, explain the removed behavior, reason and replacement in a new
   adjacent comment, and keep the code map current.
-- The owner requested a full architecture review and a next build that fixes proven
-  resource defects and supplies missing Dark Moon memory/route evidence. The new
-  0.1.21 device run confirms continued system pressure outside tracked allocations
-  and reaches lit GPU draws without quaternion sign correction. Prioritize exact
-  triangle output parity and bounded driver/system memory evidence before broader
-  specialization; record CPU fallback's potential throughput cost explicitly.
-  Preserve draw order and reliable error context; neither host regressions nor
-  system-wide memory loss establish the title's allocation owner or graphical cause.
-- The owner is comparing concurrent development sessions. This follow-up uses
-  `uberhar/codexastra-diag-comparison`; run the same build gates and retain artifacts
-  without publishing a shared release. Version 0.1.22 is a comparison candidate;
-  check the release branch and assign the next available version before integration.
+- The 0.1.22 device log contains Combo and Native Dark Moon runs. Own-process KGSL
+  reaches about 4,232 MiB in Combo versus roughly 1,081 MiB in Native, then returns
+  to about 12/15 MiB on their normal exits; system available memory recovers. This
+  supports a larger live Combo GPU footprint, not a demonstrated post-exit leak.
+  The owner still sees ghost and moon glitches, reports more visible glitches,
+  and perceives a significant speed improvement over earlier builds; this is not
+  a matched performance measurement. The 0.1.23 follow-up targets
+  optional background GPU shader optimization while preserving the generic cold
+  path, Custom behavior, exact rendering and draw order. Implementation, local
+  validation and independent review passed; CI and device qualification remain
+  separate gates. No memory cure or speedup is established.
+<!-- CodexAstraUlt: Replace the earlier comparison-only publication restriction because the owner now authorizes normal repository prereleases; preserve upstream integration as a separate decision. -->
+- The owner now authorizes normal prereleases in `RegiRex/uberhar`; their parallel
+  work will use a side branch. Continue the existing `uberhar/hybrid-shaders`
+  publication workflow with its signing, shader and Android gates. The previous
+  comparison branch was `uberhar/codexastra-diag-comparison`. Literal integration
+  into divergent upstream `master` is unnecessary for this request and remains
+  deferred for separate review; do not overwrite it. Publish only to
+  `RegiRex/uberhar`, never the upstream Azahar repository. Recheck live refs and
+  version/tag availability before publication.
+  Version 0.1.23 is a candidate until its implementation and gates are complete.
 - After changing shader generator sources, rerun CMake configuration before a
   reused local build: the inherited source-derived shader cache version is computed
   at configure time. Fresh CI configures automatically; never claim cache-version
@@ -25,6 +34,11 @@
   requested. Cloud checks do not simulate handheld performance. Thor Max Vulkan is
   primary; the exact secondary Retroid model remains unconfirmed. GammaOS must
   tolerate unavailable optional diagnostic services.
+- The [Nobara/Thor guide](tools/uberhar/device_testing/README.md) and
+  [local Codex handoff](tools/uberhar/device_testing/LOCAL_CODEX_HANDOFF.md) support
+  device readiness. USB role selection is not the ADB readiness criterion. A
+  local agent and USB authorization do not connect this cloud session to the Thor;
+  one agent owns device operations and benchmarks remain serialized.
 
 <!-- CodexAstraUlt-2: Owner-approved 0.1.18 attribution and implementation scope, 2026-10-05. -->
 - New and changed logical sections, tests, documentation and experimental log comments

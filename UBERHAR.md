@@ -7,24 +7,42 @@ Baseline: Azahar 2126.1.2, commit
 
 ## Current status
 
-<!-- CodexAstraUlt: Replace the 0.1.21 candidate summary after actual device evidence; preserve its resource fixes and isolation mode. -->
-**The 0.1.22 comparison preserves CPU quaternion correction for lit draws when
-the optional GPU path cannot perform it.** It also corrects three-component GPU
-input padding to match the CPU loader. The 0.1.21 device run confirms continued
-system memory pressure despite stable tracked allocations and orderly cleanup.
-Bounded KGSL/system snapshots extend the existing logging cadence to investigate
-that gap. Affected scenes may cost more CPU; image correction and memory benefit
-remain device gates. See the [new evidence](docs/UBERHAR_LOG_ANALYSIS_0.1.21.md),
-[architecture review](docs/UBERHAR_ARCHITECTURE_0.1.20.md),
-[release/test notes](docs/releases/0.1.22.md) and [validation status](docs/UBERHAR_PROGRESS.md).
-It is isolated on `uberhar/codexastra-diag-comparison`; its workflow retains artifacts
-only after package/signing checks and does not publish or reserve a shared release.
-The comparison builds through the existing narrowly restricted PR into the release
-branch, testing the exact comparison head. The 0.1.21 build restored the approved
-key and passed all Android/package/shader gates. Its device result does not establish
-bounded system memory or correct ghost rendering. The inherited
-[0.1.18 workflow](https://github.com/RegiRex/uberhar/actions/runs/37382914237)
-completed successfully; this does not establish device correctness or performance.
+<!-- CodexAstraUlt: Replace the pending comparison-only summary with measured 0.1.22 cleanup and the scoped 0.1.23 work; earlier implementation history remains below and in progress records. -->
+**0.1.22 now shows a large live Combo GPU footprint that is released on exit.**
+The owner's Dark Moon log contains Combo and Native runs: own-process KGSL reaches
+about **4,232 MiB** in Combo versus roughly **1,081 MiB** in Native, then returns to
+about **12 MiB / 15 MiB** respectively. System available memory recovers. These runs
+do not show a persistent post-exit leak; they do identify excessive live pressure
+worth addressing. The owner still sees ghost and moon glitches, with more glitches
+observed overall, while reporting a significant perceived speed improvement over
+earlier builds. That visual failure remains open; the speed report is not a
+matched benchmark.
+
+**0.1.23 optimizes optional background GPU shaders**, preserving the cold generic
+path and Custom behavior. Implementation, independent review and local validation
+passed; CI package and shader gates remain required. Reduced memory use or higher
+device speed is not yet demonstrated. See the
+[new log analysis](docs/UBERHAR_LOG_ANALYSIS_0.1.22.md),
+[candidate notes](docs/releases/0.1.23.md),
+[architecture review](docs/UBERHAR_ARCHITECTURE_0.1.20.md) and
+[current validation/build status](docs/UBERHAR_PROGRESS.md).
+
+The [0.1.22 build](https://github.com/RegiRex/uberhar/actions/runs/37524017429)
+passed all shader, Android and signing/package gates; its validated comparison
+artifact is available. Its quaternion-correction guard, CPU-matching attribute
+padding and bounded KGSL/system snapshots remain part of the next candidate.
+The owner now authorizes normal repository prereleases through the existing
+`uberhar/hybrid-shaders` release workflow in **RegiRex/uberhar only**, never the
+upstream Azahar repository. This is now the primary development path; parallel
+experiments use side branches. Literal integration into divergent upstream
+`master` is unnecessary for repository prereleases and is deferred for separate
+review, preserving the tested source and signing continuity.
+
+For local testing, use the [Nobara/Thor readiness guide](tools/uberhar/device_testing/README.md)
+and [local Codex handoff](tools/uberhar/device_testing/LOCAL_CODEX_HANDOFF.md).
+These ordinary repository files replace the chat-only setup bundle. Switching the
+Thor's **USB controlled by** setting is not required; check `adb devices -l`.
+Actual device communication and a repeatable gameplay runner still require setup.
 
 <!-- CodexAstraUlt-2: Separate 0.1.18 implementation and publication from device acceptance. -->
 **0.1.18 was the correctness/recovery update following the 0.1.17 review.** Combo
