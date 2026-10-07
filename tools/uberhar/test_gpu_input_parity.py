@@ -39,6 +39,7 @@ def main() -> None:
 #include <cstring>
 #include <stdexcept>
 #include <limits>
+#include <span>
 #include "common/scope_exit.h"
 #include <tuple>
 #include <vector>
@@ -50,6 +51,21 @@ def main() -> None:
 #include "video_core/renderer_vulkan/uberhar_gpu_output_policy.h"
 
 namespace Common::Log { void Stop() {} }
+
+// CodexAstraLocal: The extracted uploader contains an opt-in diagnostic loader
+// description. Count construction independently of its caught exception so a
+// disabled-path regression cannot hide behind diagnostic error containment.
+namespace Pica {
+inline u32 diagnostic_loader_constructions{};
+struct VertexLoader {
+    template<typename M> VertexLoader(M&, const PipelineRegs&) {
+        ++diagnostic_loader_constructions;
+        throw std::runtime_error("disabled diagnostic loader was reached");
+    }
+    NativeInputAttribute DescribeNativeInput(u32) const { return {}; }
+    u32 GetNumTotalAttributes() const { return 0; }
+};
+}
 
 // CodexAstraUlt-2: Model device, cache and buffer plumbing; extract production routing/packing.
 namespace Vulkan {
@@ -94,6 +110,16 @@ struct TestStream {
     void Commit(u32 size) { cursor=mapped+size; }
 };
 struct RasterizerVulkan {
+    // CodexAstraLocal: Preserve old route/input expectations with capture off.
+    struct DisabledCapture {
+        template<typename... T> void BeginDraw(T&&...) {}
+        void EndDraw() {}
+        bool WantsPayload() const { return false; }
+        template<typename... T> void PreparePayload(T&&...) {}
+        template<typename... T> void CopyVertex(T&&...) {}
+        void CopyFixed(std::span<const u8>) {}
+    };
+    DisabledCapture* vertex_capture{};
     struct {
         Pica::PipelineRegs pipeline{};
         Pica::ShaderRegs vs{};
@@ -495,6 +521,11 @@ int main() {
     std::printf("PASS: four additional CPU/GPU divergences quarantined before GPU work; "
                 "three reasons with four-record limits; five ordinary layouts retain parity\n");
     TestQuaternionAdmission();
+    // CodexAstraLocal: The production uploader catches optional-description
+    // failures, so check the durable counter after every ordinary-route fixture.
+    Check(Pica::diagnostic_loader_constructions==0,
+          "disabled capture constructed a diagnostic vertex loader");
+    std::puts("PASS: disabled capture never constructed a diagnostic vertex loader");
 }
 '''
     args.output.parent.mkdir(parents=True, exist_ok=True)

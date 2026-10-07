@@ -79,6 +79,12 @@ jobs:
         env:
           LIBGL_ALWAYS_SOFTWARE: '1'
         run: /tmp/uberhar-test-env/bin/python tools/uberhar/test_gpu_output_guard.py --render-only
+      # CodexAstraLocal: Replay synthetic bounded captures with real typed fetch
+      # and bound uniforms; Mesa evidence does not establish Thor pixel correctness.
+      - name: Compare bounded vertex replay with production CPU
+        env:
+          LIBGL_ALWAYS_SOFTWARE: '1'
+        run: /tmp/uberhar-test-env/bin/python tools/uberhar/test_vertex_capture_replay.py --render --reuse-build
       # AstraEH: Native-vs-compute pixels plus Vulkan/SPIR-V validation gate publication.
       - name: Compare compute rasterization with native triangles
         env:

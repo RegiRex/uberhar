@@ -23,6 +23,7 @@
 #include "video_core/shader/generator/pica_fs_config.h"
 #include "video_core/shader/generator/profile.h"
 #include "video_core/shader/generator/shader_gen.h"
+#include "video_core/renderer_vulkan/vk_vertex_capture.h" // CodexAstraLocal: Owned binding witness.
 
 namespace Pica {
 struct RegsInternal;
@@ -138,6 +139,10 @@ public:
     }
 
     void SetAccurateMul(bool accurate_mul);
+
+    // CodexAstraLocal: Called only after a successful optional-ready bind.
+    std::optional<VertexCapture::BindingState> CaptureVertexBinding(const Pica::RegsInternal& regs,
+        Pica::ShaderSetup& setup, const PipelineInfo& info, u64 pipeline_key) noexcept;
 
 private:
     // CodexAstraUlt: One gate covers optional fragment warming, binding and transport;

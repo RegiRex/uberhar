@@ -1,4 +1,32 @@
-# Uberhar progress — 0.1.24 tested; moon and ghost faults persist
+# Uberhar progress — 0.1.25 capture candidate; local gates passed
+
+<!-- CodexAstraLocal: Advance the diagnostic candidate independently of the unchanged device-qualification result and retain previous checkpoints below. -->
+- **0.1.25 implemented and independently reviewed:** default-off, finite Combo
+  vertex discovery/capture and private production CPU/Mesa replay. One manual
+  Test phase edge arms at most eight swap intervals, eight packets and a 4 MiB
+  aggregate budget. Actual uploads and bound uniforms are immutable; recorded,
+  accepted and completed states stay separate. No added GPU wait, worker,
+  continuous logger or rendering-policy change. See [release notes](releases/0.1.25.md)
+  and the [capture guide](../tools/uberhar/VERTEX_CAPTURE.md).
+- **Focused validation passed:** 403 checks of the production Session with modeled
+  IO/mapping, 13 real producer artifacts accepted by the independent reader, and
+  full indexed-layout reconstruction. Independent replay passed 70 checks across
+  13 synthetic CPU/Mesa cases. These do not execute the Thor scheduler or establish
+  a visible defect's cause. The native core/Vulkan/tests/room rebuild and complete probe suite passed. CTest
+  passed 61 distinct cases and 1,096 assertions, with five existing firmware-dependent
+  skips and zero failures. Policy tests passed 163 checks. Android/signing/publication
+  and device capture remain pending.
+- **Current installed result remains 0.1.24:** both consecutive-frame moon flashing
+  and matched ghost corruption persist. Sustained normal speed and 2x qualification
+  remain unmet. Every opening resets File 1 and clears the title Vulkan cache;
+  captured runs are diagnostic, not performance qualification.
+- **Cadence:** 0.1.24 is successor one to the completed 0.1.23 audit; gated 0.1.25
+  will be two, 0.1.26 three. Reaudit before 0.1.27 or earlier if evidence requires.
+  The latest fetched release branch is `43208270c`; original report and private
+  artifacts remain intact. Only the root coordinator operates the Thor.
+
+## Completed 0.1.24 checkpoint
+
 
 <!-- CodexAstraLocal: Record the reviewed candidate and completed host gates without promoting synthetic parity or a built host binary into Android/title qualification. -->
 - **Candidate 0.1.24 implemented and reviewed:** Combo rejects a complete optional

@@ -53,6 +53,10 @@ public:
         return title_id;
     }
 
+    // CodexAstraLocal: Armed-only bounded reverse lookup; the GLSL source is
+    // released after compilation, while its cache key remains immutable.
+    u64 CaptureVertexSourceHash(const Shader* shader) const noexcept;
+
 private:
     // AstraEH: Distinguish startup reuse from live misses for already known guest records.
     u64 startup_host_pipelines{}, startup_guest_records{}, live_host_pipelines{},

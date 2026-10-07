@@ -1,6 +1,37 @@
 <!-- AstraEH: Bounded troubleshooting and removal map for the hybrid renderer. -->
 # Renderer diagnostics, schema 17
 
+<!-- CodexAstraLocal: A separate private diagnostic protocol does not increment the ordinary health/log schema or create a periodic capture stream. -->
+## Opt-in vertex capture (0.1.25)
+
+The [capture guide](../tools/uberhar/VERTEX_CAPTURE.md) describes the title-specific
+sidecar, explicit Test phase trigger, discovery/selection and offline replay.
+Disabled runs perform one bounded initialization decision; Native/Custom do not
+load the request. There is no file polling or automatic repeat. A phase edge arms
+1–8 swap intervals, up to two selected packets per interval and eight total.
+
+One `UBVCAP01` artifact has bounded JSON metadata and immutable payload sections.
+Aggregate storage is at most 4 MiB including metadata reserve; raw payload is at
+most 3.75 MiB. Per-packet limits are 496 KiB raw plus 16 KiB metadata; the whole
+manifest is at most 128 KiB. Discovery holds 128 rows and examines at most 1,024
+optional requests per interval. Selection has at most 32 attempts and 8 MiB of
+lifetime raw-payload writes, including abandoned attempts; bounded fixed metadata
+and formatting are separate. Count and index span are independently capped at
+4,096. Partial/empty results and censored attempts are meaningful, not parity.
+
+Ordinary capture status/summary log records contain identities and counters, not
+raw guest data. Normal drained exit publishes once with exclusive creation;
+existing files are preserved. Android Uberhar raw filesystem IO is supported;
+unsupported document-only providers reject capture before arming. Abrupt process
+termination can lose an artifact. No added worker, GPU wait or per-launch bundle.
+
+`recorded`, `accepted` and `completed` are distinct. Source identities include
+program/swizzle/configuration and generated GLSL hashes, not Adreno binary hashes.
+Swap ordinals do not identify video frames. Host replay ends before primitive
+correction and fragments; its controls cannot establish a visible defect's cause.
+Store all artifacts/replays privately in ignored paths. Timing with capture enabled
+is diagnostic; cold-cache, noncapture runs are needed for performance qualification.
+
 <!-- CodexAstraLocal: Document the optional output guard's bounded coverage records without treating admission, transported semantics or hash identities as observed image correctness. -->
 ## Output-default containment (0.1.24)
 

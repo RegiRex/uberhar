@@ -42,6 +42,13 @@ void FmtLogMessageImpl(Class, Level level, const char*, unsigned int, const char
 // Shader words, register layouts, input guards and hash invalidation remain real.
 namespace Vulkan {
 struct RasterizerVulkan {
+    // CodexAstraLocal: Existing admission fixtures leave capture disabled; a
+    // separate production-session regression exercises diagnostic ownership.
+    struct DisabledCapture {
+        template <typename... T> void BeginDraw(T&&...) {}
+        void EndDraw() {}
+    };
+    DisabledCapture* vertex_capture{};
     Pica::RegsInternal regs{};
     struct {
         Pica::ShaderSetup vs_setup;

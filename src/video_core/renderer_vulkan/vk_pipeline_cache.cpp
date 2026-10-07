@@ -896,6 +896,42 @@ ExtraVSConfig PipelineCache::CalcExtraConfig(const PicaVSConfig& config) {
     return res;
 }
 
+std::optional<VertexCapture::BindingState> PipelineCache::CaptureVertexBinding(
+    const Pica::RegsInternal& regs, Pica::ShaderSetup& setup, const PipelineInfo& info,
+    u64 pipeline_key) noexcept {
+    // CodexAstraLocal: Mirror the already selected VS input configuration using
+    // the canonical layout; preserve actual final dynamic UBO offsets by value.
+    const auto& layout = info.state.vertex_layout;
+    // CodexAstraLocal: The existing selected path validated these invariants,
+    // but diagnostics fail closed before any fixed-array copy or trait lookup.
+    if (!curr_disk_cache || layout.attribute_count > layout.attributes.size() ||
+        layout.binding_count > layout.bindings.size() ||
+        regs.rasterizer.vs_output_total > 7 || (regs.vs.output_mask & ~0xffffU))
+        return std::nullopt;
+    for (u32 i = 0; i < layout.attribute_count; ++i) {
+        const auto& attr = layout.attributes[i];
+        if (attr.location.Value() >= 16 || static_cast<u32>(attr.type.Value()) >= 4 ||
+            attr.size.Value() < 1 || attr.size.Value() > 4 ||
+            attr.binding.Value() >= layout.binding_count)
+            return std::nullopt;
+    }
+    // CodexAstraLocal: These constructors and lookups use fixed arrays/hash
+    // arithmetic only; the current shader fixup function is empty. No compile,
+    // allocation, Vulkan request or mutable descriptor selection occurs here.
+    PicaVSConfig config{regs, setup};
+    config.state.used_input_vertex_attributes = layout.attribute_count;
+    for (u32 i = 0; i < layout.attribute_count; ++i) {
+        const auto& source = layout.attributes[i];
+        auto& target = config.state.input_vertex_attributes[i];
+        target.location = source.location;
+        target.type = static_cast<u8>(source.type.Value());
+        target.size = source.size;
+    }
+    return VertexCapture::BindingState{info, CalcExtraConfig(config), profile, offsets, shader_hashes, pipeline_key,
+        curr_disk_cache->CaptureVertexSourceHash(current_shaders[ProgramType::VS]),
+        virtual_fs_config && PreferReadySpecializedFragment(tev_user)};
+}
+
 // AstraPro: Readiness checks are atomic acquire operations. Do not inspect module
 // handles before IsDone has published construction; absent GS is a valid stage.
 bool PipelineCache::ReadyVertexShaders() const {

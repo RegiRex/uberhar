@@ -19,6 +19,7 @@ body = s[start:end]
 header = r'''
 #include <cstdio>
 #include <cstring>
+#include <span>
 #include <vector>
 #include <tuple>
 #include "video_core/pica/regs_internal.h"
@@ -35,6 +36,14 @@ struct StreamStub {
     void Commit(u32 n) { committed = n; }
 };
 struct RasterizerVulkan {
+    // CodexAstraLocal: Keep the extracted production hook disabled and count
+    // any accidental diagnostic entry independently of fixed-upload assertions.
+    struct DisabledCapture {
+        static inline unsigned calls{};
+        bool WantsPayload() const { ++calls; return false; }
+        void CopyFixed(std::span<const u8>) { ++calls; }
+    };
+    DisabledCapture* vertex_capture{};
     Pica::RegsInternal regs{};
     struct { Pica::AttributeBuffer input_default_attributes{}; } pica;
     PipelineInfo pipeline_info{};
@@ -73,7 +82,12 @@ int main() {
                 ++failures;
         }
     }
-    std::printf("Fixed attribute reserve: %u cases, %u failures; production writer, modeled buffer\n", checks, failures);
+    // CodexAstraLocal: A null capture owner must avoid diagnostic work for all
+    // ordinary fixed/default attribute layouts, including the maximum upload.
+    const unsigned diagnostic_calls=Vulkan::RasterizerVulkan::DisabledCapture::calls;
+    failures += diagnostic_calls != 0;
+    std::printf("Fixed attribute reserve: %u cases, %u failures; production writer, modeled buffer; "
+                "disabled diagnostic calls=%u\n", checks, failures, diagnostic_calls);
     return failures ? 1 : 0;
 }
 '''

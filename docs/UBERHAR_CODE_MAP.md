@@ -1,6 +1,20 @@
 <!-- AstraEH: Attribution index for the Uberhar implementation, tests, packaging and documentation. -->
 # Uberhar code map
 
+<!-- CodexAstraLocal: Index the finite diagnostic and independent replay without expanding renderer admission or distributing private guest payloads. -->
+## 0.1.25 bounded vertex evidence
+
+| Files | Purpose and limits |
+| --- | --- |
+| `renderer_vulkan/vk_vertex_capture.cpp/.h`, `uberhar_vertex_capture_policy.h` | Strict one-shot title sidecar, discovery/global ordinals, immutable bounded snapshots, separate recording/submission/completion and exclusive normal-exit artifact. Default off; diagnostic failure leaves drawing intact. |
+| `vk_rasterizer.cpp/.h`, `vk_pipeline_cache.cpp/.h`, `vk_shader_disk_cache.cpp/.h`, `vk_stream_buffer.cpp/.h`, `shader_build_failure.h`, `vk_scheduler.h` | Read actual optional-ready bindings/uploads and existing scheduler watermarks. Preserve order, ordinary draw ownership and existing drain; no new waits or rendering policy. |
+| `src/video_core/CMakeLists.txt` | Build the capture owner and stamp its metadata with `UBERHAR_VERSION`, independent of branch/tag native version naming. |
+| `tools/uberhar/vertex_capture.py`, `replay_vertex_capture.py/.cpp`, `VERTEX_CAPTURE.md` | Private strict reader/selector, production CPU interpreter/FIFO and generated GLSL Mesa replay. Separate input fetch, actual/intended uniforms and fresh-unit controls; no fragment/Adreno/pixel parity claim. |
+| `test_vertex_capture_policy.cpp`, `test_vertex_capture.cpp/.py`, `test_vertex_capture_fixture.cpp`, `test_vertex_capture_replay.py`, `build_probe.sh`, shader workflow | Policy and actual Session serialization with modeled plumbing, independent producer/reader checks and synthetic CPU/Mesa gate. Existing input/output/fixed-reserve extraction probes model and check the disabled hook. |
+
+See [0.1.25 notes](releases/0.1.25.md); private artifacts stay under ignored build
+paths. Native and Custom never load the sidecar; every tested opening remains cold.
+
 <!-- CodexAstraLocal: Index the recovered and independently reviewed candidate without relabeling earlier changes or treating tests as device acceptance. -->
 ## 0.1.24 output-default containment and recovery audit
 

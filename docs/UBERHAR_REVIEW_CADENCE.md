@@ -14,6 +14,15 @@ if numbering continues. Audit again after those three,
 before starting 0.1.27, or earlier for failed architectural assumptions/two
 uninformative candidates. The old three-to-five range below is historical.
 
+<!-- CodexAstraLocal: Focused capture ownership/bounds/replay review does not reset the full architecture-review anchor. -->
+0.1.25 source implements the requested default-off bounded vertex evidence and
+private replay after 0.1.24 retained both faults. Three parallel roles reviewed
+snapshot/lifetime/submission, actual producer serialization and CPU/Mesa replay.
+Focused tests, complete probes, native rebuild and CTest passed; release/device
+gates remain pending.
+This is candidate successor two, not a new full architecture audit.
+
+
 <!-- CodexAstraUlt: The owner's new fixed three-build audit cadence supersedes the older three-to-five range without treating a documentation update as a completed audit. -->
 **Owner update: audit every three builds.** The 0.1.20 anchor has three completed
 successors (0.1.21, 0.1.22, 0.1.23); a full audit is in progress before the next

@@ -6,6 +6,7 @@
 #include <condition_variable>
 #include <cstdint>
 #include <mutex>
+#include <optional> // CodexAstraLocal: Nonblocking opt-in submission observation.
 #include <utility>
 #include "video_core/shader_recovery_error.h"
 
@@ -70,6 +71,18 @@ public:
         std::scoped_lock lock{mutex};
         submitted = tick;
         condition.notify_all();
+    }
+
+    // CodexAstraLocal: Observe only the existing post-SubmitWork publication.
+    // Contention/error is unknown, never a wait or an invented submitted tick.
+    std::optional<std::uint64_t> TrySubmittedTick() noexcept {
+        try {
+            std::unique_lock lock{mutex, std::try_to_lock};
+            if (lock.owns_lock())
+                return submitted;
+        } catch (...) {
+        }
+        return std::nullopt;
     }
 
     bool WaitSubmitted(std::uint64_t tick) {

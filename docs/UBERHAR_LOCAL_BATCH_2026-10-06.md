@@ -1,5 +1,35 @@
 # Local autonomous batch — October 6, 2026
 
+<!-- CodexAstraLocal: Keep a durable implementation checkpoint before publication and real-device capture; do not count pending gates as a completed successor. -->
+## 0.1.25 diagnostic candidate — October 7 UTC
+
+After 0.1.24 retained both visual faults and had zero output-W fallback incidence,
+implemented the handoff's finite vertex discovery/capture and offline replay.
+Three parallel agents implemented/reviewed the snapshot owner, host replay and
+lifetime/temporal contracts; only root operates the Thor. The sidecar is default
+absent, title-specific and read once; a manual Test phase edge arms at most eight
+intervals. Exact ordinals and state identities prevent silent draw substitution.
+No renderer policy, shader math or Native behavior changes. The same APK can
+capture different selected draws in subsequent cold runs.
+
+Independent review is complete. Production Session tests with modeled IO/mapping
+passed 403 checks; all 13 actual artifacts parsed independently and the indexed
+full-layout fixture reconstructed. Maximum manifests fit the 128 KiB cap. Replay
+passed 70 checks across 13 production CPU/Mesa cases. Native core/Vulkan/tests/room, CTest and all probe checks passed. CTest has
+61 distinct passing cases, 1,096 assertions and five existing firmware skips; the
+policy fixture passed 163 checks. The complete probe prefix passed; its old
+fixed-attribute extraction fixture needed disabled-hook plumbing, then the fixed
+fixture and remaining tail passed. No production change was needed for that
+fixture failure. Android/signing/publication and actual Thor
+storage/submission/capture remain separate pending gates. The candidate is not a
+claimed fix or speed improvement. See [notes](releases/0.1.25.md) and
+[operating guide](../tools/uberhar/VERTEX_CAPTURE.md).
+
+The release branch fetched cleanly at `43208270c` before integration; local work,
+the unchanged original report and private artifacts are preserved. 0.1.25 counts
+as successor two after successful gates, with the audit anchor still 0.1.23.
+
+
 <!-- CodexAstraLocal: Resume the interrupted session from durable source and raw evidence instead of repeating completed device work or assuming lost permissions. -->
 ## Recovery checkpoint — October 7, 2026 UTC
 

@@ -10,11 +10,13 @@
 #include "common/microprofile.h"
 #include "common/settings.h"
 #include "common/uberhar_activity.h" // CodexAstraUlt: Existing atomic run correlation.
+#include "common/uberhar_test_profile.h" // CodexAstraLocal: Capture only optional Combo routes.
 #include "common/scope_exit.h" // AstraPro: Clear speculative draw state on every exit.
 #include "core/core.h"
 #include "core/loader/loader.h"
 #include "core/memory.h"
 #include "video_core/pica/pica_core.h"
+#include "video_core/pica/vertex_loader.h" // CodexAstraLocal: Authoritative capture input descriptors.
 #include "video_core/renderer_vulkan/renderer_vulkan.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_rasterizer.h"
@@ -188,6 +190,11 @@ RasterizerVulkan::~RasterizerVulkan() {
         compute_rect->Poll();
         compute_rect->Report();
     }
+    // CodexAstraLocal: Use the existing drained shutdown opportunity. Capture
+    // adds no GPU wait and reports incomplete evidence honestly after failure.
+    if (vertex_capture)
+        vertex_capture->Finish(scheduler.TrySubmittedTick(),
+                               scheduler.GetMasterSemaphore()->KnownGpuTick());
     // CodexAstraUlt: Members still own their resources here. The Instance emits a
     // second sample after those members die, without adding a shutdown GPU wait.
     instance.ReportMemoryUsage("before_dependents", pipeline_cache.GetProgramID(),
@@ -197,6 +204,14 @@ RasterizerVulkan::~RasterizerVulkan() {
 
 void RasterizerVulkan::TickFrame() {
     scheduler.WaitWorker();
+    if (vertex_capture) {
+        // CodexAstraLocal: One coherent phase/startup token avoids false edges;
+        // submission is observed only after the existing worker drain.
+        const auto activity = Common::UberharActivity::Capture();
+        vertex_capture->NextSwap(pipeline_cache.GetProgramID(), activity.run, activity.token & 3U,
+            (activity.token & 4U) != 0, scheduler.TrySubmittedTick(),
+            scheduler.GetMasterSemaphore()->KnownGpuTick());
+    }
     res_cache.TickFrame();
     // AstraEH: Read only completed GPU queries; do not add a per-frame GPU wait.
     if (compute_rect)
@@ -231,6 +246,7 @@ void RasterizerVulkan::LoadDefaultDiskResources(
     }
 
     pipeline_cache.SetProgramID(program_id);
+    InitializeVertexCapture(program_id);
     pipeline_cache.SetAccurateMul(accurate_mul);
     pipeline_cache.LoadCache(stop_loading, callback);
     // AstraEH: The compute program is prepared before the loading screen completes.
@@ -310,6 +326,27 @@ void RasterizerVulkan::SyncDrawState() {
 
 void RasterizerVulkan::SetupVertexArray() {
     const auto [vs_input_index_min, vs_input_index_max, vs_input_size] = vertex_info;
+    if (vertex_capture && vertex_capture->WantsPayload()) {
+        // CodexAstraLocal: Describe the production loader without reading guest
+        // memory. Bound its diagnostic/error paths and isolate exceptions;
+        // the unchanged real upload proceeds if optional description fails.
+        try {
+            const auto& loaders = regs.pipeline.vertex_attributes.attribute_loaders;
+            if (std::any_of(std::begin(loaders), std::end(loaders),
+                            [](const auto& loader) { return loader.component_count > 12; })) {
+                vertex_capture->EndDraw();
+            } else {
+                const Pica::VertexLoader loader{memory, regs.pipeline};
+                std::array<Pica::NativeInputAttribute, 16> native_inputs{};
+                for (u32 i = 0; i < native_inputs.size(); ++i)
+                    native_inputs[i] = loader.DescribeNativeInput(i);
+                vertex_capture->PreparePayload(regs, pica.vs_setup, pica.input_default_attributes,
+                    native_inputs, loader.GetNumTotalAttributes(), vs_input_index_min, vs_input_index_max);
+            }
+        } catch (...) {
+            vertex_capture->EndDraw();
+        }
+    }
     auto [array_ptr, array_offset, invalidate] = stream_buffer.Map(vs_input_size, 16);
 
     /**
@@ -396,6 +433,12 @@ void RasterizerVulkan::SetupVertexArray() {
             }
         }
 
+        // CodexAstraLocal: Copy only initialized uploaded row bytes, after the
+        // existing cache flush/conversion and before stream reuse can occur.
+        if (vertex_capture && vertex_capture->WantsPayload())
+            vertex_capture->CopyVertex(layout.binding_count, loader.data_offset,
+                loader.byte_count, aligned_stride, vertex_num, dst_ptr);
+
         // Create the binding associated with this loader
         VertexBinding& binding = layout.bindings[layout.binding_count];
         binding.binding.Assign(layout.binding_count);
@@ -480,6 +523,8 @@ void RasterizerVulkan::SetupFixedAttribs() {
     // each draw or attributing the earlier crash to an unobserved layout.
     fixed_attribute_max_bytes = std::max(fixed_attribute_max_bytes, offset);
     fixed_attribute_over_legacy += offset > 16 * sizeof(Common::Vec4f);
+    if (vertex_capture && vertex_capture->WantsPayload())
+        vertex_capture->CopyFixed({fixed_ptr, offset});
     stream_buffer.Commit(offset);
 }
 
@@ -512,6 +557,11 @@ bool RasterizerVulkan::SetupGeometryShader() {
 // AstraPro: PICA admits only complete, independent no-GS triangle lists. Keep
 // Native unchanged; Combo uses the inherited GPU VS/GS translation only when ready.
 bool RasterizerVulkan::AccelerateDrawBatchReady(bool is_indexed) {
+    // CodexAstraLocal: The ordinal is global within the optional entry point,
+    // independent of filters. Every early return discards staged evidence only.
+    if (vertex_capture)
+        vertex_capture->BeginDraw(regs, pica.vs_setup, is_indexed);
+    SCOPE_EXIT({ if (vertex_capture) vertex_capture->EndDraw(); });
     // AstraPro: Never bypass buffered CPU output left by an earlier non-draw.
     if (!vertex_batch.empty())
         return false;
@@ -720,7 +770,7 @@ bool RasterizerVulkan::AccelerateDrawBatchInternal(bool is_indexed) {
         .is_indexed = is_indexed,
     };
 
-    scheduler.Record([this, params](vk::CommandBuffer cmdbuf) {
+    const auto draw = [this, params](vk::CommandBuffer cmdbuf) {
         std::array<vk::DeviceSize, 16> offsets;
         std::transform(params.bindings.begin(), params.bindings.end(), offsets.begin(),
                        [](u32 offset) { return static_cast<vk::DeviceSize>(offset); });
@@ -730,7 +780,28 @@ bool RasterizerVulkan::AccelerateDrawBatchInternal(bool is_indexed) {
         } else {
             cmdbuf.draw(params.vertex_count, 1, 0, 0);
         }
-    });
+    };
+
+    // CodexAstraLocal: Ordinary draws keep the original command owner. Even
+    // an empty shared capture token is constructed only for an armed attempt.
+    if (ready_vertex_attempt && vertex_capture && vertex_capture->HasAttempt()) {
+        const auto bound = pipeline_cache.CaptureVertexBinding(
+            regs, pica.vs_setup, pipeline_info, ready_vertex_pipeline->Key());
+        // CodexAstraLocal: Final tick comes after every upload/bind that could
+        // flush. Commit only stages an owner; Recorded follows the actual draw.
+        if (bound) {
+            const auto evidence =
+                vertex_capture->Commit(*bound, uniform_buffer, scheduler.CurrentTick());
+            if (evidence) {
+                scheduler.Record([draw, evidence](vk::CommandBuffer cmdbuf) {
+                    draw(cmdbuf);
+                    evidence.Recorded();
+                });
+                return true;
+            }
+        }
+    }
+    scheduler.Record(draw);
 
     return true;
 }
@@ -755,6 +826,10 @@ void RasterizerVulkan::SetupIndexArray() {
     } else {
         std::memcpy(index_ptr, index_data, index_buffer_size);
     }
+
+    if (vertex_capture && vertex_capture->WantsPayload())
+        vertex_capture->CopyIndices(index_u8 ? 1 : 2, native_u8 ? 1 : 2,
+                                   {index_ptr, index_buffer_size});
 
     stream_buffer.Commit(index_buffer_size);
 
@@ -1387,6 +1462,7 @@ void RasterizerVulkan::UploadUniforms(bool accelerate_draw) {
 }
 
 void RasterizerVulkan::SwitchDiskResources(u64 title_id) {
+    InitializeVertexCapture(title_id);
     std::atomic_bool stop_loading = false;
 
     if (switch_disk_resources_callback) {
@@ -1399,6 +1475,23 @@ void RasterizerVulkan::SwitchDiskResources(u64 title_id) {
     if (switch_disk_resources_callback) {
         switch_disk_resources_callback(VideoCore::LoadCallbackStage::Complete, 0, 0, "");
     }
+}
+
+void RasterizerVulkan::InitializeVertexCapture(u64 title) noexcept {
+    // CodexAstraLocal: Disabled modes do no diagnostic filesystem work. Cold
+    // load and later GSP switches cannot reread/rearm this renderer's request.
+    // CodexAstraLocal: This immutable owner also guarantees the existing
+    // destructor drain runs before capture publication; capture adds no wait.
+    if (vertex_capture) {
+        const auto activity = Common::UberharActivity::Capture();
+        vertex_capture->ObserveIdentity(title, activity.run);
+    }
+    if (vertex_capture_initialized || !title || !compute_rect ||
+        !Settings::UsesReadyGpuVertices(Settings::values.uberhar_test_mode.GetValue()))
+        return;
+    vertex_capture_initialized = true;
+    const auto activity = Common::UberharActivity::Capture();
+    vertex_capture = VertexCapture::Session::Load(title, activity.run, activity.token & 3U);
 }
 
 } // namespace Vulkan

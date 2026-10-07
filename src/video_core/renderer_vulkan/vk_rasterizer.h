@@ -116,6 +116,10 @@ private:
     /// Setup the fixed attribute emulation in vulkan
     void SetupFixedAttribs();
 
+    // CodexAstraLocal: Both cold loading and rights switches use this one-shot
+    // diagnostic initializer; Native/Custom never read the optional sidecar.
+    void InitializeVertexCapture(u64 title) noexcept;
+
     /// Setup vertex shader for AccelerateDrawBatch
     bool SetupVertexShader();
 
@@ -171,6 +175,9 @@ private:
     std::chrono::steady_clock::time_point next_memory_snapshot{};
     bool ready_vertex_attempt{};
     GraphicsPipeline* ready_vertex_pipeline{};
+    // CodexAstraLocal: No capture allocation exists without a valid opt-in file.
+    std::unique_ptr<VertexCapture::Session> vertex_capture;
+    bool vertex_capture_initialized{};
     std::chrono::steady_clock::time_point cpu_bridge_start{};
 
     StreamBuffer stream_buffer;     ///< Vertex+Index buffer

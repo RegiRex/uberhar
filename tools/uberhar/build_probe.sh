@@ -51,6 +51,15 @@ timeout 30s build/uberhar-probe/test-pipeline-policy
 c++ -std=c++20 -O2 -pthread -Isrc tools/uberhar/test_shader_failure.cpp \
   -o build/uberhar-probe/test-shader-failure
 timeout 30s build/uberhar-probe/test-shader-failure
+# CodexAstraLocal: Bound diagnostic capture windows/copies and distinguish actual
+# recorded/accepted/completed classification with supplied host sequences.
+c++ -std=c++20 -O2 -pthread -Isrc tools/uberhar/test_vertex_capture_policy.cpp \
+  -o build/uberhar-probe/test-vertex-capture-policy
+timeout 30s build/uberhar-probe/test-vertex-capture-policy
+# CodexAstraLocal: Compile the real finite capture owner against modeled IO and
+# independently read its artifacts; replay synthetic input through production CPU.
+python3 tools/uberhar/test_vertex_capture.py
+python3 tools/uberhar/test_vertex_capture_replay.py
 # CodexAstraUlt: Execute the real queued compiler jobs with frozen optional/required inputs.
 python3 tools/uberhar/test_shader_compile_policy.py
 # CodexAstraUlt-2: Terminal readback errors must leave noexcept cleanup safely.

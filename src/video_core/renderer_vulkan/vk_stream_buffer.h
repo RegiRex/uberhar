@@ -40,6 +40,10 @@ public:
     /// Ensures that "size" bytes of memory are available to the GPU, potentially recording a copy.
     void Commit(u32 size);
 
+    // CodexAstraLocal: Copy bounded already-written upload bytes for an armed
+    // diagnostic. This never maps, invalidates, flushes, commits or waits.
+    bool CopyHostWrittenBytes(u64 read_offset, std::span<u8> destination) const noexcept;
+
     vk::Buffer Handle() const noexcept {
         return buffer;
     }

@@ -7,6 +7,7 @@
 // Refer to the license.txt file included.
 
 #include <algorithm>
+#include <cstring> // CodexAstraLocal: Bounded read-only upload snapshot.
 #include <limits>
 #include "common/alignment.h"
 #include "common/assert.h"
@@ -197,6 +198,17 @@ void StreamBuffer::Commit(u32 size) {
     auto& watch = current_watches[current_watch_cursor++];
     watch.upper_bound = offset;
     watch.tick = scheduler.CurrentTick();
+}
+
+bool StreamBuffer::CopyHostWrittenBytes(u64 read_offset,
+                                       std::span<u8> destination) const noexcept {
+    // CodexAstraLocal: Download memory has different visibility requirements;
+    // this accessor witnesses only host-written bytes, not device readback.
+    if (!mapped || type == BufferType::Download || read_offset > stream_buffer_size ||
+        destination.size() > stream_buffer_size - read_offset)
+        return false;
+    std::memcpy(destination.data(), mapped + read_offset, destination.size());
+    return true;
 }
 
 void StreamBuffer::CreateBuffers(u64 preferred_size) {

@@ -87,6 +87,18 @@ void ShaderDiskCache::Init(const std::atomic_bool& stop_loading,
     startup_guest_records = known_graphic_pipelines.size();
 }
 
+u64 ShaderDiskCache::CaptureVertexSourceHash(const Shader* shader) const noexcept {
+    // CodexAstraLocal: Optional vertex maps are capped; never scan Custom's
+    // unrestricted map on behalf of this diagnostic.
+    if (programmable_vertex_cache.size() > ReadyVertexPolicy::MaxPrograms)
+        return 0;
+    for (const auto& [source, candidate] : programmable_vertex_cache) {
+        if (&candidate == shader)
+            return source;
+    }
+    return 0;
+}
+
 std::optional<std::pair<u64, Shader* const>> ShaderDiskCache::UseProgrammableVertexShader(
     const Pica::RegsInternal& regs, Pica::ShaderSetup& setup, const VertexLayout& layout,
     bool ready_only) {

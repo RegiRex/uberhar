@@ -196,6 +196,10 @@ if (ENABLE_VULKAN)
         renderer_vulkan/uberhar_fragment_policy.h # AstraPro: Bounded optional specialization.
         renderer_vulkan/vk_rasterizer.cpp
         renderer_vulkan/vk_rasterizer.h
+        # CodexAstraLocal: Default-off bounded submitted vertex evidence.
+        renderer_vulkan/vk_vertex_capture.cpp
+        renderer_vulkan/vk_vertex_capture.h
+        renderer_vulkan/uberhar_vertex_capture_policy.h
         renderer_vulkan/vk_rasterizer_cache.cpp
         renderer_vulkan/vk_scheduler.cpp
         renderer_vulkan/vk_scheduler.h
@@ -225,6 +229,17 @@ if (ENABLE_VULKAN)
         shader/generator/spv_fs_shader_gen.h
     )
     target_link_libraries(video_core PRIVATE vulkan-headers vma sirit SPIRV glslang)
+    # CodexAstraLocal: Branch build tags may report native version "0". Stamp
+    # opt-in evidence with the app's actual fork version without changing shaders.
+    file(READ "${CMAKE_SOURCE_DIR}/UBERHAR_VERSION" UBERHAR_CAPTURE_VERSION LIMIT 64)
+    string(STRIP "${UBERHAR_CAPTURE_VERSION}" UBERHAR_CAPTURE_VERSION)
+    if (NOT UBERHAR_CAPTURE_VERSION MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$")
+        message(FATAL_ERROR "Invalid UBERHAR_VERSION for vertex capture metadata")
+    endif()
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+        "${CMAKE_SOURCE_DIR}/UBERHAR_VERSION")
+    set_source_files_properties(renderer_vulkan/vk_vertex_capture.cpp PROPERTIES
+        COMPILE_DEFINITIONS "UBERHAR_CAPTURE_VERSION=\"${UBERHAR_CAPTURE_VERSION}\"")
 endif()
 
 if(ENABLE_SDL2)

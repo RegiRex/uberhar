@@ -97,6 +97,12 @@ public:
         return master_semaphore->CurrentTick();
     }
 
+    // CodexAstraLocal: Armed evidence reads the existing submission watermark;
+    // neither required scheduler callback nor ordinary submit behavior changes.
+    [[nodiscard]] std::optional<u64> TrySubmittedTick() noexcept {
+        return shader_failure.TrySubmittedTick();
+    }
+
     /// Returns true when a tick has been triggered by the GPU.
     [[nodiscard]] bool IsFree(u64 tick) const noexcept {
         return master_semaphore->IsFree(tick);
