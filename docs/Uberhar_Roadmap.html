@@ -17,8 +17,9 @@
 <body>
 <h1>Uberhar roadmap</h1>
 <!-- CodexAstraLocal: Replace the active bounded-batch/mode-4-pending snapshot with completed audit and host evidence; preserve the original snapshots as history below. -->
-<p class="status"><strong>0.1.24 is a reviewed candidate. Android release gates and Thor qualification are pending.</strong>
-0.1.23 remains the installed release. The new narrow output-W guard preserves a
+<!-- CodexAstraLocal: Successful gated publication and compatible installation advance delivery only; retain the independent device acceptance gate. -->
+<p class="status"><strong>0.1.24 is published and tested. Moon and ghost faults persist; 2x remains unqualified.</strong>
+The new narrow output-W guard preserves a
 complete CPU draw when an output would provably disagree with CPU initialization.
 Production-path regressions reproduce the contract defect; no captured Dark Moon
 draw establishes that it causes the moon or ghost faults. The
@@ -34,13 +35,23 @@ Catch cases with 1,096 assertions</strong>; five existing firmware-dependent
 DSP/audio cases were skipped, with zero failures. The aggregate CTest entry is
 not another distinct case. These checks do not qualify Adreno pixels, sustained
 normal speed or memory bounds. Shader and Android CI, package/signing and gated
-publication must pass before an APK is ready.</p>
+publication passed in <a href="https://github.com/RegiRex/uberhar/actions/runs/37566500834">run 37566500834</a>.
+The exact-source release APK passed checksum and signing-identity checks and
+installed with app data preserved; CI supplied cryptographic signature validation.</p>
 <p>The <a href="UBERHAR_MODE4_ANALYSIS_2026-10-07.md">existing 0.1.23 mode-4 control</a>
 completed: moon flashing persists with zero optional fragment modules, so optional
 fragment specialization is not necessary for that observed fault.
 <strong>Native has no observed moon glitch; Combo has flashing segments.</strong>
 Compare consecutive moon frames. Ghost corruption remains a separate matched-pose
-target; a different camera or animation phase cannot establish a cure.</p>
+target; a different camera or animation phase cannot establish a cure. Three new
+0.1.23 baselines retain both moon flashing and consecutive clear/corrupt/clear
+book-holder frames in the early wide scene. See the
+<a href="UBERHAR_DEVICE_TEST_2026-10-07.md">new device evidence</a>. The matched
+0.1.24 run reproduces both faults, with zero output-guard rejections in 773,137
+checks. Its scoped opening averages 21.567% normal speed; all windows remain
+below 95%. Normal exit recovers KGSL to about 13.34 MiB. The next implementation
+is bounded, default-off selected-draw capture and offline replay, with immutable
+actual inputs, strict limits and private guest payloads.</p>
 
 <!-- CodexAstraLocal: The owner now requires cold testing for every tested title and a three-build audit cadence; warm-cache results and the earlier four-hour boundary do not govern qualification. -->
 <h2>Current qualification sequence</h2>
@@ -53,13 +64,13 @@ results do not qualify this target; driver-private cache state remains unknown.
 One coordinator owns device operations. Test Combo Dark Moon unless Native changes,
 then test both modes; qualify 2x before 4x or broader gameplay.</p>
 <table><thead><tr><th>Step</th><th>Current work</th><th>Required evidence</th></tr></thead><tbody>
-<tr><td>1. Contain a reproduced contract defect</td><td>Output-W admission guard, bounded exact-state memo and offline release classification regression reviewed. Full architecture review and local host/native gates completed.</td><td>Android, shader CI, package/signing and publication gates remain pending. Install only a validated, checksum-verified, signing-compatible APK with app data preserved.</td></tr>
-<tr><td>2. Test the actual symptom</td><td>Cold full Combo, Vulkan, 2x, 100% opening through moon and ghost scenes, then normal game-list return.</td><td>Consecutive moon frames, matched ghost phase, guard incidence, CPU/GPU routes, waits and zero skipped draws. Memory before/during/after with power, fan, charging and available thermal context. No title cure is inferred from synthetic tests.</td></tr>
+<tr><td>1. Contain a reproduced contract defect</td><td>Output-W admission guard, bounded exact-state memo and offline release classification regression reviewed. Full architecture review, host/native checks and release gates passed.</td><td>Verified 0.1.24 installed compatibly with app data preserved. The guard checked 773,137 batches with zero rejections; its synthetic defect did not trigger title containment.</td></tr>
+<tr><td>2. Test the actual symptom</td><td>Cold full Combo, Vulkan, 2x, 100% opening completed with normal return. Both temporal faults persist; guard rejection count is zero and ordinary logs report zero skipped draws.</td><td>Correctness and sustained speed remain unqualified. Retain separate moon/ghost targets and scoped memory/power evidence; no title cure follows from synthetic tests.</td></tr>
 <tr><td>3. Select the next measured correction</td><td>If needed, isolate one submitted draw and replay immutable CPU/GPU inputs. After image correctness, profile matched slow windows before transport, fragment or command changes.</td><td>Sustained 100% normal speed and bounded memory across repeated/new content. Further admission, eviction or broad renderer work needs correctness and measured cost evidence. Qualify 2x, then 4x and wider coverage.</td></tr>
 </tbody></table>
 <p>Continue toward 0.2.0 with durable checkpoints and a full architecture audit
 <strong>every three completed successor builds</strong>, sooner if evidence defeats
-an assumption. The review anchor is now 0.1.23; a successfully gated 0.1.24 becomes
+an assumption. The review anchor is now 0.1.23; successfully gated 0.1.24 is
 successor one. The old four-hour/three-candidate stop is superseded. Two candidates
 with neither improvement nor new discriminating evidence require reassessment.
 The <a href="UBERHAR_ARCHITECTURE_0.1.6.md#roadmap-and-version-gates">0.2 beta gate</a>
@@ -161,7 +172,7 @@ with that development session remains pending before emulator changes are publis
 <h2>Milestones and acceptance gates</h2>
 <table><thead><tr><th>Milestone</th><th>Current state</th><th>Acceptance evidence</th></tr></thead><tbody>
 <!-- CodexAstraLocal: Record candidate and beta gates without promoting local validation to released/device-qualified status. -->
-<tr><td>0.1.24 output-W containment</td><td>Implemented, independently reviewed and full local host/native validation passed; complete architecture audit recorded. Narrow never-written-W fallback, exact bounded memo and retained complete CPU draws.</td><td>Android/shader CI, signing/package, publication and cold Thor run pending. Measure actual guard incidence and both visual symptoms. Conditional register carry, emitted-but-unused outputs and unknown/unreachable instructions limit the guard; no graphics or speed cure claimed.</td></tr>
+<tr><td>0.1.24 output-W containment</td><td>Implemented, independently reviewed, all host and release gates passed, published and tested compatibly. Narrow never-written-W fallback, exact bounded memo and retained complete CPU draws.</td><td>Cold Thor run retains both faults, zero guard rejections, 21.567% scoped speed and normal-return GPU-memory recovery. Conditional register carry, emitted-but-unused outputs and unknown/unreachable instructions limit the guard; no graphics or speed cure claimed.</td></tr>
 <tr><td>0.2.0 beta</td><td>Evidence threshold remains open. Full Release.Beta.Alpha classification corrected locally: nonzero alpha is a prerelease; zero alpha is a full release, retaining all gates and latest=false.</td><td>Demanding matched scenes improve measurably, exact output, retained 2x FEA baseline and profiling that supports architecture. Cold first-run correctness, no skipped draws and sustained normal-speed/memory evidence remain required; a version increment is not acceptance.</td></tr>
 <!-- CodexAstraUlt: Candidate work and device acceptance are separate milestones. -->
 <!-- CodexAstraUlt: Replace outstanding CI gates with their successful published outcome; the in-progress device comparison cannot yet qualify memory or images. -->
@@ -210,6 +221,11 @@ with that development session remains pending before emulator changes are publis
 
 <!-- CodexAstraUlt-2: History references preserve earlier review evidence instead of replacing it. -->
 <h2>Review history and risks</h2>
+<!-- CodexAstraLocal: This release/device checkpoint does not reset the completed architecture audit. -->
+<p>October 7 UTC delivery/device checkpoint: 0.1.24 passed all release gates and
+installed compatibly. Both matched temporal defects persist; the narrow guard
+rejects zero of 773,137 checks. Scoped normal speed is 21.567%. Next: bounded
+actual-draw capture and replay. The audit anchor remains 0.1.23; 0.1.24 is successor one.</p>
 <ul>
 <!-- CodexAstraLocal: This completed source audit resets the old 0.1.20 anchor, unlike the focused historical releases; local validation does not count as a published successor. -->
 <li>October 7 UTC / October 6 local session, <a href="UBERHAR_AUDIT_2026-10-07.md">full architecture audit</a>: active renderer routes, output contract, ownership/memory/performance, Android lifecycle, signing/delivery and post-0.1.22 inventory completed. New source anchor: 0.1.23, <code>99fe4a885</code>. 0.1.24 containment and release classification reviewed; full local host/native gates passed with the five firmware-dependent skips recorded. Android/publication and Thor qualification remain pending. Inherited failure/lifecycle debts and unknown title causality are explicit.</li>

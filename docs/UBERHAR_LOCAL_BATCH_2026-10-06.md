@@ -3,13 +3,47 @@
 <!-- CodexAstraLocal: Resume the interrupted session from durable source and raw evidence instead of repeating completed device work or assuming lost permissions. -->
 ## Recovery checkpoint — October 7, 2026 UTC
 
+<!-- CodexAstraLocal: Publish only the exact reviewed source tree through the connected fork account, preserving dirty-work recovery and keeping the release gates explicit. -->
+Candidate **0.1.24** source is published as
+`970805ddcf448bfc6b7d437dfc6a4c9632ec4c2d`. The Git Data API uploaded 24 reviewed
+text/source files to `RegiRex/uberhar`; the resulting tree
+`4b98076ac3e9292273023a3a6f4d9b5ea5a77bf9` exactly matches the checked local index.
+The release branch moved only from the expected `814de4d60`, without force.
+Fetching and a verified identical-tree soft alignment changed no worktree or
+index content. The original report stays untracked and unchanged; private
+artifacts were excluded. [Run 37566500834](https://github.com/RegiRex/uberhar/actions/runs/37566500834)
+passed all shader, Android, package, signing and publication gates. Candidate
+build count is one published, zero device-qualified candidates. The released APK
+passed checksum, provenance, ARM64 and certificate-identity verification; CI
+performed cryptographic signature verification. A data-preserving `adb install -r`
+succeeded, and the read-only probe confirms 0.1.24 / 33973716. No uninstall or
+app-data reset occurred. The cold-cache 2x Combo test reproduced both moon flashing
+and ghost corruption in consecutive frames at the matched checkpoints.
+
+<!-- CodexAstraLocal: Record the candidate's actual discrimination before continuing with the handoff's bounded draw-capture experiment. -->
+The 0.1.24 output guard checked 773,137 batches, all with transported W components,
+and rejected zero for never-written W (one immutable memo entry, 773,136 hits).
+Thus this narrow synthetic case did not trigger title containment. The ordinary
+renderer totals report zero skipped draws; normal return recovers KGSL to about
+13.34 MiB. Both visual targets remain unresolved, and normal speed is far below
+the target. The independently reviewed
+[new device report](UBERHAR_DEVICE_TEST_2026-10-07.md) measures 21.567% average
+speed over 206.918 seconds, all windows below 95%, and a 402.226 ms worst interval.
+Sampled scene KGSL peaks at 3,122.926 MiB. Unlike scene/capture coverage does not
+establish a build-to-build speed or memory change.
+The next authorized candidate implements default-off, finite selected-draw
+discovery/capture and offline production CPU/GPU replay. Keep actual uploaded
+inputs and bound uniforms immutable, distinguish recorded/accepted/completed
+work, impose strict record/byte limits and keep all guest payloads private.
+
 <!-- CodexAstraLocal: Keep the completed audit and host evidence distinct from the running baseline and future signed Android release. -->
 The post-0.1.22 source audit, recovered output-W guard and independent review are
 complete. The full host shader/probe suite passes, as does the native core/Vulkan/
 tests/room build. CTest reports 61 distinct cases and 1,096 assertions passed,
 five pre-existing firmware-dependent audio skips, and no failures. Version 0.1.24
-is prepared for the existing gated workflow; Android/signing/publication and
-candidate device qualification remain pending. No new candidate APK is installed.
+passed the existing gated workflow and is installed; device qualification failed
+on persistent image faults and low speed. Three retained full-Combo 0.1.23 baselines establish consecutive-frame
+moon flashing and separately reproduce intermittent dark foreground-ghost patches.
 The completed architecture audit resets the three-build review count at 0.1.23.
 
 <!-- CodexAstraLocal: The owner approved retaining the virtual controller after observing its use; directional input is screenshot-guided rather than an assumed replay. -->

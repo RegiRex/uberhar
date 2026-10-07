@@ -7,8 +7,10 @@ the recovered candidate, post-0.1.22 change inventory, renderer/output contracts
 ownership, lifecycle/logging, release gates and the retained 0.2 throughput gate.
 Independent output-guard review found no blocking correctness issue; candidate
 build/device results remain separate. The new anchor is **0.1.23 audited source**.
-Count 0.1.24 as successor one only after its successful gated publication, 0.1.25
-as two and 0.1.26 as three if numbering continues. Audit again after those three,
+Version 0.1.24 passed all gates in
+[run 37566500834](https://github.com/RegiRex/uberhar/actions/runs/37566500834)
+at `970805ddc` and is successor one. Count 0.1.25 as two and 0.1.26 as three
+if numbering continues. Audit again after those three,
 before starting 0.1.27, or earlier for failed architectural assumptions/two
 uninformative candidates. The old three-to-five range below is historical.
 

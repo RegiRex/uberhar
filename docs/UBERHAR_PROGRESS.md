@@ -1,4 +1,4 @@
-# Uberhar progress — 0.1.24 output guard, cold-cache device qualification pending
+# Uberhar progress — 0.1.24 tested; moon and ghost faults persist
 
 <!-- CodexAstraLocal: Record the reviewed candidate and completed host gates without promoting synthetic parity or a built host binary into Android/title qualification. -->
 - **Candidate 0.1.24 implemented and reviewed:** Combo rejects a complete optional
@@ -17,18 +17,37 @@
   Android/package/signing/publication remain separate release gates.
 - **Audit completed:** the [October 7 architecture/change audit](UBERHAR_AUDIT_2026-10-07.md)
   covers the three successors to 0.1.20 and additions after 0.1.22. Candidate
-  0.1.24 will be successor one after this audit when published. Audit again after
+  0.1.24 is successor one after this audit. Audit again after
   three builds; continue toward the documented 0.2.0 threshold.
-- **Device work:** 0.1.23 remains installed. A fresh full-Combo/Vulkan/2x baseline
-  is collecting the earlier book-holder scene to address the unmatched ghost
-  footage. Moon flashing is assessed across consecutive frames, independently.
+- **Device work:** verified 0.1.24 / 33973716 is installed through a compatible
+  data-preserving update. Three fresh 0.1.23 full-Combo/Vulkan/2x baselines are
+  retained; consecutive frames reproduce moon flashing and intermittent dense
+  dark patches on both the foreground ghost and the early wide-view book-holder.
+  The book-holder is clear immediately before and after its corrupt sequence.
+  The candidate reproduces both faults in matched consecutive frames. Its guard
+  checked 773,137 batches with zero missing-W rejections (one memo entry), so the
+  narrow synthetic defect did not trigger containment in this title run. Ordinary
+  logs report zero skipped draws; normal exit recovers KGSL to about 13.34 MiB.
+  The [scoped report](UBERHAR_DEVICE_TEST_2026-10-07.md) measures 21.567% average
+  speed over 206.918 seconds, every window below 95%, and a 402.226 ms worst
+  interval. Sustained speed remains unqualified; unequal scene/capture mix does
+  not establish a build-to-build regression or speedup.
   Every opening resets File 1 and starts with the title's Vulkan cache deleted;
   all tested titles follow the same zero-saved-cache requirement. Warm runs
   cannot qualify the project goal. Only the root coordinator operates the Thor.
-- **Publication status:** local review and host validation are complete; Android,
-  signing and release publication for 0.1.24 have not yet run. No new APK is ready.
+- **Publication status:** reviewed source `970805ddc` is published on the authorized
+  release branch. [Run 37566500834](https://github.com/RegiRex/uberhar/actions/runs/37566500834)
+  passed shader, Android, package, signing and publication gates. The released
+  APK SHA-256 is `8c9ada7a510804cffa7a23bef341d761ea80ceb5f0a009d6b873b8e97b0748f6`.
+  Asset checksums, exact tag/source, ARM64 payload and matching signing identity
+  were verified locally; cryptographic signature validation passed in CI.
   The existing gated fork workflow retains all gates and now correctly classifies
   alpha versions as prereleases and a zero alpha component as a full release.
+- **Next implementation:** default-off, finite discovery/capture of selected
+  actual GPU draws, with immutable uploaded inputs and bound uniforms, explicit
+  recorded/accepted/completed states, strict byte/record limits and offline replay.
+  This diagnostic follows the existing handoff after the candidate did not explain
+  either visual fault. Raw game payloads stay private; full draw behavior is retained.
 
 ## Preserved recovery and earlier checkpoints
 
