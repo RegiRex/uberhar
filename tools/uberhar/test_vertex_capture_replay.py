@@ -105,7 +105,14 @@ def structural_tests(capture: vc.Capture) -> int:
     bad = replace(capture, "vs_pica", bytes(raw))
     rejected(lambda: vc.replay_packet(bad, bad.manifest["packets"][0]), "unobserved UBO padding")
     rejected(lambda: vc.encode(capture.manifest, b"x" * vc.MAX_CAPTURE), "payload bound")
-    return 38
+    # CodexAstraLocal: An optional legacy-default flag is still typed protocol
+    # data; accepting 1 or "false" could silently select another generated shader.
+    for value in (None, 0, 1, 1.0, "false", [], {}):
+        bad = vc.Capture(copy.deepcopy(capture.manifest), capture.payload)
+        bad.manifest["packets"][0]["extra"]["precise_jit_dot"] = value
+        rejected(lambda bad=bad: vc.replay_packet(bad, bad.manifest["packets"][0]),
+                 "non-boolean arithmetic policy")
+    return 45
 
 
 def selector_tests(capture: vc.Capture) -> int:
@@ -158,7 +165,8 @@ def run(directory: Path, binary: Path, fixture: Path, gpu: bool) -> dict:
     checks = structural_tests(written) + selector_tests(written)
     results = {}
     names = ("written", "missing", "carry", "fifo_high", "u8_widened", "uniform", "signed",
-             "ubyte", "sbyte_scaled", "emulated3", "fixed", "highwater", "offset")
+             "ubyte", "sbyte_scaled", "emulated3", "fixed", "highwater", "offset",
+             "dot_legacy", "dot_precise")
     for name in names:
         capture = vc.read(directory / f"{name}.uvc")
         packet = capture.manifest["packets"][0]
@@ -209,6 +217,41 @@ def run(directory: Path, binary: Path, fixture: Path, gpu: bool) -> dict:
                   "actual typed-fetch input parity differs")
         results[name] = record
         checks += 1
+
+    # CodexAstraLocal: Old packets omit the policy while new packets explicitly
+    # retain it. The same guest/config must reproduce two distinct source hashes;
+    # removing a true policy cannot silently replay under the legacy generator.
+    old, new = (results[name]["cpu"] for name in ("dot_legacy", "dot_precise"))
+    check(all(old[key] == new[key] for key in
+              ("program_hash", "swizzle_hash", "vs_config_hash")) and
+          old["vs_source_hash"] != new["vs_source_hash"],
+          "arithmetic policy lost guest/source identity separation")
+    for name in ("dot_legacy", "dot_precise"):
+        legacy = vc.read(directory / f"{name}.uvc")
+        del legacy.manifest["packets"][0]["extra"]["precise_jit_dot"]
+        path = directory / f"{name}-without-policy.uvc"
+        path.write_bytes(vc.encode(legacy.manifest, legacy.payload))
+        report = replay.replay(path, directory / f"result-{name}-without-policy", binary, False)
+        record = report["packets"][0]
+        if name == "dot_legacy":
+            check(record["status"] == "replayed" and
+                  record["cpu"]["vs_source_hash"] == old["vs_source_hash"],
+                  "legacy packet no longer reproduces the old source")
+        else:
+            check(record["status"] == "unsupported_or_invalid" and
+                  "GLSL hash differs" in record["reason"],
+                  "missing true arithmetic policy silently generated the old shader")
+    malformed = vc.read(directory / "dot_precise.uvc")
+    malformed.manifest["packets"][0]["extra"]["precise_jit_dot"] = 1
+    path = directory / "numeric-policy.uvc"
+    path.write_bytes(vc.encode(malformed.manifest, malformed.payload))
+    direct_output = directory / "result-numeric-policy"
+    direct_output.mkdir()
+    direct = subprocess.run([str(binary.resolve()), str(path), "0", str(direct_output)],
+                            capture_output=True, text=True, timeout=30)
+    check(direct.returncode == 2 and "invalid precise JIT dot flag" in direct.stderr,
+          "direct worker accepted non-boolean arithmetic policy")
+    checks += 4
 
     # CodexAstraLocal: Uppercase producer identities must replay identically, but
     # corrupted words/lengths/config hashes must fail before executing a shader.
@@ -282,7 +325,7 @@ def main() -> None:
     directory = Path(tempfile.mkdtemp(prefix="regression-", dir=args.output.resolve()))
     report = run(directory, binary, fixture, args.render)
     (directory / "regression.json").write_text(json.dumps(report, indent=2, allow_nan=False) + "\n")
-    print(f"PASS: {report['checks']} capture/replay checks, 13 production CPU cases, "
+    print(f"PASS: {report['checks']} capture/replay checks, {len(report['results'])} production CPU cases, "
           f"Mesa={'yes' if args.render else 'not requested'}; evidence {directory}")
 
 

@@ -267,10 +267,11 @@ public:
     GLSLGenerator(const std::set<Subroutine>& subroutines, const ProgramCode& program_code,
                   const SwizzleData& swizzle_data, u32 main_offset,
                   const RegGetter& inputreg_getter, const RegGetter& outputreg_getter,
-                  bool sanitize_mul)
+                  bool sanitize_mul, bool precise_jit_dot)
         : subroutines(subroutines), program_code(program_code), swizzle_data(swizzle_data),
           main_offset(main_offset), inputreg_getter(inputreg_getter),
-          outputreg_getter(outputreg_getter), sanitize_mul(sanitize_mul) {
+          outputreg_getter(outputreg_getter), sanitize_mul(sanitize_mul),
+          precise_jit_dot(precise_jit_dot) {
 
         Generate();
     }
@@ -499,7 +500,16 @@ private:
             case OpCode::Id::DPHI: {
                 OpCode::Id opcode = instr.opcode.Value().EffectiveOpCode();
                 std::string dot;
-                if (opcode == OpCode::Id::DP3) {
+                // CodexAstraLocal: DP4/DPH use the same pair tree in both CPU JITs.
+                // DP3 retains its inherited expression: the ARM JIT adds a zero
+                // fourth term whereas x64 does not, including a signed-zero edge.
+                if (precise_jit_dot && opcode != OpCode::Id::DP3) {
+                    const std::string first =
+                        (opcode == OpCode::Id::DPH || opcode == OpCode::Id::DPHI)
+                            ? fmt::format("vec4({}.xyz, 1.0)", src1)
+                            : src1;
+                    dot = fmt::format("precise_jit_dot4({}, {})", first, src2);
+                } else if (opcode == OpCode::Id::DP3) {
                     if (sanitize_mul) {
                         dot = fmt::format("dot(vec3(sanitize_mul({}, {})), vec3(1.0))", src1, src2);
                     } else {
@@ -834,6 +844,22 @@ private:
             shader.AddLine("}}\n");
         }
 
+        // CodexAstraLocal: Explicit precise additions prohibit reassociation or
+        // contraction across the JIT's (x+y)+(z+w) rounding boundaries. Keep the
+        // selected multiply sanitation intact; this is not general CPU/GPU parity.
+        if (precise_jit_dot) {
+            shader.AddLine("float precise_jit_dot4(vec4 lhs, vec4 rhs) {{");
+            ++shader.scope;
+            shader.AddLine("precise vec4 product = {};",
+                           sanitize_mul ? "sanitize_mul(lhs, rhs)" : "lhs * rhs");
+            shader.AddLine("precise float sum_xy = product.x + product.y;");
+            shader.AddLine("precise float sum_zw = product.z + product.w;");
+            shader.AddLine("precise float sum = sum_xy + sum_zw;");
+            shader.AddLine("return sum;");
+            --shader.scope;
+            shader.AddLine("}}\n");
+        }
+
         shader.AddLine("vec4 get_offset_register(int base_index, int offset) {{");
         ++shader.scope;
         shader.AddLine("int fixed_offset = offset >= -128 && offset <= 127 ? offset : 0;");
@@ -924,18 +950,21 @@ private:
     const RegGetter& inputreg_getter;
     const RegGetter& outputreg_getter;
     const bool sanitize_mul;
+    // CodexAstraLocal: Frozen for one generation; only the optional Combo policy enables it.
+    const bool precise_jit_dot;
 
     ShaderWriter shader;
 };
 
 std::string DecompileProgram(const ProgramCode& program_code, const SwizzleData& swizzle_data,
                              u32 main_offset, const RegGetter& inputreg_getter,
-                             const RegGetter& outputreg_getter, bool sanitize_mul) {
+                             const RegGetter& outputreg_getter, bool sanitize_mul,
+                             bool precise_jit_dot) {
 
     try {
         auto subroutines = ControlFlowAnalyzer(program_code, main_offset).MoveSubroutines();
         GLSLGenerator generator(subroutines, program_code, swizzle_data, main_offset,
-                                inputreg_getter, outputreg_getter, sanitize_mul);
+                                inputreg_getter, outputreg_getter, sanitize_mul, precise_jit_dot);
         return generator.MoveShaderCode();
     } catch (const DecompileFail& exception) {
         LOG_INFO(HW_GPU, "Shader decompilation failed: {}", exception.what());

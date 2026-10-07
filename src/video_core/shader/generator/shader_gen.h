@@ -161,6 +161,11 @@ struct ExtraVSConfig {
     u8 sanitize_mul;
     u8 separable_shader;
 
+    // CodexAstraLocal: Combo's ready-only GPU path can share a depth attachment
+    // with CPU-JIT draws. Match the JIT's DP4/DPH pairwise additions precisely;
+    // DP3 and the default Native/Custom/OpenGL generation remain unchanged.
+    u8 precise_jit_dot{};
+
     // Load operations to apply to the input vertex data
     std::array<AttribLoadFlags, 16> load_flags;
 };

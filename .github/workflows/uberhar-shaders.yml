@@ -38,7 +38,8 @@ jobs:
         # AstraEH: The production interpreter test also includes MicroProfile's disabled header.
         # CodexAstraUlt: The real Libretro logger regression also needs its pinned API header;
         # a full local checkout already has it, but this narrow CI checkout must fetch it.
-        run: git submodule update --init --depth 1 externals/fmt externals/xxHash externals/boost externals/nihstro externals/vulkan-headers externals/microprofile externals/libretro-common/libretro-common
+        # CodexAstraLocal: The mixed-depth regression executes the production x64 JIT.
+        run: git submodule update --init --depth 1 externals/fmt externals/xxHash externals/boost externals/nihstro externals/vulkan-headers externals/microprofile externals/xbyak externals/libretro-common/libretro-common
       - name: Install validation tools
         run: |
           sudo apt-get update
@@ -79,6 +80,12 @@ jobs:
         env:
           LIBGL_ALWAYS_SOFTWARE: '1'
         run: /tmp/uberhar-test-env/bin/python tools/uberhar/test_gpu_output_guard.py --render-only
+      # CodexAstraLocal: Fixed witnesses must fail in both legacy mixed depth
+      # directions and recover with precise production shaders, including SPIR-V.
+      - name: Compare JIT and GPU dot depth coverage
+        env:
+          LIBGL_ALWAYS_SOFTWARE: '1'
+        run: /tmp/uberhar-test-env/bin/python tools/uberhar/test_gpu_dot_depth.py --render-only --require-spirv
       # CodexAstraLocal: Replay synthetic bounded captures with real typed fetch
       # and bound uniforms; Mesa evidence does not establish Thor pixel correctness.
       - name: Compare bounded vertex replay with production CPU

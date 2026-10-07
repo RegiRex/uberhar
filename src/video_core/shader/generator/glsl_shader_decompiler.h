@@ -15,6 +15,7 @@ using RegGetter = std::function<std::string(u32)>;
 std::string DecompileProgram(const Pica::ProgramCode& program_code,
                              const Pica::SwizzleData& swizzle_data, u32 main_offset,
                              const RegGetter& inputreg_getter, const RegGetter& outputreg_getter,
-                             bool sanitize_mul);
+                             // CodexAstraLocal: The optional policy affects DP4/DPH only.
+                             bool sanitize_mul, bool precise_jit_dot = false);
 
 } // namespace Pica::Shader::Generator::GLSL

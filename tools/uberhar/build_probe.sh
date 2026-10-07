@@ -116,6 +116,9 @@ python3 tools/uberhar/test_gpu_attribute_padding.py
 # CodexAstraLocal: Never-written consumed output W must retain the complete CPU
 # batch before GPU reads/uploads; also exercise real output lifetime and mapping.
 python3 tools/uberhar/test_gpu_output_guard.py
+# CodexAstraLocal: Exercise actual JIT and production-generated ordered dots;
+# shader CI separately verifies mixed depth coverage and both SPIR-V policies.
+python3 tools/uberhar/test_gpu_dot_depth.py
 
 # AstraEH: Exact CPU cache/stack behavior and safe generic-module reuse gate the next build.
 c++ -std=c++20 -O2 -Isrc -Iexternals/boost tools/uberhar/test_vertex_runtime.cpp \

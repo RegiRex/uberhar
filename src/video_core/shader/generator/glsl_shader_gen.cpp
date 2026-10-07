@@ -181,7 +181,8 @@ std::string GenerateVertexShader(const ShaderSetup& setup, const PicaVSConfig& c
 
     auto program_source =
         DecompileProgram(setup.GetProgramCode(), setup.GetSwizzleData(), config.state.main_offset,
-                         get_input_reg, get_output_reg, extra.sanitize_mul);
+                         // CodexAstraLocal: Keep JIT reduction policy explicit in generated source.
+                         get_input_reg, get_output_reg, extra.sanitize_mul, extra.precise_jit_dot);
 
     if (program_source.empty()) {
         return "";

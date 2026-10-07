@@ -96,6 +96,36 @@ File 1 Empty and zero saved application Vulkan-cache inventory were verified
 for each opening. No new candidate build was used; the next evidence must link
 an affected visible family to its actual route/timing without assuming a cause.
 
+<!-- CodexAstraLocal: Finish the eight same-APK capture openings and record the separately reproduced arithmetic hazard without turning either into title causality. -->
+The seventh cold opening retained eight completed ghost-window packets with
+zero caps/errors. Host interpreter/Mesa geometry is partly clipped and remains
+unassigned; the video independently reproduces foreground patch-to-clear and
+book-holder clear/patch/clear sequences. The eighth retained eight completed
+depth-only packets, all wholly right-clipped under both host routes. It therefore
+supplies no visible moon attribution. Its coordinated moon clip shows an
+upper/right segment reversal across frames 212–215; the separate ghost clip
+retains near-ghost 125→126–129→130 and book-holder 466→467–472→473 corruption.
+File 1 Empty and zero saved application Vulkan caches were verified for both.
+KGSL sampled after capture/ghost and normal return is 3,047.66→13.67 MiB for
+session 7 and 3,120.45→13.35 MiB for session 8. The eighth first exit input left
+the dialog open; only the verified retry/final log is cleanup evidence. Both
+had battery 80%, 28 C, AC power present and power saver off. These diagnostic
+runs do not qualify speed or lifetime bounds. Eight openings used one APK.
+
+A separate, independently reviewed synthetic test executes the production x64
+CPU JIT and generated shaders on Mesa. Two fixed DP4 witnesses lose all 1,024
+color pixels under LEQUAL in opposite mixed depth/color route orders; same-route
+and precise pairwise controls retain all pixels. Actual OpenGL SPIR-V execution
+confirms both optimizer settings; Vulkan modules were only validated. The
+control agrees with x64 JIT positions for 4,096 finite unity-product vectors,
+which does not cover all multiplication/sanitization cases. This establishes a
+host arithmetic contract hazard, not an AArch64/Adreno measurement or Dark Moon
+cause. Authorized 0.1.26 work scopes precise pairwise DP4/DPH to Combo optional
+GPU shaders with CPU JIT enabled; production regression/review, gated release
+and cold device validation remain pending. The unchanged 0.1.25 still has both
+visual faults; raw captures remain private. The six-run documentation checkpoint
+was published as `f27d7edd6`, with no new APK or audit count.
+
 <!-- CodexAstraLocal: Resume the interrupted session from durable source and raw evidence instead of repeating completed device work or assuming lost permissions. -->
 ## Recovery checkpoint — October 7, 2026 UTC
 

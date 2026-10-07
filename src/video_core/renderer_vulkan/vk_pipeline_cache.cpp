@@ -9,6 +9,7 @@
 #include <stdexcept> // AstraEH: Recover experimental compilation failures through specialization.
 #include <boost/container/static_vector.hpp>
 
+#include "common/arch.h" // CodexAstraLocal: Match the architectures with a production PICA JIT.
 #include "common/common_paths.h"
 #ifdef ANDROID
 #include "common/android_utils.h" // AstraEH: Match the platform's cache path translation.
@@ -115,7 +116,11 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
       allow_specialized_fragments{
           Settings::AllowsSpecializedFragments(Settings::values.uberhar_test_mode.GetValue())},
       cpu_vertex_bridge{hybrid_tev && !force_tev &&
-                        Settings::values.uberhar_cpu_vertex_bridge.GetValue()} {
+                        Settings::values.uberhar_cpu_vertex_bridge.GetValue()},
+      // CodexAstraLocal: PicaCore selects its CPU engine at construction. Freeze
+      // the same choice for this renderer; never change a shader-map policy live.
+      shader_jit_enabled{(CITRA_ARCH(x86_64) || CITRA_ARCH(arm64)) &&
+                         Settings::values.use_shader_jit.GetValue()} {
     // AstraPro: Diagnostics 19 adds bounded GPU promotion and rescued-input observations.
     // AstraEH: Record effective settings so a device log identifies the tested path.
     // AstraEH Log Line: bounded renderer diagnostics; see docs/UBERHAR_DIAGNOSTICS.md.
@@ -873,6 +878,9 @@ ExtraVSConfig PipelineCache::CalcExtraConfig(const PicaVSConfig& config) {
     res.use_geometry_shader = use_geometry_shader;
     res.sanitize_mul = profile.enable_accurate_mul;
     res.separable_shader = true;
+    // CodexAstraLocal: Only Combo's immutable ready-only owner mixes GPU shaders
+    // with CPU JIT output. Custom/Native/OpenGL keep the prior dot generation.
+    res.precise_jit_dot = ready_vertex_worker != nullptr && shader_jit_enabled;
     res.load_flags.fill(AttribLoadFlags::Float);
 
     for (u32 i = 0; i < config.state.used_input_vertex_attributes; i++) {

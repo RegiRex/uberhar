@@ -1,6 +1,20 @@
 <!-- AstraEH: Attribution index for the Uberhar implementation, tests, packaging and documentation. -->
 # Uberhar code map
 
+<!-- CodexAstraLocal: Index the narrowly scoped mixed-route arithmetic correction and distinguish its host regression from unresolved title qualification. -->
+## 0.1.26 ordered Combo DP4/DPH
+
+| Files | Purpose and limits |
+| --- | --- |
+| `shader/generator/shader_gen.h`, `glsl_shader_gen.cpp`, `glsl_shader_decompiler.cpp/.h` | Default-false extra policy emits precise pairwise additions for DP4, DPH and DPHI. Retains multiplication sanitation; DP3 and unflagged generation remain unchanged. |
+| `renderer_vulkan/vk_pipeline_cache.cpp/.h`, `vk_shader_disk_cache.cpp` | Freeze CPU-JIT policy with the renderer and enable ordered generation only for Combo's ready-only worker. Generated-source identity separates modules; renderer-owned maps do not mix policies or Custom transferable records. |
+| `vk_vertex_capture.cpp`, `tools/uberhar/vertex_capture.py`, `replay_vertex_capture.cpp/.py`, capture fixtures and guide | Serialize the bound arithmetic flag, strictly validate its type and preserve legacy missing=false semantics. Replay explicitly identifies its production interpreter engine; it does not execute the device JIT. |
+| `tools/uberhar/test_gpu_dot_depth.cpp/.py`, `build_probe.sh`, shader workflow | Synthetic production-JIT/generated-shader reduction and mixed-depth coverage controls, with SPIR-V validation under both optimizer policies. No game payloads enter the regression. |
+
+See [0.1.26 notes](releases/0.1.26.md). The synthetic mixed-route depth hazard
+does not establish Dark Moon causality. Source-derived cache identity requires
+fresh configuration; Android gates and cold Thor graphics remain separate.
+
 <!-- CodexAstraLocal: Index the finite diagnostic and independent replay without expanding renderer admission or distributing private guest payloads. -->
 ## 0.1.25 bounded vertex evidence
 

@@ -198,6 +198,12 @@ struct Replay {
         extra.use_geometry_shader = flags.at("use_geometry_shader").get<bool>();
         extra.sanitize_mul = flags.at("sanitize_mul").get<bool>();
         extra.separable_shader = flags.at("separable_shader").get<bool>();
+        // CodexAstraLocal: Legacy 0.1.25 packets have no arithmetic-policy flag;
+        // preserve their source identity while reconstructing new captures exactly.
+        if (flags.contains("precise_jit_dot")) {
+            Require(flags.at("precise_jit_dot").is_boolean(), "invalid precise JIT dot flag");
+            extra.precise_jit_dot = flags.at("precise_jit_dot").get<bool>();
+        }
         Require(!extra.use_geometry_shader, "geometry-shader replay unsupported");
         Require(flags.at("load_flags").size() == 16, "invalid load flag count");
         for (u32 index = 0; index < 16; ++index)

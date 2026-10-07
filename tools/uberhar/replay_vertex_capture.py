@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""CodexAstraLocal: Replay accepted private vertex packets on production CPU/Mesa.
+"""CodexAstraLocal: Replay private packets on the production interpreter and Mesa.
 
-The CPU oracle retains draw-local register state and the production 64-entry FIFO.
+The CPU interpreter retains draw-local register state and the production 64-entry
+FIFO. It does not execute either CPU JIT or measure the Thor's enabled JIT route.
 Mesa uses the captured raw vertex formats and actual bound UBO bytes. Results are
 pre-primitive vertex evidence, not an Adreno replay or a fragment/pixel verdict.
 """
@@ -361,6 +362,9 @@ def replay(path: Path, output: Path, binary: Path, gpu: bool = True,
         except (vc.CaptureError, subprocess.TimeoutExpired, RuntimeError) as error:
             record.update(status="unsupported_or_invalid", reason=str(error))
         report["packets"].append(record)
+    # CodexAstraLocal: Engine identity is essential when JIT and interpreter dot
+    # reductions differ; a configured device JIT is not the host replay engine.
+    report["cpu_engine"] = "production_interpreter"
     report["scope"] = "A replay mismatch is vertex evidence, not a demonstrated cause of moon " \
                       "flashing/ghost corruption. Accepted-but-pending packets remain marked."
     (output / "report.json").write_text(json.dumps(report, indent=2, allow_nan=False) + "\n")

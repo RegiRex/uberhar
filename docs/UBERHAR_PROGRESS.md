@@ -1,4 +1,16 @@
-# Uberhar progress — 0.1.25 actual-payload replay; graphics unresolved
+# Uberhar progress — 0.1.26 ordered-dot candidate; local gates passed
+
+<!-- CodexAstraLocal: Advance the focused correction independently of installed title evidence, retaining all prior capture findings below. -->
+0.1.26 is implemented and independently reviewed. Combo's optional GPU path
+uses precise pairwise DP4/DPH additions when the CPU JIT is enabled. Nine
+numerical cases and two opposite mixed-depth failure/repair witnesses pass;
+48 SPIR-V modules validate, and the depth controls execute as host OpenGL
+SPIR-V under both optimizer policies. Ten unflagged/native shader sources
+remain byte-identical to 0.1.25. Full probes, native integration, CTest and
+existing shader/render gates pass. The source-derived cache identity was
+refreshed and verified after CMake configuration. Android/signing/publication
+and the cold Thor comparison remain pending. Installed 0.1.25 still has both
+visual faults; sustained normal speed and 2x qualification remain unmet.
 
 <!-- CodexAstraLocal: Advance the diagnostic candidate independently of the unchanged device-qualification result and retain previous checkpoints below. -->
 - **0.1.25 implemented and independently reviewed:** default-off, finite Combo
@@ -32,23 +44,26 @@
   their mesh matches the earlier color selection, but every cross-run pairing
   differs in position uniforms. A sixth retained eight packets from another
   color family with unclipped host geometry, still without actor attribution.
-  No packet yet identifies an affected visible actor or establishes Adreno/pixel
-  parity. All six openings used the same APK; selectors do not count as builds.
+  A seventh selected ghost-window family is partly clipped and unassigned; the
+  eighth depth instance is wholly right-clipped in both host routes. No packet
+  yet identifies an affected visible actor or establishes Adreno/pixel parity.
+  All eight openings used the same APK; selectors do not count as builds.
 - **0.1.25 graphics remain incorrect:** independent consecutive-frame review
   reproduces moon flashing and the matched ghost clear/patch/clear sequence.
   The first run's earlier ghost footage is UI-obscured; later openings retain
   unobscured matched ghost sequences with the same fault. The fourth run again
   shows the right book-holder clear, patched and clear after excluding its UI
-  transition. The fifth and sixth coordinated moon clips again flash, and their
-  unobscured ghost clips retain matched clear/patch/clear sequences. Sixth-run
-  KGSL is 2,927.85 MiB after the ghost clip and 13.10 MiB after verified normal
+  transition. The later coordinated moon clips retain segment reversals, and
+  separate ghost clips retain matched clear/patch/clear sequences. Eighth-run
+  KGSL is 3,120.45 MiB after the ghost clip and 13.35 MiB after verified normal
   return with the process alive. Its initial return input left the exit dialog
-  open; that earlier sample is pre-exit and excluded from cleanup evidence.
+  open; only the verified retry/final log establishes returned state. The sixth
+  run's earlier mislabeled sample remains explicitly pre-exit.
   These discrete readings do not establish lifetime bounds.
   Sustained normal speed and 2x qualification remain unmet. Every opening resets
   File 1 and clears the title Vulkan cache; captured runs are diagnostic, not
   performance qualification.
-- **Current discriminator:** the moon-window color replay has small numerical
+- **Captured-family limits:** the moon-window color replay has small numerical
   differences; its tolerance exceedances affect an unused fragment input. A
   same-input host depth-entry counterfactual produces identical depth/color
   positions within each host route and does not reproduce cross-program variance.
@@ -56,13 +71,27 @@
   was not replayed. Actual depth replay has zero output tolerance exceedances,
   but distinct cross-run transforms prevent a same-frame depth/color comparison.
   The sixth family's host geometry remains unassigned to a visible actor;
-  numerical position differences alone do not identify the faulty stage. Next
-  evidence must associate an affected visible family and preserve its actual
-  route and timing. No shader fix or speed improvement follows from these host
-  results.
+  numerical position differences alone do not identify the faulty stage. The
+  seventh/eighth selections likewise supply no affected actor. No title fix or
+  speed improvement follows from these captured-family host results.
+
+<!-- CodexAstraLocal: A separately executed x64 JIT witness supports narrow arithmetic work, not an ARM64/Adreno or title-cause claim. -->
+
+- **0.1.26 scoped work authorized:** a separate synthetic host test demonstrates
+  a DP4 arithmetic/depth hazard when x64 CPU JIT and legacy generated-GPU routes
+  are mixed. Two fixed cases lose all 1,024 color pixels in opposite route
+  orders; same-route and precise pairwise controls retain all 1,024. Host OpenGL
+  SPIR-V execution confirms both optimizer modes; Vulkan modules were validated
+  only. The next candidate scopes precise pairwise DP4/DPH to Combo optional
+  GPU shaders with CPU JIT enabled. Production regression/review and local
+  integration passed; release gates and cold Thor testing remain pending.
+  It is not an established Dark Moon cause
+  or cure; actual AArch64/Adreno behavior remains unmeasured by this host test.
 - **Cadence:** 0.1.24 is successor one to the completed 0.1.23 audit; gated 0.1.25
-  is two, 0.1.26 three. Reaudit before 0.1.27 or earlier if evidence requires.
-  The latest fetched release branch is `9bf0cab4e`; original report and private
+  is two, and 0.1.26 will be three after its completed gated build. Reaudit
+  before 0.1.27 or earlier if evidence requires.
+  The docs-only checkpoint is `f27d7edd6`; installed release source remains
+  `9bf0cab4e`. The original report and private
   artifacts remain intact. Only the root coordinator operates the Thor.
 
 ## Completed 0.1.24 checkpoint

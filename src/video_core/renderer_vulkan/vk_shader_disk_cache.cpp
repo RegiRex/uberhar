@@ -116,6 +116,10 @@ std::optional<std::pair<u64, Shader* const>> ShaderDiskCache::UseProgrammableVer
         dst.size = src.size;
     }
 
+    // CodexAstraLocal: The JIT-dot extra policy is immutable for this renderer
+    // and its title maps. Keep the guest-only config identity stable; generated
+    // source hashes distinguish precise/legacy modules, and Combo never loads
+    // or writes Custom's transferable records (Init). No cross-policy map reuse.
     const auto config_hash = config.Hash();
 
     // AstraPro: Only absent configs consume admission. Existing successful or

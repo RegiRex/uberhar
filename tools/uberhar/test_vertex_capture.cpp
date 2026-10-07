@@ -213,17 +213,22 @@ void TestConfiguration() {
 // semantic bytes may survive, while ABI and uploaded-stride padding stay absent.
 void TestImmutableAndSubmission() {
     Fixture f;
+    // CodexAstraLocal: Arithmetic policy is part of the immutable bound snapshot,
+    // not a later live renderer setting used when the packet is serialized.
+    f.bound.extra.precise_jit_dot = true;
     WriteConfig(f.Configuration("immutable"));
     auto session=Session::Load(Title,Run,0); Check(bool(session),"valid capture rejected");
     session->NextSwap(Title,Run,3,false,9,9);
     auto token=f.Stage(*session,10,true);
     Check(bool(token),"bounded indexed draw did not stage");
+    f.bound.extra.precise_jit_dot = false;
     f.vertices.fill(0xee); f.fixed.fill(0xee); f.uniform.bytes.fill(0xee);
     f.setup.UpdateProgramCode(0,0xffffffffU);
     token.Recorded();
     session->Finish(10,9);
     auto result=Read("immutable");
     const auto& packet=result.manifest["packets"][0];
+    Check(packet["extra"]["precise_jit_dot"] == true,"bound arithmetic policy lost or mutated");
     Check(packet["recorded"] && packet["accepted"] && !packet["completed"],
           "submission/completion states conflated");
     const auto vertices=Section(result,0,"vertex_0");

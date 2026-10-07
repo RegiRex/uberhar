@@ -320,6 +320,9 @@ private:
     const bool allow_specialized_fragments;
     // AstraEH: A/B switch captured at startup, effective only in normal hybrid mode.
     const bool cpu_vertex_bridge;
+    // CodexAstraLocal: A renderer-owned cache must not reuse a config after a
+    // mutable JIT toggle changes its DP4/DPH arithmetic policy; restart applies it.
+    const bool shader_jit_enabled;
     // AstraEH: Draw counters belong to the render thread; wait counters belong to the scheduler.
     u64 draw_requests{};
     u64 specialized_pending{};

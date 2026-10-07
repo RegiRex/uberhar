@@ -348,6 +348,9 @@ def replay_packet(capture: Capture, packet: dict[str, Any]) -> list[int]:
     extra = packet.get("extra", {})
     for field in ("use_clip_planes", "use_geometry_shader", "sanitize_mul", "separable_shader"):
         boolean(extra.get(field), f"extra.{field}")
+    # CodexAstraLocal: Version 0.1.25 predates this policy. Missing means the
+    # legacy generator; a present value must remain a JSON boolean, never truthy text.
+    boolean(extra.get("precise_jit_dot", False), "extra.precise_jit_dot")
     if extra["use_geometry_shader"]:
         raise CaptureError("geometry-shader replay is unsupported")
     flags = extra.get("load_flags")

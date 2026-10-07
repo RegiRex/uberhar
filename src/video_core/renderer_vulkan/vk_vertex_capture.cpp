@@ -780,10 +780,12 @@ void WritePacket(Writer& out, const Packet& p, u32 id, std::size_t base,
                    effective.native_format, trait.needs_conversion != 0, trait.needs_emulation != 0);
     }
     const auto& e = p.bound.extra;
+    // CodexAstraLocal: Preserve the bound Combo arithmetic policy so a replay
+    // cannot regenerate the old dot reduction for a new precise-JIT shader.
     out.Format("]}},\"extra\":{{\"use_clip_planes\":{},\"use_geometry_shader\":{},"
-               "\"sanitize_mul\":{},\"separable_shader\":{},\"load_flags\":[",
+               "\"sanitize_mul\":{},\"separable_shader\":{},\"precise_jit_dot\":{},\"load_flags\":[",
                e.use_clip_planes != 0, e.use_geometry_shader != 0,
-               e.sanitize_mul != 0, e.separable_shader != 0);
+               e.sanitize_mul != 0, e.separable_shader != 0, e.precise_jit_dot != 0);
     for (u32 i = 0; i < e.load_flags.size(); ++i) {
         if (i) out.Put(","); out.Format("{}", static_cast<u32>(e.load_flags[i]));
     }

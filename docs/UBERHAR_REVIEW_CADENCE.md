@@ -37,6 +37,23 @@ interpreter, not the device's enabled CPU JIT. Graphics and sustained-speed
 qualification remain incomplete. Same-APK selector experiments are not new builds. This is
 completed build successor two, not a new full architecture audit.
 
+<!-- CodexAstraLocal: Keep the completed eight-opening diagnostic series and synthetic arithmetic review separate from release qualification and the full-audit count. -->
+Seventh/eighth 0.1.25 openings retained eight completed packets each. The selected
+ghost-window geometry is partly clipped and unassigned; the final depth instance
+is wholly clipped in both interpreter/Mesa host routes. Temporal ghost defects
+and a moon-segment reversal persist independently. Verified normal returns
+recover sampled KGSL; the eighth exit dialog required a retry. These are same-APK
+diagnostic runs, not new builds or sustained-speed qualification.
+
+Independent review of a separate synthetic x64 JIT/generated-GPU DP4 experiment
+confirms mixed-route LEQUAL failures in both route orders and repair by precise
+pairwise controls. OpenGL SPIR-V was executed in both optimizer modes; Vulkan
+modules were only validated. AArch64/Adreno execution, full arithmetic edge
+coverage and title causality remain unproven. This supports scoped 0.1.26
+implementation work, whose production regression/review and release/device
+gates remain pending. Count 0.1.26 as successor three only after its completed
+build; the audit anchor stays 0.1.23, with a full audit required before 0.1.27.
+
 
 <!-- CodexAstraUlt: The owner's new fixed three-build audit cadence supersedes the older three-to-five range without treating a documentation update as a completed audit. -->
 **Owner update: audit every three builds.** The 0.1.20 anchor has three completed

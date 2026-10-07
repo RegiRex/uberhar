@@ -70,7 +70,8 @@ Mesa workers each have a finite timeout.
 
 - CPU replay uses the production input plan, interpreter, semantic conversion,
   draw-local register carry and 64-entry FIFO. Original indices remain FIFO keys;
-  only accesses into the compact copied upload are rebased.
+  only accesses into the compact copied upload are rebased. The report explicitly
+  names `production_interpreter`; neither CPU JIT is executed by this worker.
 - Mesa replays generated GLSL with actual typed raw uploads, fixed attributes and
   actual bound vertex UBO semantic bytes. The production trivial shader applies
   the same clip/viewport transport to CPU output before comparison.
@@ -111,3 +112,12 @@ high indices, cleared trailing shader words, conditional carry, output defaults,
 u8 index widening, signed/unsigned/scaled/fixed/padded inputs, stale bound
 uniforms, strict parser limits and the discovery ordinal contract. These are
 host correctness checks, not device performance measurements.
+
+<!-- CodexAstraLocal: Preserve old shader identity while making the new optional arithmetic contract explicit in private captures and replay interpretation. -->
+From 0.1.26, packet `extra.precise_jit_dot` records whether Combo generated
+precise JIT-ordered DP4/DPH additions. It is a strict JSON boolean; an absent
+field in a 0.1.25 artifact means the legacy generator. The reader does not
+retrofit old captures to new arithmetic. Replay still verifies generated source
+identity, so removing a true flag from a new packet is rejected. The host CPU
+side remains the interpreter: this flag changes reconstructed GPU generation,
+not the replay engine or its interpretation as device evidence.

@@ -24,6 +24,9 @@ void Fixture(const std::filesystem::path& directory, const std::string& name) {
     ExtraVSConfig extra{};
     extra.sanitize_mul = true;
     extra.separable_shader = true;
+    // CodexAstraLocal: Paired dot fixtures share guest words/config identity but
+    // require different generated-source identities for the captured policy.
+    extra.precise_jit_dot = name == "dot_precise";
     extra.load_flags.fill(AttribLoadFlags::Float);
     regs.lighting.disable.Assign(1);
     regs.vs.output_mask.Assign(1 << 3);
@@ -38,6 +41,11 @@ void Fixture(const std::filesystem::path& directory, const std::string& name) {
         {O::MOV, D::MakeOutput(3), name == "missing" || carry ? "xyz" : "xyzw",
          name == "uniform" ? S::MakeFloat(0) : S::MakeInput(0)},
         {O::END}});
+    if (name == "dot_legacy" || name == "dot_precise") {
+        binary = nihstro::InlineAsm::CompileToRawBinary({
+            {O::DP4, D::MakeOutput(3), "xyzw", S::MakeInput(0), S::MakeInput(0)},
+            {O::END}});
+    }
     if (carry) {
         binary = nihstro::InlineAsm::CompileToRawBinary({
             {O::MOV, D::MakeOutput(3), "xyz", S::MakeInput(0)}, {O::NOP}, {O::NOP},
@@ -221,7 +229,8 @@ void Fixture(const std::filesystem::path& directory, const std::string& name) {
         {"swizzle_words", setup.GetBiggestSwizzleSize()},
         {"available_attributes", 1}, {"layout", {{"bindings", layout_bindings}, {"attributes", attributes}}},
         {"extra", {{"use_clip_planes", false}, {"use_geometry_shader", false},
-            {"sanitize_mul", true}, {"separable_shader", true}, {"load_flags", flags}}},
+            {"sanitize_mul", true}, {"separable_shader", true},
+            {"precise_jit_dot", extra.precise_jit_dot != 0}, {"load_flags", flags}}},
         {"pipeline", {{"key", "0000000000000000"}, {"vs_config_hash", Hash(config.Hash())},
             {"fs_config_hash", "0000000000000000"}, {"gs_config_hash", "0000000000000000"},
             {"vs_source_hash", Hash(Common::ComputeHash64(shader.data(), shader.size()))},
@@ -251,7 +260,7 @@ int main(int argc, char** argv) {
         Require(argc == 2 && std::filesystem::is_directory(argv[1]), "fixture output directory required");
         for (const char* name : {"written", "missing", "carry", "fifo_high", "u8_widened",
                                 "uniform", "signed", "ubyte", "sbyte_scaled", "emulated3", "fixed",
-                                "highwater", "offset"})
+                                "highwater", "offset", "dot_legacy", "dot_precise"})
             Fixture(argv[1], name);
         return 0;
     } catch (const std::exception& error) {
