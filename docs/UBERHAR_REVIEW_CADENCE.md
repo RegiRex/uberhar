@@ -17,10 +17,25 @@ uninformative candidates. The old three-to-five range below is historical.
 <!-- CodexAstraLocal: Focused capture ownership/bounds/replay review does not reset the full architecture-review anchor. -->
 0.1.25 source implements the requested default-off bounded vertex evidence and
 private replay after 0.1.24 retained both faults. Three parallel roles reviewed
-snapshot/lifetime/submission, actual producer serialization and CPU/Mesa replay.
-Focused tests, complete probes, native rebuild and CTest passed; release/device
-gates remain pending.
-This is candidate successor two, not a new full architecture audit.
+snapshot/lifetime/submission, actual producer serialization and CPU interpreter/Mesa replay.
+Focused tests, complete probes, native rebuild and CTest passed. Release
+[run 37572128020](https://github.com/RegiRex/uberhar/actions/runs/37572128020)
+passed all gates at `9bf0cab4e`; a compatible data-preserving install and first
+bounded Android discovery succeeded. Later cold openings collected actual
+moon/ghost-window payloads and executed production CPU interpreter/Mesa replay. Independent
+review places all eight fourth-run packets wholly beyond the right clip plane
+under both host routes, so the selected family supplies no visible ghost
+attribution. Fifth-run actual depth packets share the earlier color mesh but
+have different cross-run position uniforms; they cannot test same-frame
+depth/color equality. Sixth-run selected geometry survives host clipping but
+still lacks actor attribution. Both later coordinated moon clips flash, while
+their independent ghost clips retain clear/patch/clear corruption. The sixth
+initial return attempt left the exit dialog open; only its later verified
+return/final log supplies cleanup evidence. These results do not establish
+Adreno parity or a fault's cause. Host CPU replay executes the production
+interpreter, not the device's enabled CPU JIT. Graphics and sustained-speed
+qualification remain incomplete. Same-APK selector experiments are not new builds. This is
+completed build successor two, not a new full architecture audit.
 
 
 <!-- CodexAstraUlt: The owner's new fixed three-build audit cadence supersedes the older three-to-five range without treating a documentation update as a completed audit. -->

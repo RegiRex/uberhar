@@ -1,8 +1,8 @@
-# Uberhar progress — 0.1.25 capture candidate; local gates passed
+# Uberhar progress — 0.1.25 actual-payload replay; graphics unresolved
 
 <!-- CodexAstraLocal: Advance the diagnostic candidate independently of the unchanged device-qualification result and retain previous checkpoints below. -->
 - **0.1.25 implemented and independently reviewed:** default-off, finite Combo
-  vertex discovery/capture and private production CPU/Mesa replay. One manual
+  vertex discovery/capture and private production CPU interpreter/Mesa replay. One manual
   Test phase edge arms at most eight swap intervals, eight packets and a 4 MiB
   aggregate budget. Actual uploads and bound uniforms are immutable; recorded,
   accepted and completed states stay separate. No added GPU wait, worker,
@@ -11,18 +11,58 @@
 - **Focused validation passed:** 403 checks of the production Session with modeled
   IO/mapping, 13 real producer artifacts accepted by the independent reader, and
   full indexed-layout reconstruction. Independent replay passed 70 checks across
-  13 synthetic CPU/Mesa cases. These do not execute the Thor scheduler or establish
+  13 synthetic CPU interpreter/Mesa cases. These do not execute the Thor scheduler or establish
   a visible defect's cause. The native core/Vulkan/tests/room rebuild and complete probe suite passed. CTest
   passed 61 distinct cases and 1,096 assertions, with five existing firmware-dependent
-  skips and zero failures. Policy tests passed 163 checks. Android/signing/publication
-  and device capture remain pending.
-- **Current installed result remains 0.1.24:** both consecutive-frame moon flashing
-  and matched ghost corruption persist. Sustained normal speed and 2x qualification
-  remain unmet. Every opening resets File 1 and clears the title Vulkan cache;
-  captured runs are diagnostic, not performance qualification.
+  skips and zero failures. Policy tests passed 163 checks. All Android, shader,
+  signing and publication gates passed in
+  [run 37572128020](https://github.com/RegiRex/uberhar/actions/runs/37572128020).
+- **0.1.25 / 33974141 installed:** exact release source `9bf0cab4e` and APK
+  SHA-256 `0dfd409de77ed6f30f9730a0ccadad784b1884dfe48f49f6e5afeba1191b9850`
+  were verified with compatible signing before the data-preserving update.
+  The first cold opening produced a valid private discovery artifact: 28 rows
+  across four swap intervals, zero capture errors or caps. The capture ID says
+  moon, but the actual trigger was the early ghost scene at opening +145 seconds;
+  the missed moon cue and partial menu occlusion are explicitly retained.
+  A second opening captured the actual moon scene: 33 discovery rows, all
+  accepted/completed. A third retained eight selected color packets and executed
+  matching-source production CPU interpreter/Mesa replay. A fourth retained eight selected
+  ghost-window packets; independent host replay places that family wholly beyond
+  the right clip plane in all eight. A fifth retained eight actual depth packets;
+  their mesh matches the earlier color selection, but every cross-run pairing
+  differs in position uniforms. A sixth retained eight packets from another
+  color family with unclipped host geometry, still without actor attribution.
+  No packet yet identifies an affected visible actor or establishes Adreno/pixel
+  parity. All six openings used the same APK; selectors do not count as builds.
+- **0.1.25 graphics remain incorrect:** independent consecutive-frame review
+  reproduces moon flashing and the matched ghost clear/patch/clear sequence.
+  The first run's earlier ghost footage is UI-obscured; later openings retain
+  unobscured matched ghost sequences with the same fault. The fourth run again
+  shows the right book-holder clear, patched and clear after excluding its UI
+  transition. The fifth and sixth coordinated moon clips again flash, and their
+  unobscured ghost clips retain matched clear/patch/clear sequences. Sixth-run
+  KGSL is 2,927.85 MiB after the ghost clip and 13.10 MiB after verified normal
+  return with the process alive. Its initial return input left the exit dialog
+  open; that earlier sample is pre-exit and excluded from cleanup evidence.
+  These discrete readings do not establish lifetime bounds.
+  Sustained normal speed and 2x qualification remain unmet. Every opening resets
+  File 1 and clears the title Vulkan cache; captured runs are diagnostic, not
+  performance qualification.
+- **Current discriminator:** the moon-window color replay has small numerical
+  differences; its tolerance exceedances affect an unused fragment input. A
+  same-input host depth-entry counterfactual produces identical depth/color
+  positions within each host route and does not reproduce cross-program variance.
+  Host CPU replay uses the production interpreter; the device's enabled CPU JIT
+  was not replayed. Actual depth replay has zero output tolerance exceedances,
+  but distinct cross-run transforms prevent a same-frame depth/color comparison.
+  The sixth family's host geometry remains unassigned to a visible actor;
+  numerical position differences alone do not identify the faulty stage. Next
+  evidence must associate an affected visible family and preserve its actual
+  route and timing. No shader fix or speed improvement follows from these host
+  results.
 - **Cadence:** 0.1.24 is successor one to the completed 0.1.23 audit; gated 0.1.25
-  will be two, 0.1.26 three. Reaudit before 0.1.27 or earlier if evidence requires.
-  The latest fetched release branch is `43208270c`; original report and private
+  is two, 0.1.26 three. Reaudit before 0.1.27 or earlier if evidence requires.
+  The latest fetched release branch is `9bf0cab4e`; original report and private
   artifacts remain intact. Only the root coordinator operates the Thor.
 
 ## Completed 0.1.24 checkpoint

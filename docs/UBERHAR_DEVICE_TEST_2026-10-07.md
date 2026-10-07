@@ -401,6 +401,330 @@ output-W fallback coverage, moon flashing and ghost patches separately. A clean
 still or one captured vertex packet cannot clear a fault that changes between
 consecutive frames. No new candidate build was used in this baseline.
 
+## Candidate 0.1.25: bounded captures and persistent temporal faults
+
+<!-- CodexAstraLocal: Separate real Android discovery success from unproven vertex parity and record the actual scene despite the retained moon capture ID. -->
+The gated [0.1.25 prerelease](https://github.com/RegiRex/uberhar/releases/tag/0.1.25)
+at `9bf0cab4e47978dfadb9185a01376fb15d96baaf` was installed as version code
+33974141 after [run 37572128020](https://github.com/RegiRex/uberhar/actions/runs/37572128020)
+passed shader, Android, package, signing and publication gates. APK SHA-256 is
+`0dfd409de77ed6f30f9730a0ccadad784b1884dfe48f49f6e5afeba1191b9850`.
+Exact provenance, asset checksum, ARM64 payload and signing identity were checked;
+CI supplied cryptographic signature validation. The compatible update preserved
+app data and the protected existing 0.1.22 emulator save-state file.
+
+The first new process session used full Combo, Vulkan, fixed 2x, 100% normal
+limit/CPU clock, JIT and accurate multiplication, with zero observed setting
+changes or temporary-limit frames. File 1 was reset through the game UI and
+Empty verified; title Vulkan cache deletion preceded launch. The startup record
+reports zero generic, driver and specialized application-cache files/bytes.
+Driver-private cache state remains unknown. Opening A was at **05:06:25.270 UTC**.
+
+### Temporal observations
+
+<!-- CodexAstraLocal: Score clear/corrupt/clear sequences independently and exclude the phase dialog instead of treating obscured frames as clean evidence. -->
+Both symptoms persist. The 12-second moon recording retains 252 decoded frames.
+Frames **64–66** (PTS **2.975200, 3.025889, 3.075978 s**) show the upper-right
+segment darkening at 65 and returning; frames **73–75** (**3.428156, 3.478211,
+3.528689 s**) show a dark right-face segment appearing at 74 and disappearing.
+This is temporal flashing at the familiar scenic phase, not static faceting.
+Native remains the owner's nonflashing reference; this run adds no Native test.
+
+Most of the early-ghost clip is obscured by the diagnostic phase dialog.
+Conservative review begins at **frame 404 / PTS 35.553122 s**, after the dialog
+and drawer close, leaving about 8.15 encoded seconds. The foreground ghost over
+the apparatus has extensive dark patches through frames **404–419**. The matched
+right-side book/board-holding ghost is clear at **447 / 39.665578 s**, patched at
+**448–453 / 39.772811–40.274733 s**, and clear at **454 / 40.372489 s**. This
+matches the earlier wide-view camera/actor phase. Earlier near-ghost footage is
+UI-censored and supplies no conclusion. No change in defect severity or frequency
+is established.
+
+### Discovery and limits
+
+<!-- CodexAstraLocal: Successful recorded/submitted metadata narrows the next selector but contains no uploaded vertex bytes or object identity. -->
+The first request retained ID `025-moon-discovery-01`, but root missed the moon
+menu cue while capture remained unarmed. Its actual manual trigger was
+**05:08:50.309 UTC**, opening **+145.039 s**, in the early wide ghost scene.
+That operator correction is retained alongside the raw evidence; the ID is not
+a moon-scene assertion.
+
+Normal exit produced a **19,847-byte** discovery artifact accepted by the strict
+reader. It contains **28 rows: seven families across four swap intervals**.
+The census examined 2,166 optional attempts, with 1,584 uncommitted preparations
+and 582 recorded observations; zero caps/errors. All recorded observations are
+accepted/completed. Same-generation FIFO-fence completion evidence in the ordinary
+log exceeds the artifact's maximum tick. Uncommitted preparations are not a
+categorized shader failure or skipped-draw count. There are **zero payload
+packets**, so actual input/uniform or CPU/GPU parity is not established.
+
+A small color-pass family recurs at the same global ordinal in all four intervals
+and was selected for a subsequent bounded payload experiment. That choice
+prioritized capture feasibility; neither the hash nor repeated ordinal identifies a ghost.
+The independent reviewers checked accounting, lifetime/submission semantics and
+the selector. Raw descriptors, program/data payloads and video stay private.
+
+Whole-title terminal counters, including long menu setup, report **8,911,098
+draws, zero skipped draws and zero fallback failures**. The output guard checked
+1,282,100 batches and again rejected none; no compute rectangles executed. The
+ordinary log reports 42 omitted optional records across 38 notices, while final
+counters and capture accounting remain present. These totals cannot be compared
+directly with a shorter title run.
+
+### Memory, conditions and next experiment
+
+<!-- CodexAstraLocal: Keep discrete external samples and mixed-scene diagnostic timing separate from qualification and full-game bounds. -->
+External KGSL samples were **2,033.67 MiB before the opening**, **3,120.19 MiB
+after capture**, and **13.41 MiB after normal return**. The process remained alive
+and system available memory recovered. Battery was 80%, with AC power present,
+25–26 C and power saver off. Android thermal status was 0; thermal HAL/headroom,
+fan policy and hardware performance mode were unavailable or unobserved.
+Battery temperature is not GPU temperature.
+
+Screen recording, lengthy menu setup and the phase dialog make this a diagnostic
+run. Its mixed-scene speed totals do not qualify sustained 100% normal speed;
+there is no graphics cure, performance improvement or full-game memory bound.
+At this checkpoint the next experiment was precisely timed moon discovery,
+selected payload capture, then production CPU interpreter/Mesa replay before a rendering
+change. Each new opening again resets File 1 and starts with deleted application
+Vulkan caches. No new candidate build is needed to change a bounded selector on
+the same APK.
+
+### Second opening: actual moon discovery
+
+<!-- CodexAstraLocal: Keep the verified scene and temporal symptoms separate from unassigned draw-family identities. -->
+A second cold opening reset File 1, verified Empty and started with zero saved
+application Vulkan-cache inventory. The discovery trigger occurred at opening
+**+32.040 seconds**, during the moon scenic phase. Normal return retained **33
+rows across four swap intervals**, comprising 176 recorded observations; all
+were accepted/completed, with zero capture caps or errors. This discovery has
+no vertex payloads. After excluding the phase UI and its transition, consecutive
+moon frames **180–182** show a purple/dark/purple right-face segment. The separate,
+unobscured early ghost clip reproduces clear/patch/clear sequences: near ghost
+**107 → 108–111 → 112**, right book-holder **445 → 446–451 → 452**. Discovery
+families do not identify an actor; swap intervals are not presented frames.
+
+Sampled KGSL was 1,961.36 MiB before opening, 2,783.61 MiB after the moon capture,
+3,120.88 MiB after the ghost clip and 13.67 MiB after normal return. Battery was
+80%, with AC power present and 27 C. Diagnostic menus and recording preclude speed
+qualification; driver-private caches and chip temperature remain unknown.
+
+### Third opening: selected payload and host replay
+
+<!-- CodexAstraLocal: Successful immutable payload replay is numerical evidence, not proof of pixel parity or a visible object's identity. -->
+The third cold opening used the same gated APK and selected one bounded color
+draw in each of eight swap intervals. Normal return retained **eight
+accepted/completed packets**, 360,896 serialized payload bytes, and zero capture
+caps/errors. Production CPU interpreter and generated-shader Mesa replay executed
+for all eight packets using the matching 0.1.25 source. Replay is not bit-exact and does
+not establish Adreno execution, fragment/depth equality or either symptom's cause.
+
+<!-- CodexAstraLocal: The host worker executes InterpreterEngine; the device's enabled AArch64 CPU JIT is a distinct, unreplayed numerical route. -->
+These host numerical comparisons use the production CPU interpreter. The device
+logs CPU JIT enabled; its AArch64 JIT was not replayed or compared with Mesa.
+Active inputs and actual-versus-intended PICA uniforms agree in these samples,
+as do the interpreter's carry-versus-fresh-unit output controls. The 90 tolerance exceedances are small
+`view.y` differences; reconstruction of the matching fragment variant shows no
+executable consumer of that input. Small position differences remain. The
+maximum projected endpoint XY difference is about 0.000341 render pixels, but
+this does not exclude depth sensitivity or establish rasterization equality.
+The color draw tests LEQUAL against D24S8 with depth writes disabled. A separate,
+private host counterfactual derives the adjacent depth entry with the same frozen
+inputs/uniforms; the two entries produce bit-identical positions within the CPU
+interpreter and within Mesa. Thus this host control does not reproduce the proposed
+cross-program variance. Actual depth payloads and Adreno behavior remain separate
+questions. No shader change or title-cause claim follows from these results.
+
+The scheduled moon recording was missed. A later clip begins at opening
+**+78.629 seconds** and shows the laboratory; it supplies no moon-payload video
+overlap. A post-trigger still shows the moon phase but cannot score flashing or
+associate a packet with displayed pixels. The unobscured early ghost clip again
+shows matched corruption: near ghost **123 → 124–127 → 128**, right book-holder
+**462 → 463–468 → 469**. Extended menu setup across the session interruption and
+recording make this evidence collection, not sustained-speed qualification.
+Sampled KGSL was 1,960.88 MiB before opening, 2,783.03 MiB after the moon capture,
+2,975.63 MiB after the ghost clip and 13.67 MiB after normal return; battery was
+28–29 C, 80%, with AC power present. Other saves and the existing emulator state
+remain outside the authorized File 1 reset. Raw payloads, derived game shaders
+and recordings stay private. At this checkpoint, selected ghost and depth
+payloads were the next experiments on the same APK.
+
+### Fourth opening: ghost fault persists; selected host geometry is clipped
+
+<!-- CodexAstraLocal: Record the matched consecutive ghost fault after censoring the phase dialog, without assigning the captured family to the visible actor. -->
+The fourth cold opening used the same 0.1.25 source and APK. Start/final settings
+agree on full Combo, Vulkan, fixed 2x, 100% frame limit and CPU clock, JIT and
+accurate multiplication; the log records zero observed setting changes. File 1
+was reset and Empty verified, and startup inventory again reports zero generic,
+driver and specialized application-cache files/bytes. Driver-private state
+remains unknown. Opening A was **06:03:18.406 UTC**; the manual capture trigger
+was **06:05:43.446 UTC**, opening **+145.040 seconds**, in the early wide ghost
+scene. Normal return retained **eight recorded/accepted/completed packets**, one
+per swap interval, with 367,440 serialized payload bytes and zero caps/errors.
+
+The 20-second requested clip spans host **06:05:38.445–06:05:58.914 UTC** and
+contains 202 decoded frames, encoded duration 19.615711 seconds. Conservatively
+exclude **frames 0–57** for the dialog/drawer transition and an additional margin;
+score from **58 / PTS 5.621311 seconds**. The foreground ghost above the apparatus
+has changing jagged dark patches throughout consecutive **58–79 / 5.621311–7.764333
+seconds**, then clears at **80 / 7.866600 seconds**. Its preceding clean state is
+UI-censored. The matched right book-holder is clear at **105 / 10.340767 seconds**,
+patched at **106–111 / 10.443922–10.950100 seconds**, and clear at **112 / 11.041211
+seconds**. All intervening frames were reviewed. This matches the prior wide
+camera/actor phase; broad background transparency bands are distinct from the
+irregular dark patches. This later clip does not cover the earlier near-ghost
+checkpoint and contains no moon scene. It adds no moon or Native conclusion.
+
+<!-- CodexAstraLocal: Separate host clipping proof from actual Adreno execution and keep successful capture from becoming false visible-object attribution. -->
+Production CPU interpreter/Mesa replay and independent geometric review put the selected
+family entirely beyond the right clip plane in **all eight packets**: W is
+positive and X/W ranges approximately 1.490–1.795. All 78 triangles in each packet
+are wholly clipped in both host routes, independent of display rotation or any
+inferred screen mapping. Small numerical output differences do not make this
+host geometry visible. The selected packets therefore do not support attributing
+the observed ghost patches to this family under CPU interpreter/Mesa semantics. Actual
+Adreno shader output was not read back; host clipping is not an Adreno or pixel
+parity claim. The ordinary terminal counters report zero skipped draws and zero
+fallback failures, including menu setup. No rendering fix follows from this
+capture. Identify a family with visible host geometry before making an actor
+association, and inspect actual depth-family evidence separately.
+
+<!-- CodexAstraLocal: Report discrete memory recovery and measured power conditions without treating battery temperature or one normal exit as a full-game resource bound. -->
+External samples are in MiB and are not additive:
+
+| Sample (UTC) | Process KGSL | Process RSS | System available |
+| --- | ---: | ---: | ---: |
+| 05:56:29.466, before title launch | 10.49 | 474.60 | 11,555.57 |
+| 06:01:31.129, before opening | 2,033.32 | 967.93 | 9,055.14 |
+| 06:06:08.641, after capture | 3,048.13 | 1,001.26 | 8,023.74 |
+| 06:07:45.353, after normal return | 13.42 | 515.54 | 11,444.16 |
+
+The same process remained alive across these samples. Battery was 80% and 28 C,
+AC power was present and power saver was off. Android thermal status was 0 with
+the thermal HAL not ready; thermal headroom, chip temperature, fan policy and
+hardware performance mode remain unknown or unobserved. These discrete samples
+show normal-return recovery, not a sampled scene maximum, a leak-free lifetime
+or a full-game memory bound. Recording and diagnostic menu setup preclude a
+sustained-speed qualification; 2x correctness and 100% normal speed remain unmet.
+
+Private frame checksums, PTS, ordered sheets and exclusions are retained in
+`analysis/ghost025a-visual/`; raw input/program payloads and game frames remain
+outside the public report. No new APK was built for this selector experiment.
+
+### Fifth opening: actual depth payloads and persistent faults
+
+<!-- CodexAstraLocal: Actual depth capture establishes a second route's immutable inputs, while different cross-run transforms prevent a same-frame equality claim. -->
+The fifth opening used the same 0.1.25 APK, full Combo, Vulkan, fixed 2x and
+100% normal limit/CPU clock, with JIT and accurate multiplication. Start/final
+settings agree with zero observed changes. File 1 was reset and Empty verified;
+session 5 startup reports zero generic, driver and specialized application-cache
+files/bytes. Opening A was **06:20:37.687 UTC**, with the manual capture trigger
+at **+32.036 seconds** in the moon scenic phase. Normal return retained **eight
+accepted/completed depth-family packets**, 360,896 serialized payload bytes and
+zero caps/errors.
+
+Production CPU interpreter/Mesa replay reports **zero output tolerance
+exceedances** in these eight packets; it is not bit-exact. The uploaded mesh,
+indices and actual input layout match the third opening's selected color family.
+However, **all 64 cross-run depth/color packet pairings differ in position
+uniforms**. These actual captures cannot test same-frame depth/color equality.
+The depth family uses LEQUAL with depth writes enabled and no color attachment;
+the earlier color family uses LEQUAL with depth writes disabled. Actual PICA
+uniform bytes match intended values, including across a bound ring-offset wrap.
+Host replay uses the interpreter, not the device's enabled CPU JIT; it does not
+read back Adreno vertices, depth or pixels. The selected mesh's actor identity
+and the cause of either fault remain unproven.
+
+<!-- CodexAstraLocal: Score consecutive moon and ghost changes independently, preserving the coordinated trigger's limits and the actual unoccluded phase. -->
+The moon clip spans host **06:21:05.727–06:21:18.045 UTC** and retains 281 frames
+over 11.997933 encoded seconds. After conservatively excluding frames 0–119 for
+the phase UI/transition, **161 → 162 → 163**, PTS **5.832700 → 5.883444 → 5.942544
+seconds**, show a purple right-face segment, dark bars, then purple again.
+The separate unobscured ghost clip spans opening **+110.039 to +155.461 seconds**.
+It reproduces near-ghost **117 → 118–121 → 122** and right book-holder
+**448 → 449–454 → 455** clear/patch/clear sequences. Consecutive foreground
+frames **392–423** retain changing jagged dark patches. The coordinated moon
+trigger and video share a scene phase; exact packet-to-presented-frame identity
+is still unavailable. No change in defect severity or frequency is established.
+
+<!-- CodexAstraLocal: Preserve sampled resource recovery and power conditions without promoting diagnostic capture to sustained-speed qualification. -->
+External samples, in MiB:
+
+| Sample (UTC) | Process KGSL | Process RSS | System available |
+| --- | ---: | ---: | ---: |
+| 06:20:24.939, before opening | 2,032.84 | 977.26 | 8,979.77 |
+| 06:22:06.635, after moon capture | 2,856.06 | 994.73 | 8,169.07 |
+| 06:23:40.201, after ghost clip | 3,048.55 | 1,024.18 | 7,947.54 |
+| 06:24:09.271, after normal return | 13.42 | 523.17 | 11,500.02 |
+
+The same process stayed alive. Battery was 80%, 28 C, AC power present and power
+saver off; Android thermal status was 0 and the thermal HAL was not ready.
+Chip temperature, headroom, fan policy and hardware performance mode remain
+unknown or unobserved. Recording and diagnostic menus preclude sustained-speed
+qualification. These readings show return recovery, not scene maxima or lifetime
+bounds. Private temporal and host reviews remain in `analysis/moon025d-visual/`
+and `moon025d-host-analysis/`; no new build was needed.
+
+### Sixth opening: another selected family; verified exit after retry
+
+<!-- CodexAstraLocal: Record a distinct successfully captured family without turning host clipping or an assumed display map into actor attribution. -->
+The sixth opening again reset File 1 and verified Empty, deleted the title
+Vulkan cache, and logged zero saved generic, driver and specialized files/bytes.
+The same APK's start/final settings retain full Combo, Vulkan, fixed 2x, 100%
+limit/CPU clock, JIT and accurate multiplication, with zero observed changes.
+Opening A was **06:28:42.147 UTC**; the moon-scene trigger was **+32.039 seconds**.
+Finalized evidence retains **eight accepted/completed packets** from a different
+selected color family, 339,848 serialized payload bytes and zero caps/errors.
+
+All 55 triangles per packet survive the host clipping review, unlike the fourth
+opening's wholly clipped selection. Their projected shape consists of separated
+narrow patches. Simple axis-swap/mirror display hypotheses place it away from
+the moon region, but the actual transfer/crop mapping is unobserved; this does
+not identify an actor or definitive screen location. CPU interpreter/Mesa replay
+has 596 tolerance exceedances, all in position X, with maximum absolute difference
+about 0.0000191. Actual/intended PICA uniforms and interpreter carry controls
+agree; the other emitted semantics are bit-exact. These are host interpreter
+comparisons, not measurements of the Thor CPU JIT or Adreno execution. They
+neither establish fragment/depth equality nor justify a rendering fix.
+
+<!-- CodexAstraLocal: Confirm recurring temporal symptoms only after UI exclusion and keep selected payloads independent of displayed-actor observations. -->
+The moon clip spans host **06:29:10.186–06:29:22.521 UTC**, with 292 frames and
+12.009300 encoded seconds. Conservatively exclude frames 0–139 for UI/transition
+and margin. **159 → 160 → 161**, PTS **5.531900 → 5.582600 → 5.632489 seconds**,
+and **169 → 170 → 171** again show purple/dark-bar/purple right-face changes.
+The unobscured ghost clip spans opening **+110.040 to +155.490 seconds**, retaining
+490 frames over 43.548000 encoded seconds. The near ghost is clear at **112**,
+patched at **113–117**, and clear at **118**; the right book-holder is clear at
+**452**, patched at **453–458**, and clear at **459**. Foreground frames
+**400–415** independently retain jagged dark patches. All intervening claimed
+frames were reviewed. Neither static moon facets nor broad background
+transparency bands substitute for these temporal faults. Exact packet/pixel
+association remains unproven; this adds no Native test or severity comparison.
+
+<!-- CodexAstraLocal: Correct the failed first exit attempt in derived reporting while retaining the original mislabeled sample and log untouched. -->
+The initial Close Game input left the confirmation dialog open. Its
+**06:32:03.703 UTC** sample, despite the retained `after-return` filename, is
+**pre-exit**, with KGSL 2,975.37 MiB. It is not cleanup evidence. The coordinator
+retried and verified the game list; use `moon025e-final-log` and
+`moon025e-after-verified-return` for final state. Final ordinary counters report
+zero skipped draws and zero fallback failures, including menu/setup time.
+
+| Sample (UTC) | Process KGSL | Process RSS | System available |
+| --- | ---: | ---: | ---: |
+| 06:28:24.098, before opening | 2,034.15 | 987.97 | 9,009.83 |
+| 06:29:44.114, after moon capture | 2,735.72 | 1,040.64 | 8,261.24 |
+| 06:31:19.648, after ghost clip | 2,927.85 | 1,030.96 | 8,060.94 |
+| 06:34:16.657, after verified normal return | 13.10 | 499.65 | 11,480.14 |
+
+The same process remains alive; battery is 80%, 28 C, AC power present, power
+saver off and Android thermal status 0, with the thermal HAL not ready. These
+discrete samples establish recovery after the verified return, not peaks or
+full-game bounds. Menus, recording and the extended exit dialog make this a
+diagnostic run, not a sustained-speed test. Both visual targets and 2x
+qualification remain unresolved. Private ordered frames, PTS and exclusions are
+in `analysis/moon025e-visual/`; independent host evidence is in
+`moon025e-host-analysis/`. No new APK was built for this selector experiment.
+
 ## Candidate 0.1.24: both symptoms persist, no output-W rejections
 
 <!-- CodexAstraLocal: Record the gated candidate's actual device outcome before distinguishing visual evidence from guard coverage and throughput. -->

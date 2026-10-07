@@ -15,20 +15,86 @@ capture different selected draws in subsequent cold runs.
 Independent review is complete. Production Session tests with modeled IO/mapping
 passed 403 checks; all 13 actual artifacts parsed independently and the indexed
 full-layout fixture reconstructed. Maximum manifests fit the 128 KiB cap. Replay
-passed 70 checks across 13 production CPU/Mesa cases. Native core/Vulkan/tests/room, CTest and all probe checks passed. CTest has
+passed 70 checks across 13 production CPU interpreter/Mesa cases. Native core/Vulkan/tests/room, CTest and all probe checks passed. CTest has
 61 distinct passing cases, 1,096 assertions and five existing firmware skips; the
 policy fixture passed 163 checks. The complete probe prefix passed; its old
 fixed-attribute extraction fixture needed disabled-hook plumbing, then the fixed
 fixture and remaining tail passed. No production change was needed for that
-fixture failure. Android/signing/publication and actual Thor
-storage/submission/capture remain separate pending gates. The candidate is not a
+fixture failure. All release gates subsequently passed in
+[run 37572128020](https://github.com/RegiRex/uberhar/actions/runs/37572128020)
+at `9bf0cab4e`; checksum/provenance/signing compatibility were verified and
+0.1.25 / 33974141 installed with app data preserved. The candidate is not a
 claimed fix or speed improvement. See [notes](releases/0.1.25.md) and
 [operating guide](../tools/uberhar/VERTEX_CAPTURE.md).
 
 The release branch fetched cleanly at `43208270c` before integration; local work,
-the unchanged original report and private artifacts are preserved. 0.1.25 counts
-as successor two after successful gates, with the audit anchor still 0.1.23.
+the unchanged original report and private artifacts are preserved. The published
+tree exactly matched the reviewed local index; origin now contains `9bf0cab4e`.
+0.1.25 counts as successor two, with the audit anchor still 0.1.23.
 
+<!-- CodexAstraLocal: Retain the actual trigger scene and operator timing failure so a filename cannot become false moon-capture evidence. -->
+The first .25 cold opening reset File 1, verified Empty and logged zero generic,
+driver and specialized application-cache files. A four-interval discovery
+produced 28 rows without cap/error; the strict reader accepted the 19,847-byte
+artifact. Despite ID `025-moon-discovery-01`, its actual trigger was the early
+wide ghost scene at opening +145 seconds: preparing the menu missed the moon
+cue while the capture remained unarmed. Video is partly obscured by the phase
+dialog. Separate moon video is retained. Independent temporal review reproduces
+both moon flashing and matched ghost corruption; no cure or speed gain is claimed.
+Sampled KGSL was 3,120.19 MiB after capture and 13.41 MiB after normal return,
+with battery 26 C and AC power present. This diagnostic run does not qualify sustained
+speed or full-game memory bounds.
+
+<!-- CodexAstraLocal: Advance the same-APK evidence checkpoint without assigning selected draw families to visible objects. -->
+Later cold openings completed actual moon discovery (33 rows, 176 recorded
+observations) and eight accepted/completed selected color payloads, with zero
+capture caps/errors. Production CPU interpreter/Mesa replay ran for all eight. Active inputs
+and intended uniforms agree; the small tolerance exceedances affect a fragment
+input that the reconstructed variant does not consume. Position differences
+remain, and a private same-input depth-entry counterfactual reproduces no
+cross-program position difference within either host route. The host worker uses
+the production CPU interpreter; the device's enabled CPU JIT was not replayed.
+This is host evidence, not Adreno/pixel parity.
+A fourth opening retained eight selected ghost-window packets. Independent
+CPU interpreter/Mesa replay places that entire family beyond the right clip plane in all
+eight, so it does not identify a visible ghost under the reconstructed host
+semantics. Consecutive unobscured footage still shows the foreground patch-to-clear
+and right book-holder clear/patch/clear fault. KGSL samples fall from 3,048.13 MiB
+after capture to 13.42 MiB after normal return with the process alive; battery
+was 80%, 28 C, AC power present and power saver off. This demonstrates sampled
+return recovery, not a scene maximum or full-game bound. At that checkpoint,
+actual depth capture and selecting a visible ghost family remained separate
+work on the same APK.
+The moon discovery clip still flashes. The third opening missed its scheduled
+moon video; its later laboratory clip is excluded from moon temporal evidence.
+See the detailed
+[device report](UBERHAR_DEVICE_TEST_2026-10-07.md). No new build is needed to
+change these bounded selectors; 2x and sustained normal speed remain unqualified.
+
+<!-- CodexAstraLocal: Advance the fifth and sixth same-APK experiments without equating cross-run transforms, host numerical routes or an assumed display mapping. -->
+The fifth cold opening captured eight accepted/completed actual depth packets,
+with zero caps/errors and zero CPU interpreter/Mesa output tolerance exceedances.
+Their mesh/index/layout match the third opening's color selection, but all 64
+cross-run pairings differ in position uniforms. This cannot test same-frame
+depth/color equality. The sixth opening retained eight packets from another
+color family; all 55 triangles per packet survive host clipping, but the narrow
+patch-like geometry still has no established actor identity or display mapping.
+Its 596 host output tolerance exceedances affect position X; neither these nor
+the earlier tiny differences measure the device CPU JIT or Adreno. No rendering
+change is justified by the numerical result alone.
+
+Both coordinated moon clips reproduce flashing after phase-UI exclusion, and
+both separate ghost clips reproduce matched clear/patch/clear corruption.
+Sampled KGSL falls from 3,048.55 to 13.42 MiB after the fifth run's normal return.
+The sixth initial return input left the Close Game dialog open; its initially
+labeled return sample is pre-exit. Only the later verified game-list return and
+final ordinary log establish cleanup: KGSL 2,927.85 MiB after the ghost clip and
+13.10 MiB after verified return, same process alive. Both runs had battery 80%,
+28 C, AC power present and power saver off. Discrete recovery is not a lifetime
+bound; menus, recording and the sixth exit delay preclude speed qualification.
+File 1 Empty and zero saved application Vulkan-cache inventory were verified
+for each opening. No new candidate build was used; the next evidence must link
+an affected visible family to its actual route/timing without assuming a cause.
 
 <!-- CodexAstraLocal: Resume the interrupted session from durable source and raw evidence instead of repeating completed device work or assuming lost permissions. -->
 ## Recovery checkpoint — October 7, 2026 UTC
