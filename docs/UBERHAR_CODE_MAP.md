@@ -1,6 +1,19 @@
 <!-- AstraEH: Attribution index for the Uberhar implementation, tests, packaging and documentation. -->
 # Uberhar code map
 
+<!-- CodexAstraLocal: Index exact output transport and per-view overlay ownership separately from unproven device performance. -->
+## 0.1.28 grouped output transport and overlay lifecycle
+
+| Files | Purpose and limits |
+| --- | --- |
+| `pica/uberhar_vertex_output.h` | Resolve the final semantic map, group complete contiguous register copies with checked storage layout, and retain scalar residual/default/color behavior. Shared Native/Combo path; bounded plan size increases by 16 bytes. |
+| `tools/uberhar/test_vertex_output.cpp` | Add structured grouped/scalar/duplicate/unaligned mappings against inherited production conversion, exceptional values, both banks and retained lane state. Existing full probe runs it. |
+| Android `fragments/EmulationFragment.kt` | One owned statistics callback per resumed view; invalidate before pause/destruction and reject stale/reentrant rescheduling. Core statistics formulas remain unchanged. |
+| `tools/uberhar/test_performance_overlay.py`, `.github/workflows/uberhar-alpha.yml` | Compile exact extracted Kotlin methods with modeled lifecycle/Handler plumbing and check callback ownership in the existing Android gate. Real Android/device behavior remains separately required. |
+
+See [candidate notes](releases/0.1.28.md). Synthetic host throughput motivates a
+device experiment and does not qualify sustained 99% at 2x or 4x.
+
 <!-- CodexAstraLocal: Index the finite opt-in CPU discriminator without attributing unmeasured work or changing the completed audit anchor. -->
 ## 0.1.27 complete CPU vertex chunks
 

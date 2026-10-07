@@ -87,6 +87,104 @@ u64 CheckPlans() {
     return cases;
 }
 
+// CodexAstraLocal: Random semantic maps rarely contain complete register runs.
+// These maps deliberately exercise six groups, packed high registers, partial
+// tails, last-writer group breaks, scalar-only/default paths and unaligned targets.
+u64 CheckGroupedPlans() {
+    struct Layout {
+        ShaderRegs shader{};
+        RasterizerRegs rasterizer{};
+    };
+    std::array<Layout, 9> layouts{};
+    const auto set_map = [](Layout& layout, u32 attribute, std::array<u32, 4> destinations) {
+        auto& map = layout.rasterizer.vs_output_attributes[attribute];
+        map.map_x.Assign(static_cast<Semantic>(destinations[0]));
+        map.map_y.Assign(static_cast<Semantic>(destinations[1]));
+        map.map_z.Assign(static_cast<Semantic>(destinations[2]));
+        map.map_w.Assign(static_cast<Semantic>(destinations[3]));
+    };
+    const auto init = [&](u32 index, u32 mask, u32 attributes) -> Layout& {
+        auto& layout = layouts[index];
+        layout.shader.output_mask.Assign(mask);
+        layout.rasterizer.vs_output_total.Assign(attributes);
+        for (u32 attr = 0; attr < 7; ++attr)
+            set_map(layout, attr, {31, 31, 31, 31});
+        return layout;
+    };
+    auto& full = init(0, 0x3f, 6);
+    auto& high = init(1, 0xfc00, 6);
+    for (u32 attr = 0; attr < 6; ++attr) {
+        const std::array<u32, 4> map{attr * 4, attr * 4 + 1, attr * 4 + 2, attr * 4 + 3};
+        set_map(full, attr, map);
+        set_map(high, attr, map);
+    }
+    auto& partial = init(2, 0x7f, 7);
+    for (u32 attr = 0; attr < 3; ++attr)
+        set_map(partial, attr, {attr * 4, attr * 4 + 1, attr * 4 + 2, attr * 4 + 3});
+    set_map(partial, 3, {12, 13, 31, 31});
+    set_map(partial, 4, {14, 15, 16, 31});
+    set_map(partial, 5, {18, 19, 20, 31});
+    set_map(partial, 6, {22, 23, 31, 31});
+    auto& duplicate = init(3, 0x7f, 7);
+    for (u32 attr = 0; attr < 6; ++attr)
+        set_map(duplicate, attr, {attr * 4, attr * 4 + 1, attr * 4 + 2, attr * 4 + 3});
+    set_map(duplicate, 6, {1, 1, 22, 31});
+    auto& scatter = init(4, 0x3f, 6);
+    for (u32 attr = 0; attr < 6; ++attr)
+        set_map(scatter, attr, {attr * 4, attr * 4 + 2, attr * 4 + 1, attr * 4 + 3});
+    auto& defaults = init(5, 0x15, 3);
+    set_map(defaults, 0, {0, 2, 31, 31});
+    set_map(defaults, 1, {8, 10, 31, 31});
+    set_map(defaults, 2, {18, 22, 31, 31});
+    init(6, 1, 0);
+    set_map(init(7, 0x8000, 1), 0, {0, 1, 2, 3});
+    set_map(init(8, 0x4000, 1), 0, {1, 2, 3, 4});
+
+    // CodexAstraLocal: Every component of both live output banks visits every
+    // exceptional value while all other lanes retain their preceding bits. The
+    // inherited conversion independently covers color NaN/abs/saturation rules.
+    constexpr std::array<u32, 16> edges{
+        0,          0x80000000, 0x7f800000, 0xff800000, 0x7fc01234, 0xffc04321,
+        0x7f801234, 0xff801234, 1,          0x80000001, 0x3f000000, 0xbf000000,
+        0x3fc00000, 0xbfc00000, 0x3f800000, 0x7f7fffff};
+    u64 cases = 0;
+    for (const auto& layout : layouts) {
+        const NativeVertexPlan plan{layout.shader, layout.rasterizer};
+        Check(plan.Supported(), "Structured grouped transport was rejected");
+        ShaderUnit unit;
+        for (u32 bank = 0; bank < 2; ++bank) {
+            for (u32 reg = 0; reg < 16; ++reg) {
+                for (u32 lane = 0; lane < 4; ++lane) {
+                    unit.output[bank][reg][lane] = f24::FromFloat32(std::bit_cast<float>(
+                        edges[(reg * 4 + lane + bank * 5) % edges.size()]));
+                }
+            }
+        }
+        for (u32 iteration = 0; iteration < 2048; ++iteration) {
+            const u32 bank = iteration & 1;
+            const u32 slot = (iteration / 2) % 64;
+            const u32 reg = slot / 4, lane = slot % 4;
+            unit.output_bank = bank != 0;
+            unit.output[bank][reg][lane] = f24::FromFloat32(std::bit_cast<float>(
+                edges[(iteration / 128 + reg + lane + bank * 7) % edges.size()]));
+            AttributeBuffer packed{};
+            unit.WriteOutput(layout.shader, packed);
+            const OutputVertex reference{layout.rasterizer, packed};
+            const auto actual = plan.Convert(unit);
+            Check(std::memcmp(&reference, &actual, sizeof(actual)) == 0,
+                  "Structured grouped/scalar/default output differs from inherited conversion");
+            ++cases;
+        }
+    }
+    ShaderRegs incomplete_shader{};
+    incomplete_shader.output_mask.Assign(0x8000);
+    RasterizerRegs incomplete_rasterizer{};
+    incomplete_rasterizer.vs_output_total.Assign(2);
+    Check(!NativeVertexPlan{incomplete_shader, incomplete_rasterizer}.Supported(),
+          "Grouping admitted an incomplete output mask");
+    return cases;
+}
+
 struct BatchResult {
     std::vector<OutputVertex> vertices;
     std::vector<OutputVertex> triangles;
@@ -248,8 +346,11 @@ int main() {
         Check(!budget.Admit(now + 1ms, 100), "Dense draws escaped time budget");
     }
     const auto plans = CheckPlans();
+    const auto grouped = CheckGroupedPlans();
     const auto batches = CheckBatches();
-    std::printf("PASS: %llu bitwise production vertex conversions; %llu FIFO/assembly batches; "
+    std::printf("PASS: %llu bitwise production vertex conversions; %llu structured grouped "
+                "conversions; %llu FIFO/assembly batches; "
                 "all 65536 masks, both banks, input mapping and sustained sample admission\n",
-                static_cast<unsigned long long>(plans), static_cast<unsigned long long>(batches));
+                static_cast<unsigned long long>(plans), static_cast<unsigned long long>(grouped),
+                static_cast<unsigned long long>(batches));
 }

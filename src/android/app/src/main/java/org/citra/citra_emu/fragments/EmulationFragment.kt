@@ -99,7 +99,11 @@ class EmulationFragment :
         get() = PreferenceManager.getDefaultSharedPreferences(CitraApplication.appContext)
 
     private lateinit var emulationState: EmulationState
+    // CodexAstraLocal: Polling belongs to this resumed view; a closed title must
+    // not retain a callback that resets the next title's shared native counters.
+    private val perfStatsUpdateHandler = Handler(Looper.getMainLooper())
     private var perfStatsUpdater: Runnable? = null
+    private var performanceOverlayResumed = false
 
     private val emulationActivity: EmulationActivity
         get() = (requireActivity() as EmulationActivity)
@@ -575,6 +579,10 @@ class EmulationFragment :
 
     override fun onResume() {
         super.onResume()
+        // CodexAstraLocal: Start after the resume callback, including returns
+        // from settings and the retained fragment's replacement view.
+        performanceOverlayResumed = true
+        updateShowPerformanceOverlay()
         Choreographer.getInstance().postFrameCallback(this)
         if (NativeLibrary.isRunning()) {
             emulationState.unpause()
@@ -602,11 +610,23 @@ class EmulationFragment :
     }
 
     override fun onPause() {
+        // CodexAstraLocal: Invalidate polling before pausing the core so no
+        // hidden screen continues consuming destructive native statistics.
+        performanceOverlayResumed = false
+        stopPerformanceOverlayUpdates()
         if (NativeLibrary.isRunning()) {
             emulationState.pause()
         }
         Choreographer.getInstance().removeFrameCallback(this)
         super.onPause()
+    }
+
+    // CodexAstraLocal: Retained fragments can lose their view without being
+    // destroyed. Cancel this view's callback before it can be replaced.
+    override fun onDestroyView() {
+        performanceOverlayResumed = false
+        stopPerformanceOverlayUpdates()
+        super.onDestroyView()
     }
 
     override fun onDetach() {
@@ -615,6 +635,10 @@ class EmulationFragment :
     }
 
     override fun onDestroy() {
+        // CodexAstraLocal: Final teardown also invalidates a pending callback,
+        // independently of whether view teardown already removed it.
+        performanceOverlayResumed = false
+        stopPerformanceOverlayUpdates()
         if (::emulationState.isInitialized && requireActivity().isFinishing) {
             emulationState.stop()
         }
@@ -1527,12 +1551,20 @@ class EmulationFragment :
         binding.surfaceInputOverlay.resetButtonPlacement()
     }
 
-    fun updateShowPerformanceOverlay() {
-        if (perfStatsUpdater != null) {
-            perfStatsUpdateHandler.removeCallbacks(perfStatsUpdater!!)
-        }
+    // CodexAstraLocal: Clear callback ownership before removing queued work;
+    // stale callbacks must neither read statistics nor schedule a replacement.
+    private fun stopPerformanceOverlayUpdates() {
+        val updater = perfStatsUpdater
+        perfStatsUpdater = null
+        if (updater != null) perfStatsUpdateHandler.removeCallbacks(updater)
+    }
 
-        if (BooleanSetting.PERF_OVERLAY_ENABLE.boolean) {
+    fun updateShowPerformanceOverlay() {
+        stopPerformanceOverlayUpdates()
+        val binding = _binding ?: return
+        val enabled = BooleanSetting.PERF_OVERLAY_ENABLE.boolean
+        binding.performanceOverlayShowText.visibility = if (enabled) View.VISIBLE else View.GONE
+        if (enabled && performanceOverlayResumed) {
             @Suppress("UnusedVariable")
             val systemFps = 0
             val fps = 1
@@ -1543,84 +1575,92 @@ class EmulationFragment :
             val timeGpu = 6
             val timeSwap = 7
             val timeRem = 8
-            perfStatsUpdater = Runnable {
-                val sb = StringBuilder()
-                val perfStats = NativeLibrary.getPerfStats()
-                val dividerString = "\u00A0\u2502 "
-                if (perfStats[fps] > 0) {
-                    if (BooleanSetting.PERF_OVERLAY_SHOW_FPS.boolean) {
-                        sb.append(String.format("FPS:\u00A0%d", (perfStats[fps] + 0.5).toInt()))
-                    }
+            // CodexAstraLocal: Bind each callback to this exact view and owner.
+            // Recheck before reposting if a native read triggered cancellation.
+            val updater = object : Runnable {
+                private fun isCurrent(): Boolean =
+                    perfStatsUpdater === this && performanceOverlayResumed &&
+                        _binding === binding && BooleanSetting.PERF_OVERLAY_ENABLE.boolean
 
-                    if (BooleanSetting.PERF_OVERLAY_SHOW_FRAMETIME.boolean) {
-                        if (sb.isNotEmpty()) sb.append(dividerString)
-                        sb.append(
-                            String.format(
-                                "Frame:\u00A0%.1fms (GPU: [CMD:\u00A0%.1fms SWP:\u00A0%.1fms] IPC:\u00A0%.1fms SVC:\u00A0%.1fms Rem:\u00A0%.1fms)",
-                                (perfStats[frametime] * 1000.0f).toFloat(),
-                                (perfStats[timeGpu] * 1000.0f).toFloat(),
-                                (perfStats[timeSwap] * 1000.0f).toFloat(),
-                                (perfStats[timeIpc] * 1000.0f).toFloat(),
-                                (perfStats[timeSvc] * 1000.0f).toFloat(),
-                                (perfStats[timeRem] * 1000.0f).toFloat()
-                            )
-                        )
-                    }
-
-                    if (BooleanSetting.PERF_OVERLAY_SHOW_SPEED.boolean) {
-                        if (sb.isNotEmpty()) sb.append(dividerString)
-                        sb.append(
-                            String.format(
-                                "Speed:\u00A0%d%%",
-                                (perfStats[speed] * 100.0 + 0.5).toInt()
-                            )
-                        )
-                    }
-
-                    if (BooleanSetting.PERF_OVERLAY_SHOW_APP_RAM_USAGE.boolean) {
-                        if (sb.isNotEmpty()) sb.append(dividerString)
-                        val appRamUsage =
-                            File("/proc/self/statm").readLines()[0].split(' ')[1].toLong() * 4096 /
-                                1000000
-                        sb.append("Process\u00A0RAM:\u00A0$appRamUsage\u00A0MB")
-                    }
-
-                    if (BooleanSetting.PERF_OVERLAY_SHOW_AVAILABLE_RAM.boolean) {
-                        if (sb.isNotEmpty()) sb.append(dividerString)
-                        context?.let { ctx ->
-                            val activityManager =
-                                ctx.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
-                            val memInfo = ActivityManager.MemoryInfo()
-                            activityManager.getMemoryInfo(memInfo)
-                            val megabyteBytes = 1048576L
-                            val availableRam = memInfo.availMem / megabyteBytes
-                            sb.append("Available\u00A0RAM:\u00A0$availableRam\u00A0MB")
+                override fun run() {
+                    if (!isCurrent()) return
+                    val sb = StringBuilder()
+                    val perfStats = NativeLibrary.getPerfStats()
+                    if (!isCurrent()) return
+                    val dividerString = "\u00A0\u2502 "
+                    if (perfStats[fps] > 0) {
+                        if (BooleanSetting.PERF_OVERLAY_SHOW_FPS.boolean) {
+                            sb.append(String.format("FPS:\u00A0%d", (perfStats[fps] + 0.5).toInt()))
                         }
-                    }
 
-                    if (BooleanSetting.PERF_OVERLAY_SHOW_BATTERY_TEMP.boolean) {
-                        if (sb.isNotEmpty()) sb.append(dividerString)
-                        val batteryTemp = getBatteryTemperature()
-                        val tempF = celsiusToFahrenheit(batteryTemp)
-                        sb.append(String.format("%.1f°C/%.1f°F", batteryTemp, tempF))
-                    }
+                        if (BooleanSetting.PERF_OVERLAY_SHOW_FRAMETIME.boolean) {
+                            if (sb.isNotEmpty()) sb.append(dividerString)
+                            sb.append(
+                                String.format(
+                                    "Frame:\u00A0%.1fms (GPU: [CMD:\u00A0%.1fms SWP:\u00A0%.1fms] IPC:\u00A0%.1fms SVC:\u00A0%.1fms Rem:\u00A0%.1fms)",
+                                    (perfStats[frametime] * 1000.0f).toFloat(),
+                                    (perfStats[timeGpu] * 1000.0f).toFloat(),
+                                    (perfStats[timeSwap] * 1000.0f).toFloat(),
+                                    (perfStats[timeIpc] * 1000.0f).toFloat(),
+                                    (perfStats[timeSvc] * 1000.0f).toFloat(),
+                                    (perfStats[timeRem] * 1000.0f).toFloat()
+                                )
+                            )
+                        }
 
-                    if (BooleanSetting.PERF_OVERLAY_BACKGROUND.boolean) {
-                        binding.performanceOverlayShowText.setBackgroundResource(
-                            R.color.citra_transparent_black
-                        )
-                    } else {
-                        binding.performanceOverlayShowText.setBackgroundResource(0)
-                    }
+                        if (BooleanSetting.PERF_OVERLAY_SHOW_SPEED.boolean) {
+                            if (sb.isNotEmpty()) sb.append(dividerString)
+                            sb.append(
+                                String.format(
+                                    "Speed:\u00A0%d%%",
+                                    (perfStats[speed] * 100.0 + 0.5).toInt()
+                                )
+                            )
+                        }
 
-                    binding.performanceOverlayShowText.text = sb.toString()
+                        if (BooleanSetting.PERF_OVERLAY_SHOW_APP_RAM_USAGE.boolean) {
+                            if (sb.isNotEmpty()) sb.append(dividerString)
+                            val appRamUsage =
+                                File("/proc/self/statm").readLines()[0].split(' ')[1].toLong() * 4096 /
+                                    1000000
+                            sb.append("Process\u00A0RAM:\u00A0$appRamUsage\u00A0MB")
+                        }
+
+                        if (BooleanSetting.PERF_OVERLAY_SHOW_AVAILABLE_RAM.boolean) {
+                            if (sb.isNotEmpty()) sb.append(dividerString)
+                            context?.let { ctx ->
+                                val activityManager =
+                                    ctx.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+                                val memInfo = ActivityManager.MemoryInfo()
+                                activityManager.getMemoryInfo(memInfo)
+                                val megabyteBytes = 1048576L
+                                val availableRam = memInfo.availMem / megabyteBytes
+                                sb.append("Available\u00A0RAM:\u00A0$availableRam\u00A0MB")
+                            }
+                        }
+
+                        if (BooleanSetting.PERF_OVERLAY_SHOW_BATTERY_TEMP.boolean) {
+                            if (sb.isNotEmpty()) sb.append(dividerString)
+                            val batteryTemp = getBatteryTemperature()
+                            val tempF = celsiusToFahrenheit(batteryTemp)
+                            sb.append(String.format("%.1f°C/%.1f°F", batteryTemp, tempF))
+                        }
+
+                        if (BooleanSetting.PERF_OVERLAY_BACKGROUND.boolean) {
+                            binding.performanceOverlayShowText.setBackgroundResource(
+                                R.color.citra_transparent_black
+                            )
+                        } else {
+                            binding.performanceOverlayShowText.setBackgroundResource(0)
+                        }
+
+                        binding.performanceOverlayShowText.text = sb.toString()
+                    }
+                    if (isCurrent()) perfStatsUpdateHandler.postDelayed(this, 1000)
                 }
-                perfStatsUpdateHandler.postDelayed(perfStatsUpdater!!, 1000)
             }
-            perfStatsUpdateHandler.post(perfStatsUpdater!!)
-            binding.performanceOverlayShowText.visibility = View.VISIBLE
-        } else {
-            binding.performanceOverlayShowText.visibility = View.GONE
+            perfStatsUpdater = updater
+            perfStatsUpdateHandler.post(updater)
         }
     }
 
@@ -1864,9 +1904,5 @@ class EmulationFragment :
             RUNNING,
             PAUSED
         }
-    }
-
-    companion object {
-        private val perfStatsUpdateHandler = Handler(Looper.myLooper()!!)
     }
 }

@@ -11,8 +11,15 @@ temporal-evidence reviews, including actual .26 release gates and two cold Thor
 runs. No new release-blocking defect was found; recorded diagnostic and inherited
 ownership/failure debts remain explicit in the audit.
 
-The new source-audit anchor is **0.1.26**. A completed gated 0.1.27 build will be
-successor one. Continue the owner's audit every three completed successor builds,
+<!-- CodexAstraLocal: Count the actual successful .27 release as one successor; focused delivery review does not reset the full audit anchor. -->
+The new source-audit anchor is **0.1.26**. Gated **0.1.27 is successor one**.
+<!-- CodexAstraLocal: Focused .28 review does not prematurely increment the completed-build count or reset the full audit. -->
+Implemented **0.1.28** passes focused independent review, full host probes and
+native integration/CTest. Release gates are next; it counts as successor two after successful
+delivery. Its shared exact-output transport requires Native and Combo tests.
+The next full audit remains due after the third successful successor (.29 if
+numbering continues).
+Continue the owner's audit every three completed successor builds,
 or sooner when evidence contradicts an architectural assumption or two candidates
 produce neither improvement nor useful discrimination. Existing-build tests,
 documentation checkpoints and retries do not increment the build count. The old
@@ -26,7 +33,7 @@ flashing or dense irregular patches. These are separately scored, bounded
 observations. The selected complete timing windows average **23.227% and 22.339%
 of normal speed**; their differing scene mixtures do not establish a speedup.
 Same-process KGSL returns to 13.32 MiB after each verified normal exit, which does
-not bound long-game memory. Full correctness, sustained 100% speed, 4x and broader
+not bound long-game memory. Full correctness, sustained 99%+ speed, 4x and broader
 gameplay remain unqualified. The retained
 [0.2 beta evidence gate](UBERHAR_ARCHITECTURE_0.1.6.md#roadmap-and-version-gates),
 including the 2x FEA baseline, exact output and profiling-supported architecture,
@@ -41,12 +48,29 @@ function attribution. A one-second idle scheduler-trace check then hit a fatal
 vendor-event parser incompatibility in the stock producer and yielded no events;
 the producer restarted. Do not retry unchanged ftrace initialization.
 
-The next candidate, **0.1.27, passed implementation, focused review and local
-validation; delivery/device gates remain pending**. It adds default-off
+<!-- CodexAstraLocal: Close delivery only after exact-run gates, APK verification and installed-version evidence; device controls remain separate. -->
+**0.1.27 passed implementation, focused review, local validation and every
+release gate** in
+[run 37668250513](https://github.com/RegiRex/uberhar/actions/runs/37668250513)
+at `76b307a917cf2098c636492648a601e71079a2a1`. APK checksum/provenance and
+compatible signing identity were verified; cryptographic signing passed in CI.
+The data-preserving update installed version code **33979207**. It adds default-off
 bounded timing of complete contiguous CPU vertex chunks, with boundary-only and
 detailed controls, exact coverage and explicit observer limits. It is a
-discriminator, not a renderer optimization or achieved speedup. A prospective
-version does not increment the completed-build count or reset this audit anchor.
+discriminator, not a renderer optimization or achieved speedup. This completed
+release increments the successor count without resetting the .26 audit anchor.
+<!-- CodexAstraLocal: Integrate completed finite controls without converting tiny perturbed intervals or unlike populations into a bottleneck claim. -->
+The request-free, boundary and detailed cold controls have completed normal
+return. Their conservative ordinary opening windows average **22.568%, 23.121%
+and 23.172%** respectively; unlike scene mixtures prevent a speedup or observer
+ratio claim. The request-free recorded moon and three bounded ghost sequences
+show none of the prior faults, with broader correctness still open. Both finite
+reports pass all 64 chunks, but detailed clock cost is material and selected
+populations are mostly different. Focused independent review and regression now
+support the Android overlay lifecycle repair and grouped exact CPU output copies
+selected for .28. Neither changes the audit anchor or establishes a device gain.
+The owner's updated memory priority is continuing gameplay growth/pressure;
+repeated post-exit sweeps are optional absent ownership changes or a regression.
 The `simpleperf stat` attempt was denied; root restored its internally changed
 `security.perf_harden` property from 0 to the original 1 and verified the result
 at 08:26:47 UTC. Do not repeat that tool or weaken platform controls.

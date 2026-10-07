@@ -1,5 +1,19 @@
 # Uberhar development instructions
 
+<!-- CodexAstraLocal: The owner's October 7 performance and memory update supersedes earlier stricter throughput wording and per-run cleanup sampling. -->
+- Target sustained **99% or better normal emulation speed** with the limiter at
+  100%, correct graphics and zero skipped draws on cold application caches.
+  Qualify 2x first; the long-term target is 99%+ at 4x. Report lower-tail intervals
+  and stalls so an acceptable mean does not conceal recurring pauses.
+- Expected gameplay memory buildup is acceptable. Prioritize unexplained ongoing
+  growth across longer/repeated gameplay and pressure/crashes; normal-exit memory
+  recovery need not be measured every run. Recheck cleanup after ownership changes
+  or a regression. Preserve normal exits and ordinary evidence retention.
+- Research substantial architecture alternatives alongside focused candidates.
+  Improve Native and calculated rendering individually and assess their effect on
+  Combo, preserving exact rendering and cold first-run behavior. One research
+  agent may work in parallel; the root remains the sole device operator.
+
 <!-- CodexAstraLocal: Restore the owner's resumed-session attribution and operating scope without relabeling historical authorship or trusting lost conversational state. -->
 - The resumed local coordinator uses **CodexAstraLocal** for all new logical
   sections and explanatory comments; new optional log comments use

@@ -97,6 +97,36 @@ jobs:
           echo "UBERHAR_VERSION=$UBERHAR_VERSION" >> "$GITHUB_ENV"
           python3 tools/uberhar/test_manifest.py
 
+      # CodexAstraLocal: Execute the real overlay lifecycle methods before signing
+      # or building. Pin the official compiler archive before extraction; this
+      # modeled Handler regression complements Android compilation and unit tests.
+      - name: Test performance overlay callback lifecycle
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          set -euo pipefail
+          overlay_tools="$(mktemp -d "$RUNNER_TEMP/uberhar-overlay-XXXXXX")"
+          trap 'rm -rf -- "$overlay_tools"' EXIT
+          overlay_java="$JAVA_HOME_17_X64/bin/java"
+          test -x "$overlay_java"
+          "$overlay_java" -version 2> "$overlay_tools/java-version.txt"
+          cat "$overlay_tools/java-version.txt"
+          grep -Eq '^(openjdk|java) version "17([."]|$)' "$overlay_tools/java-version.txt"
+          overlay_url='https://github.com/JetBrains/kotlin/releases/download/v2.0.20/kotlin-compiler-2.0.20.zip'
+          overlay_sha256='5f5d2a8ad6a718a002acd0775b67a9e27035872fdbd4b0791e3cb3ea00095931'
+          overlay_archive="$overlay_tools/kotlin-compiler-2.0.20.zip"
+          curl --fail --location --proto '=https' --proto-redir '=https' \
+            --connect-timeout 15 --max-time 120 --retry 2 --retry-delay 2 \
+            --retry-max-time 150 --output "$overlay_archive" "$overlay_url"
+          printf 'Kotlin 2.0.20 official archive: %s\nPinned SHA-256: %s\n' \
+            "$overlay_url" "$overlay_sha256"
+          printf '%s  %s\n' "$overlay_sha256" "$overlay_archive" | sha256sum --check --strict
+          python3 -m zipfile -e "$overlay_archive" "$overlay_tools"
+          chmod u+x "$overlay_tools/kotlinc/bin/kotlinc"
+          python3 tools/uberhar/test_performance_overlay.py \
+            --kotlinc "$overlay_tools/kotlinc/bin/kotlinc" --java "$overlay_java" \
+            --output "$overlay_tools/regression"
+
       - name: Cache compilation dependencies
         uses: actions/cache/restore@v5
         with:

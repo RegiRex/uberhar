@@ -1,5 +1,19 @@
 # Local Codex takeover: Dark Moon correctness and performance
 
+<!-- CodexAstraLocal: Direct October 7 owner guidance replaces the earlier 100% acceptance wording and every-run post-exit memory sweep. -->
+**Current performance/memory scope:** use a 100% normal-speed limiter and accept
+sustained **99%+** with correct images and no skipped draws. Qualify 2x before
+pursuing the long-term 4x target; keep lower-tail/stall evidence visible. Improve
+Native and calculated rendering independently, including substantial architecture
+alternatives when justified, then measure their combined behavior. Parallel
+research is authorized; the root remains the only device operator.
+
+Gameplay working-set growth is expected. Watch for continuing unexplained growth
+across longer or repeated content and memory pressure/crashes. Existing repeated
+cleanup evidence means a post-exit memory sweep is no longer required for every
+run; repeat it after relevant ownership changes or evidence of regression. Normal
+exit, cold-cache/File 1 setup and private evidence preservation still apply.
+
 <!-- CodexAstraLocal: The owner resumed after a permissions/session interruption; make the current scope explicit while retaining prior instructions and evidence as history. -->
 **Resumed-session instructions (October 6 EDT / October 7 UTC):** use
 `CodexAstraLocal` for new explanatory comments and missing purpose comments on

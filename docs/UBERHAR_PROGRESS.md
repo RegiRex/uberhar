@@ -1,4 +1,74 @@
-# Uberhar progress — 0.1.27 locally validated; release/device gates pending
+# Uberhar progress — 0.1.28 validated locally; release gates next
+
+<!-- CodexAstraLocal: Advance two independently reviewed changes while retaining installed .27 evidence and the revised owner acceptance scope. -->
+**0.1.28** groups exact contiguous CPU output copies after resolving final
+semantics and repairs Android performance-overlay callback ownership. Focused
+production output/plan-cache checks and the actual-method Kotlin lifecycle
+regression pass. Full host probes and the native core/video/tests/room build pass;
+67 CTest entries complete with zero failures and five existing firmware skips.
+Android/shader/signing/publication gates are next. The
+Thor still runs 0.1.27. No device speedup is claimed. Both Native and Combo require
+cold testing because the output path is shared. See
+[candidate notes](releases/0.1.28.md).
+
+The owner now accepts sustained **99%+ normal speed** with the limiter at 100%,
+correct graphics and zero skipped draws. Qualify 2x first, with 4x the long-term
+target. Memory evidence will focus on continuing growth during longer/repeated
+gameplay and pressure/crashes; normal-exit memory recovery is no longer a required
+measurement every run. Parallel research is examining substantial Native and
+calculated-rendering alternatives, alongside this focused candidate. The full
+0.2.0 evidence gate remains open.
+
+<!-- CodexAstraLocal: Replace pending delivery with exact successful publication and compatible installation, without advancing device qualification. -->
+All 0.1.27 shader, Android, package/signing and publication gates passed in
+[run 37668250513](https://github.com/RegiRex/uberhar/actions/runs/37668250513)
+for `76b307a917cf2098c636492648a601e71079a2a1`. The
+[published prerelease](https://github.com/RegiRex/uberhar/releases/tag/0.1.27)
+APK SHA-256 is
+`a41ece374cacc586a2092c1797c42dfc87a2f893ea9ba8d0b9748cb0a159add4`.
+Asset/provenance, package, ARM64 and compatible certificate checks passed;
+cryptographic signature verification passed in CI. The data-preserving update
+installed **0.1.27 / 33979207** on the Thor. The request-free, boundary-only and
+detailed cold controls have completed normal return to the game list.
+
+<!-- CodexAstraLocal: Replace the pending control with its bounded observed result and distinguish finite diagnostic coverage from workload attribution. -->
+The request-free Combo/Vulkan/2x opening averaged **22.568%** across 40 complete
+normal-limit windows; every selected window remained below 95%. Consecutive
+review of 449 moon frames and three bounded ghost sequences found no recurrence
+of the earlier flashing or dense irregular ghost corruption. Coherent
+transparency bands remain unqualified. These results do not establish a matched
+speedup, full-game correctness or 2x qualification.
+
+Both finite timing reports passed the strict reader with all **64 chunks**
+accepted and no clock, identity or phase failures. They exhausted their record
+budgets about 6.4 seconds into the configured ten-second eligibility interval.
+Boundary/detail observations contain 4,074 / 4,068 inputs and 1,753 / 1,736 actual
+shader invocations, respectively; every recorded miss used the fused loader.
+Detailed stage instrumentation is material at this scale. Its raw wall intervals
+are not CPU shares, and differing selected populations cannot establish a precise
+observer-cost ratio or be extrapolated to the whole title. Independent cohort
+and ordinary-log interpretation is complete, with these limits retained when
+selecting the bounded output-copy experiment.
+
+<!-- CodexAstraLocal: Use direct distant endpoints on the same verified owner thread, independently of the tiny selected-chunk sums. -->
+Across first-chunk begin to last-chunk end, the owner thread consumed **6.297 /
+6.293 CPU seconds in about 6.407 wall seconds** in the two controls, approximately
+98.3% of one thread. This directly brackets all intervening work, including
+unobserved emulation, draw preparation and diagnostic overhead; it does not
+attribute time to the selected inputs or measure GPU utilization. The controls'
+ordinary opening windows average **23.121% / 23.172%**, with no temporary speed
+limit. The on-screen overlay's implausible rates are excluded: a separate source
+review found that stale fragment callbacks can continue resetting shared native
+statistics after title exit. Independent review and focused regression support
+the lifecycle repair and exact-output-copy experiment selected for 0.1.28.
+Neither is a measured device gain.
+
+All three launches verified complete zero application-cache inventories after
+the title-specific Vulkan reset, and each opening reset File 1 and verified
+Empty. Same-process GPU allocations recovered to **13.00 / 12.70 / 12.88 MiB**
+after normal return. The protected .22 state remains unchanged; temporary timing
+requests were removed after retaining their exact bytes. Battery readings were
+22–26 C across these controls; thermal HAL headroom remains unavailable.
 
 <!-- CodexAstraLocal: Record the completed installed-build discriminator and its platform limit before developing an opt-in measurement candidate. -->
 The approved .26 audit checkpoint is published at
@@ -14,9 +84,8 @@ An idle one-second scheduler-trace capability check produced no scheduler data:
 the stock Android tracing producer crashed on an unsupported vendor f2fs event
 format before applying the requested scheduler-only filter, then restarted.
 The title was stopped throughout. Further ftrace retries and security changes
-are not part of this experiment. **0.1.27 source is implemented and independently
-reviewed**, with no APK or performance improvement claimed yet: a default-off,
-bounded diagnostic will
+are not part of this experiment. **0.1.27 adds an independently reviewed,
+default-off bounded diagnostic** to
 measure complete vertex chunks, separate operation wall times from owner-thread
 CPU time, and provide lighter boundary-only controls for observer overhead.
 Unmeasured work will remain unknown; sparse vertex timings will not be expanded
@@ -29,9 +98,9 @@ test methods. The largest report is 44,714 bytes within its 65,536-byte cap.
 The full host probe suite and native integration build passed; all 67 CTest
 entries passed or retained their five existing firmware-dependent skips.
 Ordinary shader generation/cache identity and the original vertex runner remain
-unchanged. Existing shader, Android, package/signing and publication gates are
-still required before device installation. A completed .27 will be successor one
-after the .26 audit; its device observer cost remains unmeasured.
+unchanged. The completed .27 release is **successor one after the .26 audit**;
+its device controls remain separate from sustained-speed qualification.
+Matched observer cost and representative workload attribution remain unresolved.
 
 <!-- CodexAstraLocal: Integrate two independent cold confirmations and the three-build audit while preserving limited visual coverage and unmet performance gates. -->
 All 0.1.26 shader, Android, package/signing and publication gates passed in
@@ -57,14 +126,14 @@ headroom remains unknown. See the [two-run report](UBERHAR_DEVICE_TEST_2026-10-0
 
 The [full .24–.26 architecture audit](UBERHAR_ARCHITECTURE_0.1.26.md) integrates
 parallel renderer, performance, delivery and visual review. Released .26 is the
-new source audit anchor; a completed .27 will be successor one. The installed-build
+new source audit anchor; completed .27 is successor one. The installed-build
 thread-counter observation is complete, with the scope limits recorded above.
 The raw perf-event/stat access probe was denied; its internally changed security
 property was restored to its original value and verified. The 0.2.0 evidence gate,
 including the retained 2x FEA baseline,
 remains open. No 4x or broader-title qualification follows from this opening.
 
-## Pre-publication implementation checkpoint
+## Historical pre-publication implementation checkpoints
 
 <!-- CodexAstraLocal: Advance the focused correction independently of installed title evidence, retaining all prior capture findings below. -->
 0.1.26 is implemented and independently reviewed. Combo's optional GPU path

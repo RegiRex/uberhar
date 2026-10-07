@@ -5,7 +5,9 @@
 #include <bit>
 #include <chrono>
 #include <cmath>
+#include <cstddef>
 #include <cstring>
+#include <type_traits>
 #include "video_core/pica/regs_rasterizer.h"
 #include "video_core/pica/regs_shader.h"
 #include "video_core/pica/shader_unit.h"
@@ -42,9 +44,21 @@ public:
                     sources[destinations[comp]] = static_cast<u8>(reg * 4 + comp);
             }
         }
-        for (u32 dest = 0; dest < sources.size(); ++dest) {
-            if (sources[dest] != 64)
-                copies[copy_count++] = {static_cast<u8>(dest), sources[dest]};
+        // CodexAstraLocal: Group only four final contiguous components from one
+        // output register. Resolve duplicate semantics above before grouping;
+        // unmapped, partial and irregular destinations retain scalar transport.
+        for (u32 dest = 0; dest < sources.size();) {
+            const u8 source = sources[dest];
+            if (dest + 3 < sources.size() && source < 64 && source % 4 == 0 &&
+                sources[dest + 1] == source + 1 && sources[dest + 2] == source + 2 &&
+                sources[dest + 3] == source + 3) {
+                quads[quad_count++] = {static_cast<u8>(dest), source};
+                dest += 4;
+            } else {
+                if (source != 64)
+                    copies[copy_count++] = {static_cast<u8>(dest), source};
+                ++dest;
+            }
         }
     }
 
@@ -59,8 +73,25 @@ public:
     }
 
     OutputVertex Convert(const ShaderUnit& unit) const {
+        // CodexAstraLocal: Whole-register copying requires packed scalar order
+        // and trivial object representation; a future layout change must fail build.
+        using Register = Common::Vec4<f24>;
+        static_assert(std::is_trivially_copyable_v<f24> &&
+                      std::is_trivially_copyable_v<Register> &&
+                      std::is_standard_layout_v<Register> &&
+                      sizeof(Register) == 4 * sizeof(f24) &&
+                      offsetof(Register, x) == 0 && offsetof(Register, y) == sizeof(f24) &&
+                      offsetof(Register, z) == 2 * sizeof(f24) &&
+                      offsetof(Register, w) == 3 * sizeof(f24));
         std::array<f24, 24> slots;
         slots.fill(f24::One());
+        // CodexAstraLocal: Copy complete register object bytes, preserving f24
+        // storage bits and both output banks. Color conversion remains below.
+        for (u32 i = 0; i < quad_count; ++i) {
+            const auto [dest, source] = quads[i];
+            std::memcpy(&slots[dest], &unit.output[unit.output_bank][source / 4],
+                        4 * sizeof(f24));
+        }
         for (u32 i = 0; i < copy_count; ++i) {
             const auto [dest, source] = copies[i];
             slots[dest] = unit.output[unit.output_bank][source / 4][source % 4];
@@ -81,7 +112,8 @@ private:
     };
     std::array<u8, 16> input_registers{};
     std::array<Copy, 24> copies{};
-    u32 input_count{}, copy_count{};
+    std::array<Copy, 6> quads{};
+    u32 input_count{}, copy_count{}, quad_count{};
     bool supported{};
 };
 
