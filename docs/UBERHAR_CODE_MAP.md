@@ -1,6 +1,37 @@
 <!-- AstraEH: Attribution index for the Uberhar implementation, tests, packaging and documentation. -->
 # Uberhar code map
 
+<!-- CodexAstraLocal: Map the exact Calculated extension and comment-free candidate version; release/device gates remain separately reported. -->
+## 0.1.32 — masked and endpoint replacement
+
+- `renderer_vulkan/uberhar_compute_rect.h` preserves the raw rejection mask,
+  prepares a small effective-state proof and checks strict geometry only for
+  newly admitted operations. Exact final alpha endpoints and nonzero byte masks
+  permit additional replacements without copying the guest register file.
+- `renderer_vulkan/uberhar_compute_rect_shader.h` uses one packet mask word
+  to preserve disabled RGBA bytes; full masks keep the existing direct store.
+- `renderer_vulkan/vk_rasterizer.cpp` prepares state once, keeps Native's old
+  gate and preserves framebuffer format, identity and invalidation checks.
+  `vk_compute_rect.{h,cpp}` carries the immutable packet into ordered commands
+  and includes ShaderRead visibility when destination bytes are preserved.
+- `renderer_vulkan/uberhar_compute_census.h` retains the raw state bank.
+  Schema 2 in `vk_compute_rect.{h,cpp}` separates raw and effective admission
+  with two scalar totals. `test_compute_census.{cpp,py}` exercises both
+  conservation relationships and deliberately broken admission/accounting.
+- `tools/uberhar/test_compute_rect_pixels.{cpp,py}` exercises the real admission
+  helper and emits source-bound original CPU vertex fixtures. Its companion
+  `test_compute_rect_commands.cpp` checks actual queued command capture and
+  partial-read dependencies against controlled Vulkan endpoints. `build_probe.sh`
+  runs this host gate; it does not claim actual Vulkan execution.
+- `tools/uberhar/compare_compute_rect.py` preserves its inherited full-write
+  controls with the explicit new packet mask, then invokes
+  `compare_compute_rect_pixels.py` for original-vertex comparisons, ordered
+  overlaps and required failing controls. The existing shader-workflow command
+  requires both suites. Host GL pixels and validated Vulkan modules remain
+  distinct from device rendering.
+- `UBERHAR_VERSION` records `0.1.32`. Its release notes and progress distinguish
+  integrated source from pending full gates, publication and title qualification.
+
 <!-- CodexAstraLocal: Map bounded replacement, independent lifetime conditions and their durable gate; comment-free version data records this candidate. -->
 ## 0.1.31 — adaptive CPU fragment pipeline ownership
 

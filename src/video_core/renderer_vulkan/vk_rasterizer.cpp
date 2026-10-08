@@ -912,11 +912,14 @@ bool RasterizerVulkan::Draw(bool accelerate, bool is_indexed) {
     int timing_slot = -1;
     if (compute_rect && !accelerate) {
         ++compute_rect->considered;
-        // CodexAstraLocal: Joint diagnostics consume only this existing mask
-        // and CPU batch count; all actual admission/geometry tests stay below.
-        const auto reasons = ComputeRectStateRejections(regs);
-        compute_rect->ObserveState(reasons, vertex_batch.size());
-        if (reasons != 0) {
+        // CodexAstraLocal: Prepare the exact state proof once and retain its
+        // raw mask for census. Native keeps the inherited gate; only compute
+        // modes examine new endpoint replacements. No guest register copy occurs.
+        const auto vertices = std::span<const HardwareVertex>{vertex_batch};
+        const auto compute_state = PrepareComputeRectState(
+            regs, vertices, compute_rect->AllowsExpandedRectangles());
+        compute_rect->ObserveState(compute_state.raw_rejections, vertex_batch.size());
+        if (!compute_state) {
             ++compute_rect->unsupported;
         } else if (!framebuffer->color_id || framebuffer->color_level != 0 ||
                    framebuffer->Format(SurfaceType::Color) != VideoCore::PixelFormat::RGBA8) {
@@ -930,10 +933,11 @@ bool RasterizerVulkan::Draw(bool accelerate, bool is_indexed) {
                 ++compute_rect->format_rejected;
             } else {
                 compute_packet =
-                    MakeComputeRect(regs, std::span<const HardwareVertex>{vertex_batch},
+                    MakeComputeRectPrepared(regs, vertices,
                                     {viewport.x, viewport.y, viewport.width, viewport.height},
                                     {static_cast<s32>(rect.left), static_cast<s32>(rect.bottom),
-                                     static_cast<s32>(rect.right), static_cast<s32>(rect.top)});
+                                     static_cast<s32>(rect.right), static_cast<s32>(rect.top)},
+                                    compute_state);
                 if (!compute_packet) {
                     ++compute_rect->geometry_rejected;
                 } else if (compute_rect->Choose(*compute_packet)) {

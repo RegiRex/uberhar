@@ -73,10 +73,18 @@ void ComputeRectRenderer::Initialize(vk::PipelineCache cache) {
         }
     }
     // AstraEH Log Line: Startup reports the true subset and whether automatic selection can learn.
+    // CodexAstraLocal Log Line: Name the real masked/endpoint replacement scope;
+    // this remains a bounded fragment subset after CPU vertices, not full compute rendering.
     LOG_INFO(Render_Vulkan,
-             "Uberhar compute prepared: coverage=solid_replace_rectangles pipeline_count=1 "
+             "Uberhar compute prepared: coverage=solid_masked_endpoint_rectangles pipeline_count=1 "
              "runtime_compilation=false timestamps={} mode={}",
              bool(queries), static_cast<u32>(mode));
+}
+
+// CodexAstraLocal: Keep optional expanded proof work on immutable compute modes
+// without rereading settings or changing the inherited readiness/chooser policy.
+bool ComputeRectRenderer::AllowsExpandedRectangles() const {
+    return Settings::AllowsComputeRendering(mode);
 }
 
 bool ComputeRectRenderer::Choose(const ComputeRectPacket& packet) {
@@ -99,7 +107,11 @@ void ComputeRectRenderer::Draw(Surface& surface, const ComputeRectPacket& packet
                       packet](vk::CommandBuffer cmdbuf) {
         vk::ImageMemoryBarrier barrier{
             .srcAccessMask = vk::AccessFlagBits::eMemoryRead | vk::AccessFlagBits::eMemoryWrite,
-            .dstAccessMask = vk::AccessFlagBits::eShaderWrite,
+            // CodexAstraLocal: Masked writes read preserved bytes from this
+            // same validated image. Keep the full-mask direct-write access scope.
+            .dstAccessMask = packet.byte_mask == 0xffffffff
+                ? vk::AccessFlags{vk::AccessFlagBits::eShaderWrite}
+                : vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eShaderWrite,
             .oldLayout = vk::ImageLayout::eGeneral,
             .newLayout = vk::ImageLayout::eGeneral,
             .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
@@ -196,33 +208,45 @@ void ComputeRectRenderer::ReportCensus(std::chrono::steady_clock::time_point now
     census_overflow |= snapshot.overflow;
     for (unsigned i = 0; i < rejected_state.size(); ++i)
         ComputeStateCensus::Add(rejected_state[i], snapshot.marginal[i], census_overflow);
+    // CodexAstraLocal: Schema2 separates the unchanged raw mask from effective
+    // state admission. A newly proved masked draw can have raw blockers and still
+    // be admitted; only later format/geometry/selection gates establish dispatch.
+    const bool monotonic = considered >= census_considered && unsupported >= census_unsupported &&
+                           raw_unsupported >= census_raw_unsupported;
+    const u64 effective_rejected = monotonic ? unsupported - census_unsupported : 0;
+    const u64 effective_admitted = effective_rejected <= snapshot.draws
+                                       ? snapshot.draws - effective_rejected : 0;
     const bool conservation = !census_overflow && !snapshot.invalid.six && !snapshot.invalid.other &&
-        considered >= census_considered && unsupported >= census_unsupported &&
-        snapshot.draws == considered - census_considered &&
-        snapshot.rejected == unsupported - census_unsupported;
+        monotonic && snapshot.draws == considered - census_considered &&
+        snapshot.rejected == raw_unsupported - census_raw_unsupported &&
+        effective_rejected <= snapshot.rejected;
     const bool clock_valid = now >= census_start;
     const double window_ms = clock_valid
         ? std::chrono::duration<double, std::milli>(now - census_start).count() : 0.0;
     census_start = now;
     census_considered = considered;
     census_unsupported = unsupported;
+    census_raw_unsupported = raw_unsupported;
     ++census_sequence;
     try {
         const auto delivery = final ? Common::Log::Delivery::Reliable : Common::Log::Delivery::Diagnostic;
         // CodexAstraLocal Log Line: At most one summary plus four groups per
         // existing 30s boundary and final flush; only counts and state masks.
         LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
-            "Uberhar compute state census: schema=1 mode={} window={} final={} "
+            "Uberhar compute state census: schema=2 mode={} window={} final={} "
             "scope=cpu_draw_attempts window_ms={:.3f} clock_valid={} considered={} six={} other={} "
-            "state_admitted={} admitted_six={} unsupported={} considered_total={} unsupported_total={} "
+            "state_admitted={} unsupported={} considered_total={} unsupported_total={} "
+            "raw_state_admitted={} raw_admitted_six={} raw_unsupported={} raw_unsupported_total={} "
             "distinct_masks={} ranked_groups={} ranked_draws={} ranked_six={} "
             "unranked_draws={} unranked_six={} invalid_mask_draws={} overflow={} conservation={} "
             "state_six_scissor_cull={} state_six_color_alpha_scissor_cull={} "
-            "prior_log_failures={} six_scope=two_triangles_not_rectangle_proof",
+            "prior_log_failures={} raw_scope=unmodified_state_mask "
+            "six_scope=two_triangles_not_rectangle_proof",
             static_cast<u32>(mode), census_sequence, final, window_ms, clock_valid,
             snapshot.draws, snapshot.total.six, snapshot.total.other,
-            snapshot.admitted_draws, snapshot.admitted.six,
-            snapshot.rejected, considered, unsupported, snapshot.distinct, snapshot.groups,
+            effective_admitted, effective_rejected, considered, unsupported,
+            snapshot.admitted_draws, snapshot.admitted.six, snapshot.rejected, raw_unsupported,
+            snapshot.distinct, snapshot.groups,
             snapshot.ranked_draws, snapshot.ranked.six,
             snapshot.unranked_draws, snapshot.unranked.six,
             snapshot.invalid_draws, census_overflow, conservation,
@@ -233,8 +257,8 @@ void ComputeRectRenderer::ReportCensus(std::chrono::steady_clock::time_point now
             // optional top row. Consumers must first partition the exact process/
             // renderer lifecycle; a missing row is not an absent mask.
             LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
-                "Uberhar compute state group: schema=1 mode={} window={} final={} rank={} "
-                "mask={} draws={} six={} other={} max_groups=4 scope=interval",
+                "Uberhar compute state group: schema=2 mode={} window={} final={} rank={} "
+                "mask={} draws={} six={} other={} max_groups=4 scope=interval raw_scope=unmodified_state_mask",
                 static_cast<u32>(mode), census_sequence, final, i + 1,
                 group.mask, group.draws, group.counts.six, group.counts.other);
         }
@@ -250,6 +274,9 @@ void ComputeRectRenderer::Report() {
     // teardown duration is part of this last interval, not active-render time.
     ReportCensus(std::chrono::steady_clock::now(), true);
     // AstraEH Log Line: One non-exclusive rejection summary; totals can exceed rejected draws.
+    // CodexAstraLocal: These remain raw overlapping blockers, even when schema2
+    // proves a formerly blocked state effective. Final route totals below count
+    // actual admission/fallback and must not be equated with raw marginals.
     LOG_INFO(Render_Vulkan,
              "Uberhar compute blockers: shadow={} color_write={} depth_test={} depth_write={} "
              "stencil={} alpha={} clip={} scissor={} cull={} fog={} blend={}",

@@ -44,7 +44,8 @@ size = w * h * 4
 seed = random.Random(1009)
 reference = ctx.texture((w, h), 4, dtype="f1")
 target = ctx.texture((w, h), 1, dtype="u4")
-target.bind_to_image(0, read=False, write=True)
+# CodexAstraLocal: The shared kernel now also supports preserved destination lanes.
+target.bind_to_image(0, read=True, write=True)
 framebuffer = ctx.framebuffer([reference])
 framebuffer.use()
 ctx.viewport = (0, 0, w, h)
@@ -57,7 +58,9 @@ vao = ctx.simple_vertex_array(native, vertex_buffer, "position")
 def draw(rect, rgba):
     x, y, rw, rh = rect
     color = int.from_bytes(bytes(rgba), "little")
-    state.write(struct.pack("4i4I", *rect, color, 0, 0, 0))
+    # CodexAstraLocal: Preserve these inherited full-overwrite controls while
+    # the original-vertex companion gate covers nonzero partial masks.
+    state.write(struct.pack("4i4I", *rect, color, 0xffffffff, 0, 0))
     compute.run((rw + 7) // 8, (rh + 7) // 8, 1)
     ctx.memory_barrier()
     x0, x1 = x / w * 2 - 1, (x + rw) / w * 2 - 1
@@ -79,3 +82,30 @@ for case in range(256):
         differing = sum(a != b for a,b in zip(actual, expected))
         raise AssertionError(f"case {case}: {differing} differing bytes")
 print(f"PASS: 256 compute/native pixel comparisons with clipping, partial workgroups, ordered overlaps; {ctx.info['GL_RENDERER']}")
+
+# CodexAstraLocal: The legacy kernel checks above use ideal packet rectangles.
+# Bind the release gate also to actual helper-produced packets and original
+# HardwareVertex/trivial-VS/generic-FS inputs, including deliberate unsafe cases.
+import hashlib
+import json
+parent = Path("build/uberhar-probe/compute-rect-pixels")
+latest = parent / "latest.json"
+fixtures = None
+try:
+    candidate = Path(json.loads(latest.read_text())["directory"])
+    manifest = json.loads((candidate / "provenance.json").read_text())
+    matches = lambda path, digest: hashlib.sha256(path.read_bytes()).hexdigest() == digest
+    if (all(matches(Path(p), h) for p, h in manifest["source_sha256"].items()) and
+            all(matches(candidate / p, h) for p, h in manifest["artifact_sha256"].items())):
+        fixtures = candidate
+except (OSError, ValueError, KeyError, TypeError):
+    pass
+if fixtures is None:
+    subprocess.run([sys.executable, str(Path(__file__).with_name("test_compute_rect_pixels.py"))],
+                   check=True, timeout=360)
+    fixtures = Path(json.loads(latest.read_text())["directory"])
+command = [sys.executable, str(Path(__file__).with_name("compare_compute_rect_pixels.py")),
+           str(fixtures)]
+if "--require-vulkan" in sys.argv:
+    command.append("--require-vulkan")
+subprocess.run(command, check=True, timeout=300)

@@ -25,6 +25,9 @@ public:
     bool Ready() const {
         return bool(pipeline);
     }
+    // CodexAstraLocal: Immutable mode policy keeps new proof work off Native;
+    // this does not bypass startup readiness or the existing measured chooser.
+    bool AllowsExpandedRectangles() const;
     bool Choose(const ComputeRectPacket& packet);
     void Draw(Surface& surface, const ComputeRectPacket& packet);
     int ReserveSample(bool compute, u64 pixels);
@@ -38,6 +41,10 @@ public:
     // including mask 0; geometry and fragment qualification remain unchanged.
     void ObserveState(u32 reasons, std::size_t vertices) noexcept {
         state_census.Record(reasons, vertices);
+        // CodexAstraLocal: Raw state blockers remain comparable across admission
+        // changes; they must not be confused with effective fallback decisions.
+        if (reasons != 0)
+            ComputeStateCensus::Add(raw_unsupported, 1, census_overflow);
     }
     // CodexAstraLocal: Reuse the caller's existing 30s clock/cadence. A final
     // partial interval is distinct from cumulative lifetime blocker totals.
@@ -70,6 +77,9 @@ private:
     ComputeStateCensus state_census;
     std::chrono::steady_clock::time_point census_start{std::chrono::steady_clock::now()};
     u64 census_sequence{}, census_considered{}, census_unsupported{}, census_log_failures{};
+    // CodexAstraLocal: Two scalar totals join unchanged raw-mask intervals to
+    // effective route counts without another histogram or per-draw state scan.
+    u64 raw_unsupported{}, census_raw_unsupported{};
     bool census_overflow{};
     static_assert(static_cast<unsigned>(ComputeRectReject::Count) == ComputeStateCensus::ReasonBits);
     double timestamp_period{};

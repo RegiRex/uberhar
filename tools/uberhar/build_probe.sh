@@ -73,6 +73,9 @@ python3 tools/uberhar/test_adaptive_cpu_cache.py --mutants
 # CodexAstraLocal: Actual compute admission/report hooks must preserve exact
 # interval counts, final flushes and bounded diagnostics without changing draws.
 python3 tools/uberhar/test_compute_census.py
+# CodexAstraLocal: Prove new masked/endpoint admission with original CPU vertices
+# and immutable command capture; shader CI separately executes the pixel fixtures.
+python3 tools/uberhar/test_compute_rect_pixels.py
 # CodexAstraUlt-2: Terminal readback errors must leave noexcept cleanup safely.
 python3 tools/uberhar/test_download_recovery.py
 # CodexAstraUlt: Verify real resource reuse/failed-allocation cleanup and event-only memory counters.

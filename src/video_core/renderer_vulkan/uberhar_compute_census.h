@@ -9,6 +9,8 @@
 namespace Vulkan {
 // CodexAstraLocal: Count only existing admission masks and submitted CPU vertex
 // counts. Six vertices means two triangles, never rectangle/TEV correctness.
+// CodexAstraLocal: Admitted/rejected fields here describe only raw mask zero/
+// nonzero. The renderer's effective admission can differ after a new state proof.
 class ComputeStateCensus {
 public:
     static constexpr unsigned ReasonBits = 11;

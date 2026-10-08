@@ -1,8 +1,8 @@
-# Uberhar progress — 0.1.31 host validation passed; release gates pending
+# Uberhar progress — 0.1.31 controls complete; 0.1.32 Calculated work underway
 
 <!-- CodexAstraLocal: Keep the latest owner implementation order, consolidated testing and explicit review boundary visible above historical scope. -->
-Next: finish 0.1.31's bounded adaptive CPU fragment-cache work, then prioritize
-genuine Calculated-mode rendering coverage for 0.1.32. The aim is independent
+Next: validate 0.1.32's expanded Calculated-mode rendering coverage after the
+completed 0.1.31 adaptive CPU fragment-cache work. The aim is independent
 calculation with no Native fallback; report actual coverage without weakening
 correctness or skipping draws. Use one evidence run per method per build.
 After 0.1.32 is built and tested, complete the systematic architecture,
@@ -21,8 +21,34 @@ in 363.786 seconds. Policy checks pass 643 cases plus nine intended failures;
 actual helper/binding checks pass 6,698 plus seven; census checks pass 41,283
 with four private intended-failure controls. Existing worker and CPU fragment
 ABI/image/binary gates remain required. See [0.1.31 notes](releases/0.1.31.md).
-Shader/Android/signing/publication and one cold run per method remain pending;
-no device gain is established. Installed release remains 0.1.30.
+<!-- CodexAstraLocal: Record verified delivery separately from incomplete device qualification. -->
+[Run 37738256467](https://github.com/RegiRex/uberhar/actions/runs/37738256467)
+passed all 22 required shader/Android/signing/publication steps at source
+`775d1437c9c9cbb5b9756ca6861c1e25608c877b`. Exact-source, downloaded checksum,
+package and signing-identity checks passed before a compatible data-preserving
+install of **0.1.31 / 33983499**. APK SHA-256:
+`f844c066bf39cf37598d02c788a170494dada6dd578304ad2019ea7d31e5ef6f`.
+One cold run per method has completed with normal returns: mean speed is
+20.666% Calculated, 20.871% Native, 22.792% full Combo and 19.439% ComboGeneric.
+All accepted windows remain below 99%; scene mixtures prevent a causal speedup
+claim. No skipped draws or required fallback failures were reported. The .29
+review anchor now has two gated release successors.
+
+<!-- CodexAstraLocal: Separate demonstrated adaptive use, zero computed coverage and the exact scope of the next implementation. -->
+Full Combo's adaptive CPU bank recorded 624,679 selections between two bounded
+opening interior records, including 377,310 lit draws, with 43 retirements and
+destructions. Eight physical slots remained the limit. A delayed cleanup check
+found 13.00 MiB same-process GPU memory; longer gameplay growth is not qualified.
+Calculated still computed zero draws. Its useful ColorWrite/Blend census evidence
+is concentrated in menus and the opening boundary, not a proved broad gameplay
+opportunity. The .32 partial-mask/endpoint replacement implementation is integrated
+and passes fresh native builds, CTest and 41,890 census checks. The complete
+host probe passes in 404.578 seconds, along with both pixel comparison suites
+and independent source/cleanliness review. Release/device gates remain pending.
+It retains the roughly 83.7% inclusive CPU vertex wall
+bracket observed in Native/Calculated. The
+[Calculated design](UBERHAR_CALCULATED_DESIGN.md) records substantial alternatives
+and the exact semantics needed before moving that work onto the GPU.
 
 <!-- CodexAstraLocal: Distinguish the integrated candidate's completed proofs from pending delivery and device controls. -->
 **0.1.30 is published and installed after all release gates passed.** Full Combo can select
@@ -83,7 +109,7 @@ complete windows, or 20.273% after excluding four observer-overlapping windows.
 Settings were unchanged; no affinity, clocks or security controls were changed.
 The requested one-run-per-method rule governs subsequent builds; no further
 0.1.30 openings are scheduled.
-The .29 full audit remains the anchor with **one successful successor**;
+The .29 full audit remains the anchor with **two successful release successors**;
 0.2.0 remains unqualified.
 
 ## Completed 0.1.29 controls and review

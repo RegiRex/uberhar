@@ -1,8 +1,8 @@
 # Architecture review ledger
 
 <!-- CodexAstraLocal: The owner's latest instruction fixes the next review and stopping boundary without prematurely counting unfinished builds. -->
-Finish the scheduled 0.1.31 adaptive CPU fragment-cache candidate, then prioritize
-Calculated-mode coverage for 0.1.32. After **0.1.32 is built and tested**, perform
+The 0.1.31 adaptive CPU fragment-cache candidate is delivered and tested; now
+validate Calculated-mode coverage for 0.1.32. After **0.1.32 is built and tested**, perform
 the systematic architecture/correctness/performance review and a separate
 code-cleanliness/purpose-comment audit, then **stop for owner inspection**.
 Gather each method's evidence in **one run per method per build**; do not repeat
@@ -20,9 +20,12 @@ controls and independent consecutive-frame evidence. The final comment-only
 patch is integrated and matches reviewed token/AST proofs. No new blocking
 correctness defect was found in the delivered changes.
 
-There is **one successful successor** to this new anchor: 0.1.30 passed all
+There are **two successful release successors** to this new anchor: 0.1.30 passed all
 shader/Android/signing/publication gates, exact-asset verification and compatible
-installation. Cold device controls are complete. Audit again after three successful successors or earlier
+installation, followed by gated 0.1.31 delivery and compatible installation.
+The .30 and all four .31 cold device controls have completed normal return and
+bounded consecutive-frame review. Unobserved scenes remain unqualified.
+Audit again after three successful successors or earlier
 when evidence contradicts the architecture. Native/Combo bounded means remain
 27.869%/21.892%, far below sustained 99%. Moon and ghost coverage remains limited,
 with the brief Native rear-ghost disturbance still tracked. Audit closure does
@@ -35,11 +38,12 @@ process repeat did not recover the earlier speed; cause remains unassigned.
 Routine work continues to the explicit .32 review/stop boundary above.
 
 <!-- CodexAstraLocal: Focused candidate reviews and host checks do not increment delivered-build cadence or reset the full-audit anchor. -->
-The 0.1.31 adaptive ownership/census candidate passes independent correctness,
+The 0.1.31 adaptive ownership/census release passes independent correctness,
 separate cleanliness and merged-hook review, fresh native integration/CTest and
-the full host probe. Its release gates and one-run-per-method device evidence
-are pending. It is not yet a second successful successor; the .29 full-audit
-anchor and mandatory .32 systematic review remain unchanged.
+the full host probe. All 22 mandatory release steps passed in run 37738256467,
+followed by exact-source/APK/signing-identity verification and compatible install.
+Its one-run-per-method ordinary device evidence is complete. The .29 full-audit anchor
+and mandatory .32 systematic review remain unchanged.
 
 <details>
 <summary>Completed 0.1.26 anchor and its three successors, retained as history</summary>

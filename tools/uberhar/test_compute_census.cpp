@@ -15,6 +15,7 @@
 #include "common/vector_math.h"
 #include "video_core/renderer_vulkan/uberhar_compute_rect.h"
 #include "video_core/renderer_vulkan/uberhar_compute_census.h"
+#include "policy.inc"
 
 struct LogEntry { Common::Log::Delivery delivery; std::string text; };
 std::vector<LogEntry> logs;
@@ -67,7 +68,7 @@ struct Framebuffer {
 };
 class ComputeRectRenderer {
 public:
-    u32 mode{2}; bool selected{};
+    Settings::UberharTestMode mode{Settings::UberharTestMode::Compute}; bool selected{};
     u64 considered{}, unsupported{}, geometry_rejected{}, format_rejected{}, eligible{},
         native_draws{}, compute_draws{}, compute_pixels{};
     std::array<u64, 11> rejected_state{};
@@ -81,6 +82,7 @@ public:
     void Draw(Surface&, const ComputeRectPacket& p) { ++compute_draws; compute_pixels += p.PixelCount(); }
     void ReportCensus(std::chrono::steady_clock::time_point now, bool final = false) noexcept;
     void Report();
+    bool AllowsExpandedRectangles() const;
 #include "members.inc"
 #include "observe.inc"
 };
@@ -224,6 +226,8 @@ void TestReports() {
     r.ReportCensus(steady_clock::time_point{} + seconds{30});
     Check(logs.size() == 5, "summary plus four rows bound");
     auto first = Parse(logs[0].text);
+    Check(Number(first,"schema") == 2 && first.at("raw_scope") == "unmodified_state_mask" &&
+          !first.contains("admitted_six"), "schema2 labels raw six-vertex evidence");
     Check(Number(first,"window") == 1 && Number(first,"considered") == 36 && first.at("conservation") == "true", "first interval retains preceding draws");
     Check(Number(first,"ranked_draws") + Number(first,"unranked_draws") == 36, "reported censoring totals");
     for (unsigned i = 1; i < 5; ++i) { auto row = Parse(logs[i].text); Check(row.at("window") == first.at("window") && Number(row,"rank") == i && logs[i].delivery == Common::Log::Delivery::Diagnostic, "group interval and optional delivery"); }
@@ -252,7 +256,78 @@ void TestReports() {
     logs.clear(); r.ReportCensus(steady_clock::time_point{});
     Check(Parse(logs[0].text).at("clock_valid") == "false", "backward diagnostic interval is explicit");
 }
+
+// CodexAstraLocal: The same raw1026 bucket can contain an exact replacement,
+// a genuine blend, and a state-admitted draw later rejected by format/geometry.
+// Count the unchanged diagnostic distribution independently of actual routing.
+void TestEffectiveAdmission() {
+    using namespace Vulkan; using namespace std::chrono;
+    using M = Settings::UberharTestMode; using FB = Pica::FramebufferRegs;
+    const auto expanded = [] {
+        Fixture f; f.regs = Registers(0); f.vertex_batch = Vertices(6);
+        auto& om = f.regs.framebuffer.output_merger;
+        om.depth_color_mask = 0x500;
+        om.alphablend_enable.Assign(true);
+        om.alpha_blending.blend_equation_rgb.Assign(FB::BlendEquation::Add);
+        om.alpha_blending.blend_equation_a.Assign(FB::BlendEquation::Add);
+        om.alpha_blending.factor_source_rgb.Assign(FB::BlendFactor::SourceAlpha);
+        om.alpha_blending.factor_source_a.Assign(FB::BlendFactor::SourceAlpha);
+        om.alpha_blending.factor_dest_rgb.Assign(FB::BlendFactor::OneMinusSourceAlpha);
+        om.alpha_blending.factor_dest_a.Assign(FB::BlendFactor::OneMinusSourceAlpha);
+        return f;
+    };
+    for (M mode : {M::Custom, M::Native, M::Compute, M::Automatic, M::ComboGeneric}) {
+        Fixture f = expanded(); f.compute_rect = &f.owned;
+        f.owned.mode = mode; f.owned.selected = true;
+        const bool enabled = mode == M::Compute || mode == M::Automatic || mode == M::ComboGeneric;
+        Check(ComputeRectStateRejections(f.regs) == 1026, "expanded fixture retains exact raw mask");
+        Check(f.Route() == enabled && f.owned.compute_draws == enabled &&
+              f.owned.native_draws == !enabled, "expanded state selects complete draw");
+        Check(f.owned.unsupported == !enabled && f.owned.raw_unsupported == 1 &&
+              f.owned.considered == 1, "raw rejection stays separate from effective route");
+        logs.clear(); f.owned.ReportCensus(steady_clock::now());
+        const auto summary = Parse(logs[0].text);
+        Check(Number(summary,"state_admitted") == enabled && Number(summary,"unsupported") == !enabled &&
+              Number(summary,"raw_state_admitted") == 0 && Number(summary,"raw_unsupported") == 1 &&
+              Number(summary,"raw_unsupported_total") == 1 && summary.at("conservation") == "true",
+              "raw and effective admission differ");
+        Check(Number(summary,"raw_admitted_six") == 0 && Number(summary,"six") == 1 &&
+              Number(Parse(logs[1].text),"mask") == 1026, "raw ranked group preserves new supported mask");
+    }
+    for (unsigned failure = 0; failure < 4; ++failure) {
+        Fixture f = expanded(); f.compute_rect = &f.owned; f.owned.selected = true;
+        if (failure == 0) for (auto& vertex : f.vertex_batch) vertex.color[3] = .5f;
+        if (failure == 1) f.target.color_id = 0;
+        if (failure == 2) f.vertex_batch[0].position.w = 2.f;
+        if (failure == 3) f.owned.selected = false;
+        Check(!f.Route() && f.owned.native_draws == 1 && !f.owned.compute_draws,
+              "unsupported incomplete and unselected draw remain native");
+        Check(f.owned.raw_unsupported == 1 && f.owned.unsupported == (failure == 0) &&
+              f.owned.format_rejected == (failure == 1) && f.owned.geometry_rejected == (failure == 2),
+              "effective state format and geometry remain distinct");
+        logs.clear(); f.owned.Report();
+        const auto summary = Parse(logs[0].text);
+        const auto routes = Parse(logs.back().text);
+        Check(Number(summary,"raw_unsupported") == 1 && Number(summary,"unsupported") == (failure == 0) &&
+              Number(routes,"unsupported_state") == (failure == 0) && summary.at("conservation") == "true",
+              "final effective route totals are not raw blockers");
+    }
+    // CodexAstraLocal: Saturation, regressed totals and impossible effective
+    // populations invalidate diagnostics instead of printing wrapped admission.
+    for (unsigned failure = 0; failure < 4; ++failure) {
+        ComputeRectRenderer r;
+        if (failure == 0) { r.raw_unsupported = std::numeric_limits<u64>::max(); r.ObserveState(2,6); ++r.considered; }
+        if (failure == 1) r.census_raw_unsupported = 1;
+        if (failure == 2) { r.ObserveState(0,6); ++r.considered; ++r.unsupported; }
+        if (failure == 3) { r.ObserveState(2,6); ++r.considered; r.unsupported = 2; }
+        logs.clear(); r.ReportCensus(steady_clock::now());
+        const auto summary = Parse(logs[0].text);
+        Check(summary.at("conservation") == "false" && Number(summary,"state_admitted") <= 1,
+              "inconsistent effective or raw counters invalidate conservation");
+        if (failure == 0) Check(summary.at("overflow") == "true", "raw counter saturation is explicit");
+    }
+}
 int main() {
-    try { TestBins(); TestAdmission(); TestReports(); std::printf("PASS checks=%u bank_bytes=%zu\n", checks, sizeof(Vulkan::ComputeStateCensus)); }
+    try { TestBins(); TestAdmission(); TestReports(); TestEffectiveAdmission(); std::printf("PASS checks=%u bank_bytes=%zu\n", checks, sizeof(Vulkan::ComputeStateCensus)); }
     catch (const std::exception& error) { std::fprintf(stderr,"FAILED: %s\n",error.what()); return 1; }
 }

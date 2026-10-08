@@ -56,16 +56,23 @@ def main():
     cpp = read('vk_compute_rect.cpp')
     rasterizer = read('vk_rasterizer.cpp')
     helper = read('uberhar_compute_census.h')
+    rectangle = read('uberhar_compute_rect.h')
     observe = block(header, 'void ObserveState(')
     members = header[header.index('    ComputeStateCensus state_census;'):header.index('    double timestamp_period{};')]
-    report = block(cpp, 'void ComputeRectRenderer::ReportCensus(') + '\n' + block(cpp, 'void ComputeRectRenderer::Report()')
+    report = block(cpp, 'bool ComputeRectRenderer::AllowsExpandedRectangles()') + '\n' + block(cpp, 'void ComputeRectRenderer::ReportCensus(') + '\n' + block(cpp, 'void ComputeRectRenderer::Report()')
     admission = block(rasterizer, 'if (compute_rect && !accelerate)')
     tick = block(rasterizer, 'void RasterizerVulkan::TickFrame()')
     # CodexAstraLocal: These integration checks bind the cheap observation to its
     # existing denominator and cadence, rather than only testing an orphan helper.
-    assert admission.count('ComputeRectStateRejections(regs)') == 1
-    assert admission.count('ObserveState(reasons, vertex_batch.size())') == 1
-    assert admission.index('++compute_rect->considered') < admission.index('ObserveState(') < admission.index('if (reasons != 0)')
+    # CodexAstraLocal: Use the exact prepared-state callsite, preserving one raw
+    # observation while effective state rejection has its separate route counter.
+    observation = 'ObserveState(compute_state.raw_rejections, vertex_batch.size())'
+    assert admission.count('PrepareComputeRectState(') == 1
+    assert admission.count('MakeComputeRectPrepared(') == 1
+    assert admission.count('AllowsExpandedRectangles()') == 1
+    assert admission.count(observation) == 1
+    assert admission.index('++compute_rect->considered') < admission.index('ObserveState(') < admission.index('if (!compute_state)')
+    assert 'ComputeRectStateRejections(regs)' not in admission
     assert 'RejectState' not in admission
     draw = block(rasterizer, 'bool RasterizerVulkan::Draw(')
     assert draw.index('if (!framebuffer->Handle())') < draw.index('if (compute_rect && !accelerate)')
@@ -80,29 +87,46 @@ def main():
 
     # CodexAstraLocal: Retain the real classifier/register inputs as well as
     # extracted changed source; no private generated helper is a hidden dependency.
-    for name in ('uberhar_compute_rect.h', '../pica/regs_internal.h', '../pica/regs_framebuffer.h', '../pica/regs_rasterizer.h', '../pica/regs_texturing.h'):
+    for name in ('../pica/regs_internal.h', '../pica/regs_framebuffer.h', '../pica/regs_rasterizer.h', '../pica/regs_texturing.h'):
         path = (root / relative / name).resolve()
         inputs[str(path)] = hashlib.sha256(path.read_bytes()).hexdigest()
+    # CodexAstraLocal: The production enum and capability predicates exercise the
+    # real mode gate without importing the unrelated global settings singleton.
+    settings = root / 'src/common/settings.h'
+    profile = root / 'src/common/uberhar_test_profile.h'
+    for path in (settings, profile):
+        inputs[str(path)] = hashlib.sha256(path.read_bytes()).hexdigest()
+    policy = 'namespace Settings {\n' + block(settings.read_text(), 'enum class UberharTestMode') + ';\n'
+    policy += block(profile.read_text(), 'constexpr bool UsesAutomaticCompute(') + '\n'
+    policy += block(profile.read_text(), 'constexpr bool AllowsComputeRendering(') + '\n}\n'
     fixture = Path(__file__).with_suffix('.cpp').resolve()
     inputs[str(fixture)] = hashlib.sha256(fixture.read_bytes()).hexdigest()
     inputs[str(Path(__file__).resolve())] = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
     # CodexAstraLocal: Mutations must fail a specific behavioral assertion, not
     # merely fail compilation. All subprocesses have finite time limits.
-    variants = [('normal', helper, admission, None)]
+    variants = [('normal', helper, admission, observe, report, None)]
     if args.mutants:
         variants += [
-            ('drop-zero-mask', helper.replace('auto& counts = mask < Bins', 'if (mask == 0) return;\n        auto& counts = mask < Bins'), admission, 'joint populations include mask zero'),
-            ('no-consume-reset', helper.replace('bins[mask] = {};', '(void)mask;'), admission, 'consume resets interval'),
-            ('wrong-six-count', helper, admission.replace('ObserveState(reasons, vertex_batch.size())', 'ObserveState(reasons, 6)'), 'callsite observes actual batch once'),
-            ('missing-observation', helper, admission.replace('compute_rect->ObserveState(reasons, vertex_batch.size());', '(void)reasons;'), 'callsite observes actual batch once'),
+            ('drop-zero-mask', helper.replace('auto& counts = mask < Bins', 'if (mask == 0) return;\n        auto& counts = mask < Bins'), admission, observe, report, 'joint populations include mask zero'),
+            ('no-consume-reset', helper.replace('bins[mask] = {};', '(void)mask;'), admission, observe, report, 'consume resets interval'),
+            ('wrong-six-count', helper, admission.replace(observation, 'ObserveState(compute_state.raw_rejections, 6)'), observe, report, 'callsite observes actual batch once'),
+            ('missing-observation', helper, admission.replace('compute_rect->' + observation + ';', '(void)compute_state;'), observe, report, 'callsite observes actual batch once'),
+            # CodexAstraLocal: These defects would resurrect schema1 conflation
+            # or lose the new cumulative raw counter without changing rendering.
+            ('raw-as-effective', helper, admission, observe, report.replace('effective_admitted, effective_rejected, considered, unsupported,', 'snapshot.admitted_draws, snapshot.rejected, considered, unsupported,'), 'raw and effective admission differ'),
+            ('missing-raw-total', helper, admission, observe.replace('ComputeStateCensus::Add(raw_unsupported, 1, census_overflow);', '(void)raw_unsupported;'), report, 'first interval retains preceding draws'),
+            ('raw-route-rejection', helper, admission.replace('if (!compute_state)', 'if (compute_state.raw_rejections != 0)'), observe, report, 'expanded state selects complete draw'),
         ]
     cases = []
-    for name, census_source, route, expected in variants:
+    for name, census_source, route, observation_source, report_source, expected in variants:
         target = out / name
         include = target / 'video_core/renderer_vulkan'
         include.mkdir(parents=True)
         (include / 'uberhar_compute_census.h').write_text(census_source)
-        for filename, body in [('observe.inc', observe), ('members.inc', members), ('report.inc', report), ('admission.inc', route)]:
+        # CodexAstraLocal: A shadow-source run must compile its prepared-state
+        # helper, not silently fall back to the checkout's older classifier API.
+        (include / 'uberhar_compute_rect.h').write_text(rectangle)
+        for filename, body in [('observe.inc', observation_source), ('members.inc', members), ('report.inc', report_source), ('admission.inc', route), ('policy.inc', policy)]:
             (target / filename).write_text(body + '\n')
         command = [os.environ.get('CXX', 'c++'), '-std=c++20', '-O2', '-DFMT_HEADER_ONLY',
                    '-I' + str(target), '-I' + str(root / 'src'),
