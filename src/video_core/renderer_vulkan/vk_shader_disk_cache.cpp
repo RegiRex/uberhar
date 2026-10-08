@@ -286,7 +286,7 @@ std::optional<std::pair<u64, Shader* const>> ShaderDiskCache::UseFragmentShader(
 // relaxed approximation. CPU fallback continues until both this module and its
 // GPU pipeline are ready. The bounded in-memory cache never writes stock vkch.
 std::optional<std::pair<u64, Shader* const>> ShaderDiskCache::UseReadyFragmentShader(
-    const FSConfig& config, const Pica::Shader::UserConfig& user) {
+    const FSConfig& config, const Pica::Shader::UserConfig& user, bool allow_build) {
     ++ready_fragment_requests;
     if (!user.IsCacheable()) {
         ++ready_fragment_unsupported;
@@ -313,6 +313,12 @@ std::optional<std::pair<u64, Shader* const>> ShaderDiskCache::UseReadyFragmentSh
         ++ready_fragment_hits;
         return std::make_pair(hash, &shader);
     }
+    // CodexAstraLocal: A caller without PSO capacity may still reuse a ready
+    // module above; a miss does not create demand/objects/queued compilation.
+    if (!allow_build) {
+        ++ready_fragment_lookup_only_misses;
+        return {};
+    }
     const ReadyFragmentKey key{config, parent.profile};
     if (!ready_fragment_demand.Observe(hash, key)) {
         ++ready_fragment_cold;
@@ -331,44 +337,66 @@ std::optional<std::pair<u64, Shader* const>> ShaderDiskCache::UseReadyFragmentSh
     // AstraPro: All compiler inputs are immutable owned snapshots. A mutable
     // renderer profile must not be read by this worker while emulation resumes.
     const auto device = parent.instance.GetDevice();
-    parent.shader_workers.QueueWork([this, entry, device] {
-        const auto start = std::chrono::steady_clock::now();
-        bool failed = false;
-        try {
-            const auto& [fs, profile] = entry->key;
-            // AstraPro: Keep this optional experiment on the inherited GLSL
-            // specialization used by the existing full-fragment pixel oracle.
-            // This does not change the normal/custom renderer's SPIR-V choice.
-            const auto code = GLSL::GenerateFragmentShader(fs, {}, profile);
-            // CodexAstraUlt: Replace AstraPro's inherited generic-latency compiler
-            // option for this optional job. Full requested-profile equality still
-            // guards the cache; every entry has this same fixed optimization policy.
-            // CodexAstraLocal: The cache entry owns this profile snapshot for the
-            // queued job. Apply the optional-only override to compilation, preserving
-            // profile identity and complete CPU fallback while the module is absent.
-            const auto spirv = CompileGLSL(code, vk::ShaderStageFlagBits::eFragment, "",
-                DisableShaderOptimizer(true, profile.vk_disable_spirv_optimizer != 0));
-            if (spirv.empty()) throw std::runtime_error("empty optional fragment module");
-            entry->shader.module = CompileSPV(spirv, device);
-            if (!entry->shader.module) throw std::runtime_error("null optional fragment module");
-        } catch (const std::exception& error) {
-            failed = true;
-            if (ready_fragment_failures.fetch_add(1) < 8) {
-                // AstraPro Log Line: Bound failure details; the CPU still renders.
-                LOG_ERROR(Render_Vulkan, "Uberhar optional GPU fragment failed: {}", error.what());
+    // CodexAstraLocal: Optional queue allocation can fail after owner insertion.
+    // Publish failed completion so every route keeps its existing complete draw.
+    try {
+        parent.shader_workers.QueueWork([this, entry, device] {
+            const auto start = std::chrono::steady_clock::now();
+            bool failed = false;
+            try {
+                const auto& [fs, profile] = entry->key;
+                // AstraPro: Keep this optional experiment on the inherited GLSL
+                // specialization used by the existing full-fragment pixel oracle.
+                // This does not change the normal/custom renderer's SPIR-V choice.
+                const auto code = GLSL::GenerateFragmentShader(fs, {}, profile);
+                // CodexAstraUlt: Replace AstraPro's inherited generic-latency compiler
+                // option for this optional job. Full requested-profile equality still
+                // guards the cache; every entry has this same fixed optimization policy.
+                // CodexAstraLocal: The cache entry owns this profile snapshot for the
+                // queued job. Apply the optional-only override to compilation, preserving
+                // profile identity and complete CPU fallback while the module is absent.
+                const auto spirv = CompileGLSL(code, vk::ShaderStageFlagBits::eFragment, "",
+                    DisableShaderOptimizer(true, profile.vk_disable_spirv_optimizer != 0));
+                if (spirv.empty()) throw std::runtime_error("empty optional fragment module");
+                entry->shader.module = CompileSPV(spirv, device);
+                if (!entry->shader.module) throw std::runtime_error("null optional fragment module");
+            } catch (const std::exception& error) {
+                failed = true;
+                if (ready_fragment_failures.fetch_add(1) < 8) {
+                    // AstraPro Log Line: Bound failure details; the CPU still renders.
+                    // CodexAstraLocal: Diagnostic allocation failure cannot escape a
+                    // compiler worker and prevent terminal completion publication.
+                    try {
+                        LOG_ERROR(Render_Vulkan, "Uberhar optional GPU fragment failed: {}", error.what());
+                    } catch (...) {}
+                }
+            } catch (...) {
+                // CodexAstraLocal: ThreadWorker has no task exception boundary.
+                // An opaque optional compiler failure still publishes generic recovery.
+                failed = true;
+                if (ready_fragment_failures.fetch_add(1) < 8) {
+                    try {
+                        // CodexAstraLocal Log Line: Share the existing eight-failure budget.
+                        LOG_ERROR(Render_Vulkan, "Uberhar optional fragment failed: unknown exception");
+                    } catch (...) {}
+                }
             }
-        }
-        const u64 ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
-                           std::chrono::steady_clock::now() - start).count();
-        ready_fragment_compile_ns.fetch_add(ns);
-        // AstraPro: Admission permits one optional fragment compiler at a time;
-        // keep atomic stats so progress reporting never races its completion.
-        auto maximum = ready_fragment_max_compile_ns.load();
-        while (maximum < ns && !ready_fragment_max_compile_ns.compare_exchange_weak(maximum, ns)) {}
-        ready_fragment_builds.fetch_add(1);
-        if (failed) entry->shader.MarkFailed();
-        else entry->shader.MarkDone(); // Publish the module only after all writes.
-    });
+            const u64 ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                               std::chrono::steady_clock::now() - start).count();
+            ready_fragment_compile_ns.fetch_add(ns);
+            // AstraPro: Admission permits one optional fragment compiler at a time;
+            // keep atomic stats so progress reporting never races its completion.
+            auto maximum = ready_fragment_max_compile_ns.load();
+            while (maximum < ns && !ready_fragment_max_compile_ns.compare_exchange_weak(maximum, ns)) {}
+            ready_fragment_builds.fetch_add(1);
+            if (failed) entry->shader.MarkFailed();
+            else entry->shader.MarkDone(); // Publish the module only after all writes.
+        });
+    } catch (...) {
+        entry->shader.MarkFailed();
+        ready_fragment_failures.fetch_add(1);
+        return {};
+    }
     ++ready_fragment_busy;
     return {};
 }
@@ -513,12 +541,13 @@ void ShaderDiskCache::ReportUberharStats(const char* kind) const {
     // CodexAstraUlt Log Line: Replace AstraPro's blocking progress enqueue; totals stay reliable.
     LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
              "Uberhar ready GPU fragments {}: schema=1 scope=title requests={} ready_hits={} "
-             "cold_demand={} busy={} capped={} mismatches={} failed_hits={} unsupported={} "
+             "cold_demand={} busy={} capped={} mismatches={} failed_hits={} unsupported={} lookup_only_misses={} "
              "modules={} builds={} failures={} compile_ms={:.3f} max_compile_ms={:.3f} "
              "demand_replacements={} max_modules={} warmup_draws={} storage=memory_only generator=glsl_specialized weighting=lookups",
              kind, ready_fragment_requests, ready_fragment_hits, ready_fragment_cold,
              ready_fragment_busy, ready_fragment_capped, ready_fragment_mismatches,
-             ready_fragment_failed_hits, ready_fragment_unsupported, ready_fragments.size(),
+             ready_fragment_failed_hits, ready_fragment_unsupported, ready_fragment_lookup_only_misses,
+             ready_fragments.size(),
              ready_fragment_builds.load(), ready_fragment_failures.load(),
              ready_fragment_compile_ns.load() / 1e6, ready_fragment_max_compile_ns.load() / 1e6,
              ready_fragment_demand.Replacements(), ReadyFragmentPolicy::MaxModules,

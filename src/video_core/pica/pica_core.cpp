@@ -1357,6 +1357,8 @@ void PicaCore::LoadVertices(bool is_indexed, std::chrono::steady_clock::time_poi
     if (index_address_8 == nullptr) {
         // Mario & Luigi: Superstar Saga sets an invalid base address
         // for the vertex attributes. Return early if that is the case.
+        // CodexAstraLocal: Retain this preexisting invalid-input return in
+        // diagnostic coverage; it never creates a timed chunk.
         if (vertex_timing) vertex_timing->Unsupported();
         return;
     }
@@ -1589,6 +1591,8 @@ void PicaCore::LoadVertices(bool is_indexed, std::chrono::steady_clock::time_poi
             ++native_geometry_fallbacks;
     }
 
+    // CodexAstraLocal: Recovery/geometry draws remain rendered below but
+    // are outside the finite no-GS timing cohort.
     if (vertex_timing) vertex_timing->Unsupported();
 
     // AstraEH: Preserve the original attribute cache and geometry pipeline for recovery.

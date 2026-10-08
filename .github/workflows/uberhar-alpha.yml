@@ -340,6 +340,8 @@ jobs:
 
       # AstraEH: Attach assets to a draft first; publish only when all uploads succeed.
       # Existing versions are never overwritten: increment UBERHAR_VERSION for the next iteration.
+      # CodexAstraLocal: The same gated job publishes alpha prereleases
+      # and earned beta releases according to the version classification below.
       - name: Publish GitHub release
         run: |
           if gh release view "$UBERHAR_VERSION" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then

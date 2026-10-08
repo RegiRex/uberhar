@@ -112,6 +112,8 @@ private:
     };
     std::array<u8, 16> input_registers{};
     std::array<Copy, 24> copies{};
+    // CodexAstraLocal: Store only final grouped mappings; scalar copies
+    // retain every destination that could not safely form a full register.
     std::array<Copy, 6> quads{};
     u32 input_count{}, copy_count{}, quad_count{};
     bool supported{};

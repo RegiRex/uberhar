@@ -65,6 +65,8 @@ FORMATS = {number: (kind, fmt, cls, components + 1) for kind, fmt, cls, group in
            FORMAT_GROUPS for components, number in enumerate(group)}
 
 
+# CodexAstraLocal: Reject contradictory effective formats or load flags
+# before asking GL to fetch the captured bytes.
 def attribute_format(attribute: dict[str, Any], flag: int) -> tuple[str, str, int]:
     try:
         kind, fmt, cls, components = FORMATS[attribute["native_format"]]
@@ -126,6 +128,8 @@ def compare(left: bytes, right: bytes, names: list[str], limit: int = 16) -> dic
             "tolerance": {"absolute": 1e-6, "relative": 1e-5}}
 
 
+# CodexAstraLocal: Execute actual uploaded fetch/UBO transport in the
+# isolated Mesa worker; pre-primitive comparisons cannot prove pixels.
 def render(capture: vc.Capture, packet: dict[str, Any], directory: Path) -> dict[str, Any]:
     import moderngl
 
@@ -371,6 +375,8 @@ def replay(path: Path, output: Path, binary: Path, gpu: bool = True,
     return report
 
 
+# CodexAstraLocal: Worker reuse is explicit; bound replay subprocesses and
+# keep generated files separate from the unchanged original capture.
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("capture", type=Path, nargs="?")

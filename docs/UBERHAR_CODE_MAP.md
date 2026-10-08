@@ -1,8 +1,46 @@
 <!-- AstraEH: Attribution index for the Uberhar implementation, tests, packaging and documentation. -->
 # Uberhar code map
 
+<!-- CodexAstraLocal: Map the new complete-draw route, bounded ownership and independent host gates; version data remains comment-free. -->
+## 0.1.30 — ready fragments with CPU vertices
+
+- `renderer_vulkan/vk_pipeline_cache.{h,cpp}` owns the distinct CPU pipeline
+  bank, exact software execution/layout keys, ready-only selection, eight-entry
+  cap within combined limits, selection/occupancy counters and ordered teardown.
+  It prepares generic constants before optional selection and accounts for the
+  four exclusive fragment routes while preserving queued binding state.
+- `renderer_vulkan/vk_rasterizer.cpp` passes an explicit software-layout token
+  only for actual CPU draws and preserves the existing vertex upload.
+- `renderer_vulkan/vk_shader_disk_cache.{h,cpp}` contains optional generation,
+  compiler, queue-admission and diagnostic exceptions without changing the
+  general worker implementation or required shader policy.
+- `core/perf_stats.cpp` reports configured `ready_cpu_fragment_policy`; draw
+  counters independently prove whether ready CPU fragments actually ran.
+- `tools/uberhar/test_ready_cpu_fragments.{cpp,py}` exercises extracted actual
+  selection, binding, queued state and teardown with controlled endpoints.
+  `test_optional_fragment_worker.{cpp,py}` exercises the real worker and handles.
+  Both include intended failing mutants and run in `build_probe.sh`.
+- `test_cpu_fragment_abi.{cpp,py}` and `compare_cpu_fragment_abi.py` validate real
+  CPU vertex layout/transport against generic and specialized fragments, including
+  consecutive route transitions and optimized OpenGL SPIR-V execution. The shader
+  workflow requires this gate; Vulkan sibling binaries are validated, not run.
+- `UBERHAR_VERSION` records `0.1.30`. Its notes and progress separate host proof,
+  gated delivery and pending device qualification. No image or speed gain is assumed.
+
+<!-- CodexAstraLocal: Explain extraction changes needed by the optional admission boundary. -->
+### Compiler-policy gate adaptation
+
+`tools/uberhar/test_shader_compile_policy.py` now derives each worker queue's
+actual indentation inside its selected method. This preserves extraction after
+adding an outer optional-admission failure boundary and still accepts older
+source for negative controls. Missing/inline queues fail closed. Both released
+and private proposed job bodies pass the 48 policy cases; an incorrect optional
+optimizer policy fails. Compiler/device endpoints remain modeled; the actual
+worker and CPU vertex/fragment proofs are separate gates above. No runtime
+route change is implied by this host-tool update alone.
+
 <!-- CodexAstraLocal: Map the complete per-draw execution change and its durable gate; comment-free version metadata is explained here. -->
-## 0.1.29 candidate — draw-local CPU shader calls
+## 0.1.29 — draw-local CPU shader calls
 
 - `shader/shader.h` defines the borrowed, exact-typed program/uniform/entry tuple
   and empty base-engine fallback. `shader_jit.{h,cpp}` binds after existing setup,
@@ -14,8 +52,8 @@
 - `tools/uberhar/test_shader_draw_context.{cpp,py}` exercises real engines,
   output/FIFO/assembly and extracted binding/adapter sites with profiler off/on.
   `build_probe.sh` includes the fail-closed regression in the existing gate.
-- `UBERHAR_VERSION` advances to the candidate alpha `0.1.29`; release notes and
-  progress distinguish host validation from pending CI and device qualification.
+- `UBERHAR_VERSION` records alpha `0.1.29`; release notes and progress distinguish
+  successful host/release gates from incomplete device qualification.
 
 
 <!-- CodexAstraLocal: Close confirmed historical attribution gaps without relabeling the original author or changing the already published 0.1.28 behavior. -->
@@ -43,9 +81,21 @@ loopback-only transport, response deadlines/byte caps, explicit serial selection
 metadata-only readiness and exclusive optional local report. Its Python AST and
 historical docstrings are unchanged; no device action accompanies this audit.
 
-This is a focused comment-only checkpoint. The separate review of post-0.1.22
-purpose coverage, computed-value consumers and redundant runtime preparation
-continues; it does not close the architecture audit due after 0.1.29.
+<!-- CodexAstraLocal: Complete the separate logical-section audit without claiming that comments change runtime behavior or qualify the product. -->
+The separate cleanliness audit covers 62 changed code/tool/gate files since
+0.1.22, including 32 production files. Its final 17-file comment-only patch adds
+purpose explanations beside timing recovery, actual-upload capture, grouped
+mapping storage, arithmetic-policy transfer, release classification and the
+complex replay/test boundaries. C++ noncomment tokens, Python ASTs including
+embedded source, and existing workflow bytes remain unchanged. The integrated
+files match the independently reviewed hashes. Historical author markers remain.
+
+Consumer tracing retains intentional diagnostics and safety checks. The enabled
+timing path has three unused activity-counter reads; default-off execution avoids
+them, and no Thor cost is established. A private attempt to skip overwritten
+output defaults regressed several host cases and was rejected. Neither finding
+justifies deleting useful work or publishing another APK on its own. Combined
+architecture/device audit closure is recorded separately in the review ledger.
 
 <!-- CodexAstraLocal: Index exact output transport and per-view overlay ownership separately from unproven device performance. -->
 ## 0.1.28 grouped output transport and overlay lifecycle

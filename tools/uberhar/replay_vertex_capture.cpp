@@ -39,6 +39,8 @@ using namespace Pica;
 using namespace Pica::Shader::Generator;
 constexpr std::size_t MaxFile = 4 * 1024 * 1024;
 
+// CodexAstraLocal: Scalar decoding rejects truncated or out-of-range
+// evidence before it can become a loader bound or shader identity.
 void Require(bool condition, const char* message) {
     if (!condition)
         throw std::runtime_error(message);
@@ -137,6 +139,8 @@ void WriteVertex(std::ostream& output, const OutputVertex& vertex) {
         WriteFloat(output, value.ToFloat32());
 }
 
+// CodexAstraLocal: Reconstruct only frozen inline guest state and compact
+// upload spans; source identities are checked before generated replay.
 struct Replay {
     RegsInternal regs{};
     ShaderSetup setup;
@@ -283,6 +287,8 @@ struct Replay {
         Require(prepared == NativeVertexInputPlan::Result::Ready, "production native input rejected");
     }
 
+    // CodexAstraLocal: The oracle keeps one live unit and original FIFO
+    // order for the draw. Per-miss reset is a separate counterfactual.
     NativeVertexCounts Run(const std::filesystem::path& directory, bool reset_per_miss) {
         Shader::InterpreterEngine engine;
         engine.SetupBatch(setup, regs.vs.main_offset);
@@ -322,6 +328,8 @@ struct Replay {
         return counts;
     }
 
+    // CodexAstraLocal: Regenerate the production source from actual layout
+    // flags, refusing nonzero captured identities that no longer match.
     Json Generate(const Packet& packet, const std::filesystem::path& directory) {
         PicaVSConfig config{regs, setup};
         const auto& attributes = packet.info.at("layout").at("attributes");
@@ -360,6 +368,8 @@ struct Replay {
 };
 } // namespace
 
+// CodexAstraLocal: This bounded worker is launched after the strict Python
+// reader; failures exit the isolated replay without touching the capture.
 int main(int argc, char** argv) {
     try {
         Require(argc == 4, "usage: replay_vertex_capture capture.uvc packet-index existing-output-dir");

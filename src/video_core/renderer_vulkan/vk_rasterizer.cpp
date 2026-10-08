@@ -246,6 +246,8 @@ void RasterizerVulkan::LoadDefaultDiskResources(
     }
 
     pipeline_cache.SetProgramID(program_id);
+    // CodexAstraLocal: Cold Android loading bypasses the rights-switch
+    // hook, so it must reach the same one-shot diagnostic initializer.
     InitializeVertexCapture(program_id);
     pipeline_cache.SetAccurateMul(accurate_mul);
     pipeline_cache.LoadCache(stop_loading, callback);
@@ -523,6 +525,8 @@ void RasterizerVulkan::SetupFixedAttribs() {
     // each draw or attributing the earlier crash to an unobserved layout.
     fixed_attribute_max_bytes = std::max(fixed_attribute_max_bytes, offset);
     fixed_attribute_over_legacy += offset > 16 * sizeof(Common::Vec4f);
+    // CodexAstraLocal: Freeze the actual initialized default upload before
+    // stream-buffer reuse; absent/discovery requests copy no payload.
     if (vertex_capture && vertex_capture->WantsPayload())
         vertex_capture->CopyFixed({fixed_ptr, offset});
     stream_buffer.Commit(offset);
@@ -770,6 +774,8 @@ bool RasterizerVulkan::AccelerateDrawBatchInternal(bool is_indexed) {
         .is_indexed = is_indexed,
     };
 
+    // CodexAstraLocal: Share the unchanged draw body between ordinary
+    // recording and the opt-in token published only after that real draw.
     const auto draw = [this, params](vk::CommandBuffer cmdbuf) {
         std::array<vk::DeviceSize, 16> offsets;
         std::transform(params.bindings.begin(), params.bindings.end(), offsets.begin(),
@@ -827,6 +833,8 @@ void RasterizerVulkan::SetupIndexArray() {
         std::memcpy(index_ptr, index_data, index_buffer_size);
     }
 
+    // CodexAstraLocal: Retain original width plus actual widened bytes
+    // in submission order; a later guest-memory reread is not evidence.
     if (vertex_capture && vertex_capture->WantsPayload())
         vertex_capture->CopyIndices(index_u8 ? 1 : 2, native_u8 ? 1 : 2,
                                    {index_ptr, index_buffer_size});
@@ -995,7 +1003,10 @@ bool RasterizerVulkan::Draw(bool accelerate, bool is_indexed) {
     const bool prebound = timing_slot >= 0;
     if (prebound) {
         renderpass_cache.EndRendering();
-        pipeline_cache.BindPipeline(pipeline_info, true, cpu_bridge.ready);
+        // CodexAstraLocal: Only an actual CPU draw carries this software ABI token;
+        // hardware prebinding cannot request the independent CPU-fragment bank.
+        pipeline_cache.BindPipeline(pipeline_info, true, cpu_bridge.ready, true, nullptr,
+                                    accelerate ? nullptr : &software_layout);
         compute_rect->BeginSample(timing_slot);
     }
     renderpass_cache.BeginRendering(framebuffer, draw_rect);
@@ -1038,7 +1049,10 @@ bool RasterizerVulkan::Draw(bool accelerate, bool is_indexed) {
     } else {
         // AstraEH: A ready bridge bypasses creation of an unnecessary CPU-specialized PSO.
         if (!prebound)
-            pipeline_cache.BindPipeline(pipeline_info, true, cpu_bridge.ready);
+            // CodexAstraLocal: CPU assembly has already produced HardwareVertex;
+            // optional ready fragment selection keeps this exact upload/layout.
+            pipeline_cache.BindPipeline(pipeline_info, true, cpu_bridge.ready, true, nullptr,
+                                        &software_layout);
 
         const u32 vertex_count = static_cast<u32>(vertex_batch.size());
         const u32 vertex_size = vertex_count * sizeof(HardwareVertex);
@@ -1462,6 +1476,8 @@ void RasterizerVulkan::UploadUniforms(bool accelerate_draw) {
 }
 
 void RasterizerVulkan::SwitchDiskResources(u64 title_id) {
+    // CodexAstraLocal: A rights switch closes stale title identity before
+    // another draw, while the initializer refuses to reread or rearm.
     InitializeVertexCapture(title_id);
     std::atomic_bool stop_loading = false;
 

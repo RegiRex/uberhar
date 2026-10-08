@@ -12,10 +12,19 @@ import subprocess
 
 # CodexAstraLocal: Extract the real queued job and its frozen option preparation;
 # an older source can therefore fail the same behavioral policy assertions.
-def job(source: str, signature: str, indent: str, options: bool) -> str:
+def job(source: str, signature: str, options: bool) -> str:
     start = source.index(signature)
-    queue = source.index("parent.shader_workers.QueueWork(", start)
-    end = source.index("\n" + indent + "});", queue) + len(indent) + 5
+    # CodexAstraLocal: These methods have an unindented outer close. Bound both
+    # searches to it so a removed queue cannot silently select another method.
+    method_end = source.index("\n}\n", start)
+    queue = source.index("parent.shader_workers.QueueWork(", start, method_end)
+    # CodexAstraLocal: Optional queue admission now has an outer failure boundary.
+    # Derive its indentation so both old and contained job bodies stay testable;
+    # refuse an unexpected inline call rather than extracting a later method.
+    indent = source[source.rfind("\n", 0, queue) + 1:queue]
+    if not indent or indent.strip():
+        raise ValueError("Expected a standalone indented shader-worker queue call")
+    end = source.index("\n" + indent + "});", queue, method_end) + len(indent) + 5
     # CodexAstraUlt: Include the actual frozen-option preparation when present.
     # Accept the previous source too, so --source reproduces its behavioral failure.
     option = source.find("const bool disable_optimizer =", start, queue)
@@ -163,9 +172,11 @@ def main() -> None:
                         default=Path("build/uberhar-probe/test-shader-compile-policy"))
     args = parser.parse_args()
     source = args.source.read_text()
-    vertex = job(source, "ShaderDiskCache::UseProgrammableVertexShader(", "            ", True)
-    geometry = job(source, "ShaderDiskCache::UseFixedGeometryShader(", "            ", True)
-    fragment = job(source, "ShaderDiskCache::UseReadyFragmentShader(", "    ", False)
+    # CodexAstraLocal: Extract each actual queue nesting without fixing its
+    # indentation to a particular source revision or exception boundary.
+    vertex = job(source, "ShaderDiskCache::UseProgrammableVertexShader(", True)
+    geometry = job(source, "ShaderDiskCache::UseFixedGeometryShader(", True)
+    fragment = job(source, "ShaderDiskCache::UseReadyFragmentShader(", False)
     cpp = HEADER + vertex + r'''
     }
     void Geometry(bool ready_only) {

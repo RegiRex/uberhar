@@ -40,6 +40,8 @@ def replace(capture: vc.Capture, name: str, raw: bytes) -> vc.Capture:
     return vc.Capture(manifest, bytes(payload))
 
 
+# CodexAstraLocal: Mutate valid synthetic containers at protocol edges
+# so malformed evidence fails before replay or selector generation.
 def structural_tests(capture: vc.Capture) -> int:
     packet = capture.manifest["packets"][0]
     vc.validate(capture)
@@ -159,6 +161,8 @@ def selector_tests(capture: vc.Capture) -> int:
     return 12
 
 
+# CodexAstraLocal: Exercise every generated case through the real worker
+# and optional Mesa transport, retaining evidence in a fresh directory.
 def run(directory: Path, binary: Path, fixture: Path, gpu: bool) -> dict:
     subprocess.run([str(fixture.resolve()), str(directory.resolve())], check=True)
     written = vc.read(directory / "written.uvc")

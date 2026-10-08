@@ -71,6 +71,8 @@ def flag(arguments: list[str], name: str, default=None):
     raise AssertionError(f"Unexpected boolean {name}: {arguments}")
 
 
+# CodexAstraLocal: Run the extracted publication shell against a fake gh
+# command, checking call order, exact target and failed-draft containment.
 def run_case(script: str, binary: Path, version: str, prerelease: bool,
              scenario: dict, expected_success: bool) -> None:
     with tempfile.TemporaryDirectory(prefix="uberhar-release-case-") as temporary:

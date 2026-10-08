@@ -45,6 +45,8 @@ def fixture():
     }
 
 
+# CodexAstraLocal: Separate accepted measurements from malformed or
+# censored rows; empty/boundary data must not become invented stage times.
 class ReportTests(unittest.TestCase):
     def accepted(self, report):
         parsed, digest = vt.decode(json.dumps(report).encode())

@@ -387,6 +387,8 @@ fun main() {
 '''
 
 
+# CodexAstraLocal: Compile actual extracted methods under the chosen JDK
+# and preserve commands/results; Android queues remain explicitly modeled.
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", type=Path, default=FRAGMENT)

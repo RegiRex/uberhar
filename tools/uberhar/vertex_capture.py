@@ -38,6 +38,8 @@ class CaptureError(ValueError):
     """CodexAstraLocal: Invalid or unsupported evidence, never guessed state."""
 
 
+# CodexAstraLocal: Shared scalar/shape checks reject coercion, duplicate
+# keys and excessive nesting before section or replay interpretation.
 def integer(value: Any, name: str, low: int = 0, high: int = 0xFFFFFFFF) -> int:
     if type(value) is not int or not low <= value <= high:
         raise CaptureError(f"{name}: expected integer in [{low}, {high}]")
@@ -262,6 +264,8 @@ def validate(capture: Capture) -> None:
         validate_key(row.get("key"))
 
 
+# CodexAstraLocal: Discovery and payload keys share exact scalar bounds;
+# a selector must not silently broaden malformed program/draw identities.
 def validate_key(key: Any) -> None:
     if not isinstance(key, dict):
         raise CaptureError("missing draw key")
@@ -508,6 +512,8 @@ def intervals(capture: Capture) -> list[dict[str, Any]]:
     return result
 
 
+# CodexAstraLocal: Inspect retained evidence or emit a bounded request;
+# this host CLI performs no device action and does not arm a session.
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)

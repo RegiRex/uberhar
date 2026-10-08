@@ -122,6 +122,8 @@ float UnsanitizedReference(O opcode, const Row& row) {
     return result;
 }
 
+// CodexAstraLocal: Emit paired production engine/source witnesses; raw
+// IEEE policy uses its explicit reference instead of sanitized JIT values.
 Json Emit(const std::filesystem::path& directory, std::string id, O opcode, bool depth,
           bool sanitize) {
     // CodexAstraLocal: DPHI uses the actual inverse source fields and relative

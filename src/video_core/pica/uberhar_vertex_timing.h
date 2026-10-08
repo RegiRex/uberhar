@@ -46,6 +46,8 @@ struct Clock {
 Clock HostClock() noexcept;
 std::optional<Config> ParseConfig(std::string_view bytes, u64 title) noexcept;
 
+// CodexAstraLocal: Value-only cohort and clock records never retain guest
+// pointers. Counts and validity flags survive partial/failed observation.
 struct Draw {
     u64 program{}, swizzle{};
     u32 entry{}, count{}, inputs{}, topology{};

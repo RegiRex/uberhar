@@ -85,9 +85,12 @@ public:
     /// Binds a pipeline using the provided information
     // AstraEH: A ready CPU bridge may bind its generic pipeline directly; admitting
     // another GPU-vertex fallback is optional while the shared CPU route warms.
+    // CodexAstraLocal: Only the explicit software-layout argument may request
+    // the independent ready CPU-fragment route; other callers retain old routing.
     bool BindPipeline(PipelineInfo& info, bool wait_built = false,
                       GraphicsPipeline* ready_cpu_fallback = nullptr, bool allow_tev_build = true,
-                      GraphicsPipeline* ready_gpu_vertex = nullptr);
+                      GraphicsPipeline* ready_gpu_vertex = nullptr,
+                      const VertexLayout* cpu_vertex_layout = nullptr);
 
     // AstraPro: A conservative fragment preflight avoids speculative vertex
     // uploads while optional specialization is cold/pending. It cannot authorize
@@ -148,6 +151,11 @@ private:
     // CodexAstraUlt: One gate covers optional fragment warming, binding and transport;
     // mandatory unsupported-state recovery continues through UseFragmentShader independently.
     bool PreferReadySpecializedFragment(const Pica::Shader::UserConfig& user) const;
+
+    // CodexAstraLocal: Optional CPU-fragment selection requires a completed generic
+    // draw and the caller's real software layout. Failure changes no draw state.
+    GraphicsPipeline* PrepareReadyCpuFragment(PipelineInfo& info, GraphicsPipeline* generic,
+                                              const VertexLayout& software_layout) noexcept;
 
     // AstraEH: Only the serial TEV worker reads/writes generic modules; reports use atomics.
     // AstraEH: Compiler workers receive the exact options/path captured with their profile.
@@ -222,7 +230,21 @@ private:
     // Drain this worker before releasing ANY referenced shaders/driver cache.
     std::unique_ptr<Common::ThreadWorker> ready_vertex_worker;
     std::unordered_map<u64, std::unique_ptr<GraphicsPipeline>> ready_vertex_pipelines;
+    // CodexAstraLocal: Both optional banks share this one pending-worker slot;
+    // eight CPU PSOs count inside the unchanged total of 256, not in addition.
+    static constexpr std::size_t MaxReadyCpuPipelines = 8;
+    std::unordered_map<u64, std::unique_ptr<GraphicsPipeline>> ready_cpu_pipelines;
     GraphicsPipeline* warming_ready_vertex{};
+    PipelineBuildStats ready_cpu_build_stats;
+    u64 ready_cpu_requests{}, ready_cpu_selected{}, ready_cpu_dependencies{},
+        ready_cpu_deferred{}, ready_cpu_capped{}, ready_cpu_mismatches{},
+        ready_cpu_failed_hits{}, ready_cpu_admission_failures{};
+    // CodexAstraLocal: Distinguish useful lit/unlit selections when an early title
+    // population fills the fixed bank; these counters are not fragment GPU time.
+    std::array<u64, 2> ready_cpu_selected_lighting{};
+    // CodexAstraLocal: Current bank occupancy includes pending/failed admissions;
+    // reset only when its owners drain and clear, so early menu use stays visible.
+    std::array<u64, 2> ready_cpu_bank_lighting{};
     PipelineBuildStats ready_vertex_build_stats;
     // AstraPro: Optimized covered fragments are distinct from correctness recovery.
     u64 virtual_specialized_gpu_draws{};

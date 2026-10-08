@@ -13,11 +13,15 @@ using D = nihstro::DestRegister;
 using S = nihstro::SourceRegister;
 using Semantic = RasterizerRegs::VSOutputAttributes::Semantic;
 
+// CodexAstraLocal: Encode portable little-endian section words rather
+// than serializing host structs or their padding into synthetic evidence.
 void Append(std::vector<u8>& bytes, u32 value) {
     for (u32 shift = 0; shift < 32; shift += 8)
         bytes.push_back(static_cast<u8>(value >> shift));
 }
 
+// CodexAstraLocal: Each named fixture changes a specific carry, index,
+// fetch or uniform-transport contract while using production shader IDs.
 void Fixture(const std::filesystem::path& directory, const std::string& name) {
     RegsInternal regs{};
     ShaderSetup setup;

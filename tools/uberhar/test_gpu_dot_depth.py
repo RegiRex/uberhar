@@ -61,6 +61,8 @@ def verify_cases(directory):
     return cases
 
 
+# CodexAstraLocal: Build real x64 engines and generator sources, then
+# require the complete frozen corpus before any render-only reuse.
 def compile_cases(directory):
     if platform.machine().lower() not in ('x86_64', 'amd64'):
         raise RuntimeError('This gate executes the production x64 JIT; use an x86_64 host')
@@ -211,6 +213,8 @@ def fixed_geometry(directory, route, index):
     return bytes(raw)
 
 
+# CodexAstraLocal: Require both fixed failure directions and all seven
+# coverage controls so missing witnesses cannot turn into a passing gate.
 def check_outcomes(outcomes, index):
     assert index in (23, 30)
     assert set(outcomes) == {'native->native', 'legacy->legacy', 'native->legacy',
@@ -220,6 +224,8 @@ def check_outcomes(outcomes, index):
         assert outcome['visible'] == expected, (index, pair, outcome, expected)
 
 
+# CodexAstraLocal: Test exact numerical controls and real D24 coverage
+# independently; shader validation alone does not execute either draw.
 def render(directory, require_spirv):
     host = Host(directory)
     native = (directory / 'native.vert').read_text()
@@ -274,6 +280,8 @@ def render(directory, require_spirv):
           f' on {host.ctx.info["GL_RENDERER"]}')
 
 
+# CodexAstraLocal: Required SPIR-V tools may come from PATH or the known
+# local build, but their absence must fail rather than skip validation.
 def tool(name, local):
     found = shutil.which(name)
     if not found and Path(local).is_file():

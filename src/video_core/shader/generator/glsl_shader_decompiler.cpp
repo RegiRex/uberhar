@@ -264,6 +264,8 @@ constexpr auto GetSelectorSrc3 = GetSelectorSrc<&SwizzlePattern::GetSelectorSrc3
 
 class GLSLGenerator {
 public:
+    // CodexAstraLocal: Carry the caller-selected four-lane JIT reduction
+    // policy by value; unflagged generation retains its historical source.
     GLSLGenerator(const std::set<Subroutine>& subroutines, const ProgramCode& program_code,
                   const SwizzleData& swizzle_data, u32 main_offset,
                   const RegGetter& inputreg_getter, const RegGetter& outputreg_getter,

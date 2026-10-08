@@ -1,4 +1,19 @@
-# Uberhar progress — 0.1.29 host candidate; 0.1.28 visual discriminator
+# Uberhar progress — 0.1.30 ready-fragment candidate validated on host
+
+<!-- CodexAstraLocal: Distinguish the integrated candidate's completed proofs from pending delivery and device controls. -->
+**0.1.30 is integrated and passes host validation.** Full Combo can select
+already-ready optimized fragments for CPU vertex draws, retaining the exact
+software layout and complete generic fallback. A separate eight-entry CPU
+pipeline bank stays within the existing combined limits and shares the optional
+worker. Queue and worker exceptions become bounded optional failures. Native
+integration/CTest, the full host probe, actual selection/worker negative controls
+and CPU vertex/fragment image and binary gates pass. Independent reviews found
+no blocker. See [0.1.30 notes](releases/0.1.30.md) for proof scope and limits.
+Android/shader/signing/publication gates and cold Thor controls are pending;
+**0.1.29 remains installed**. No target speedup or 0.2.0 qualification is claimed.
+The complete .29 audit remains the anchor with zero completed successors.
+
+## Completed 0.1.29 controls and review
 
 <!-- CodexAstraLocal: Advance the reviewed per-draw call candidate without declaring pending release or device gates complete. -->
 **0.1.29 is implemented and passes local host validation.** Eligible CPU draws now bind
@@ -6,12 +21,45 @@ the existing shader function/live uniforms/entry once, preserving generated code
 register carry, FIFO and assembly. Independent source review, the real native
 integration build and CTest pass. The focused regression passes 1,920 complete
 draw comparisons with profiler off and another 1,920 with it on. The full host
-probe passes; Android, shader, signing and publication gates have not run.
-No candidate APK or device gain is claimed. See [0.1.29 notes](releases/0.1.29.md).
+probe passes. All Android, shader, signing and publication gates passed in
+[run 37695964933](https://github.com/RegiRex/uberhar/actions/runs/37695964933)
+at `0136f89d429eab2b25f626703b2158b9ebe5091d`.
+The [published prerelease](https://github.com/RegiRex/uberhar/releases/tag/0.1.29)
+passed exact-source/digest/package/signing-identity verification and installed
+**0.1.29 / 33980566** with app data preserved. APK SHA-256:
+`f175e3e8cd57785395224fcd3eb13bed2ded62dd42e54eec15b0b798d59c52c5`.
+Cryptographic signing passed in CI; local certificate parsing verifies identity.
+Cold Native/Combo controls completed normal return; no device gain is claimed. See
+[0.1.29 notes](releases/0.1.29.md).
+<!-- CodexAstraLocal: Integrate independently checked controls without converting unmatched scene mixtures into a version speedup. -->
+The two openings average **27.869% Native and 21.892% full Combo** across 40
+complete normal-limit windows each, all below 99%. Settings match their respective
+prior controls, and complete-zero application cache, no-skipped-draw and failure
+checks pass. Native's lower fifth-percentile window is 20.781% with a 208.762 ms
+worst interval; Combo's is 16.628% with 222.201 ms. Direct vertex brackets cover
+83.81% and 54.90% of separate complete reporting-window wall populations; these
+are not thread-CPU/GPU shares. Native moon review finds five isolated singles,
+within the owner's reference threshold, and one separate single-frame rear-ghost
+disturbance. Combo's 417 reviewed moon frames show no comparable event; three
+bounded ghost cores lack the older dense patches. Its clip ends before the later
+Native rear-ghost phase, which remains independently tracked.
+
+The [three-build architecture review](UBERHAR_ARCHITECTURE_0.1.29.md) and separate
+62-file cleanliness review found no new blocking defect in the delivered changes.
+The final 17-file purpose-comment patch is integrated with identical executable
+tokens/ASTs. Final visual integration closes the audit at the new **0.1.29**
+source anchor, with zero completed successors. The next
+candidate gives CPU-generated vertices access to already-ready optimized
+fragment pipelines while retaining exact software layout and complete generic
+fallback. Its host ABI, state-transition, key, failure and ownership proofs have
+passed; release gates and target measurements remain separate.
+
+<!-- CodexAstraLocal: Retain the earlier changed-overlay control as bounded historical evidence, not a cause or cure claim. -->
 The existing-.28 overlay-isolation opening completed a normal return; all 405
 moon frames show no comparable event with performance text hidden. Slightly
 shifted scene progression and a single repeat prevent a causal or cure claim.
-Touch controls stayed enabled; ghost review remains independent.
+Touch controls stayed enabled. The separate rear-ghost review still finds one
+single-frame and one two-frame disturbance, so text removal is not a general cure.
 
 <!-- CodexAstraLocal: Replace pending gates with verified publication and a compatible data-preserving upgrade; device acceptance remains separate. -->
 **0.1.28** groups exact contiguous CPU output copies after resolving final
@@ -71,6 +119,17 @@ owner's greater-than-five threshold and is now a priority for a bounded visual
 discriminator. The run selected zero compute draws; that fact does not identify
 the cause. Rendering, presentation and recording remain to be separated. Ghost
 review stays independent, and the clean bounded Combo clip is not overwritten.
+
+<!-- CodexAstraLocal: Close the single-variable existing-build control without assigning cause or treating native fallback as calculated rendering. -->
+The calculated overlay-off control averaged **26.627%** across 40 complete
+normal-limit windows, all below 99%; its lower fifth-percentile window was 20.448%
+and worst observed interval 220.740 ms. Ordinary route checks again found zero
+computed draws. The effective saved configuration differed only in performance
+text being hidden. All 405 consecutive moon frames show no comparable event;
+slightly shifted progression and one repeat cannot establish causality. The rear
+ghost still has a one-frame event and a separate two-frame event (66.811 and
+142.789 ms); matched primary ghost cores do not show the older dense patches.
+The measured opening ends at first Back, excluding the delayed normal-exit tail.
 
 <!-- CodexAstraLocal: Record a fresh Native baseline and keep brief tolerated moon events distinct from a longer rear-ghost disturbance. -->
 A fresh cold 0.1.27 Native/Vulkan/2x opening averaged **27.976%** across 40 complete

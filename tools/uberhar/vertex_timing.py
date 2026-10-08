@@ -81,6 +81,8 @@ def read_report(path):
     return decode(data)
 
 
+# CodexAstraLocal: Validate byte, JSON and accounting contracts together;
+# the returned hash always identifies the unmodified raw report.
 def decode(data):
     require(0 < len(data) <= MAX_BYTES, "report must be 1 through 65536 bytes")
     try:
@@ -94,6 +96,8 @@ def decode(data):
     return report, hashlib.sha256(data).hexdigest()
 
 
+# CodexAstraLocal: Independently check identity, window and operation
+# counts instead of trusting producer status flags as timing proof.
 def validate(report):
     require(type(report) is dict, "report must be an object")
     require(integer(report["schema"], "schema") == 1, "unsupported schema")
@@ -269,6 +273,8 @@ def summarize(report, digest):
     }
 
 
+# CodexAstraLocal: Print only the validated selected-population summary;
+# malformed reports fail without inventing missing measurements.
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("report", type=Path)

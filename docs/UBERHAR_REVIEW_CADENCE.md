@@ -1,7 +1,33 @@
 # Architecture review ledger
 
+<!-- CodexAstraLocal: Reset cadence only after the three delivered builds, separate source/cleanliness tracks and required cold controls are integrated. -->
+## Current review anchor — released 0.1.29
+
+The [full 0.1.27–0.1.29 review](UBERHAR_ARCHITECTURE_0.1.29.md) is complete
+against released **0.1.29, `0136f89d429eab2b25f626703b2158b9ebe5091d`**.
+It integrates architecture/correctness, a separate 62-file post-0.1.22
+cleanliness/purpose audit, exact release verification, both cold Native/Combo
+controls and independent consecutive-frame evidence. The final comment-only
+patch is integrated and matches reviewed token/AST proofs. No new blocking
+correctness defect was found in the delivered changes.
+
+There are **zero completed successors** to this new anchor. A successful 0.1.30
+would be successor one; audit again after three completed successors or earlier
+when evidence contradicts the architecture. Native/Combo bounded means remain
+27.869%/21.892%, far below sustained 99%. Moon and ghost coverage remains limited,
+with the brief Native rear-ghost disturbance still tracked. Audit closure does
+not qualify 0.2.0, 4x, longer gameplay or the retained FEA baseline.
+
+The integrated 0.1.30 CPU-ready-fragment candidate passed actual host ABI/pixel,
+selection, state, failure and lifetime proofs, native integration and the full
+host probe. Delivery and device controls remain pending. Routine authorized
+development continues; the superseded four-hour stop is not restored.
+
+<details>
+<summary>Completed 0.1.26 anchor and its three successors, retained as history</summary>
+
 <!-- CodexAstraLocal: Close the three completed successors with an integrated source/evidence audit while keeping product qualification separate. -->
-## Current review anchor — released 0.1.26
+## Previous review anchor — released 0.1.26
 
 The [full 0.1.24–0.1.26 architecture review](UBERHAR_ARCHITECTURE_0.1.26.md)
 is complete against released **0.1.26, `e83e8f4f1`**, after the three completed
@@ -21,8 +47,9 @@ upgrade installed. Cold Native and Combo controls completed at 28.424% and
 owner-requested calculated baseline completed at 27.337%, with zero computed draws
 and complete Native fallback. The source-audit anchor remains
 0.1.26; focused control/comment reviews do not reset it.
-The next full audit remains due after the third successful successor (.29 if
-numbering continues).
+Gated **0.1.29 is successor three**, with its verified compatible upgrade
+installed. Separate full architecture/correctness and code-cleanliness audits are
+underway alongside cold device controls; the .26 anchor is not yet reset.
 <!-- CodexAstraLocal: Record focused .29 review and local gates without prematurely advancing the successful-build audit count. -->
 The .29 per-draw shader-call candidate passes independent source review, real
 production regression, native integration/CTest and the complete host probe.
@@ -83,6 +110,8 @@ repeated post-exit sweeps are optional absent ownership changes or a regression.
 The `simpleperf stat` attempt was denied; root restored its internally changed
 `security.perf_harden` property from 0 to the original 1 and verified the result
 at 08:26:47 UTC. Do not repeat that tool or weaken platform controls.
+
+</details>
 
 <!-- CodexAstraLocal: Preserve every prior checkpoint and author attribution as historical state rather than current instructions or an active audit anchor. -->
 <details>
