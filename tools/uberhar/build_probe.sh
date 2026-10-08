@@ -67,6 +67,12 @@ python3 tools/uberhar/test_shader_compile_policy.py
 # GPU image/transport execution remains a separate mandatory shader-workflow gate.
 python3 tools/uberhar/test_optional_fragment_worker.py
 python3 tools/uberhar/test_ready_cpu_fragments.py --mutants
+# CodexAstraLocal: Real worker release, completed GPU use and fixed ownership
+# must all permit reuse; intended broken lifetime/admission policies fail closed.
+python3 tools/uberhar/test_adaptive_cpu_cache.py --mutants
+# CodexAstraLocal: Actual compute admission/report hooks must preserve exact
+# interval counts, final flushes and bounded diagnostics without changing draws.
+python3 tools/uberhar/test_compute_census.py
 # CodexAstraUlt-2: Terminal readback errors must leave noexcept cleanup safely.
 python3 tools/uberhar/test_download_recovery.py
 # CodexAstraUlt: Verify real resource reuse/failed-allocation cleanup and event-only memory counters.

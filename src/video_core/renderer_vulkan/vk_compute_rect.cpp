@@ -182,7 +182,73 @@ void ComputeRectRenderer::Poll() {
     }
 }
 
-void ComputeRectRenderer::Report() const {
+// CodexAstraLocal: Consume/reset before optional output so a dropped or throwing
+// log cannot double-count a later interval. Top rows are censored; unranked draws
+// and fixed mask-family upper bounds are computed from the complete bank.
+// Ranked counts mean selected for emission; optional logging may lose rows.
+void ComputeRectRenderer::ReportCensus(std::chrono::steady_clock::time_point now,
+                                      bool final) noexcept {
+    constexpr auto bit = [](ComputeRectReject reason) { return 1U << static_cast<unsigned>(reason); };
+    constexpr u32 scissor_cull = bit(ComputeRectReject::Scissor) | bit(ComputeRectReject::Cull);
+    constexpr u32 color_alpha_scissor_cull = scissor_cull | bit(ComputeRectReject::ColorWrite) |
+                                            bit(ComputeRectReject::Alpha);
+    const auto snapshot = state_census.Consume({scissor_cull, color_alpha_scissor_cull});
+    census_overflow |= snapshot.overflow;
+    for (unsigned i = 0; i < rejected_state.size(); ++i)
+        ComputeStateCensus::Add(rejected_state[i], snapshot.marginal[i], census_overflow);
+    const bool conservation = !census_overflow && !snapshot.invalid.six && !snapshot.invalid.other &&
+        considered >= census_considered && unsupported >= census_unsupported &&
+        snapshot.draws == considered - census_considered &&
+        snapshot.rejected == unsupported - census_unsupported;
+    const bool clock_valid = now >= census_start;
+    const double window_ms = clock_valid
+        ? std::chrono::duration<double, std::milli>(now - census_start).count() : 0.0;
+    census_start = now;
+    census_considered = considered;
+    census_unsupported = unsupported;
+    ++census_sequence;
+    try {
+        const auto delivery = final ? Common::Log::Delivery::Reliable : Common::Log::Delivery::Diagnostic;
+        // CodexAstraLocal Log Line: At most one summary plus four groups per
+        // existing 30s boundary and final flush; only counts and state masks.
+        LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
+            "Uberhar compute state census: schema=1 mode={} window={} final={} "
+            "scope=cpu_draw_attempts window_ms={:.3f} clock_valid={} considered={} six={} other={} "
+            "state_admitted={} admitted_six={} unsupported={} considered_total={} unsupported_total={} "
+            "distinct_masks={} ranked_groups={} ranked_draws={} ranked_six={} "
+            "unranked_draws={} unranked_six={} invalid_mask_draws={} overflow={} conservation={} "
+            "state_six_scissor_cull={} state_six_color_alpha_scissor_cull={} "
+            "prior_log_failures={} six_scope=two_triangles_not_rectangle_proof",
+            static_cast<u32>(mode), census_sequence, final, window_ms, clock_valid,
+            snapshot.draws, snapshot.total.six, snapshot.total.other,
+            snapshot.admitted_draws, snapshot.admitted.six,
+            snapshot.rejected, considered, unsupported, snapshot.distinct, snapshot.groups,
+            snapshot.ranked_draws, snapshot.ranked.six,
+            snapshot.unranked_draws, snapshot.unranked.six,
+            snapshot.invalid_draws, census_overflow, conservation,
+            snapshot.state_only_six[0], snapshot.state_only_six[1], census_log_failures);
+        for (unsigned i = 0; i < snapshot.groups; ++i) {
+            const auto& group = snapshot.top[i];
+            // CodexAstraLocal Log Line: Same interval identity binds each
+            // optional top row. Consumers must first partition the exact process/
+            // renderer lifecycle; a missing row is not an absent mask.
+            LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
+                "Uberhar compute state group: schema=1 mode={} window={} final={} rank={} "
+                "mask={} draws={} six={} other={} max_groups=4 scope=interval",
+                static_cast<u32>(mode), census_sequence, final, i + 1,
+                group.mask, group.draws, group.counts.six, group.counts.other);
+        }
+    } catch (...) {
+        // CodexAstraLocal: Optional diagnostics cannot interrupt rendering or
+        // retry a consumed bank after allocation/formatting failure.
+        ++census_log_failures;
+    }
+}
+
+void ComputeRectRenderer::Report() {
+    // CodexAstraLocal: Flush every remaining draw before lifetime marginals;
+    // teardown duration is part of this last interval, not active-render time.
+    ReportCensus(std::chrono::steady_clock::now(), true);
     // AstraEH Log Line: One non-exclusive rejection summary; totals can exceed rejected draws.
     LOG_INFO(Render_Vulkan,
              "Uberhar compute blockers: shadow={} color_write={} depth_test={} depth_write={} "

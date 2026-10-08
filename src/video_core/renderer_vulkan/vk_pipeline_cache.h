@@ -23,6 +23,8 @@
 #include "video_core/shader/generator/pica_fs_config.h"
 #include "video_core/shader/generator/profile.h"
 #include "video_core/shader/generator/shader_gen.h"
+// CodexAstraLocal: Fixed ownership and bounded automatic CPU PSO reuse.
+#include "video_core/renderer_vulkan/uberhar_cpu_fragment_cache.h"
 #include "video_core/renderer_vulkan/vk_vertex_capture.h" // CodexAstraLocal: Owned binding witness.
 
 namespace Pica {
@@ -82,6 +84,12 @@ public:
     void SwitchCache(u64 title_id, const std::atomic_bool& stop_loading = std::atomic_bool{false},
                      const VideoCore::DiskResourceLoadCallback& callback = {});
 
+    // CodexAstraLocal: A draw-local generation token carries selection lifetime
+    // across stream mapping; the post-draw stamp includes an intervening Flush.
+    using CpuFragmentToken = ReadyCpuBank::Token;
+    void CompleteReadyCpuDraw(CpuFragmentToken token);
+    void RetireReadyCpuAfterWorkerDrain();
+
     /// Binds a pipeline using the provided information
     // AstraEH: A ready CPU bridge may bind its generic pipeline directly; admitting
     // another GPU-vertex fallback is optional while the shared CPU route warms.
@@ -90,7 +98,8 @@ public:
     bool BindPipeline(PipelineInfo& info, bool wait_built = false,
                       GraphicsPipeline* ready_cpu_fallback = nullptr, bool allow_tev_build = true,
                       GraphicsPipeline* ready_gpu_vertex = nullptr,
-                      const VertexLayout* cpu_vertex_layout = nullptr);
+                      const VertexLayout* cpu_vertex_layout = nullptr,
+                      CpuFragmentToken* cpu_use = nullptr);
 
     // AstraPro: A conservative fragment preflight avoids speculative vertex
     // uploads while optional specialization is cold/pending. It cannot authorize
@@ -155,7 +164,7 @@ private:
     // CodexAstraLocal: Optional CPU-fragment selection requires a completed generic
     // draw and the caller's real software layout. Failure changes no draw state.
     GraphicsPipeline* PrepareReadyCpuFragment(PipelineInfo& info, GraphicsPipeline* generic,
-                                              const VertexLayout& software_layout) noexcept;
+                                              const VertexLayout& software_layout, CpuFragmentToken* cpu_use) noexcept;
 
     // AstraEH: Only the serial TEV worker reads/writes generic modules; reports use atomics.
     // AstraEH: Compiler workers receive the exact options/path captured with their profile.
@@ -230,10 +239,13 @@ private:
     // Drain this worker before releasing ANY referenced shaders/driver cache.
     std::unique_ptr<Common::ThreadWorker> ready_vertex_worker;
     std::unordered_map<u64, std::unique_ptr<GraphicsPipeline>> ready_vertex_pipelines;
-    // CodexAstraLocal: Both optional banks share this one pending-worker slot;
-    // eight CPU PSOs count inside the unchanged total of 256, not in addition.
-    static constexpr std::size_t MaxReadyCpuPipelines = 8;
-    std::unordered_map<u64, std::unique_ptr<GraphicsPipeline>> ready_cpu_pipelines;
+    // CodexAstraLocal: Allocate metadata only for full Combo; every active,
+    // retired and destruction-queued CPU owner remains inside the same eight.
+    std::unique_ptr<ReadyCpuBank> ready_cpu_bank;
+    // CodexAstraLocal: Eviction never refunds creation attempts. Charge GPU and
+    // CPU before allocation so repeated failures cannot grow unbounded work.
+    std::size_t ready_optional_attempts{};
+    std::size_t ReadyCpuOwned() const { return ready_cpu_bank ? ready_cpu_bank->Owned() : 0; }
     GraphicsPipeline* warming_ready_vertex{};
     PipelineBuildStats ready_cpu_build_stats;
     u64 ready_cpu_requests{}, ready_cpu_selected{}, ready_cpu_dependencies{},
@@ -242,8 +254,8 @@ private:
     // CodexAstraLocal: Distinguish useful lit/unlit selections when an early title
     // population fills the fixed bank; these counters are not fragment GPU time.
     std::array<u64, 2> ready_cpu_selected_lighting{};
-    // CodexAstraLocal: Current bank occupancy includes pending/failed admissions;
-    // reset only when its owners drain and clear, so early menu use stays visible.
+    // CodexAstraLocal: Reporting snapshots all fixed ownership states together;
+    // replacing the append-only bank requires a fresh census at the report cadence.
     std::array<u64, 2> ready_cpu_bank_lighting{};
     PipelineBuildStats ready_vertex_build_stats;
     // AstraPro: Optimized covered fragments are distinct from correctness recovery.

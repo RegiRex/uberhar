@@ -1,7 +1,31 @@
-# Uberhar progress — 0.1.30 ready-fragment candidate validated on host
+# Uberhar progress — 0.1.31 host validation passed; release gates pending
+
+<!-- CodexAstraLocal: Keep the latest owner implementation order, consolidated testing and explicit review boundary visible above historical scope. -->
+Next: finish 0.1.31's bounded adaptive CPU fragment-cache work, then prioritize
+genuine Calculated-mode rendering coverage for 0.1.32. The aim is independent
+calculation with no Native fallback; report actual coverage without weakening
+correctness or skipping draws. Use one evidence run per method per build.
+After 0.1.32 is built and tested, complete the systematic architecture,
+correctness, performance and separate cleanliness/comment review, then stop
+with a resumable report for owner inspection.
+
+<!-- CodexAstraLocal: Advance the reviewed adaptive candidate only through completed host gates; release and target results remain separate. -->
+**0.1.31 is integrated and passes full local validation.** Bounded CPU fragment
+pipeline replacement addresses .30's menu-filled bank while retaining eight
+physical slots, complete generic fallback and separate compiler/GPU lifetime
+proofs. The fixed joint Calculated census preserves admission and guides .32
+coverage without inspecting vertex payloads. Independent correctness, cleanliness
+and combined-hook reviews found no blocker. Fresh native integration and CTest
+pass with the same five firmware-dependent skips; the full host probe passes
+in 363.786 seconds. Policy checks pass 643 cases plus nine intended failures;
+actual helper/binding checks pass 6,698 plus seven; census checks pass 41,283
+with four private intended-failure controls. Existing worker and CPU fragment
+ABI/image/binary gates remain required. See [0.1.31 notes](releases/0.1.31.md).
+Shader/Android/signing/publication and one cold run per method remain pending;
+no device gain is established. Installed release remains 0.1.30.
 
 <!-- CodexAstraLocal: Distinguish the integrated candidate's completed proofs from pending delivery and device controls. -->
-**0.1.30 is integrated and passes host validation.** Full Combo can select
+**0.1.30 is published and installed after all release gates passed.** Full Combo can select
 already-ready optimized fragments for CPU vertex draws, retaining the exact
 software layout and complete generic fallback. A separate eight-entry CPU
 pipeline bank stays within the existing combined limits and shares the optional
@@ -9,9 +33,58 @@ worker. Queue and worker exceptions become bounded optional failures. Native
 integration/CTest, the full host probe, actual selection/worker negative controls
 and CPU vertex/fragment image and binary gates pass. Independent reviews found
 no blocker. See [0.1.30 notes](releases/0.1.30.md) for proof scope and limits.
-Android/shader/signing/publication gates and cold Thor controls are pending;
-**0.1.29 remains installed**. No target speedup or 0.2.0 qualification is claimed.
-The complete .29 audit remains the anchor with zero completed successors.
+The exact source is published at `b3ea97f4f059af5aa1a4644a16cd9afc0b04343b`;
+[run 37707003464](https://github.com/RegiRex/uberhar/actions/runs/37707003464)
+passed all 22 required shader/Android/signing/publication steps without waivers.
+Exact-source, downloaded asset, package and signing-identity checks passed,
+followed by a compatible data-preserving install of **0.1.30 / 33981241**.
+APK SHA-256: `63ba6d7c3f1b129cbc35d413757d1fd79e5788ba9c3b4bf1a2030a70f2db7d41`.
+The completed cold full-Combo opening averaged **20.932%** across 40 complete
+windows (fifth-percentile window 16.611%, worst interval 315.366 ms). Its eight CPU
+optimization slots filled during menus, and CPU-specialized selections stopped
+increasing about 12 seconds into the opening. Most measured gameplay did not
+exercise the new route; bounded admission is under review. Four fragment routes
+close with zero reported failures/skips. Delayed normal-exit cleanup observed
+13.06 MiB GPU memory after 2,859.02 MiB during the opening.
+
+<!-- CodexAstraLocal: Keep temporal coverage and actual route use separate from candidate acceptance. -->
+The 343-frame moon clip showed no comparable event. All 506 ghost frames were
+reviewed: two covered target cores lacked the prior corruption, while the
+book-holder and later rear target remain unqualified. Native and ComboGeneric
+completed normal return at 20.986% and19.518% mean speed. Their fifth-percentile
+windows were 16.077%/13.691%, and worst intervals 337.695/351.160 ms; no skipped draws
+or optional failures were reported. Native's moon has three isolated singles,
+ComboGeneric one, all below the owner threshold. Native has a separate single
+rear-ghost event; Generic's later ghost targets are unobserved.
+
+<!-- CodexAstraLocal: Investigate an observed timing change without assigning cause from unmatched process history. -->
+Native was slower than its .29 observation despite identical saved settings;
+the same camera cue arrived about 26.8 s later. Unlike .29, this Native control
+followed Combo in a reused app process. Source review found the new optional CPU
+route disabled and no PICA/JIT/input/output logic change. A fresh-process repeat
+still averaged 20.940% across 40 complete windows (fifth-percentile window 16.078%,
+worst interval 283.733 ms), although process memory returned near the earlier
+baseline. Reused-process memory is therefore insufficient to explain the decline.
+The repeat retained identical settings, an empty application cache and zero
+reported failures/skips. Its 349 moon frames contain three isolated singles;
+586 ghost frames lack the prior dense patches in covered cores, with later
+electrical/rear targets unobserved. No cause or matched speedup is claimed.
+
+<!-- CodexAstraLocal: Distinguish released instruction structure and endpoint scheduling observations from a causal performance profile. -->
+Seven released ARM64 hot functions have equal instruction counts, opcodes and
+register structure; 114 of 2,547 instruction words differ in address/displacement
+fields. This does not prove all resolved targets, caller behavior, instruction-cache
+effects or runtime conditions equivalent. A final read-only placement control
+found the emulation owner using about 9.87 CPU seconds over 10.00 elapsed seconds,
+with 19.70 ms of runqueue wait. Eleven last-CPU observations sampled the middle
+cluster and none the prime core; these are endpoints, not continuous residency
+or a cause for the version difference. The control averaged 20.800% over 40
+complete windows, or 20.273% after excluding four observer-overlapping windows.
+Settings were unchanged; no affinity, clocks or security controls were changed.
+The requested one-run-per-method rule governs subsequent builds; no further
+0.1.30 openings are scheduled.
+The .29 full audit remains the anchor with **one successful successor**;
+0.2.0 remains unqualified.
 
 ## Completed 0.1.29 controls and review
 

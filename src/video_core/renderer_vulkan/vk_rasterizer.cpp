@@ -204,6 +204,9 @@ RasterizerVulkan::~RasterizerVulkan() {
 
 void RasterizerVulkan::TickFrame() {
     scheduler.WaitWorker();
+    // CodexAstraLocal: Reuse only this existing drained command boundary; the
+    // cache separately checks compiler release and actual GPU completion.
+    pipeline_cache.RetireReadyCpuAfterWorkerDrain();
     if (vertex_capture) {
         // CodexAstraLocal: One coherent phase/startup token avoids false edges;
         // submission is observed only after the existing worker drain.
@@ -227,6 +230,10 @@ void RasterizerVulkan::TickFrame() {
                                        Common::UberharActivity::session.load(std::memory_order_relaxed),
                                        scheduler.CurrentTick(),
                                        scheduler.GetMasterSemaphore()->KnownGpuTick());
+            // CodexAstraLocal: Consume the census once at the existing bounded
+            // reporting cadence. Reuse now; do not sample clocks for each draw.
+            if (compute_rect)
+                compute_rect->ReportCensus(now);
             next_memory_snapshot = now + std::chrono::seconds{30};
         }
     }
@@ -905,8 +912,12 @@ bool RasterizerVulkan::Draw(bool accelerate, bool is_indexed) {
     int timing_slot = -1;
     if (compute_rect && !accelerate) {
         ++compute_rect->considered;
-        if (const auto reasons = ComputeRectStateRejections(regs); reasons != 0) {
-            compute_rect->RejectState(reasons);
+        // CodexAstraLocal: Joint diagnostics consume only this existing mask
+        // and CPU batch count; all actual admission/geometry tests stay below.
+        const auto reasons = ComputeRectStateRejections(regs);
+        compute_rect->ObserveState(reasons, vertex_batch.size());
+        if (reasons != 0) {
+            ++compute_rect->unsupported;
         } else if (!framebuffer->color_id || framebuffer->color_level != 0 ||
                    framebuffer->Format(SurfaceType::Color) != VideoCore::PixelFormat::RGBA8) {
             ++compute_rect->format_rejected;
@@ -1000,13 +1011,15 @@ bool RasterizerVulkan::Draw(bool accelerate, bool is_indexed) {
     // Queries must be reset outside a render pass; only measured test routes split it.
     if (compute_rect && compute_packet)
         timing_slot = compute_rect->ReserveSample(false, compute_packet->PixelCount());
+    // CodexAstraLocal: Preserve the selected owner across any stream-map Flush.
+    PipelineCache::CpuFragmentToken cpu_fragment_use{};
     const bool prebound = timing_slot >= 0;
     if (prebound) {
         renderpass_cache.EndRendering();
         // CodexAstraLocal: Only an actual CPU draw carries this software ABI token;
         // hardware prebinding cannot request the independent CPU-fragment bank.
         pipeline_cache.BindPipeline(pipeline_info, true, cpu_bridge.ready, true, nullptr,
-                                    accelerate ? nullptr : &software_layout);
+                                    accelerate ? nullptr : &software_layout, &cpu_fragment_use);
         compute_rect->BeginSample(timing_slot);
     }
     renderpass_cache.BeginRendering(framebuffer, draw_rect);
@@ -1052,7 +1065,7 @@ bool RasterizerVulkan::Draw(bool accelerate, bool is_indexed) {
             // CodexAstraLocal: CPU assembly has already produced HardwareVertex;
             // optional ready fragment selection keeps this exact upload/layout.
             pipeline_cache.BindPipeline(pipeline_info, true, cpu_bridge.ready, true, nullptr,
-                                        &software_layout);
+                                        &software_layout, &cpu_fragment_use);
 
         const u32 vertex_count = static_cast<u32>(vertex_batch.size());
         const u32 vertex_size = vertex_count * sizeof(HardwareVertex);
@@ -1065,6 +1078,9 @@ bool RasterizerVulkan::Draw(bool accelerate, bool is_indexed) {
             cmdbuf.bindVertexBuffers(0, stream_buffer.Handle(), offset);
             cmdbuf.draw(vertex_count, 1, 0, 0);
         });
+        // CodexAstraLocal: Stamp after actual draw enqueue; selection alone can
+        // precede a stream wait that advances the submission tick.
+        if (cpu_fragment_use) pipeline_cache.CompleteReadyCpuDraw(cpu_fragment_use);
     }
 
     // AstraEH: This sample covers the native draw's GPU work, not its compilation wait.

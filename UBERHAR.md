@@ -7,12 +7,34 @@ Baseline: Azahar 2126.1.2, commit
 
 ## Current status
 
+<!-- CodexAstraLocal: The owner fixes the next development sequence and review boundary. -->
+The next sequence is 0.1.31 adaptive CPU fragment-cache admission, followed by
+Calculated-mode coverage work for 0.1.32. Test each method once per build, then
+complete a systematic review after 0.1.32 is built/tested and stop for owner
+inspection. Sustained 99% and the eventual 0.2.0 evidence gates remain open.
+
+<!-- CodexAstraLocal: Separate completed source/host review from gated delivery and actual device qualification. -->
+**0.1.31 passes full host validation; release and device gates are pending.**
+It adds bounded replacement of unused CPU fragment pipelines and a joint
+Calculated admission census for choosing .32 coverage. Independent source and
+cleanliness reviews, native integration/CTest and the full host probe pass.
+See [0.1.31 notes](docs/releases/0.1.31.md). No speedup or new Calculated rendering
+coverage is claimed for this candidate before device testing.
+
 <!-- CodexAstraLocal: Keep the overview aligned with verified delivery and audit closure; retain archived snapshots below as history. -->
-**0.1.30 is integrated and host-validated; delivery and Thor controls are pending.**
+**0.1.30 is published and installed; cold Thor controls are complete.**
 Full Combo can use already-ready optimized fragment pipelines with CPU-generated
 vertices while retaining complete generic fallback. The eight-entry CPU bank
 shares existing limits and worker capacity. See the [candidate notes](docs/releases/0.1.30.md)
 for actual worker, binding and CPU-image proofs and their host-only scope.
+All shader, Android, signing and publication gates passed. Exact release and
+signing compatibility checks passed before the data-preserving installation.
+The first cold Combo opening averaged 20.932% speed. Its CPU optimization bank
+filled during menus and stopped serving draws early in the opening; a bounded
+admission review is underway. Native and ComboGeneric completed at 20.986%/19.518%
+mean speed. Fresh-process Native remained at 20.940% despite its memory footprint
+returning near the earlier baseline. Read-only CPU placement and released
+machine-code review did not establish the cause of the speed decline.
 
 **0.1.29 is published, installed and audited.**
 It binds CPU shader execution once per eligible draw, preserving the
@@ -38,11 +60,11 @@ focus on continuing growth/pressure rather than requiring an exit sweep every ru
 One agent owns the Thor. The bottom panel stays off outside needed game testing.
 
 The completed [full-review anchor is **0.1.29**](docs/UBERHAR_ARCHITECTURE_0.1.29.md),
-with zero successful successors. Architecture and code cleanliness have separate
+with one successful successor. Architecture and code cleanliness have separate
 reviewers; audit again after three successful successors. The CPU-ready
 fragment-pipeline candidate has passed ABI, pixel, state and ownership host proofs.
-Continue toward evidence-qualified 0.2.0 under the corrected autonomous
-handoff; no old four-hour stop or publication hold applies. All releases remain
+Continue to the explicit 0.1.32 test/review stopping boundary above; no old
+four-hour stop or publication hold applies. All releases remain
 gated in `RegiRex/uberhar`, with no signing bypass or universal qualification claim.
 
 ## Archived 0.1.24 status snapshot

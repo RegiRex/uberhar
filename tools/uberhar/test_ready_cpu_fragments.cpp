@@ -1,5 +1,6 @@
 // CodexAstraLocal: Execute exact extracted candidate helpers and bind closure
 // with controlled driver/queue endpoints.
+#include "video_core/renderer_vulkan/uberhar_adaptive_cpu_policy.h"
 #include "common/logging/log.h"
 #include "common/settings.h"
 #include "common/uberhar_activity.h"
@@ -283,10 +284,15 @@ struct Scheduler {
     }
   }
   void WaitWorker() { Finish(); }
-  u64 CurrentTick() const { return 1; }
+  u64 tick=1,known{};
+  u64 CurrentTick() const { return tick; }
   Scheduler *GetMasterSemaphore() { return this; }
-  u64 KnownGpuTick() const { return 1; }
+  u64 KnownGpuTick() const { return known; }
 };
+
+// CodexAstraLocal: Exact production observation-key declaration.
+#include "cpu_fragment_key.inc"
+
 class ShaderDiskCache;
 class PipelineCache {
 public:
@@ -303,9 +309,13 @@ public:
       std::make_unique<Common::ThreadWorker>();
   std::unique_ptr<Common::ThreadWorker> ready_vertex_worker =
       std::make_unique<Common::ThreadWorker>();
-  std::unordered_map<u64, std::unique_ptr<GraphicsPipeline>>
-      ready_vertex_pipelines, ready_cpu_pipelines;
-#include "ready_cpu_limits.inc"
+  std::unordered_map<u64, std::unique_ptr<GraphicsPipeline>> ready_vertex_pipelines;
+  std::unique_ptr<ReadyCpuBank> ready_cpu_bank=std::make_unique<ReadyCpuBank>();
+  using CpuFragmentToken=ReadyCpuBank::Token;
+  std::size_t ready_optional_attempts{};
+  std::size_t ReadyCpuOwned()const{return ready_cpu_bank?ready_cpu_bank->Owned():0;}
+  void CompleteReadyCpuDraw(CpuFragmentToken);
+  void RetireReadyCpuAfterWorkerDrain();
   GraphicsPipeline *warming_ready_vertex{};
   PipelineBuildStats ready_vertex_build_stats, ready_cpu_build_stats;
   Common::AsyncCompletion pipeline_completion;
@@ -374,9 +384,9 @@ public:
   ~PipelineCache();
   bool BindPipeline(PipelineInfo &, bool = false, GraphicsPipeline * = nullptr,
                     bool = true, GraphicsPipeline * = nullptr,
-                    const VertexLayout * = nullptr);
+                    const VertexLayout * = nullptr, CpuFragmentToken* = nullptr);
   GraphicsPipeline *PrepareReadyCpuFragment(PipelineInfo &, GraphicsPipeline *,
-                                            const VertexLayout &) noexcept;
+                                            const VertexLayout &, CpuFragmentToken*) noexcept;
   GraphicsPipeline *PrepareReadyGpuVertex(const PipelineInfo &);
   bool ReadyVertexShaders() const;
   bool PreferReadySpecializedFragment(const UserConfig &) const;
@@ -534,264 +544,283 @@ void SeedModule(PipelineCache &p, const FSConfig &c) {
   e->shader.MarkDone();
   p.curr_disk_cache->ready_fragments.emplace(c.Hash(), std::move(e));
 }
-GraphicsPipeline *WarmPipeline(PipelineCache &p, PipelineInfo &i,
-                               const FSConfig &c) {
-  auto l = SoftwareLayout();
-  p.Fresh(c);
-  if (!p.curr_disk_cache->ready_fragments.contains(c.Hash()))
-    SeedModule(p, c);
-  auto *g = p.GetTevFallback(i, true);
-  Require(!p.PrepareReadyCpuFragment(i, g, l), "first PSO must fall back");
-  Require(p.ready_vertex_worker->tasks.size() == 1, "one PSO queued");
-  p.ready_vertex_worker->WaitForRequests();
-  p.Fresh(c);
-  auto *s = p.PrepareReadyCpuFragment(i, g, l);
-  Require(s && s->IsDone() && !s->HasFailed(), "ready PSO selectable");
-  return s;
+// CodexAstraLocal: Actual shadow helper/bind/reset functions are injected into
+// production-key recording endpoints. These tests do not execute Vulkan.
+void Advance(PipelineCache& p, bool completed = true) {
+    p.scheduler.WaitWorker();
+    if (completed) p.scheduler.known = p.scheduler.tick;
+    ++p.scheduler.tick;
+    p.RetireReadyCpuAfterWorkerDrain();
 }
 
-void AdmissionAndFailures() {
-  auto layout = SoftwareLayout();
-  auto info = Info();
-  auto config = Config();
-  {
-    PipelineCache p;
+PipelineCache::CpuFragmentToken DrawCpu(PipelineCache& p, PipelineInfo info,
+                                      const FSConfig& config, bool flush = false) {
+    auto layout = SoftwareLayout();
+    PipelineCache::CpuFragmentToken token{};
     p.Fresh(config);
-    auto *g = p.GetTevFallback(info, true);
-    for (unsigned i = 0; i < 15; ++i) {
-      Require(!p.PrepareReadyCpuFragment(info, g, layout),
-              "cold module fallback");
-      Require(p.shader_workers.tasks.empty(), "no early module build");
-    }
-    Require(!p.PrepareReadyCpuFragment(info, g, layout),
-            "module admission fallback");
-    Require(p.shader_workers.tasks.size() == 1, "sixteenth demand one module");
-    p.profile.enable_accurate_mul = 1;
-    const auto expected =
-        GLSL::GenerateFragmentShader(config, {},
-                                     Profile{.has_separable_shaders = true,
-                                             .has_logic_op = true,
-                                             .vk_disable_spirv_optimizer = true,
-                                             .is_vulkan = true});
-    p.shader_workers.WaitForRequests();
-    Require(Probe::compiled_sources.back() == expected,
-            "module worker frozen profile/config");
-    Require(!Probe::optimizer_disabled.back(), "optional optimizer enabled");
-    Require(!p.PrepareReadyCpuFragment(info, g, layout),
-            "new profile cannot borrow old module");
-    p.profile.enable_accurate_mul = 0;
-    Require(!p.PrepareReadyCpuFragment(info, g, layout),
-            "pending PSO fallback");
-    Require(p.ready_cpu_pipelines.size() == 1, "CPU bank owns pending PSO");
-    p.ready_vertex_worker->WaitForRequests();
-    Require(p.PrepareReadyCpuFragment(info, g, layout) != nullptr,
-            "completed exact PSO");
-    Require(Probe::optional_waits == 0, "no optional wait");
-  }
-  for (int failure : {1, 2, 3, 4})
-    for (bool logthrow : {false, true}) {
-      PipelineCache p;
-      p.Fresh(config);
-      auto *g = p.GetTevFallback(info, true);
-      Probe::compiler_failure = failure;
-      Probe::logger_throws = logthrow;
-      for (unsigned n = 0; n < 16; ++n)
-        p.PrepareReadyCpuFragment(info, g, layout);
-      p.shader_workers.WaitForRequests();
-      auto &e = *p.curr_disk_cache->ready_fragments.at(config.Hash());
-      Require(e.shader.IsDone() && e.shader.HasFailed(),
-              "all compiler failure kinds terminal");
-      auto calls = Probe::compiler_calls;
-      for (unsigned n = 0; n < 20; ++n)
-        Require(!p.PrepareReadyCpuFragment(info, g, layout),
-                "failed module fallback");
-      Require(calls == Probe::compiler_calls && p.shader_workers.tasks.empty(),
-              "failed module never retried");
-      Probe::compiler_failure = 0;
-      Probe::logger_throws = false;
-    }
-  for (bool shader : {false, true}) {
-    PipelineCache p;
-    p.Fresh(config);
-    auto *g = p.GetTevFallback(info, true);
-    if (shader)
-      p.shader_workers.throw_queue = true;
-    else {
-      SeedModule(p, config);
-      p.ready_vertex_worker->throw_queue = true;
-    }
-    for (unsigned n = 0; n < 16; ++n)
-      Require(!p.PrepareReadyCpuFragment(info, g, layout),
-              "queue failure retains generic");
-    Require((shader ? p.curr_disk_cache->ready_fragments.at(config.Hash())
-                          ->shader.IsDone()
-                    : p.ready_cpu_pipelines.begin()->second->IsDone()),
-            "queue failure publishes done");
-    Require(p.shader_workers.tasks.empty() &&
-                p.ready_vertex_worker->tasks.empty(),
-            "queue failure no ghost task");
-  }
-  for (int failure : {1, 2, 3, 4}) {
-    PipelineCache p;
-    p.Fresh(config);
-    SeedModule(p, config);
-    auto *g = p.GetTevFallback(info, true);
-    Probe::build_failure = failure;
-    Require(!p.PrepareReadyCpuFragment(info, g, layout), "PSO queued fallback");
-    p.ready_vertex_worker->WaitForRequests();
-    auto *saved = p.ready_cpu_pipelines.begin()->second.get();
-    Require(saved->IsDone(), "PSO failed/null completion");
-    Require(!p.PrepareReadyCpuFragment(info, g, layout),
-            "failed/null PSO cannot select");
-    Require(p.ready_cpu_pipelines.begin()->second.get() == saved &&
-                p.ready_vertex_worker->tasks.empty(),
-            "stable failed PSO no retry");
-    Probe::build_failure = 0;
-  }
+    Require(p.BindPipeline(info, true, nullptr, true, nullptr, &layout, &token),
+            "generic or specialized draw always binds");
+    if (flush) { p.scheduler.WaitWorker(); ++p.scheduler.tick; }
+    // CodexAstraLocal: Command emission is controlled, while the exact production
+    // post-enqueue stamp below is extracted from the rasterizer shadow.
+    p.scheduler.Record([](RecordingCommands command) {
+        Require(command.s->pipeline != 0, "complete draw has actual pipeline");
+    });
+    auto cpu_fragment_use = token;
+    auto& pipeline_cache = p;
+#include "after_draw.inc"
+    return token;
 }
-void IdentitiesCapsAndLifetime() {
-  auto layout = SoftwareLayout();
-  auto i = Info();
-  auto c = Config();
-  for (unsigned defect = 0; defect < 13; ++defect) {
-    PipelineCache p;
-    p.Fresh(c);
-    auto *g = p.GetTevFallback(i, true);
-    auto x = i;
-    auto original = p.current_shaders;
-    auto hashes = p.shader_hashes;
-    switch (defect) {
-    case 0:
-      p.current_shaders[0] = &p.other_shader;
-      break;
-    case 1:
-      p.current_shaders[2] = &p.other_shader;
-      break;
-    case 2:
-      p.shader_hashes[0] = 4;
-      break;
-    case 3:
-      p.shader_hashes[2] = 7;
-      break;
-    case 4:
-      p.trivial_vertex_shader.MarkDone(false);
-      break;
-    case 5:
-      p.trivial_vertex_shader.module = nullptr;
-      break;
-    case 6:
-      x.state.rasterization.topology.Assign(
-          Pica::PipelineRegs::TriangleTopology::Strip);
-      break;
-    case 7:
-      x.state.vertex_layout.bindings[0].byte_count.Assign(96);
-      break;
-    case 8:
-      x.state.vertex_layout.attributes[3].offset.Assign(4);
-      break;
-    case 9:
-      x.state.vertex_layout.attributes[3].location.Assign(9);
-      break;
-    case 10:
-      x.state.vertex_layout.attributes[3].type.Assign(
-          Pica::PipelineRegs::VertexAttributeFormat::UBYTE);
-      break;
-    case 11:
-      x.state.vertex_layout.attributes[3].size.Assign(1);
-      break;
-    case 12:
-      x.state.vertex_layout.attributes[3].binding.Assign(1);
-      break;
+
+GraphicsPipeline* QualifyAndBuild(PipelineCache& p, PipelineInfo info, const FSConfig& config) {
+    if (!p.curr_disk_cache->ready_fragments.contains(config.Hash())) SeedModule(p, config);
+    for (unsigned frame = 0; frame < 4; ++frame) {
+        for (unsigned draw = 0; draw < 16; ++draw) DrawCpu(p, info, config);
+        Advance(p);
     }
-    Require(!p.PrepareReadyCpuFragment(x, g, layout),
-            "wrong software owner/layout rejected");
-    Require(p.curr_disk_cache->ready_fragment_requests == 0,
-            "ABI reject before optional lookup");
-  }
-  {
-    PipelineCache p;
-    p.Fresh(c);
-    SeedModule(p, c);
-    auto *g = p.GetTevFallback(i, true);
-    auto &e = *p.curr_disk_cache->ready_fragments.at(c.Hash());
-    e.key.config.texture.fog_flip.Assign(!e.key.config.texture.fog_flip);
-    Require(!p.PrepareReadyCpuFragment(i, g, layout), "FS collision rejected");
-    Require(p.curr_disk_cache->ready_fragment_mismatches == 1,
-            "FS exact collision count");
-  }
-  {
-    PipelineCache p;
-    auto *base = WarmPipeline(p, i, c);
-    p.Fresh(c);
-    auto *g = p.GetTevFallback(i, true);
-    base->forged_key = base->ActualKey();
-    base->info.state.vertex_layout.bindings[0].byte_count.Assign(96);
-    Require(!p.PrepareReadyCpuFragment(i, g, layout),
-            "actual map bucket with changed active layout rejected");
-    base->info = i;
-    base->stages[0] = &p.other_shader;
-    Require(!p.PrepareReadyCpuFragment(i, g, layout),
-            "stale shader owner rejected");
-    base->stages[0] = &p.trivial_vertex_shader;
-    base->forged_key.reset();
-    for (unsigned k = 1; k < 8; ++k) {
-      auto x = i;
-      x.state.blending.color_write_mask = k;
-      WarmPipeline(p, x, c);
-    }
-    Require(p.ready_cpu_pipelines.size() == 8, "CPU bank exactly eight");
-    p.Fresh(c);
-    Require(p.PrepareReadyCpuFragment(i, g, layout) == base,
-            "existing hit at full CPU bank");
-    auto fresh = Config(10);
-    p.Fresh(fresh);
-    auto calls = p.shader_workers.scheduled;
-    auto modules = p.curr_disk_cache->ready_fragments.size();
-    for (unsigned k = 0; k < 32; ++k)
-      Require(!p.PrepareReadyCpuFragment(i, g, layout),
-              "full bank unseen FS fallback");
-    Require(calls == p.shader_workers.scheduled &&
-                modules == p.curr_disk_cache->ready_fragments.size(),
-            "full bank does not warm module demand");
-    Require(p.curr_disk_cache->ready_fragment_lookup_only_misses == 32,
-            "lookup-only miss counter");
-    for (unsigned k = 0; k < 248; ++k)
-      p.ready_vertex_pipelines.emplace(
-          k, std::make_unique<GraphicsPipeline>(
-                 p.instance, p.renderpass_cache, i, *p.driver_pipeline_cache,
-                 *p.pipeline_layout,
-                 std::array<Shader *, 3>{&p.trivial_vertex_shader,
-                                         &p.generic_shader, nullptr},
-                 p.ready_vertex_worker.get()));
-    p.Fresh(c);
-    Require(p.PrepareReadyCpuFragment(i, g, layout) == base,
-            "existing CPU hit at combined256");
-    Require(!ReadyVertexPolicy::CanQueue(p.ready_cpu_pipelines.size() +
-                                             p.ready_vertex_pipelines.size(),
-                                         false),
-            "GPU cap includes CPU bank");
-    p.ClearTevFallbacks();
-    Require(p.ready_cpu_pipelines.empty() && p.ready_vertex_pipelines.empty() &&
-                !p.warming_ready_vertex,
-            "title drain clears both banks");
-    Require(Probe::lifetime_errors == 0,
-            "pipeline destroyed before live stages");
-  }
-  {
-    PipelineCache p;
-    SeedModule(p, c);
-    p.Fresh(c);
-    auto *g = p.GetTevFallback(i, true);
-    p.PrepareReadyCpuFragment(i, g, layout);
-    Require(!p.ready_vertex_worker->tasks.empty(), "lifetime has queued job");
-    p.ClearTevFallbacks();
-    Require(p.ready_vertex_worker->tasks.empty() &&
-                p.ready_cpu_pipelines.empty(),
-            "reset drains before destroy");
-    Require(Probe::lifetime_errors == 0, "no stale ownership during drain");
-  }
+    Require(p.ready_vertex_worker->tasks.size() == 1, "one qualified CPU build queued");
+    p.ready_vertex_worker->WaitForRequests();
+    Advance(p);
+    auto token = DrawCpu(p, info, config);
+    Require(bool(token), "ready CPU selection yields draw-local token");
+    auto* owner = p.ready_cpu_bank->AllSlots()[token.slot].owner.get();
+    Require(owner && owner->IsDone() && !owner->HasFailed(), "selected owner usable");
+    return owner;
 }
+
+void RealSelectionAndTransport() {
+    PipelineCache p;
+    auto info = Info();
+    auto config = Config();
+    auto* special = QualifyAndBuild(p, info, config);
+    Advance(p);
+    auto* generic = p.GetTevFallback(info, true);
+    p.scheduler.completed.clear();
+    p.tev_constants.buffer_mask = 11;
+    p.offsets = {1, 2, 3};
+    auto layout = SoftwareLayout();
+    p.Fresh(config);
+    // No token means no optional owner may be borrowed by an unknown caller.
+    Require(p.BindPipeline(info, true, nullptr, true, nullptr, &layout, nullptr), "no-token generic binds");
+    p.tev_constants.buffer_mask = 22;
+    p.offsets = {4, 5, 6};
+    p.scheduler.MakeDirty(StateFlags::FragmentConstants);
+    auto token = DrawCpu(p, info, config);
+    Require(bool(token), "specialized middle draw");
+    p.tev_constants.buffer_mask = 11;
+    p.offsets = {7, 8, 9};
+    p.Fresh(config);
+    Require(p.BindPipeline(info, true, nullptr, true, nullptr, &layout, nullptr), "same-A generic binds");
+    Advance(p);
+    const auto& rows = p.scheduler.completed;
+    Require(rows.size() == 4, "three binds plus actual draw snapshots");
+    Require(rows[0].pipeline == generic->Handle() && rows[1].pipeline == special->Handle() &&
+            rows[2].pipeline == special->Handle() && rows[3].pipeline == generic->Handle(),
+            "actual G/S/G pipeline identity");
+    Require(rows[0].offsets == std::array<u32,3>{1,2,3} &&
+            rows[1].offsets == std::array<u32,3>{4,5,6} &&
+            rows[3].offsets == std::array<u32,3>{7,8,9}, "queued offsets immutable");
+    Require(rows[1].pushes == rows[0].pushes && rows[3].pushes == rows[0].pushes + 1,
+            "specialized dirty state invalidates same-A generic constants");
+    Require(Probe::optional_waits == 0, "selection adds no optional wait");
+
+    // Existing ready selections survive an exhausted creation budget.
+    p.ready_optional_attempts = 256;
+    const auto builds = Probe::pipeline_builds;
+    auto retained = DrawCpu(p, info, config);
+    Require(bool(retained) && Probe::pipeline_builds == builds,
+            "exhausted creation budget retains ready hit");
+    const auto observations = p.ready_cpu_bank->stats.observations;
+    const auto retirements = p.ready_cpu_bank->stats.retirements;
+    for (unsigned n = 0; n < 20; ++n) { DrawCpu(p, info, Config(1)); Advance(p); }
+    Require(p.ready_cpu_bank->stats.retirements == retirements,
+            "no destruction without replacement creation token");
+    Require(p.ready_cpu_bank->stats.observations == observations,
+            "terminal work budget avoids new observation key preparation");
+}
+
+void ActualBankReuse() {
+    PipelineCache p;
+    auto info = Info();
+    std::array<FSConfig, 8> configs{Config(0),Config(1),Config(2),Config(3),
+                                   Config(4),Config(5),Config(6),Config(7)};
+    for (auto& c : configs) SeedModule(p,c);
+    for (unsigned k = 0; k < 8; ++k) {
+        for (unsigned frame = 0; frame < 4; ++frame) {
+            for (unsigned old = 0; old < k; ++old) DrawCpu(p, info, configs[old]);
+            for (unsigned d = 0; d < 16; ++d) DrawCpu(p, info, configs[k]);
+            Advance(p);
+        }
+        p.ready_vertex_worker->WaitForRequests(); Advance(p);
+    }
+    Require(p.ReadyCpuOwned() == 8 && p.ready_optional_attempts == 8, "eight accounted owners");
+    auto token = DrawCpu(p, info, configs[7], true);
+    Require(bool(token), "actual populated bank selected");
+    auto& slot = p.ready_cpu_bank->AllSlots()[token.slot];
+    Require(slot.last_use_tick == p.scheduler.tick, "actual after-Map draw tick retained");
+    const auto later_tick = p.scheduler.tick;
+    p.scheduler.known = later_tick - 1;
+    // Refresh seven residents; the eighth becomes the only stale replacement.
+    for (unsigned f = 0; f < 14; ++f) {
+        for (unsigned k=0;k<7;++k) DrawCpu(p, info, configs[k]);
+        for (unsigned d=0;d<16;++d) DrawCpu(p, info, Config(8));
+        Advance(p, false);
+    }
+    Require(slot.state == Vulkan::AdaptiveCpu::State::Retired && slot.owner &&
+            p.ready_vertex_worker->tasks.empty(), "GPU-incomplete actual draw keeps retired owner");
+    Require(p.ReadyCpuOwned() == 8, "retired capacity included");
+    Require(p.warming_ready_vertex != slot.owner.get(),
+            "retirement clears shared warming raw pointer");
+    Advance(p);
+    Require(slot.state == Vulkan::AdaptiveCpu::State::DestroyQueued && p.ReadyCpuOwned() == 8,
+            "actual frame queues deletion without freeing capacity");
+    auto stages = p.current_shaders;
+    p.Fresh(Config(8));
+    SeedModule(p, Config(8));
+    const auto scheduled = p.ready_vertex_worker->scheduled;
+    for (unsigned d=0;d<32;++d) DrawCpu(p, info, Config(8));
+    Require(p.ready_vertex_worker->scheduled == scheduled && p.ReadyCpuOwned() == 8,
+            "no new creation behind pending destruction");
+    p.virtual_fs_config.reset();
+    p.current_shaders={&p.other_shader,&p.generic_shader,nullptr};
+    p.shader_hashes={99,88,0};
+    Require(!p.PrepareReadyGpuVertex(info) && p.ready_vertex_pipelines.empty() &&
+            p.ready_vertex_worker->scheduled==scheduled,
+            "GPU shares CPU destruction pending slot");
+    p.ready_vertex_worker->WaitForRequests();
+    Advance(p);
+    Require(p.ReadyCpuOwned() == 7, "actual destruction completion releases exactly one slot");
+    for (unsigned d=0;d<32;++d) DrawCpu(p,info,Config(8));
+    Require(p.ready_vertex_worker->tasks.size() == 1 && p.ReadyCpuOwned() == 8,
+            "new observed family replaces only completed owner");
+    p.ready_vertex_worker->WaitForRequests(); Advance(p);
+    Require(bool(DrawCpu(p,info,Config(8))), "new family eventually selected automatically");
+    Require(p.ready_cpu_bank->stats.max_owned == 8 && p.ready_optional_attempts == 9,
+            "fixed physical cap plus cumulative creation accounting");
+}
+
+void FailuresProfilesAndModes() {
+    for (unsigned failure=1; failure<=4; ++failure) {
+        PipelineCache p; auto info=Info(); auto config=Config(); SeedModule(p,config);
+        Probe::build_failure = failure;
+        for (unsigned f=0;f<4;++f) {
+            for(unsigned d=0;d<16;++d) DrawCpu(p,info,config);
+            Advance(p);
+        }
+        p.ready_vertex_worker->WaitForRequests(); Advance(p);
+        Probe::build_failure = 0;
+        const auto attempts=p.ready_optional_attempts;
+        for(unsigned d=0;d<64;++d) Require(!DrawCpu(p,info,config), "failed key renders full generic");
+        Require(p.ready_optional_attempts==attempts && attempts==1, "failed hot key no retries");
+    }
+    {
+        PipelineCache p; auto info=Info(); auto config=Config();
+        auto* owner=QualifyAndBuild(p,info,config); Advance(p);
+        auto changed=info; changed.state.vertex_layout.bindings[0].byte_count.Assign(96);
+        Require(!DrawCpu(p,changed,config), "wrong software ABI rejects promotion");
+        const auto saved=owner->info;
+        owner->forged_key=owner->ActualKey();
+        owner->info.state.vertex_layout.attributes[0].offset.Assign(4);
+        Require(!DrawCpu(p,info,config), "hash collision cannot replace actual execution equality");
+        owner->info=saved; owner->forged_key.reset();
+        const auto attempts=p.ready_optional_attempts;
+        p.profile.enable_accurate_mul=1;
+        Require(!DrawCpu(p,info,config), "live profile mismatch stays generic");
+        Require(p.ready_optional_attempts==attempts,"profile mismatch cannot alias old owner");
+    }
+    for (unsigned mode=0;mode<2;++mode) {
+        PipelineCache p; auto info=Info(); auto config=Config();
+        p.ready_cpu_bank.reset();
+        if(mode==0) p.ready_vertex_worker.reset();
+        else p.allow_specialized_fragments=false;
+        for(unsigned n=0;n<20;++n) { DrawCpu(p,info,config); Advance(p); }
+        Require(p.ready_cpu_requests==0 && p.ready_optional_attempts==0,
+                "control modes have no adaptive metadata work");
+    }
+}
+
+// CodexAstraLocal: Execute actual GPU admission against CPU physical ownership
+// and lifetime budgets, preserving ready hits and reciprocal pending behavior.
+void SharedLimitsAndAllocation() {
+    {
+        PipelineCache p; auto info=Info(); auto config=Config();
+        auto* cpu=QualifyAndBuild(p,info,config); Advance(p);
+        for(unsigned n=0;n<255;++n)
+            p.ready_vertex_pipelines.emplace(10000+n,std::make_unique<GraphicsPipeline>(
+                p.instance,p.renderpass_cache,info,*p.driver_pipeline_cache,*p.pipeline_layout,
+                p.current_shaders,p.ready_vertex_worker.get()));
+        p.virtual_fs_config.reset();
+        p.current_shaders={&p.other_shader,&p.generic_shader,nullptr};
+        p.shader_hashes={99,88,0};
+        const auto before=p.ready_vertex_worker->scheduled;
+        Require(!p.PrepareReadyGpuVertex(info) && p.ready_vertex_pipelines.size()==255 &&
+                p.ready_vertex_worker->scheduled==before,"combined physical cap includes CPU owner");
+        auto token=DrawCpu(p,info,config);
+        Require(bool(token) && p.ready_cpu_bank->AllSlots()[token.slot].owner.get()==cpu,
+                "combined physical saturation preserves CPU ready hit");
+    }
+    {
+        PipelineCache p; auto info=Info();
+        p.virtual_fs_config.reset();
+        p.current_shaders={&p.other_shader,&p.generic_shader,nullptr};
+        p.shader_hashes={99,88,0};
+        Require(!p.PrepareReadyGpuVertex(info) && p.ready_optional_attempts==1,
+                "GPU attempt charged before worker admission");
+        p.ready_vertex_worker->WaitForRequests();
+        auto* ready=p.PrepareReadyGpuVertex(info);
+        Require(ready!=nullptr,"GPU control ready hit");
+        p.ready_optional_attempts=256;
+        Require(p.PrepareReadyGpuVertex(info)==ready,"GPU ready hit survives cumulative exhaustion");
+        auto changed=info;changed.state.blending.color_write_mask=7;
+        Require(!p.PrepareReadyGpuVertex(changed) && p.ready_vertex_pipelines.size()==1,
+                "GPU creation respects nonrefundable combined budget");
+    }
+    // The exact helper must charge a failed real operator-new allocation before
+    // constructing an owner, then retain no-retry metadata and the generic draw.
+    {
+        PipelineCache p;auto info=Info();auto config=Config();SeedModule(p,config);
+        for(unsigned frame=0;frame<3;++frame) {
+            for(unsigned d=0;d<16;++d)DrawCpu(p,info,config);
+            Advance(p);
+        }
+        p.Fresh(config);auto* generic=p.GetTevFallback(info,true);auto layout=SoftwareLayout();
+        PipelineCache::CpuFragmentToken token{};
+        AllocationProbe::Start(1);
+        const auto* result=p.PrepareReadyCpuFragment(info,generic,layout,&token);
+        const auto allocations=AllocationProbe::Stop();
+        Require(!result && !token && allocations==1 && p.ready_optional_attempts==1 &&
+                p.ReadyCpuOwned()==1,"failed real allocation consumes bounded attempt and slot");
+        for(unsigned d=0;d<64;++d)Require(!DrawCpu(p,info,config),"allocation failure retains generic");
+        Require(p.ready_optional_attempts==1 && p.ready_vertex_worker->tasks.empty(),
+                "allocation failure cannot retry or queue");
+    }
+}
+
+
+// CodexAstraLocal: Retain the previous binding/state regression population while
+// respecting adaptive probation; no compatibility shim bypasses admission.
+GraphicsPipeline* WarmPipeline(PipelineCache& p, PipelineInfo& info,const FSConfig& config) {
+    auto layout=SoftwareLayout(); PipelineCache::CpuFragmentToken token{};
+    if(!p.curr_disk_cache->ready_fragments.contains(config.Hash())) SeedModule(p,config);
+    for(unsigned frame=0;frame<8 && p.ready_vertex_worker->tasks.empty();++frame) {
+        for(unsigned draw=0;draw<16;++draw) {
+            p.Fresh(config);
+            Require(!p.PrepareReadyCpuFragment(info,p.GetTevFallback(info,true),layout,&token),
+                    "warm-up remains generic until worker completion");
+        }
+        if(p.ready_vertex_worker->tasks.empty()) Advance(p);
+    }
+    Require(p.ready_vertex_worker->tasks.size()==1,"one probated warm-up build");
+    p.ready_vertex_worker->WaitForRequests();
+    p.Fresh(config);
+    auto* result=p.PrepareReadyCpuFragment(info,p.GetTevFallback(info,true),layout,&token);
+    Require(result && bool(token),"completed warm-up selects exact owner");
+    return result;
+}
+
+
 void BindTransportAndModes() {
+  PipelineCache::CpuFragmentToken token{};
   auto layout = SoftwareLayout();
   auto c = Config();
   for (auto mode :
@@ -803,7 +832,7 @@ void BindTransportAndModes() {
     p.allow_specialized_fragments = false;
     p.Fresh(c);
     auto i = Info();
-    Require(p.BindPipeline(i, true, nullptr, true, nullptr, &layout),
+    Require(p.BindPipeline(i, true, nullptr, true, nullptr, &layout, &token),
             "control mode draws");
     p.scheduler.Finish();
     Require(p.ready_cpu_requests == 0 &&
@@ -847,7 +876,7 @@ void BindTransportAndModes() {
       x.dynamic_info.scissor.right = n + 800;
       if (dirty)
         p.scheduler.MakeDirty(StateFlags::FragmentConstants);
-      Require(p.BindPipeline(x, true, nullptr, true, nullptr, &layout),
+      Require(p.BindPipeline(x, true, nullptr, true, nullptr, &layout, &token),
               "actual bind records one complete route");
       return x;
     };
@@ -907,7 +936,7 @@ void BindTransportAndModes() {
     p.Fresh(c);
     p.allow_specialized_fragments = true;
     auto *g = p.GetTevFallback(changed, true);
-    auto *same = p.PrepareReadyCpuFragment(changed, g, layout);
+    auto *same = p.PrepareReadyCpuFragment(changed, g, layout, &token);
     Require((same == special) == dynamic,
             "dynamic key normalized, static key distinct");
   }
@@ -916,7 +945,7 @@ void BindTransportAndModes() {
     auto i = Info();
     p.Fresh(c);
     p.generic_mode = failure;
-    Require(p.BindPipeline(i, true, nullptr, true, nullptr, &layout),
+    Require(p.BindPipeline(i, true, nullptr, true, nullptr, &layout, &token),
             "required generic failure accurate recovery");
     p.scheduler.Finish();
     Require(p.virtual_recovery_draws == 1 && p.ready_cpu_requests == 0 &&
@@ -928,7 +957,7 @@ void BindTransportAndModes() {
     auto i = Info();
     p.Fresh(c);
     p.profile.has_fragment_shader_barycentric = true;
-    Require(p.BindPipeline(i, true, nullptr, true, nullptr, &layout),
+    Require(p.BindPipeline(i, true, nullptr, true, nullptr, &layout, &token),
             "untested barycentric CPU ABI remains generic");
     p.scheduler.Finish();
     Require(p.curr_disk_cache->ready_fragment_requests == 0,
@@ -940,7 +969,7 @@ void BindTransportAndModes() {
     p.Fresh(c);
     p.generic_mode = 1;
     auto n = Probe::required_waits;
-    Require(p.BindPipeline(i, true, nullptr, true, nullptr, &layout),
+    Require(p.BindPipeline(i, true, nullptr, true, nullptr, &layout, &token),
             "required cold generic completes");
     p.scheduler.Finish();
     Require(Probe::required_waits == n + 1 && p.ready_cpu_requests == 1,
@@ -948,146 +977,8 @@ void BindTransportAndModes() {
   }
 }
 
-// CodexAstraLocal: Exercise actual allocator and both bank admissions, not a
-// restated size predicate.
-void AllocationAndSharedBudget() {
-  auto layout = SoftwareLayout();
-  auto config = Config();
-  auto info = Info();
-  std::size_t allocations{};
-  for (unsigned pass = 0; pass < 2; ++pass) {
-    const auto count = pass ? allocations : 1;
-    for (std::size_t failure = 1; failure <= count; ++failure) {
-      PipelineCache p;
-      p.Fresh(config);
-      SeedModule(p, config);
-      auto *generic = p.GetTevFallback(info, true);
-      const auto before_stages = p.current_shaders;
-      const auto before_ids = p.shader_hashes;
-      const auto before_info = info;
-      AllocationProbe::Start(pass ? failure : 0);
-      auto *optional = p.PrepareReadyCpuFragment(info, generic, layout);
-      const auto observed = AllocationProbe::Stop();
-      Require(!optional, "new CPU pipeline remains optional fallback");
-      Require(p.current_shaders == before_stages &&
-                  p.shader_hashes == before_ids &&
-                  info.state.ExecutionEquals(before_info.state, false),
-              "failed/new admission cannot commit draw identities");
-      if (!pass) {
-        allocations = observed;
-        Require(allocations >= 3 && allocations <= 16,
-                "bounded real CPU allocation points");
-      } else {
-        Require(observed == failure && p.ready_cpu_admission_failures == 1,
-                "each CPU allocation failure contained");
-        Require(p.ready_vertex_worker->tasks.empty(),
-                "allocation failure cannot leave an unowned queued task");
-        if (p.warming_ready_vertex) {
-          Require(p.ready_cpu_pipelines.size() == 1 &&
-                      p.warming_ready_vertex ==
-                          p.ready_cpu_pipelines.begin()->second.get(),
-                  "failed queue owner remains stable");
-          Require(p.warming_ready_vertex->IsDone() &&
-                      p.warming_ready_vertex->HasFailed(),
-                  "failed queue publishes terminal state");
-        } else
-          Require(p.ready_cpu_pipelines.empty(),
-                  "failed prequeue allocation leaves no owner");
-        p.allow_specialized_fragments = false;
-        Require(p.BindPipeline(info, true, nullptr, true, nullptr, &layout),
-                "allocation failure retains complete generic draw");
-        p.scheduler.Finish();
-        Require(p.scheduler.completed.size() == 1 && p.skipped_draws == 0,
-                "allocation failure complete command recorded");
-      }
-    }
-  }
-  auto gpu_state = [&](PipelineCache &p) {
-    p.virtual_fs_config.reset();
-    p.current_shaders = {&p.other_shader, &p.generic_shader, nullptr};
-    p.shader_hashes = {111, 222, 0};
-  };
-  {
-    PipelineCache p;
-    auto *cpu = WarmPipeline(p, info, config);
-    for (unsigned k = 0; k < 255; ++k)
-      p.ready_vertex_pipelines.emplace(
-          k, std::make_unique<GraphicsPipeline>(
-                 p.instance, p.renderpass_cache, info, *p.driver_pipeline_cache,
-                 *p.pipeline_layout,
-                 std::array<Shader *, 3>{&p.other_shader, &p.generic_shader,
-                                         nullptr},
-                 p.ready_vertex_worker.get()));
-    gpu_state(p);
-    auto before = p.ready_vertex_worker->scheduled;
-    Require(!p.PrepareReadyGpuVertex(info),
-            "actual GPU admission honors CPU contribution to combined cap");
-    Require(p.ready_vertex_capped == 1 &&
-                p.ready_vertex_worker->scheduled == before &&
-                p.ready_vertex_pipelines.size() == 255,
-            "combined256 has no new GPU owner/task");
-    p.Fresh(config);
-    Require(p.PrepareReadyCpuFragment(info, p.GetTevFallback(info, true),
-                                      layout) == cpu,
-            "CPU ready hit survives combined saturation");
-  }
-  {
-    PipelineCache p;
-    p.Fresh(config);
-    SeedModule(p, config);
-    auto *g = p.GetTevFallback(info, true);
-    Require(!p.PrepareReadyCpuFragment(info, g, layout),
-            "CPU queues shared pending owner");
-    auto *cpu_pending = p.warming_ready_vertex;
-    gpu_state(p);
-    Require(!p.PrepareReadyGpuVertex(info) && p.ready_vertex_pipelines.empty(),
-            "GPU cannot queue while CPU pending");
-    Require(p.warming_ready_vertex == cpu_pending &&
-                p.ready_vertex_worker->tasks.size() == 1,
-            "single shared pending job unchanged");
-    p.ready_vertex_worker->WaitForRequests();
-    Require(!p.PrepareReadyGpuVertex(info) &&
-                p.ready_vertex_pipelines.size() == 1,
-            "GPU can queue after CPU completion");
-    auto *gpu_pending = p.warming_ready_vertex;
-    auto other = info;
-    other.state.blending.color_write_mask = 7;
-    p.Fresh(config);
-    Require(!p.PrepareReadyCpuFragment(other, p.GetTevFallback(other, true),
-                                       layout),
-            "CPU cannot queue while GPU pending");
-    Require(p.warming_ready_vertex == gpu_pending &&
-                p.ready_cpu_pipelines.size() == 1 &&
-                p.ready_vertex_worker->tasks.size() == 1,
-            "single shared pending reciprocal");
-    p.ClearTevFallbacks();
-    Require(Probe::lifetime_errors == 0,
-            "cross-bank pending drain preserves stage owners");
-  }
-  // CodexAstraLocal: A ready shader at a full CPU bank must not create a ninth
-  // variant.
-  {
-    PipelineCache p;
-    for (unsigned n = 0; n < 8; ++n) {
-      auto x = info;
-      x.state.blending.color_write_mask = n;
-      WarmPipeline(p, x, config);
-    }
-    auto x = info;
-    x.state.blending.color_write_mask = 9;
-    p.Fresh(config);
-    auto before = p.ready_vertex_worker->scheduled;
-    Require(!p.PrepareReadyCpuFragment(x, p.GetTevFallback(x, true), layout),
-            "ninth CPU PSO retains generic despite ready module");
-    Require(p.ready_cpu_capped == 1 && p.ready_cpu_pipelines.size() == 8 &&
-                p.ready_vertex_worker->scheduled == before,
-            "CPU cap exact and no speculative task");
-  }
-}
-
-// CodexAstraLocal: Check actual static execution dimensions and queued dynamic
-// snapshots independently.
 void KeyAndDynamicState() {
+  PipelineCache::CpuFragmentToken token{};
   // CodexAstraLocal: Distinguish admitted bank occupancy from successful draw
   // weighting.
   {
@@ -1099,11 +990,16 @@ void KeyAndDynamicState() {
     auto layout = SoftwareLayout();
     WarmPipeline(p, info, unlit);
     WarmPipeline(p, info, lit);
-    Require(p.ready_cpu_bank_lighting == std::array<u64, 2>{1, 1},
+    // CodexAstraLocal: The production report snapshots this same fixed metadata;
+    // no test or reporter inspects a destruction-queued unique owner.
+    std::array<u64,2> owned_lighting{};
+    for(const auto& slot:p.ready_cpu_bank->AllSlots())
+      if(slot.state!=Vulkan::AdaptiveCpu::State::Empty)++owned_lighting[slot.lit];
+    Require(owned_lighting == std::array<u64, 2>{1, 1},
             "bank occupancy records lit and unlit admissions");
     for (const auto &c : {unlit, lit, lit}) {
       p.Fresh(c);
-      Require(p.BindPipeline(info, true, nullptr, true, nullptr, &layout),
+      Require(p.BindPipeline(info, true, nullptr, true, nullptr, &layout, &token),
               "lit/unlit ready draw");
     }
     p.scheduler.Finish();
@@ -1152,13 +1048,16 @@ void KeyAndDynamicState() {
       }
       p.Fresh(config);
       auto *actual =
-          p.PrepareReadyCpuFragment(x, p.GetTevFallback(x, true), layout);
+          p.PrepareReadyCpuFragment(x, p.GetTevFallback(x, true), layout, &token);
       Require((actual == base) == (dynamic && changed >= 4),
               "exact state key separates static and normalized dynamic fields");
-      if (!actual)
-        Require(p.ready_cpu_pipelines.size() == 2 &&
-                    p.ready_vertex_worker->tasks.size() == 1,
-                "static state admits distinct stable PSO");
+      if (!actual) {
+        Require(p.ReadyCpuOwned()==1 && p.ready_vertex_worker->tasks.empty(),
+                "static miss cannot bypass probation");
+        auto* distinct=WarmPipeline(p,x,config);
+        Require(distinct!=base && p.ReadyCpuOwned()==2,
+                "probated static state admits distinct stable PSO");
+      }
     }
   {
     PipelineCache p;
@@ -1190,14 +1089,14 @@ void KeyAndDynamicState() {
       x.state.rasterization.flip_viewport.Assign(n & 1);
       x.dynamic_info.viewport = {n, n + 4, n + 804, n + 484};
       x.dynamic_info.scissor = {n + 1, n + 5, n + 800, n + 480};
-      Require(p.BindPipeline(x, true, nullptr, true, nullptr, &layout),
+      Require(p.BindPipeline(x, true, nullptr, true, nullptr, &layout, &token),
               "dynamic state specialized complete draw");
     }
     p.current_info = {};
     p.tev_constants = {};
     p.scheduler.Finish();
     Require(p.scheduler.completed.size() == 3 &&
-                p.ready_cpu_pipelines.size() == 1,
+                p.ReadyCpuOwned() == 1,
             "dynamic normalized PSO reused for three draws");
     for (unsigned n = 1; n <= 3; ++n) {
       const auto &x = p.scheduler.completed[n - 1];
@@ -1245,25 +1144,16 @@ void KeyAndDynamicState() {
 }
 
 int main() {
-  try {
-    AdmissionAndFailures();
-    IdentitiesCapsAndLifetime();
-    BindTransportAndModes();
-    AllocationAndSharedBudget();
-    KeyAndDynamicState();
-    Require(Probe::optional_waits == 0 && Probe::lifetime_errors == 0,
-            "final optional waits and ownership");
-    std::cout << "PASS checks=" << Probe::checks
-              << " compiler_calls=" << Probe::compiler_calls
-              << " pipeline_builds=" << Probe::pipeline_builds
-              << " optional_waits=" << Probe::optional_waits
-              << " destroyed_pipelines=" << Probe::destroyed_pipelines << "\n";
-    return 0;
-  } catch (const std::exception &e) {
-    std::cerr << "FAIL " << e.what() << " checks=" << Probe::checks << "\n";
-    return 1;
-  } catch (...) {
-    std::cerr << "FAIL opaque escape\n";
-    return 2;
-  }
+    try {
+        RealSelectionAndTransport(); ActualBankReuse(); FailuresProfilesAndModes();
+        SharedLimitsAndAllocation();
+        BindTransportAndModes(); KeyAndDynamicState();
+        Require(Probe::optional_waits==0 && Probe::lifetime_errors==0,
+                "no optional waits or borrowed shader destruction");
+        std::cout << "PASS checks=" << Probe::checks << " builds=" << Probe::pipeline_builds
+                  << " optional_waits=" << Probe::optional_waits << '\n';
+        return 0;
+    } catch(const std::exception& e) {
+        std::cerr << "FAIL " << e.what() << " checks=" << Probe::checks << '\n'; return 1;
+    }
 }

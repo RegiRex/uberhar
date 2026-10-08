@@ -1,6 +1,51 @@
 <!-- AstraEH: Attribution index for the Uberhar implementation, tests, packaging and documentation. -->
 # Uberhar code map
 
+<!-- CodexAstraLocal: Map bounded replacement, independent lifetime conditions and their durable gate; comment-free version data records this candidate. -->
+## 0.1.31 — adaptive CPU fragment pipeline ownership
+
+- `renderer_vulkan/uberhar_adaptive_cpu_policy.h` owns eight stable slots,
+  fixed demand probation, cumulative attempt limits and failed-key history.
+  Compiler release and completed GPU use protect worker-side destruction;
+  retired owners retain their capacity until completion is acquired.
+- `renderer_vulkan/uberhar_cpu_fragment_cache.h` supplies exact observation
+  equality and a value hash. Observation identity admits work; the existing
+  full execution and shader-owner checks still authorize selection.
+- `renderer_vulkan/vk_pipeline_cache.{h,cpp}` integrates shared work limits,
+  retirement, generation tokens, binding invalidation and bounded reports.
+  `vk_rasterizer.cpp` uses the existing drained frame boundary and stamps actual
+  draw enqueue after any stream-map flush. Native and mode 4 avoid the optional
+  post-draw call when no CPU token was selected.
+- `tools/uberhar/test_adaptive_cpu_cache.{cpp,py}` exercises production policy
+  with the real worker and explicit compiler/GPU completion controls.
+  `test_ready_cpu_fragments.{cpp,py}` retains actual binding and fallback checks
+  and adds retirement, slot reuse and draw-tick controls. Both require intended
+  failing mutants through `build_probe.sh`. Controlled command endpoints are
+  separate from device execution and existing CPU ABI/image/binary gates.
+- `src/video_core/CMakeLists.txt` includes the helper headers in the Vulkan
+  source set. `UBERHAR_VERSION` records `0.1.31`; release notes distinguish
+  completed source proofs from pending delivery and target qualification.
+
+<!-- CodexAstraLocal: Explain the diagnostic consumer and its bounded costs without equating state eligibility with independent rendering. -->
+### Joint Calculated admission census
+
+`renderer_vulkan/uberhar_compute_census.h` counts the existing eleven-bit state
+mask and six/other vertex batches in one fixed interval bank. It derives lifetime
+marginals, four ranked groups, exact unranked totals and two state-only candidate
+upper bounds at reporting time. `vk_compute_rect.{h,cpp}` owns the bank, consumes
+each interval once, catches reporting failures and flushes the final partial
+before lifetime totals. `vk_rasterizer.cpp` supplies the existing mask/count and
+reuses the 30-second memory-report cadence. All prior admission tests and actual
+rendering remain unchanged; Native also owns this compute-route observer.
+
+`tools/uberhar/test_compute_census.{cpp,py}` exercises production classification,
+geometry and extracted admission/report methods with controlled resource/log
+endpoints. The host probe requires it. Joint bins do not contain guest payloads,
+and six vertices do not prove rectangles. Window IDs require exact renderer-
+lifecycle scope; optional delivery may omit reports or groups. Complete delivered
+summaries can support their full-bank upper bounds, while absent intervals remain
+unknown. These diagnostics select the next experiment, not a claimed speedup.
+
 <!-- CodexAstraLocal: Map the new complete-draw route, bounded ownership and independent host gates; version data remains comment-free. -->
 ## 0.1.30 — ready fragments with CPU vertices
 

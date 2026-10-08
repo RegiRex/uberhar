@@ -145,6 +145,12 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
         if (Settings::UsesReadyGpuVertices(Settings::values.uberhar_test_mode.GetValue()))
             ready_vertex_worker = std::make_unique<Common::ThreadWorker>(1, "Uberhar GPU vertex");
     }
+    // CodexAstraLocal: Optional metadata allocation failure keeps generic draws
+    // available. Native and forced-generic modes allocate no adaptive policy.
+    if (ready_vertex_worker && allow_specialized_fragments) {
+        try { ready_cpu_bank = std::make_unique<ReadyCpuBank>(); }
+        catch (...) { ++ready_cpu_admission_failures; }
+    }
     scheduler.RegisterOnDispatch([this] { update_queue.Flush(); });
     profile = Pica::Shader::Profile{
         .enable_accurate_mul = false,
@@ -226,7 +232,8 @@ PipelineCache::~PipelineCache() {
     SaveDriverPipelineDiskCache();
     // CodexAstraLocal: All queued users are drained before the CPU bank releases
     // its pipelines, and before automatic destruction of shared shader owners.
-    ready_cpu_pipelines.clear();
+    if (ready_cpu_bank) ready_cpu_bank->ResetAfterDrain();
+    ready_optional_attempts = 0;
 }
 
 void PipelineCache::LoadCache(const std::atomic_bool& stop_loading,
@@ -508,7 +515,10 @@ void PipelineCache::SwitchDiskCache(u64 title_id, const std::atomic_bool& stop_l
 bool PipelineCache::BindPipeline(PipelineInfo& info, bool wait_built,
                                  GraphicsPipeline* ready_cpu_fallback, bool allow_tev_build,
                                  GraphicsPipeline* ready_gpu_vertex,
-                                 const VertexLayout* cpu_vertex_layout) {
+                                 const VertexLayout* cpu_vertex_layout, CpuFragmentToken* cpu_use) {
+    // CodexAstraLocal: Every call starts with no borrowed optional owner. A CPU
+    // promotion requires a caller that will stamp its actual later draw.
+    if (cpu_use) *cpu_use = {};
     MICROPROFILE_SCOPE(Vulkan_Bind);
 
     for (u32 i = 0; i < MAX_SHADER_STAGES; i++) {
@@ -602,9 +612,9 @@ bool PipelineCache::BindPipeline(PipelineInfo& info, bool wait_built,
             // CodexAstraLocal: Required cold compilation remains complete first.
             // Keep legacy CPU bridges unchanged; only an explicit normal CPU draw
             // can choose the separately keyed, already successful specialization.
-            if (cpu_vertex_layout && ready_vertex_worker && allow_specialized_fragments &&
+            if (cpu_vertex_layout && cpu_use && ready_cpu_bank && ready_vertex_worker && allow_specialized_fragments &&
                 !cpu_bridge && !ready_gpu_vertex) {
-                if (auto* ready = PrepareReadyCpuFragment(info, generic, *cpu_vertex_layout)) {
+                if (auto* ready = PrepareReadyCpuFragment(info, generic, *cpu_vertex_layout, cpu_use)) {
                     pipeline = ready;
                     specialized_cpu = true;
                     ++ready_cpu_selected;
@@ -1002,13 +1012,14 @@ bool PipelineCache::ReadyGpuFragmentPreflight(const Pica::RegsInternal& regs,
 // generic draw on every miss/error. Host shader owners and full execution state,
 // not guest/hash identity alone, admit the separate software-layout pipeline.
 GraphicsPipeline* PipelineCache::PrepareReadyCpuFragment(
-    PipelineInfo& info, GraphicsPipeline* generic, const VertexLayout& software_layout) noexcept {
+    PipelineInfo& info, GraphicsPipeline* generic, const VertexLayout& software_layout,
+    CpuFragmentToken* cpu_use) noexcept {
     // CodexAstraLocal: Barycentric fragment interfaces retain their existing route
     // until the distinct per-vertex ABI has its own executed proof (Thor is false).
-    if (!ready_vertex_worker || !curr_disk_cache || !virtual_fs_config || !tev_supported ||
-        profile.has_fragment_shader_barycentric || !PreferReadySpecializedFragment(tev_user) || !generic || !generic->IsDone() ||
-        generic->HasFailed() || !generic->Handle())
-        return nullptr;
+    if (!ready_cpu_bank || !cpu_use || !ready_vertex_worker || !curr_disk_cache ||
+        !virtual_fs_config || !tev_supported || profile.has_fragment_shader_barycentric ||
+        !PreferReadySpecializedFragment(tev_user) || !generic || !generic->IsDone() ||
+        generic->HasFailed() || !generic->Handle()) return nullptr;
     ++ready_cpu_requests;
     auto expected = info.state;
     expected.vertex_layout = software_layout;
@@ -1022,87 +1033,120 @@ GraphicsPipeline* PipelineCache::PrepareReadyCpuFragment(
         return nullptr;
     }
     try {
-        // CodexAstraLocal: A full CPU/combined bank may reuse existing modules,
-        // but cannot warm new FS demand that has no remaining pipeline slot.
-        const bool capacity = ready_cpu_pipelines.size() < MaxReadyCpuPipelines &&
-            ready_cpu_pipelines.size() + ready_vertex_pipelines.size() < ReadyVertexPolicy::MaxPipelines;
+        // CodexAstraLocal: Ready hits avoid copying the probation key/profile.
+        // First lookup is always read-only, including full/exhausted banks.
         const auto fragment = curr_disk_cache->UseReadyFragmentShader(
-            *virtual_fs_config, tev_user, capacity);
+            *virtual_fs_config, tev_user, false);
+        auto stages = current_shaders;
+        auto candidate = info;
+        u64 key{};
+        if (fragment) {
+            stages[ProgramType::FS] = fragment->second;
+            if (!stages[ProgramType::FS] || !stages[ProgramType::FS]->IsDone() ||
+                stages[ProgramType::FS]->HasFailed() || !stages[ProgramType::FS]->Handle()) {
+                ++ready_cpu_dependencies;
+                return nullptr;
+            }
+            candidate.state.shader_ids = shader_hashes;
+            candidate.state.shader_ids[ProgramType::FS] = fragment->first;
+            const auto owners = HostShaderIds(stages);
+            key = candidate.state.ExecutionHash(instance.IsExtendedDynamicStateSupported(), owners);
+            if (auto* slot = ready_cpu_bank->Find(key)) {
+                auto* ready = slot->owner.get();
+                if (ready->Key() != key || !ready->MatchesExecution(candidate, owners)) {
+                    ++ready_cpu_mismatches;
+                    return nullptr;
+                }
+                ready_cpu_bank->Requested(*slot);
+                if (!ready->IsDone()) { ++ready_cpu_deferred; return nullptr; }
+                if (ready->HasFailed() || !ready->Handle()) {
+                    ++ready_cpu_failed_hits;
+                    return nullptr;
+                }
+                current_shaders = stages;
+                shader_hashes[ProgramType::FS] = fragment->first;
+                info.state.shader_ids[ProgramType::FS] = fragment->first;
+                *cpu_use = ready_cpu_bank->Selected(*slot, scheduler.CurrentTick());
+                return ready;
+            }
+        }
+        // CodexAstraLocal: Terminal creation limits cannot be repaired by new
+        // demand. Preserve ready hits above, then avoid copying/hashing the large
+        // observation key on every later generic draw. Capacity/busy misses still
+        // observe demand because their availability can recover normally.
+        if (!ready_cpu_bank->AcceptingDemand(ready_optional_attempts)) {
+            ++ready_cpu_bank->stats.exhausted;
+            ++ready_cpu_capped;
+            if (!fragment) ++ready_cpu_dependencies;
+            return nullptr;
+        }
+        // CodexAstraLocal: Cold novelty alone updates fixed probation metadata.
+        // No phase/title heuristic or per-draw allocation chooses useful owners.
+        const CpuFragmentObservation observation{info.state, *virtual_fs_config, profile,
+                                                 instance.IsExtendedDynamicStateSupported()};
+        const u64 observed_hash = observation.Hash();
+        const bool qualified = ready_cpu_bank->Observe(observed_hash, observation);
+        const bool pending = (warming_ready_vertex && !warming_ready_vertex->IsDone());
+        const bool capacity = ready_cpu_bank->CanCreate(ready_vertex_pipelines.size(),
+                                                        ready_optional_attempts, pending);
         if (!fragment) {
             ++ready_cpu_dependencies;
+            if (qualified && capacity)
+                curr_disk_cache->UseReadyFragmentShader(*virtual_fs_config, tev_user, true);
             if (!capacity) ++ready_cpu_capped;
             return nullptr;
         }
-        auto stages = current_shaders;
-        stages[ProgramType::FS] = fragment->second;
-        if (!stages[ProgramType::FS] || !stages[ProgramType::FS]->IsDone() ||
-            stages[ProgramType::FS]->HasFailed() || !stages[ProgramType::FS]->Handle()) {
-            ++ready_cpu_dependencies;
-            return nullptr;
-        }
-        auto candidate = info;
-        candidate.state.shader_ids = shader_hashes;
-        candidate.state.shader_ids[ProgramType::FS] = fragment->first;
-        const auto owners = HostShaderIds(stages);
-        const u64 key = candidate.state.ExecutionHash(
-            instance.IsExtendedDynamicStateSupported(), owners);
-        if (const auto it = ready_cpu_pipelines.find(key); it != ready_cpu_pipelines.end()) {
-            auto* ready = it->second.get();
-            if (ready->Key() != key || !ready->MatchesExecution(candidate, owners)) {
-                ++ready_cpu_mismatches;
-                return nullptr;
-            }
-            if (!ready->IsDone()) {
-                ++ready_cpu_deferred;
-                return nullptr;
-            }
-            if (ready->HasFailed() || !ready->Handle()) {
-                ++ready_cpu_failed_hits;
-                return nullptr;
-            }
-            // CodexAstraLocal: Commit identities only after every check succeeds.
-            // Later descriptor/uniform contents remain ordinary queued draw data.
-            current_shaders = stages;
-            shader_hashes[ProgramType::FS] = fragment->first;
-            info.state.shader_ids[ProgramType::FS] = fragment->first;
-            return ready;
-        }
-        const bool pending = warming_ready_vertex && !warming_ready_vertex->IsDone();
-        if (!capacity || pending) {
-            if (pending) ++ready_cpu_deferred;
+        if (!qualified || !capacity) {
+            if (pending || !qualified) ++ready_cpu_deferred;
             else ++ready_cpu_capped;
             return nullptr;
         }
-        auto pipeline = std::make_unique<GraphicsPipeline>(
-            instance, renderpass_cache, candidate, *driver_pipeline_cache, *pipeline_layout,
-            stages, ready_vertex_worker.get(),
-            PipelineBuildOptions{&pipeline_completion, &ready_cpu_build_stats, false, true});
-        auto* prepared = pipeline.get();
-        ready_cpu_pipelines.emplace(key, std::move(pipeline));
-        ++ready_cpu_bank_lighting[virtual_fs_config->lighting.enable.Value() != 0];
-        warming_ready_vertex = prepared;
-        // CodexAstraLocal: The stable owner contains immutable state/stage pointers.
-        // Queue failure publishes terminal failure; no wait or rendering retry is added.
+        auto* slot = ready_cpu_bank->Reserve(observed_hash, observation,
+            virtual_fs_config->lighting.enable.Value() != 0, ready_vertex_pipelines.size(),
+            ready_optional_attempts, pending);
+        if (!slot) { ++ready_cpu_deferred; return nullptr; }
+        // CodexAstraLocal: The lifetime work token and physical slot are charged
+        // before this potentially throwing allocation; failures remain no-retry keys.
+        std::unique_ptr<GraphicsPipeline> pipeline;
         try {
-            ready_vertex_worker->QueueWork([prepared] {
-                try {
-                    if (!prepared->Build()) prepared->MarkFailed();
-                } catch (...) {
-                    if (!prepared->IsDone()) prepared->MarkFailed();
-                }
-            });
+            pipeline = std::make_unique<GraphicsPipeline>(
+                instance, renderpass_cache, candidate, *driver_pipeline_cache, *pipeline_layout,
+                stages, ready_vertex_worker.get(),
+                PipelineBuildOptions{&pipeline_completion, &ready_cpu_build_stats, false, true});
         } catch (...) {
-            prepared->MarkFailed();
+            ready_cpu_bank->AllocationFailed(*slot);
             ++ready_cpu_admission_failures;
             return nullptr;
         }
+        warming_ready_vertex = pipeline.get();
+        if (!ready_cpu_bank->Start(*slot, std::move(pipeline), key, *ready_vertex_worker,
+                                  [](GraphicsPipeline& owner) { return owner.Build(); }))
+            ++ready_cpu_admission_failures;
         ++ready_cpu_deferred;
     } catch (...) {
-        // CodexAstraLocal: Optional allocation/module admission cannot newly abort
-        // the complete required generic draw already selected by the caller.
         ++ready_cpu_admission_failures;
     }
     return nullptr;
+}
+
+// CodexAstraLocal: A stream-buffer Map can Flush after binding. Only this actual
+// post-enqueue tick plus the earlier bind tick protect the full recorded use.
+void PipelineCache::CompleteReadyCpuDraw(CpuFragmentToken token) {
+    if (ready_cpu_bank && token) ready_cpu_bank->DrawQueued(token, scheduler.CurrentTick());
+}
+
+// CodexAstraLocal: Called immediately after the pre-existing command worker
+// drain, never concurrently with a binding closure or a draw producer. Reuse
+// separately requires final compiler release and known completed GPU use.
+void PipelineCache::RetireReadyCpuAfterWorkerDrain() {
+    if (!ready_cpu_bank) return;
+    const bool pending = warming_ready_vertex && !warming_ready_vertex->IsDone();
+    ready_cpu_bank->FrameAfterDrain(scheduler.GetMasterSemaphore()->KnownGpuTick(),
+        ready_vertex_pipelines.size(), ready_optional_attempts, pending, *ready_vertex_worker,
+        [this](GraphicsPipeline* owner) {
+            if (bound_pipeline == owner) bound_pipeline = nullptr;
+            if (warming_ready_vertex == owner) warming_ready_vertex = nullptr;
+        });
 }
 
 GraphicsPipeline* PipelineCache::PrepareReadyGpuVertex(const PipelineInfo& info) {
@@ -1156,14 +1200,21 @@ GraphicsPipeline* PipelineCache::PrepareReadyGpuVertex(const PipelineInfo& info)
             ++ready_vertex_deferred;
         return nullptr;
     }
-    const bool pending = warming_ready_vertex && !warming_ready_vertex->IsDone();
-    if (!ReadyVertexPolicy::CanQueue(ready_vertex_pipelines.size() + ready_cpu_pipelines.size(), pending)) {
+    // CodexAstraLocal: CPU destruction/compiler-release work shares the existing
+    // serial optional slot; retired owners and lifetime attempts still count.
+    const bool pending = (ready_cpu_bank && ready_cpu_bank->AnyJob()) ||
+        (warming_ready_vertex && !warming_ready_vertex->IsDone());
+    if (ready_optional_attempts >= ReadyCpuBank::CombinedLimit ||
+        !ReadyVertexPolicy::CanQueue(ready_vertex_pipelines.size() + ReadyCpuOwned(), pending)) {
         if (pending)
             ++ready_vertex_deferred;
         else
             ++ready_vertex_capped;
         return nullptr;
     }
+    // CodexAstraLocal: Charge before allocation/queue work; CPU retirement never
+    // refunds this combined finite compilation budget.
+    ++ready_optional_attempts;
     auto pipeline = std::make_unique<GraphicsPipeline>(
         instance, renderpass_cache, candidate, *driver_pipeline_cache, *pipeline_layout,
         stages, ready_vertex_worker.get(),
@@ -1629,7 +1680,8 @@ void PipelineCache::ClearTevFallbacks() {
     ready_vertex_pipelines.clear();
     // CodexAstraLocal: The scheduler/compiler drains above protect every borrowed
     // module owner; release CPU PSOs before disk-cache modules can be replaced.
-    ready_cpu_pipelines.clear();
+    if (ready_cpu_bank) ready_cpu_bank->ResetAfterDrain();
+    ready_optional_attempts = 0;
     ready_cpu_bank_lighting = {};
     warming_tev_pipeline = nullptr;
     tev_pipelines.clear();
@@ -1748,6 +1800,53 @@ void PipelineCache::ReportUberharStats(const char* kind) {
                  ready_cpu_selected);
     }
     if (allow_specialized_fragments && ready_vertex_worker) {
+        // CodexAstraLocal: State/lit metadata is producer-owned even while a worker
+        // destroys the unique_ptr. Snapshot at reporting time to include admissions
+        // since the last swap without adding per-draw census work.
+        std::array<u64, 7> ownership{};
+        ready_cpu_bank_lighting = {};
+        if (ready_cpu_bank) {
+            for (const auto& slot : ready_cpu_bank->AllSlots()) {
+                ++ownership[static_cast<std::size_t>(slot.state)];
+                if (slot.state != Vulkan::AdaptiveCpu::State::Empty)
+                    ++ready_cpu_bank_lighting[slot.lit];
+            }
+            const auto& adaptation = ready_cpu_bank->stats;
+            // CodexAstraLocal Log Line: Counts show bounded reuse and fallback,
+            // never GPU duration, guest frames or an opaque-driver memory ceiling.
+            LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
+                "Uberhar adaptive CPU PSOs {}: schema=1 scope=current_title swap={} "
+                "empty={} reserved={} building={} ready={} failed={} retired={} destroy_queued={} "
+                "owned={} max_owned={} cpu_attempts={} combined_attempts={} "
+                "observations={} probation={} collisions={} retirements={} destroyed={} failed_keys={} "
+                "queue_failures={} exhausted={} stale_tokens={} disabled={} "
+                "max_cpu=8 max_cpu_attempts=64 max_combined_attempts=256",
+                kind, ready_cpu_bank->Swap(), ownership[0], ownership[1], ownership[2],
+                ownership[3], ownership[4], ownership[5], ownership[6], ReadyCpuOwned(),
+                adaptation.max_owned, ready_cpu_bank->Attempts(), ready_optional_attempts,
+                adaptation.observations, adaptation.probation, adaptation.collisions, adaptation.retirements,
+                adaptation.destroyed, adaptation.failed_keys, adaptation.queue_failures,
+                adaptation.exhausted, adaptation.stale_tokens, ready_cpu_bank->Disabled());
+            // CodexAstraLocal Log Line: Final-only, at most64 attempted keys,
+            // including failed/retired owners. The observation hash is a bucket,
+            // not actor identity or a replacement for exact key equality.
+            if (std::strcmp(kind, "totals") == 0) {
+                ready_cpu_bank->VisitAttempts([&](std::size_t ordinal,
+                    const CpuFragmentObservation& key, u64 observed_hash, bool failed) {
+                    LOG_INFO(Render_Vulkan,
+                        "Uberhar CPU PSO census: schema=1 scope=current_title title={:016X} "
+                        "ordinal={} observation={:016X} fs={:016X} failed={} lit={} "
+                        "color_format={} depth_format={} bindings={} attributes={} "
+                        "dynamic={} accurate_mul={} clip_planes={} max_attempts=64",
+                        GetProgramID(), ordinal, observed_hash, key.fs.Hash(), failed,
+                        key.fs.lighting.enable.Value() != 0,
+                        static_cast<u32>(key.state.attachments.color),
+                        static_cast<u32>(key.state.attachments.depth),
+                        key.state.vertex_layout.binding_count, key.state.vertex_layout.attribute_count,
+                        key.dynamic, key.profile.enable_accurate_mul, key.profile.has_clip_planes);
+                });
+            }
+        }
         // CodexAstraLocal Log Line: Existing bounded progress/final cadence only;
         // counts are draw/admission coverage, never GPU cost or a byte budget.
         LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
@@ -1757,8 +1856,8 @@ void PipelineCache::ReportUberharStats(const char* kind) {
             "selected_unlit={} selected_lit={} bank_unlit={} bank_lit={} weighting=draws",
             kind, ready_cpu_requests, ready_cpu_selected, ready_cpu_dependencies,
             ready_cpu_deferred, ready_cpu_capped, ready_cpu_mismatches, ready_cpu_failed_hits,
-            ready_cpu_admission_failures, ready_cpu_pipelines.size(),
-            ready_cpu_pipelines.size() + ready_vertex_pipelines.size(),
+            ready_cpu_admission_failures, ReadyCpuOwned(),
+            ReadyCpuOwned() + ready_vertex_pipelines.size(),
             ready_cpu_selected_lighting[0], ready_cpu_selected_lighting[1],
             ready_cpu_bank_lighting[0], ready_cpu_bank_lighting[1]);
     }

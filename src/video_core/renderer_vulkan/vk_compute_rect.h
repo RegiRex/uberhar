@@ -1,9 +1,11 @@
 // Copyright 2026 Uberhar contributors
 // Licensed under GPLv2 or any later version. Refer to license.txt.
 #pragma once
+#include <chrono>
 #include <memory>
 #include "common/settings.h"
 #include "video_core/renderer_vulkan/uberhar_compute_rect.h"
+#include "video_core/renderer_vulkan/uberhar_compute_census.h"
 #include "video_core/renderer_vulkan/vk_resource_pool.h"
 
 namespace Vulkan {
@@ -29,13 +31,17 @@ public:
     void BeginSample(int slot);
     void EndSample(int slot);
     void Poll();
-    void Report() const;
+    void Report();
     // AstraEH: Count all blocking state components, not just the first one.
-    void RejectState(u32 reasons) {
-        ++unsupported;
-        for (unsigned i = 0; i < rejected_state.size(); ++i)
-            rejected_state[i] += (reasons >> i) & 1;
+    // CodexAstraLocal: Replace the per-draw marginal loop with the full joint
+    // interval bank. Observe the already-computed state mask exactly once,
+    // including mask 0; geometry and fragment qualification remain unchanged.
+    void ObserveState(u32 reasons, std::size_t vertices) noexcept {
+        state_census.Record(reasons, vertices);
     }
+    // CodexAstraLocal: Reuse the caller's existing 30s clock/cadence. A final
+    // partial interval is distinct from cumulative lifetime blocker totals.
+    void ReportCensus(std::chrono::steady_clock::time_point now, bool final = false) noexcept;
     // AstraEH: Counters describe actual route coverage, including rejected states.
     u64 considered{}, unsupported{}, geometry_rejected{}, format_rejected{}, eligible{},
         native_draws{}, compute_draws{}, compute_pixels{};
@@ -59,6 +65,13 @@ private:
     std::array<Sample, 32> samples{};
     ComputeRectSelector selector;
     std::array<u64, static_cast<unsigned>(ComputeRectReject::Count)> rejected_state{};
+    // CodexAstraLocal: One 32 KiB interval bank; lifetime marginals are accumulated
+    // only on reports. This adds no per-draw clock, allocation or guest read.
+    ComputeStateCensus state_census;
+    std::chrono::steady_clock::time_point census_start{std::chrono::steady_clock::now()};
+    u64 census_sequence{}, census_considered{}, census_unsupported{}, census_log_failures{};
+    bool census_overflow{};
+    static_assert(static_cast<unsigned>(ComputeRectReject::Count) == ComputeStateCensus::ReasonBits);
     double timestamp_period{};
     u64 timestamp_mask{}, measurement_attempts{};
     std::array<u64, 2> measured_draws{};

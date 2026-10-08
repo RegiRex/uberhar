@@ -1,5 +1,23 @@
 # Uberhar development instructions
 
+<!-- CodexAstraLocal: The owner's October 7 late-session update sets the next implementation sequence, consolidates device runs and replaces the open-ended 0.2.0 stopping point. -->
+- Finish the scheduled next candidate (0.1.31 bounded adaptive CPU fragment
+  pipeline admission), then prioritize substantive Calculated-mode rendering
+  coverage for 0.1.32. Aim for independent calculated execution with no Native
+  fallback; report actual computed/fallback coverage honestly and preserve
+  correctness, complete draws and the existing gates. A mode label or forced
+  unsupported admission does not establish independent rendering.
+- Gather each method's required conditions, logs, brief consecutive-frame visual
+  evidence, memory and relevant diagnostics in **one run per method per build**.
+  Do not schedule routine repeated openings with the same settings. Consolidate
+  necessary observations into the run; retain incomplete/unobserved scope rather
+  than silently repeating a method to fill every evidence gap.
+- After **0.1.32 is built and tested**, complete a systematic architecture,
+  correctness and performance review plus a separate code-cleanliness/purpose-
+  comment audit, then **stop with a resumable report for owner inspection**.
+  This explicitly supersedes the earlier instruction to continue until 0.2.0.
+  The every-three-build review cadence remains compatible with this .32 boundary.
+
 <!-- CodexAstraLocal: The owner expands the current .28 controls to include calculated rendering. -->
 - Add a calculated-mode (mode 2) Dark Moon cold opening baseline alongside
   Native and full Combo, using the same File 1/cache reset, Vulkan 2x and 100%

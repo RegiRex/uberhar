@@ -183,6 +183,11 @@ if (ENABLE_VULKAN)
         renderer_vulkan/uberhar_spirv_cache.h
         renderer_vulkan/uberhar_compute_rect.h
         renderer_vulkan/uberhar_compute_rect_shader.h
+        # CodexAstraLocal: Count joint rejection states at the existing report cadence.
+        renderer_vulkan/uberhar_compute_census.h
+        # CodexAstraLocal: Bounded demand and ownership permit safe CPU pipeline reuse.
+        renderer_vulkan/uberhar_adaptive_cpu_policy.h
+        renderer_vulkan/uberhar_cpu_fragment_cache.h
         renderer_vulkan/vk_blit_helper.cpp
         renderer_vulkan/vk_blit_helper.h
         renderer_vulkan/vk_common.cpp
