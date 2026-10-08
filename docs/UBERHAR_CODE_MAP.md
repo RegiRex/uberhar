@@ -1,6 +1,21 @@
 <!-- AstraEH: Attribution index for the Uberhar implementation, tests, packaging and documentation. -->
 # Uberhar code map
 
+<!-- CodexAstraLocal: Map the final audit and local purpose-comment closure without changing released source identity. -->
+## 0.1.32 review checkpoint
+
+The [architecture review](UBERHAR_ARCHITECTURE_0.1.32.md),
+[independent cleanliness audit](UBERHAR_CLEANLINESS_0.1.32.md) and
+[Thor test review](UBERHAR_TEST_REVIEW_0.1.32.md) are complete. The tested source
+is `6486198d52df144e184165133c716ffa01a05f26`; no new runtime build accompanies
+this documentation checkpoint. Six local comment lines explain three inherited
+Android lifecycle blocks: `CrashSessionLogs.beginRun` writes the current-run
+marker, `endRun` records orderly completion, and `EmulationFragment` brackets
+the native call with teardown hooks while a fatal process exit leaves the active
+marker behind. Removing
+only those additions reconstructs the released bytes. They remain local for
+the next authorized source build and are not represented as installed .32 code.
+
 <!-- CodexAstraLocal: Map the exact Calculated extension and comment-free candidate version; release/device gates remain separately reported. -->
 ## 0.1.32 — masked and endpoint replacement
 
@@ -30,7 +45,8 @@
   requires both suites. Host GL pixels and validated Vulkan modules remain
   distinct from device rendering.
 - `UBERHAR_VERSION` records `0.1.32`. Its release notes and progress distinguish
-  integrated source from pending full gates, publication and title qualification.
+  released source and passed build gates from actual title qualification. The .32
+  Calculated control still records zero state admissions and compute draws.
 
 <!-- CodexAstraLocal: Map bounded replacement, independent lifetime conditions and their durable gate; comment-free version data records this candidate. -->
 ## 0.1.31 — adaptive CPU fragment pipeline ownership

@@ -1,13 +1,54 @@
-# Uberhar progress — 0.1.31 controls complete; 0.1.32 Calculated work underway
+# Uberhar progress — 0.1.32 reviewed; paused for owner inspection
 
 <!-- CodexAstraLocal: Keep the latest owner implementation order, consolidated testing and explicit review boundary visible above historical scope. -->
-Next: validate 0.1.32's expanded Calculated-mode rendering coverage after the
-completed 0.1.31 adaptive CPU fragment-cache work. The aim is independent
-calculation with no Native fallback; report actual coverage without weakening
-correctness or skipping draws. Use one evidence run per method per build.
-After 0.1.32 is built and tested, complete the systematic architecture,
-correctness, performance and separate cleanliness/comment review, then stop
-with a resumable report for owner inspection.
+The scheduled 0.1.31 adaptive CPU fragment work and 0.1.32 Calculated extension
+are delivered and tested, with one cold opening per method per build. The
+systematic architecture/correctness/performance and separate cleanliness/comment
+reviews are complete. **Development is paused for owner inspection**, as requested.
+Independent calculation, correct graphics and sustained 99%+ remain the goal;
+0.1.32 does not qualify them. No 0.1.33 build or automatic 0.2.0 continuation
+is scheduled.
+
+<!-- CodexAstraLocal: Bind verified delivery and bounded target results to the released source without claiming product qualification. -->
+**0.1.32 passed all 22 required release gates** in
+[run 37750392228](https://github.com/RegiRex/uberhar/actions/runs/37750392228)
+at `6486198d52df144e184165133c716ffa01a05f26`. Exact source, checksum, package
+and signing compatibility checks passed, followed by a data-preserving update
+to **0.1.32 / 33984206**. APK SHA-256:
+`bee332a5504a9323609f5bb7557e16319fb0c70f4772391fdb6b2be108bc040a`.
+All four single cold openings completed with normal returns: **20.957% Calculated,
+20.964% Native, 23.185% full Combo and 19.455% ComboGeneric** mean normal speed.
+Every accepted reporting window remained below 99%. No skipped draws or required
+fallback failures were reported; scene and observer differences prevent a causal
+speedup claim. Calculated recorded zero compute draws: all lifecycle attempts
+failed state admission before geometry/format despite a prepared compute pipeline.
+The host-validated extension has not demonstrated Dark Moon coverage improvement.
+Consecutive review found zero/two/zero/two isolated moon events in Calculated,
+Native, Combo and Generic respectively, all below the owner's priority threshold.
+Calculated and Native have four/two separate single-frame ghost blocks; the
+prior dense ghost patches are absent in the covered cores. Unequal scene coverage
+and capture limits prevent broader correctness or frequency claims.
+See the [test review](UBERHAR_TEST_REVIEW_0.1.32.md),
+[architecture review](UBERHAR_ARCHITECTURE_0.1.32.md) and
+[separate cleanliness audit](UBERHAR_CLEANLINESS_0.1.32.md).
+
+<!-- CodexAstraLocal: State the review's next proposed evidence and implementation order without starting another iteration. -->
+The next proposed performance work targets the complete CPU vertex path, which
+still occupies about 83.7% of separate Calculated vertex-report wall time.
+Select exact input-loader recipes only after representative workload coverage
+and whole-path output/cost checks. Further compute-pixel expansion first needs
+bounded exact failed-state examples: raw ColorWrite/Blend counts alone did not
+identify states admitted by .32. These are resumable proposals, not implemented
+speedups. The new full-review anchor is released .32, with zero successors.
+
+<!-- CodexAstraLocal: Preserve the final device state and local documentation-only correction without changing released identity. -->
+Both Thor screens are off, the original 60-second timeout is restored and the
+protected .22 state remains unchanged. Six local comment lines cover three older
+Android lifecycle blocks missing CodexAstraLocal attribution; byte-reconstruction
+checks confirm no executable change. They are preserved for the next authorized
+source build, separate from installed .32 and this documentation-only checkpoint.
+
+<details><summary>Earlier .30/.31 implementation and testing checkpoints</summary>
 
 <!-- CodexAstraLocal: Advance the reviewed adaptive candidate only through completed host gates; release and target results remain separate. -->
 **0.1.31 is integrated and passes full local validation.** Bounded CPU fragment
@@ -44,7 +85,8 @@ is concentrated in menus and the opening boundary, not a proved broad gameplay
 opportunity. The .32 partial-mask/endpoint replacement implementation is integrated
 and passes fresh native builds, CTest and 41,890 census checks. The complete
 host probe passes in 404.578 seconds, along with both pixel comparison suites
-and independent source/cleanliness review. Release/device gates remain pending.
+and independent source/cleanliness review. Release gates and the final device
+review subsequently completed as recorded above.
 It retains the roughly 83.7% inclusive CPU vertex wall
 bracket observed in Native/Calculated. The
 [Calculated design](UBERHAR_CALCULATED_DESIGN.md) records substantial alternatives
@@ -111,6 +153,8 @@ The requested one-run-per-method rule governs subsequent builds; no further
 0.1.30 openings are scheduled.
 The .29 full audit remains the anchor with **two successful release successors**;
 0.2.0 remains unqualified.
+
+</details>
 
 ## Completed 0.1.29 controls and review
 

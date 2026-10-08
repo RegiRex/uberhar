@@ -1,16 +1,42 @@
 # Architecture review ledger
 
 <!-- CodexAstraLocal: The owner's latest instruction fixes the next review and stopping boundary without prematurely counting unfinished builds. -->
-The 0.1.31 adaptive CPU fragment-cache candidate is delivered and tested; now
-validate Calculated-mode coverage for 0.1.32. After **0.1.32 is built and tested**, perform
-the systematic architecture/correctness/performance review and a separate
-code-cleanliness/purpose-comment audit, then **stop for owner inspection**.
+The 0.1.31 adaptive CPU fragment-cache candidate and 0.1.32 Calculated extension
+are delivered and tested. The systematic architecture/correctness/performance
+review and separate code-cleanliness/purpose-comment audit are complete.
+**Development is paused for owner inspection**, as requested.
 Gather each method's evidence in **one run per method per build**; do not repeat
 ordinary openings to fill every observation gap. This replaces the earlier
 open-ended continuation toward 0.2.0 and aligns with three successors to .29.
 
+<!-- CodexAstraLocal: Reset cadence only after all three delivered successors, four .32 controls and independent full-review tracks have closed. -->
+## Current review anchor — released 0.1.32
+
+The [architecture review](UBERHAR_ARCHITECTURE_0.1.32.md),
+[separate cleanliness audit](UBERHAR_CLEANLINESS_0.1.32.md) and
+[four-method Thor review](UBERHAR_TEST_REVIEW_0.1.32.md) are complete against
+**0.1.32, `6486198d52df144e184165133c716ffa01a05f26`**. This closes the three
+successful successors to .29: .30, .31 and .32. The new anchor has **zero
+successful release successors**. Documentation publication and six local
+comment-only lines do not count as another build; those comments are separate
+from the tested APK and retained for the next authorized source build.
+
+No new blocker was identified within the reviewed delivered-change scope.
+Inherited correctness/ownership debts and observer limits remain in the review.
+Mean normal speed remains 19–23%, and Calculated performs zero compute draws.
+The existing required fallback preserves complete draws; neither independent
+calculation, sustained 99%, 4x, long-game memory nor the retained FEA beta baseline
+is qualified. Moon events remain below the owner's escalation threshold;
+separate ghost events and missing scene coverage remain explicit.
+
+Next work is proposed in the architecture review but does not begin before owner
+inspection. Once resumed, audit after three successful successors or earlier
+when contradictory evidence requires it. No .33 build is scheduled.
+
+<details><summary>Completed .29 anchor and its three successors, retained as history</summary>
+
 <!-- CodexAstraLocal: Reset cadence only after the three delivered builds, separate source/cleanliness tracks and required cold controls are integrated. -->
-## Current review anchor — released 0.1.29
+## Previous review anchor — released 0.1.29
 
 The [full 0.1.27–0.1.29 review](UBERHAR_ARCHITECTURE_0.1.29.md) is complete
 against released **0.1.29, `0136f89d429eab2b25f626703b2158b9ebe5091d`**.
@@ -20,11 +46,13 @@ controls and independent consecutive-frame evidence. The final comment-only
 patch is integrated and matches reviewed token/AST proofs. No new blocking
 correctness defect was found in the delivered changes.
 
-There are **two successful release successors** to this new anchor: 0.1.30 passed all
+There are **three successful release successors** to this anchor: 0.1.30 passed all
 shader/Android/signing/publication gates, exact-asset verification and compatible
-installation, followed by gated 0.1.31 delivery and compatible installation.
-The .30 and all four .31 cold device controls have completed normal return and
-bounded consecutive-frame review. Unobserved scenes remain unqualified.
+installation, followed by gated 0.1.31 and 0.1.32 delivery and compatible installation.
+The .30 and all four .31 controls completed normal return and bounded temporal
+review. All four .32 controls have now returned normally; the mandatory full
+review and final temporal synthesis are closing. Unobserved scenes remain
+unqualified; the anchor is not reset until both reviews are complete.
 Audit again after three successful successors or earlier
 when evidence contradicts the architecture. Native/Combo bounded means remain
 27.869%/21.892%, far below sustained 99%. Moon and ghost coverage remains limited,
@@ -44,6 +72,8 @@ the full host probe. All 22 mandatory release steps passed in run 37738256467,
 followed by exact-source/APK/signing-identity verification and compatible install.
 Its one-run-per-method ordinary device evidence is complete. The .29 full-audit anchor
 and mandatory .32 systematic review remain unchanged.
+
+</details>
 
 <details>
 <summary>Completed 0.1.26 anchor and its three successors, retained as history</summary>

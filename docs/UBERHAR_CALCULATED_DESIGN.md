@@ -5,15 +5,21 @@
 The goal is correct first-run rendering with no saved application shader cache,
 no skipped draws and sustained 99% or better normal speed. Qualify 2x before 4x.
 Calculated mode currently retains CPU vertex execution and a complete graphics
-fallback. Its 0.1.31 Dark Moon control computed zero rectangles or pixels. A mode
-name does not establish independent rendering.
+fallback. Its 0.1.31 and 0.1.32 Dark Moon controls computed zero rectangles
+or pixels. A mode name does not establish independent rendering.
 
 The integrated 0.1.32 candidate expands exact solid replacement to nonzero partial
-RGBA masks and source-alpha endpoint blends. It is not yet a delivered change.
-Original-vertex host pixel comparisons and native builds pass; release gates
-and device qualification remain required. The observed ColorWrite/Blend
-population is concentrated in menus and the opening boundary. The census does
+RGBA masks and source-alpha endpoint blends. It passed all release gates and
+was installed through a verified data-preserving update. Original-vertex host
+pixel comparisons and native builds pass. The single Calculated control prepared
+its compute pipeline but admitted zero states; all 6,646,279 lifecycle attempts
+fell back before geometry or format checks. This has not added Dark Moon coverage. The prior .31
+ColorWrite/Blend population is concentrated in menus and the opening boundary. The census does
 not prove that those draws have supported geometry, TEV or blend factors.
+The .32 logs retain at least 1,126,850 six-vertex raw-1026 draws across delivered
+lifecycle detail rows, yet no effective state admission. Before further pixel
+widening, collect a bounded exact failed-state cohort and replay the unchanged
+classifier. Geometry relaxation cannot fix a rejection occurring before geometry.
 
 <!-- CodexAstraLocal: Tie the next architecture decision to the direct measured bracket without misidentifying wall time as CPU or GPU utilization. -->
 
@@ -22,7 +28,10 @@ seconds of separate complete vertex-report windows: 83.737% inclusive wall time.
 This bracket includes preparation, loading, shader execution, FIFO, output and
 assembly, plus scheduling delays. It ends before `DrawTriangles`. It is neither
 exclusive shader CPU time nor a GPU timing measurement. A pixel-only extension
-cannot claim to remove this work.
+cannot claim to remove this work. The .32 control similarly averaged 20.957%
+normal speed, with 83.665% of separate vertex-report wall time in this bracket.
+These are observations with different report and scene populations, not a causal
+version comparison.
 
 | Architecture | Work moved | Required proof | Decision condition |
 | --- | --- | --- | --- |
@@ -96,6 +105,7 @@ failing controls, followed by actual title coverage. Device evidence uses one
 cold opening per method per build, with normal-100 lower-tail timing,
 consecutive-frame moon and separate ghost review, and relevant memory readings.
 Longer gameplay, 4x and the retained Fire Emblem Awakening beta baseline remain
-unqualified. After 0.1.32 is built and tested, complete the systematic architecture
-review and independent cleanliness/purpose-comment audit, then stop for owner
-inspection. This design document neither closes that audit nor qualifies 0.2.0.
+unqualified. The [0.1.32 architecture review](UBERHAR_ARCHITECTURE_0.1.32.md)
+and [independent cleanliness audit](UBERHAR_CLEANLINESS_0.1.32.md) are complete.
+Development is paused for owner inspection; these architecture proposals do not
+authorize automatic continuation or qualify 0.2.0.
