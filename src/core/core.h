@@ -137,8 +137,9 @@ public:
     /// Shutdown the emulated system.
     void Shutdown(bool is_deserializing = false);
 
-    /// Shutdown and then load again
-    void Reset();
+    // CodexAstraLocal: Return reload failures so frontends cannot resume an
+    // unpowered core after an isolated renderer refuses the selected backend.
+    [[nodiscard]] ResultStatus Reset();
 
     enum class Signal : u32 { None, Shutdown, Reset, Save, Load };
 

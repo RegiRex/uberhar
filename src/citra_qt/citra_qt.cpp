@@ -3933,8 +3933,15 @@ void GMainWindow::OnCoreError(Core::System::ResultStatus result, std::string det
 
     QString title, message;
     QMessageBox::Icon error_severity_icon;
-    bool can_continue = true;
-    if (result == Core::System::ResultStatus::ErrorSystemFiles) {
+    // CodexAstraLocal: A reset can fail after destroying the old core. Keep its
+    // error visible, but never offer to resume a missing system or renderer.
+    bool can_continue = system.IsPoweredOn();
+    if (result == Core::System::ResultStatus::ErrorRendererRecovery) {
+        title = tr("Renderer unavailable");
+        message = QString::fromStdString(details);
+        error_severity_icon = QMessageBox::Icon::Critical;
+        can_continue = false;
+    } else if (result == Core::System::ResultStatus::ErrorSystemFiles) {
         const QString common_message =
             tr("%1 is missing. Please <a "
                "href='https://github.com/azahar-emu/azahar/wiki/Dumping-System-Files'>dump your "
@@ -3984,7 +3991,9 @@ void GMainWindow::OnCoreError(Core::System::ResultStatus result, std::string det
     message_box.setWindowTitle(title);
     message_box.setText(message);
     message_box.setIcon(error_severity_icon);
-    if (error_severity_icon == QMessageBox::Icon::Critical) {
+    // CodexAstraLocal: Even a normally recoverable save-file warning must close
+    // an unpowered core instead of reaching the final worker-resume action.
+    if (error_severity_icon == QMessageBox::Icon::Critical || !can_continue) {
         if (can_continue) {
             message_box.addButton(tr("Continue"), QMessageBox::RejectRole);
         }

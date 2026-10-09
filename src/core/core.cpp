@@ -57,6 +57,7 @@
 #include "video_core/custom_textures/custom_tex_manager.h"
 #include "video_core/gpu.h"
 #include "video_core/renderer_base.h"
+#include "video_core/shader_recovery_error.h" // CodexAstraLocal: Stop unsupported isolated startup.
 
 namespace Core {
 
@@ -116,8 +117,9 @@ System::ResultStatus System::RunLoop(bool tight_loop) {
             // Treat reset as shutdown if we are doing the initial setup
             return ResultStatus::ShutdownRequested;
         }
-        Reset();
-        return ResultStatus::Success;
+        // CodexAstraLocal: A failed reload is terminal once Reset has shut down
+        // the previous core; preserve its status instead of reporting success.
+        return Reset();
     }
     case Signal::Shutdown:
         return ResultStatus::ShutdownRequested;
@@ -172,6 +174,13 @@ System::ResultStatus System::RunLoop(bool tight_loop) {
         try {
             System::LoadState(slot);
             LOG_INFO(Core, "Load completed");
+        } catch (const VideoCore::ShaderRecoveryError& e) {
+            // CodexAstraLocal: An unavailable renderer during restore must not
+            // become a recoverable save-file error or escape a frontend loop.
+            SetStatus(ResultStatus::ErrorRendererRecovery, e.what());
+            // CodexAstraLocal Log Line: Preserve one terminal restore diagnostic.
+            LOG_ERROR(Core, "Renderer stopped during restore: {}", e.what());
+            return ResultStatus::ErrorRendererRecovery;
         } catch (const std::exception& e) {
             LOG_ERROR(Core, "Error loading: {}", e.what());
             status_details = e.what();
@@ -622,7 +631,17 @@ System::ResultStatus System::Init(Frontend::EmuWindow& emu_window,
     custom_tex_manager = std::make_unique<VideoCore::CustomTexManager>(*this);
 
     auto gsp = service_manager->GetService<Service::GSP::GSP_GPU>("gsp::Gpu");
-    gpu = std::make_unique<VideoCore::GPU>(*this, emu_window, secondary_window);
+    // CodexAstraLocal: GPU construction precedes frontend gameplay catches.
+    // Return the existing terminal status for strict-backend rejection so Load
+    // executes its normal partial-initialization cleanup instead of crossing JNI.
+    try {
+        gpu = std::make_unique<VideoCore::GPU>(*this, emu_window, secondary_window);
+    } catch (const VideoCore::ShaderRecoveryError& error) {
+        SetStatus(ResultStatus::ErrorRendererRecovery, error.what());
+        // CodexAstraLocal Log Line: One startup failure; no substitute backend or retry.
+        LOG_ERROR(Core, "Renderer initialization stopped: {}", error.what());
+        return ResultStatus::ErrorRendererRecovery;
+    }
     gpu->SetInterruptHandler([gsp](Service::GSP::InterruptId interrupt_id, u64 wait_delay_ns) {
         gsp->SignalInterrupt(interrupt_id, wait_delay_ns);
     });
@@ -772,7 +791,9 @@ void System::Shutdown(bool is_deserializing) {
     LOG_DEBUG(Core, "Shutdown OK");
 }
 
-void System::Reset() {
+// CodexAstraLocal: Keep the existing reset ownership sequence but propagate the
+// replacement load result to the caller that decides whether execution can resume.
+System::ResultStatus System::Reset() {
     // This is NOT a proper reset, but a temporary workaround by shutting down the system and
     // reloading.
     // TODO: Properly implement the reset
@@ -797,9 +818,8 @@ void System::Reset() {
         m_chainloadpath.clear();
     }
 
-    // Reload the system with the same setting
-    [[maybe_unused]] const System::ResultStatus result =
-        Load(*m_emu_window, m_filepath, m_secondary_window);
+    // CodexAstraLocal: A failed reload leaves no running system to continue.
+    return Load(*m_emu_window, m_filepath, m_secondary_window);
 }
 
 void System::ApplySettings() {
@@ -925,8 +945,14 @@ void System::serialize(Archive& ar, const unsigned int file_version) {
         // Shutdown, but persist a few things between loads...
         Shutdown(true);
 
-        [[maybe_unused]] const System::ResultStatus result =
+        const System::ResultStatus result =
             Init(*m_emu_window, m_secondary_window, mem_mode, num_cores);
+        // CodexAstraLocal: Reinitialization can now return a contained renderer
+        // failure. Abort deserialization through the existing exception handler
+        // before dereferencing an absent GPU; never continue with partial state.
+        if (result != ResultStatus::Success) {
+            throw VideoCore::ShaderRecoveryError{GetStatusDetails().c_str()};
+        }
     }
 
     // Flush on save, don't flush on load

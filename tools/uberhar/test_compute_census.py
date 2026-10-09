@@ -54,6 +54,7 @@ def main():
 
     header = read('vk_compute_rect.h')
     cpp = read('vk_compute_rect.cpp')
+    rasterizer_header = read('vk_rasterizer.h')
     rasterizer = read('vk_rasterizer.cpp')
     helper = read('uberhar_compute_census.h')
     rectangle = read('uberhar_compute_rect.h')
@@ -75,6 +76,25 @@ def main():
     assert 'ComputeRectStateRejections(regs)' not in admission
     assert 'RejectState' not in admission
     draw = block(rasterizer, 'bool RasterizerVulkan::Draw(')
+    # CodexAstraLocal: Execute the actual complete pre-graphics Draw prefix,
+    # including no-target exits and the owner-independent strict terminal gate.
+    # A recording fallthrough sentinel replaces only the unchanged graphics tail;
+    # ordering checks forbid moving guest graphics work before that boundary.
+    boundary = draw.index('    // Update scissor uniforms')
+    prefix = draw[draw.index('{') + 1:boundary]
+    assert admission in prefix
+    for call in ('SyncTextureUnits(', 'SyncUtilityTextures(', 'UseFragmentShader(',
+                 'UploadUniforms(', 'BindPipeline(', 'stream_buffer.Map(', 'cmdbuf.draw('):
+        assert call not in prefix and call in draw[boundary:], call
+    strict_stats = block(rasterizer_header, 'struct StrictComputeStats') + ';'
+    strict_report = block(rasterizer, 'void RasterizerVulkan::ReportStrictCompute() const')
+    strict_report = strict_report.replace('RasterizerVulkan::', 'Fixture::')
+    triangles = block(rasterizer, 'void RasterizerVulkan::DrawTriangles()')
+    empty = block(triangles, 'if (vertex_batch.empty())')
+    accelerated = block(rasterizer, 'bool RasterizerVulkan::AccelerateDrawBatch(bool is_indexed)')
+    assert accelerated.index('if (strict_compute)') < accelerated.index('AnalyzeVertexArray(')
+    assert 'Settings::RequiresComputeOnly(Settings::values.uberhar_test_mode.GetValue())' in rasterizer
+    assert block(rasterizer, 'RasterizerVulkan::~RasterizerVulkan()').count('ReportStrictCompute();') == 1
     assert draw.index('if (!framebuffer->Handle())') < draw.index('if (compute_rect && !accelerate)')
     assert tick.count('ReportCensus(now)') == 1
     cadence = block(tick, 'if (now >= next_memory_snapshot)')
@@ -98,24 +118,32 @@ def main():
         inputs[str(path)] = hashlib.sha256(path.read_bytes()).hexdigest()
     policy = 'namespace Settings {\n' + block(settings.read_text(), 'enum class UberharTestMode') + ';\n'
     policy += block(profile.read_text(), 'constexpr bool UsesAutomaticCompute(') + '\n'
-    policy += block(profile.read_text(), 'constexpr bool AllowsComputeRendering(') + '\n}\n'
+    policy += block(profile.read_text(), 'constexpr bool AllowsComputeRendering(') + '\n'
+    policy += block(profile.read_text(), 'constexpr bool RequiresComputeOnly(') + '\n}\n'
     fixture = Path(__file__).with_suffix('.cpp').resolve()
     inputs[str(fixture)] = hashlib.sha256(fixture.read_bytes()).hexdigest()
     inputs[str(Path(__file__).resolve())] = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
     # CodexAstraLocal: Mutations must fail a specific behavioral assertion, not
     # merely fail compilation. All subprocesses have finite time limits.
-    variants = [('normal', helper, admission, observe, report, None)]
+    variants = [('normal', helper, prefix, observe, report, None)]
     if args.mutants:
         variants += [
-            ('drop-zero-mask', helper.replace('auto& counts = mask < Bins', 'if (mask == 0) return;\n        auto& counts = mask < Bins'), admission, observe, report, 'joint populations include mask zero'),
-            ('no-consume-reset', helper.replace('bins[mask] = {};', '(void)mask;'), admission, observe, report, 'consume resets interval'),
-            ('wrong-six-count', helper, admission.replace(observation, 'ObserveState(compute_state.raw_rejections, 6)'), observe, report, 'callsite observes actual batch once'),
-            ('missing-observation', helper, admission.replace('compute_rect->' + observation + ';', '(void)compute_state;'), observe, report, 'callsite observes actual batch once'),
+            ('drop-zero-mask', helper.replace('auto& counts = mask < Bins', 'if (mask == 0) return;\n        auto& counts = mask < Bins'), prefix, observe, report, 'joint populations include mask zero'),
+            ('no-consume-reset', helper.replace('bins[mask] = {};', '(void)mask;'), prefix, observe, report, 'consume resets interval'),
+            ('wrong-six-count', helper, prefix.replace(observation, 'ObserveState(compute_state.raw_rejections, 6)'), observe, report, 'callsite observes actual batch once'),
+            ('missing-observation', helper, prefix.replace('compute_rect->' + observation + ';', '(void)compute_state;'), observe, report, 'callsite observes actual batch once'),
             # CodexAstraLocal: These defects would resurrect schema1 conflation
             # or lose the new cumulative raw counter without changing rendering.
-            ('raw-as-effective', helper, admission, observe, report.replace('effective_admitted, effective_rejected, considered, unsupported,', 'snapshot.admitted_draws, snapshot.rejected, considered, unsupported,'), 'raw and effective admission differ'),
-            ('missing-raw-total', helper, admission, observe.replace('ComputeStateCensus::Add(raw_unsupported, 1, census_overflow);', '(void)raw_unsupported;'), report, 'first interval retains preceding draws'),
-            ('raw-route-rejection', helper, admission.replace('if (!compute_state)', 'if (compute_state.raw_rejections != 0)'), observe, report, 'expanded state selects complete draw'),
+            ('raw-as-effective', helper, prefix, observe, report.replace('effective_admitted, effective_rejected, considered, unsupported,', 'snapshot.admitted_draws, snapshot.rejected, considered, unsupported,'), 'raw and effective admission differ'),
+            ('missing-raw-total', helper, prefix, observe.replace('ComputeStateCensus::Add(raw_unsupported, 1, census_overflow);', '(void)raw_unsupported;'), report, 'first interval retains preceding draws'),
+            ('raw-route-rejection', helper, prefix.replace('if (!compute_state)', 'if (compute_state.raw_rejections != 0)'), observe, report, 'expanded state selects complete draw'),
+            # CodexAstraLocal: Fail actual strict-route behavior, not a mirrored
+            # policy model. Graphics reachability, retries and ownership each
+            # have a separate negative control, including absent compute owner.
+            ('strict-graphics-fallthrough', helper, prefix.replace('if (strict_compute) {\n        if (!compute_rect)', 'if (false) {\n        if (!compute_rect)'), observe, report, 'strict rejected draw is consumed before graphics'),
+            ('strict-false-retry', helper, prefix.replace('vertex_batch.clear();\n        return true;', 'vertex_batch.clear();\n        return false;'), observe, report, 'strict rejected draw is consumed before graphics'),
+            ('strict-false-invalidation', helper, prefix.replace('fb_helper.CancelInvalidation();', '(void)fb_helper;'), observe, report, 'strict omitted draw has no pixel ownership'),
+            ('strict-stale-batch', helper, prefix.replace('vertex_batch.clear();\n        return true;', '(void)vertex_batch;\n        return true;'), observe, report, 'strict omitted draw consumes vertex batch'),
         ]
     cases = []
     for name, census_source, route, observation_source, report_source, expected in variants:
@@ -126,7 +154,7 @@ def main():
         # CodexAstraLocal: A shadow-source run must compile its prepared-state
         # helper, not silently fall back to the checkout's older classifier API.
         (include / 'uberhar_compute_rect.h').write_text(rectangle)
-        for filename, body in [('observe.inc', observation_source), ('members.inc', members), ('report.inc', report_source), ('admission.inc', route), ('policy.inc', policy)]:
+        for filename, body in [('observe.inc', observation_source), ('members.inc', members), ('report.inc', report_source), ('admission.inc', route), ('policy.inc', policy), ('strict_stats.inc', strict_stats), ('strict_report.inc', strict_report), ('empty.inc', empty)]:
             (target / filename).write_text(body + '\n')
         command = [os.environ.get('CXX', 'c++'), '-std=c++20', '-O2', '-DFMT_HEADER_ONLY',
                    '-I' + str(target), '-I' + str(root / 'src'),
@@ -144,7 +172,7 @@ def main():
         if not passed:
             raise RuntimeError(f'case {name} failed: {ran.stdout}')
     result = {'author': 'CodexAstraLocal', 'inputs': inputs, 'cases': cases,
-              'scope': 'Real helper/classifier/geometry and extracted report/admission, recording resource/log endpoints. No Vulkan or device performance proof.'}
+              'scope': 'Real helper/classifier/geometry, complete Draw prefix before graphics and extracted reports/empty branch; recording resource/log endpoints. No Vulkan or device performance proof.'}
     (out / 'provenance.json').write_text(json.dumps(result, indent=2) + '\n')
     print(json.dumps({'pass': True, 'cases': [(c['name'], c['output']) for c in cases], 'provenance': str(out / 'provenance.json')}, indent=2))
 

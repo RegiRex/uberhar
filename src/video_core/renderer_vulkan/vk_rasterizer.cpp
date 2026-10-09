@@ -72,6 +72,9 @@ RasterizerVulkan::RasterizerVulkan(Memory::MemorySystem& memory, Pica::PicaCore&
       pipeline_cache{instance, scheduler, renderpass_cache, update_queue},
       runtime{instance, scheduler, renderpass_cache, update_queue, image_count},
       res_cache{memory, custom_tex_manager, runtime, regs, renderer},
+      // CodexAstraLocal: A missing compute owner cannot silently remove strict
+      // isolation; keep the immutable mode decision in the rasterizer itself.
+      strict_compute{Settings::RequiresComputeOnly(Settings::values.uberhar_test_mode.GetValue())},
       stream_buffer{instance, scheduler, BUFFER_USAGE, STREAM_BUFFER_SIZE},
       uniform_buffer{instance, scheduler, vk::BufferUsageFlagBits::eUniformBuffer,
                      UNIFORM_BUFFER_SIZE},
@@ -184,12 +187,21 @@ RasterizerVulkan::~RasterizerVulkan() {
                  ready_vertex_output_rejections, ready_vertex_output_writes.Size(),
                  ready_vertex_output_writes.Hits(), ready_vertex_output_writes.Scans());
     }
-    if (compute_rect) {
+    if (compute_rect || compute_benchmark) {
         // AstraEH: Queued compute/timestamp commands must finish before their owners die.
         scheduler.Finish();
-        compute_rect->Poll();
-        compute_rect->Report();
+        // CodexAstraLocal: Reuse this drain; an unfinished private request is
+        // reported as incomplete and cannot enqueue work during destruction.
+        if (compute_benchmark)
+            compute_benchmark->FinishAfterDrain();
+        if (compute_rect) {
+            compute_rect->Poll();
+            compute_rect->Report();
+        }
     }
+    // CodexAstraLocal: This also reports isolation if no compute owner existed;
+    // incomplete or zero-work output cannot support a full-scene speed claim.
+    ReportStrictCompute();
     // CodexAstraLocal: Use the existing drained shutdown opportunity. Capture
     // adds no GPU wait and reports incomplete evidence honestly after failure.
     if (vertex_capture)
@@ -219,6 +231,10 @@ void RasterizerVulkan::TickFrame() {
     // AstraEH: Read only completed GPU queries; do not add a per-frame GPU wait.
     if (compute_rect)
         compute_rect->Poll();
+    // CodexAstraLocal: The existing worker drain precedes private readback
+    // polling. No query wait, extra thread or guest route-counter update occurs.
+    if (compute_benchmark)
+        compute_benchmark->Poll(pipeline_cache.GetProgramID());
     // CodexAstraUlt: Reuse the renderer owner's frame cadence. Idle/stalled rendering
     // may delay a native sample; Android process health keeps its existing IO cadence.
     if ((memory_diagnostic_frames++ & 63) == 0) {
@@ -261,10 +277,24 @@ void RasterizerVulkan::LoadDefaultDiskResources(
     // AstraEH: The compute program is prepared before the loading screen completes.
     if (compute_rect && !stop_loading)
         compute_rect->Initialize(pipeline_cache.DriverCache());
+    // CodexAstraLocal: Explicit synthetic preparation is separate from game
+    // loading cost and never required to render any supported guest operation.
+    if (!stop_loading)
+        InitializeComputeBenchmark(program_id);
 
     if (callback) {
         callback(VideoCore::LoadCallbackStage::Complete, 0, 0, "");
     }
+}
+
+// CodexAstraLocal: Native/Combo/Generic never read this request. One renderer
+// attempt plus its persistent claimed ID prevents automatic retry after failure.
+void RasterizerVulkan::InitializeComputeBenchmark(u64 title) {
+    if (!strict_compute || compute_benchmark_attempted)
+        return;
+    compute_benchmark_attempted = true;
+    compute_benchmark = ComputeBenchmark::Load(instance, scheduler, renderpass_cache,
+                                               pipeline_cache.ShaderProfile(), title);
 }
 
 void RasterizerVulkan::SyncDrawState() {
@@ -694,6 +724,10 @@ bool RasterizerVulkan::AccelerateDrawBatchReady(bool is_indexed) {
 }
 
 bool RasterizerVulkan::AccelerateDrawBatch(bool is_indexed) {
+    // CodexAstraLocal: Strict Calculated still prepares vertices on the CPU;
+    // a changed hardware setting cannot enter a guest graphics draw instead.
+    if (strict_compute)
+        return false;
     // AstraEH: A decision cannot leak into a later batch or an unsupported draw.
     cpu_bridge = {};
     if (regs.pipeline.use_gs != Pica::PipelineRegs::UseGS::No) {
@@ -856,6 +890,10 @@ void RasterizerVulkan::SetupIndexArray() {
 
 void RasterizerVulkan::DrawTriangles() {
     if (vertex_batch.empty()) {
+        // CodexAstraLocal: Empty assembly is distinct from an unsupported draw
+        // and contributes no useful compute or graphics coverage.
+        if (strict_compute)
+            ++strict_compute_stats.empty_batches;
         // AstraEH: Invalid/empty CPU output must not leave a prepared handle latched.
         cpu_bridge = {};
         return;
@@ -882,6 +920,12 @@ void RasterizerVulkan::DrawTriangles() {
 
 bool RasterizerVulkan::Draw(bool accelerate, bool is_indexed) {
     MICROPROFILE_SCOPE(Vulkan_Drawing);
+    // CodexAstraLocal: Reject an unexpected hardware entry before preparation;
+    // the caller then performs the unchanged CPU vertex/assembly path once.
+    if (strict_compute && accelerate)
+        return false;
+    if (strict_compute)
+        ++strict_compute_stats.attempts;
     SyncDrawState();
 
     const bool shadow_rendering = regs.framebuffer.IsShadowRendering();
@@ -899,6 +943,13 @@ bool RasterizerVulkan::Draw(bool accelerate, bool is_indexed) {
     const auto fb_helper = res_cache.GetFramebufferSurfaces(using_color_fb, using_depth_fb);
     const Framebuffer* framebuffer = fb_helper.Framebuffer();
     if (!framebuffer->Handle()) {
+        // CodexAstraLocal: A consumed no-target batch authored no framebuffer
+        // pixels. Do not leave stale vertices or publish false cache ownership.
+        if (strict_compute) {
+            ++strict_compute_stats.no_target;
+            fb_helper.CancelInvalidation();
+            vertex_batch.clear();
+        }
         return true;
     }
 
@@ -908,6 +959,8 @@ bool RasterizerVulkan::Draw(bool accelerate, bool is_indexed) {
     // AstraEH: Admit a complete compute operation before texture/fragment setup.
     // Unsupported draws retain the native route, and the framebuffer helper still
     // publishes correct cache invalidation for either route when this scope exits.
+    // CodexAstraLocal: The explicit strict preset replaces that recovery with a
+    // counted omission below; successful compute keeps normal invalidation.
     std::optional<ComputeRectPacket> compute_packet;
     int timing_slot = -1;
     if (compute_rect && !accelerate) {
@@ -921,9 +974,13 @@ bool RasterizerVulkan::Draw(bool accelerate, bool is_indexed) {
         compute_rect->ObserveState(compute_state.raw_rejections, vertex_batch.size());
         if (!compute_state) {
             ++compute_rect->unsupported;
+            if (strict_compute)
+                ++strict_compute_stats.state;
         } else if (!framebuffer->color_id || framebuffer->color_level != 0 ||
                    framebuffer->Format(SurfaceType::Color) != VideoCore::PixelFormat::RGBA8) {
             ++compute_rect->format_rejected;
+            if (strict_compute)
+                ++strict_compute_stats.format;
         } else {
             auto& surface = res_cache.GetSurface(framebuffer->color_id);
             const auto viewport = fb_helper.Viewport();
@@ -931,6 +988,8 @@ bool RasterizerVulkan::Draw(bool accelerate, bool is_indexed) {
             if (surface.traits.native != vk::Format::eR8G8B8A8Unorm ||
                 !surface.traits.storage_support || surface.Image() != framebuffer->Images()[0]) {
                 ++compute_rect->format_rejected;
+                if (strict_compute)
+                    ++strict_compute_stats.format;
             } else {
                 compute_packet =
                     MakeComputeRectPrepared(regs, vertices,
@@ -940,18 +999,37 @@ bool RasterizerVulkan::Draw(bool accelerate, bool is_indexed) {
                                     compute_state);
                 if (!compute_packet) {
                     ++compute_rect->geometry_rejected;
+                    if (strict_compute)
+                        ++strict_compute_stats.geometry;
                 } else if (compute_rect->Choose(*compute_packet)) {
                     renderpass_cache.EndRendering();
                     timing_slot = compute_rect->ReserveSample(true, compute_packet->PixelCount());
                     compute_rect->BeginSample(timing_slot);
                     compute_rect->Draw(surface, *compute_packet);
                     compute_rect->EndSample(timing_slot);
+                    if (strict_compute)
+                        ++strict_compute_stats.computed;
                     vertex_batch.clear();
                     return true;
+                } else if (strict_compute) {
+                    ++strict_compute_stats.not_ready;
                 }
             }
         }
-        ++compute_rect->native_draws;
+        // CodexAstraLocal: An intentional isolation omission is neither a
+        // native draw nor a compute dispatch. Other modes retain their route.
+        if (!strict_compute)
+            ++compute_rect->native_draws;
+    }
+    // CodexAstraLocal: This owner-independent terminal gate precedes every
+    // texture/fragment preparation, upload and guest graphics bind/draw below.
+    // Return consumed, not failed, so the caller cannot retry a graphics route.
+    if (strict_compute) {
+        if (!compute_rect)
+            ++strict_compute_stats.no_renderer;
+        fb_helper.CancelInvalidation();
+        vertex_batch.clear();
+        return true;
     }
 
     // Update scissor uniforms
@@ -1096,6 +1174,28 @@ bool RasterizerVulkan::Draw(bool accelerate, bool is_indexed) {
         fb_helper.CancelInvalidation();
     vertex_batch.clear();
     return succeeded;
+}
+
+// CodexAstraLocal: Fixed lifetime totals distinguish real compute work from
+// unsupported omissions. This is coverage after shared CPU vertices, not proof
+// of independent compute vertex execution or eligibility of incomplete scenes.
+void RasterizerVulkan::ReportStrictCompute() const {
+    if (!strict_compute)
+        return;
+    const auto& counts = strict_compute_stats;
+    const u64 omitted = counts.Omitted();
+    // CodexAstraLocal Log Line: One bounded final isolation record; no per-draw
+    // logging and no synthetic benchmark work in these guest counters.
+    LOG_INFO(Render_Vulkan,
+             "Uberhar strict calculated totals: schema=1 attempts={} computed={} omitted={} "
+             "empty_batches={} no_target={} no_renderer={} unsupported_state={} "
+             "rejected_format={} rejected_geometry={} not_ready={} conservation={} "
+             "incomplete_output={} zero_compute_work={} graphics_fallback=disabled "
+             "vertex_policy=shared_cpu scope=guest_draws_after_cpu_vertices "
+             "work_status=commands_recorded",
+             counts.attempts, counts.computed, omitted, counts.empty_batches, counts.no_target,
+             counts.no_renderer, counts.state, counts.format, counts.geometry, counts.not_ready,
+             counts.attempts == counts.computed + omitted, omitted != 0, counts.computed == 0);
 }
 
 void RasterizerVulkan::SyncTextureUnits(const Framebuffer* framebuffer) {

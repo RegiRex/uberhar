@@ -179,6 +179,11 @@ if (ENABLE_VULKAN)
         # AstraEH: Startup-compiled compute subset and measured automatic routing.
         renderer_vulkan/vk_compute_rect.cpp
         renderer_vulkan/vk_compute_rect.h
+        # CodexAstraLocal: Default-off fixed scratch comparison shares actual
+        # compute commands but owns its request, pipelines, queries and readbacks.
+        renderer_vulkan/uberhar_compute_benchmark.h
+        renderer_vulkan/vk_compute_benchmark.cpp
+        renderer_vulkan/vk_compute_benchmark.h
         # AstraEH: Validated persistent generic-module envelope.
         renderer_vulkan/uberhar_spirv_cache.h
         renderer_vulkan/uberhar_compute_rect.h

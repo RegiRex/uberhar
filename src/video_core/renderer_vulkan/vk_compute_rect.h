@@ -14,6 +14,12 @@ class Scheduler;
 class DescriptorUpdateQueue;
 class Surface;
 
+// CodexAstraLocal: Share the exact bounded image command sequence with the
+// explicit scratch benchmark; this helper has no guest or selector counters.
+void RecordComputeRectCommands(vk::CommandBuffer cmdbuf, vk::Image image,
+                               vk::PipelineLayout view_layout, vk::Pipeline target,
+                               vk::DescriptorSet set, const ComputeRectPacket& packet);
+
 // AstraEH: Own a startup-compiled compute rasterization subset and nonblocking
 // GPU measurements. All methods run on the renderer thread; scheduler lambdas
 // only record commands. Destruction requires draining the scheduler/GPU first.

@@ -26,6 +26,13 @@ constexpr bool AllowsComputeRendering(UberharTestMode mode) {
     return mode == UberharTestMode::Compute || UsesAutomaticCompute(mode);
 }
 
+// CodexAstraLocal: Only the explicit Calculated isolation preset consumes
+// unsupported guest draws without a graphics replacement. Other modes retain
+// complete-draw recovery; CPU vertex preparation is still shared by this preset.
+constexpr bool RequiresComputeOnly(UberharTestMode mode) {
+    return mode == UberharTestMode::Compute;
+}
+
 constexpr bool IsUberharTestProfile(UberharTestMode mode) {
     return mode == UberharTestMode::Native || AllowsComputeRendering(mode);
 }

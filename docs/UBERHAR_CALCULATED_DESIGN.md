@@ -1,5 +1,74 @@
 # Calculated rendering: coverage and architecture decisions
 
+<!-- CodexAstraLocal: The owner requires direct isolation before further performance conclusions; keep the installed baseline and next implementation separate. -->
+## Next experiment: isolated Calculated execution
+
+The owner has authorized .33/.34 and requires Calculated to stop using
+Native/graphics fallback in .33. Unsupported guest draws will be explicitly
+counted as unrendered instead of delegated. The exact compute admission checks
+remain necessary; disabling recovery does not implement missing rasterization.
+Current CPU vertex preparation and presentation remain shared infrastructure,
+so this isolates guest raster work, not a new independent vertex processor.
+
+The direct experiment uses scratch targets and supported original inputs
+to compare actual compute commands with a separate graphics reference, checking
+pixels before comparing GPU times. Setup, barriers/dispatch and sampling scope
+must remain explicit. Synthetic reference draws must never inflate guest compute
+coverage or act as fallback in a strict title test. A blank or incomplete title
+cannot establish performance versus complete Native output.
+
+The strict route and backend refusal/terminal reload handling pass focused
+control-flow and failure tests. The merged native build, CTest and full host probe
+pass. The scratch benchmark's focused owner/command checks, original-input pixel
+comparisons and required Vulkan module validation pass, alongside the merged
+compute gate. Android delivery and device measurements remain pending.
+The .32 results below remain the baseline; the prior review-and-stop instruction
+is superseded only for this two-build batch and its final audits.
+
+<!-- CodexAstraLocal: Document explicit admission and evidence limits so a synthetic graphics reference cannot be mistaken for guest fallback or complete-title performance. -->
+## Optional supported-work benchmark
+
+Android with raw-filesystem access can consume one explicit request in the
+application config directory, named `uberhar_compute_benchmark.json`. It is
+disabled by default and admitted only in isolated Calculated mode. The JSON
+object has exactly these five fields; choose a fresh identifier for an authorized
+experiment, using at most 48 ASCII letters, digits, underscores or hyphens:
+
+```json
+{"schema":1,"enabled":true,"trigger":"renderer_startup","title_id":"0004000000055F00","benchmark_id":"example_once"}
+```
+
+Before compiling or allocating scratch resources, the owner exclusively creates
+`compute-benchmark-<id>.claimed.json` in the application dump directory. An
+existing claim prevents replay, including after an interrupted run. A separately
+created `.result.json` reports completion or a bounded failure. Remove the request
+after collecting the experiment. Other modes and unsupported frontends return
+before request IO or resource construction.
+
+Four cases cover 256×256 and 800×480 targets with full RGBA and partial R/B writes.
+Each uses eight alternating graphics/compute pairs, with 32 operations per route:
+two overlapping rectangles repeated sixteen times. The graphics reference uses
+the original 88-byte CPU hardware vertices and the production shader generator;
+compute uses the production rectangle command recorder. Both must match an
+independent whole-image integer oracle, including untouched and masked bytes.
+These graphics commands are private reference work and never service guest draws.
+
+GPU intervals include route barriers and either one graphics pass or 32 compute
+dispatches. Reset, upload and readback lie outside those intervals. Host enqueue,
+validation and observed readback latency are separate fields. Ratios require all
+64 routes to complete with correct, useful output. Repeated idempotent writes
+cannot prove that every individual operation executed; command tests check their
+ordering and counts separately.
+
+Only one pair may be in flight. The 120-second soft deadline stops further
+admission, without cancelling submitted GPU work or bounding driver compilation.
+Pending resources remain owned until the existing renderer drain. Allocation
+reports include VMA sizes; the roughly 7.34 MiB raw allocation total excludes
+driver overhead. Synthetic timings cannot establish general 3D coverage or
+complete Dark Moon throughput.
+
+## Delivered .32 baseline and longer-term options
+
 <!-- CodexAstraLocal: Keep the requested independent-rendering goal distinct from the bounded .32 candidate and unimplemented architecture alternatives. -->
 
 The goal is correct first-run rendering with no saved application shader cache,

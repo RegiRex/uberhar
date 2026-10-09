@@ -91,8 +91,10 @@ def main():
     # CodexAstraLocal: Execute the exact Draw closure with one documented command
     # endpoint substitution, proving read access and immutable packet/handle data.
     extractor=load('compute_command_extract',extractor_path)
-    body=extractor.block(cpp.read_text(),'void ComputeRectRenderer::Draw(')
-    if body.count('vk::CommandBuffer cmdbuf')!=1:raise AssertionError('Command boundary changed')
+    # CodexAstraLocal: Keep the shared recorder and guest closure in the same
+    # actual-source gate after the explicit scratch benchmark reuses commands.
+    body=extractor.block(cpp.read_text(),'void RecordComputeRectCommands(')+'\n'+extractor.block(cpp.read_text(),'void ComputeRectRenderer::Draw(')
+    if body.count('vk::CommandBuffer cmdbuf')!=2:raise AssertionError('Command boundary changed')
     body=body.replace('vk::CommandBuffer cmdbuf','RecordingCommands cmdbuf')
     needle='vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eShaderWrite'
     if body.count(needle)!=1 or body.count('packet](RecordingCommands cmdbuf)')!=1:

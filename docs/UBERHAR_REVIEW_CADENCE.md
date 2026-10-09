@@ -1,5 +1,13 @@
 # Architecture review ledger
 
+<!-- CodexAstraLocal: The October 8 owner instruction advances a bounded two-build batch and explicitly requires a review sooner than the standing three-build cadence. -->
+**Current owner scope:** deliver and test .33 and .34, then complete another
+results/architecture and separate cleanliness audit and stop for owner inspection.
+Calculated's .33 test route must have Native/graphics fallback disabled, with
+unsupported work explicit and incomplete output excluded from performance claims.
+The .32 review remains the completed anchor, zero delivered successors at batch
+start. The prior pause below is historical and was explicitly lifted.
+
 <!-- CodexAstraLocal: The owner's latest instruction fixes the next review and stopping boundary without prematurely counting unfinished builds. -->
 The 0.1.31 adaptive CPU fragment-cache candidate and 0.1.32 Calculated extension
 are delivered and tested. The systematic architecture/correctness/performance

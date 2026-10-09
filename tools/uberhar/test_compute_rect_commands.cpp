@@ -10,6 +10,12 @@
 #include "video_core/renderer_vulkan/uberhar_compute_rect.h"
 #define VK_QUEUE_FAMILY_IGNORED 0xffffffffU
 namespace vk {
+// CodexAstraLocal: Only opaque handle types are boundary adapters for the
+// shared production command recorder; command/packet ordering stays extracted.
+using Image = u64;
+using PipelineLayout = u64;
+using Pipeline = u64;
+using DescriptorSet = u64;
 enum class AccessFlagBits : u32 { eMemoryRead=1,eMemoryWrite=2,eShaderWrite=4,eShaderRead=8 };
 struct AccessFlags {
     u32 bits{};

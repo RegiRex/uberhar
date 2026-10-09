@@ -1,6 +1,47 @@
 <!-- AstraEH: Attribution index for the Uberhar implementation, tests, packaging and documentation. -->
 # Uberhar code map
 
+<!-- CodexAstraLocal: Map .33 work in progress to real route and lifecycle consumers; delivery remains separately gated. -->
+## 0.1.33 local implementation checkpoint
+
+- `uberhar_test_profile.h` marks mode 2 as isolated. The Vulkan rasterizer's
+  immutable guard blocks GPU promotion and consumes unsupported CPU draw batches
+  before graphics preparation; cancelling invalidation prevents a missing draw
+  from claiming new framebuffer contents. Broad strict counters distinguish
+  missing targets/owners, empty batches, recorded compute and omitted work.
+  The existing valid-target raw/effective census keeps its own denominator.
+- `video_core.cpp` rejects unavailable/non-Vulkan backends for isolated mode 2
+  before constructing a substitute. `System::Init` returns the existing terminal
+  error, restore preserves it, and `Reset` propagates the reload result. Android,
+  Qt and Libretro stop terminal/unpowered sessions instead of retrying, offering
+  continuation or waiting forever for a frame. Ordinary powered save-file errors
+  retain their previous recovery behavior.
+- `test_strict_compute_backend.py` compiles the real factory under four backend
+  configurations and exercises extracted startup, restore, reset and frontend
+  branches with injected failure controls. Driver constructors and GUI endpoints
+  are modeled; this does not execute Vulkan, JNI or the Qt event loop.
+- The Android Calculated label/description exposes intentional incomplete output.
+  The six Android lifecycle comments retained at the .32 review are included in
+  the next source candidate.
+- `uberhar_compute_benchmark.h` defines fixed original-vertex workloads and the
+  independent integer image oracle. `vk_compute_benchmark.{h,cpp}` owns the
+  opt-in Android request, exclusive claim, scratch resources, alternating paired
+  commands, completion/readback checks and bounded result. The rasterizer polls
+  after its existing worker drain and retains resources through normal teardown.
+  Unsupported frontends and non-isolated modes return before request IO.
+- `RecordComputeRectCommands` is shared by actual guest rectangle draws and the
+  synthetic compute route. Only the guest owner increments guest coverage.
+  `PipelineCache::ShaderProfile` exposes a read-only view of the current profile;
+  the benchmark copies it immutably so its independent graphics reference
+  retains the renderer's device workarounds at admission.
+- `test_compute_benchmark.{cpp,py}` and `compare_compute_benchmark.py` exercise
+  the actual owner/control methods, original-input images and failing controls.
+  Host endpoint models, GL pixels and Vulkan module validation remain distinct
+  from eventual Thor Vulkan execution and title performance.
+- `UBERHAR_VERSION` records the .33 source candidate. The existing release
+  workflow requires its host isolation/owner regressions and a new separate
+  benchmark pixel/module step before Android publication can succeed.
+
 <!-- CodexAstraLocal: Map the final audit and local purpose-comment closure without changing released source identity. -->
 ## 0.1.32 review checkpoint
 

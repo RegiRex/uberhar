@@ -10,6 +10,8 @@
 // CodexAstraLocal: Keep the recovered optional output guard owned by the renderer.
 #include "video_core/renderer_vulkan/uberhar_gpu_output_policy.h"
 #include "video_core/renderer_vulkan/vk_compute_rect.h" // AstraEH: Bounded compute test path.
+// CodexAstraLocal: Explicit scratch diagnostics have separate ownership/counters.
+#include "video_core/renderer_vulkan/vk_compute_benchmark.h"
 #include "video_core/renderer_vulkan/vk_descriptor_update_queue.h"
 #include "video_core/renderer_vulkan/vk_pipeline_cache.h"
 #include "video_core/renderer_vulkan/vk_render_manager.h"
@@ -104,6 +106,10 @@ private:
     /// Generic draw function for DrawTriangles and AccelerateDrawBatch
     bool Draw(bool accelerate, bool is_indexed);
 
+    // CodexAstraLocal: Report explicit isolation omissions independently of the
+    // optional compute owner and its valid-framebuffer census denominator.
+    void ReportStrictCompute() const;
+
     /// Internal implementation for AccelerateDrawBatch
     bool AccelerateDrawBatchInternal(bool is_indexed);
 
@@ -119,6 +125,9 @@ private:
     // CodexAstraLocal: Both cold loading and rights switches use this one-shot
     // diagnostic initializer; Native/Custom never read the optional sidecar.
     void InitializeVertexCapture(u64 title) noexcept;
+    // CodexAstraLocal: Attempt the one-shot scratch request only at cold startup;
+    // rights switches cannot rearm an ID or turn it into a guest fallback.
+    void InitializeComputeBenchmark(u64 title);
 
     /// Setup vertex shader for AccelerateDrawBatch
     bool SetupVertexShader();
@@ -140,6 +149,20 @@ private:
 
     // AstraEH: Created only for a selected test profile; custom rendering allocates nothing.
     std::unique_ptr<ComputeRectRenderer> compute_rect;
+    // CodexAstraLocal: Default-off, bounded, private resources remain alive until
+    // the same scheduler/GPU drain that already protects compute ownership.
+    std::unique_ptr<ComputeBenchmark> compute_benchmark;
+    bool compute_benchmark_attempted{};
+    // CodexAstraLocal: Freeze isolation for this renderer lifetime. Counters
+    // include no-target/no-owner exits; empty batches are not attempted draws.
+    const bool strict_compute;
+    struct StrictComputeStats {
+        u64 attempts{}, computed{}, empty_batches{}, no_target{}, no_renderer{},
+            state{}, format{}, geometry{}, not_ready{};
+        u64 Omitted() const {
+            return no_target + no_renderer + state + format + geometry + not_ready;
+        }
+    } strict_compute_stats;
     VertexLayout software_layout;
     std::array<u32, 16> binding_offsets{};
     std::array<bool, 16> enable_attributes{};

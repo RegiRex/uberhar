@@ -152,6 +152,12 @@ public:
 
     void SetAccurateMul(bool accurate_mul);
 
+    // CodexAstraLocal: Explicit scratch diagnostics copy the same immutable
+    // shader capabilities/options used by this owner, without changing preparation.
+    const Pica::Shader::Profile& ShaderProfile() const {
+        return profile;
+    }
+
     // CodexAstraLocal: Called only after a successful optional-ready bind.
     std::optional<VertexCapture::BindingState> CaptureVertexBinding(const Pica::RegsInternal& regs,
         Pica::ShaderSetup& setup, const PipelineInfo& info, u64 pipeline_key) noexcept;

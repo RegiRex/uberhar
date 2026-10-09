@@ -142,11 +142,15 @@ object CrashSessionLogs {
 
     // CodexAstraUlt: Keep the active marker before optional diagnostics, then compare
     // this process baseline with the normal native-return sample across title cycles.
+    // CodexAstraLocal: Mark the run active before the bounded memory sample so a
+    // fatal native exit remains distinguishable from an orderly lifecycle return.
     fun beginRun() {
         markRun(true)
         UberharDeviceDiagnostics.reportProcessMemory("before_native_run")
     }
 
+    // CodexAstraLocal: Preserve the final sample and primary-log flush before
+    // clearing the run marker; optional memory sampling remains best-effort.
     fun endRun() {
         // CodexAstraUlt: NativeEmulation's existing finally hook runs after native
         // cleanup on an orderly return. Failure to sample must not prevent the flush.

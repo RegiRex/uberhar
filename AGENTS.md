@@ -1,5 +1,25 @@
 # Uberhar development instructions
 
+<!-- CodexAstraLocal: The owner's October 8 follow-up resumes two builds and requires real rendering-route isolation for Calculated tests. -->
+- Complete the next two candidate builds after .32 (.33 and .34), their device
+  tests, then summarize results and perform systematic architecture and separate
+  code-cleanliness/purpose-comment audits before stopping for owner inspection.
+  This supersedes the completed .32 stop, without restoring open-ended .2.0 work.
+- For the next build, Calculated mode must not execute Native/graphics fallback
+  or silently delegate unsupported rendering to another method. Test the actual
+  calculated implementation independently. Report unsupported operations and
+  missing output explicitly; empty or incomplete scenes cannot establish a speed
+  gain or compare complete rendering against Native. This diagnostic isolation
+  is explicitly authorized even though unsupported draws cannot be rendered.
+  Keep correctness/admission checks intact; do not force unsafe compute execution.
+- Preserve complete rendering and existing fallback behavior in other modes.
+  Isolated performance experiments must identify the work actually executed,
+  use comparable supported inputs/output, and separate kernel measurements from
+  complete-title throughput. Do not spend repeated gameplay runs measuring a
+  fallback route as if it measured Calculated rendering. Retain one consolidated
+  run per tested method/build, one device operator, cold-cache/File 1 resets,
+  CodexAstraLocal purpose comments and all publication/signing gates.
+
 <!-- CodexAstraLocal: The owner's October 7 late-session update sets the next implementation sequence, consolidates device runs and replaces the open-ended 0.2.0 stopping point. -->
 - Finish the scheduled next candidate (0.1.31 bounded adaptive CPU fragment
   pipeline admission), then prioritize substantive Calculated-mode rendering

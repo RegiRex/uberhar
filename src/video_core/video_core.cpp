@@ -5,6 +5,7 @@
 #include "common/logging/log.h"
 #include "common/settings.h"
 #include "video_core/gpu.h"
+#include "video_core/shader_recovery_error.h" // CodexAstraLocal: Contained strict-backend failure.
 #ifdef ENABLE_OPENGL
 #include "video_core/renderer_opengl/renderer_opengl.h"
 #endif
@@ -26,6 +27,21 @@ std::unique_ptr<RendererBase> CreateRenderer(Frontend::EmuWindow& emu_window,
                                              Frontend::EmuWindow* secondary_window,
                                              Pica::PicaCore& pica, Core::System& system) {
     const auto graphics_api = Settings::GetWorkingGraphicsAPI();
+    // CodexAstraLocal: Calculated isolation cannot silently select OpenGL or
+    // software when Vulkan is unavailable. Other profiles retain the existing
+    // backend resolver and default behavior; initial-load callers contain this
+    // typed failure before any substitute renderer can be constructed.
+    if (Settings::values.uberhar_test_mode.GetValue() == Settings::UberharTestMode::Compute) {
+#ifdef ENABLE_VULKAN
+        const bool available = graphics_api == Settings::GraphicsAPI::Vulkan;
+#else
+        const bool available = false;
+#endif
+        if (!available) {
+            throw ShaderRecoveryError{
+                "Isolated Calculated rendering requires the Vulkan backend; fallback is disabled"};
+        }
+    }
     switch (graphics_api) {
 #ifdef ENABLE_SOFTWARE_RENDERER
     case Settings::GraphicsAPI::Software:

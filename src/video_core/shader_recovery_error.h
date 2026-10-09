@@ -11,6 +11,9 @@ namespace VideoCore {
 class ShaderRecoveryError final : public std::runtime_error {
 public:
     ShaderRecoveryError() : std::runtime_error{"Uberhar native recovery shader unavailable"} {}
+    // CodexAstraLocal: Reuse the contained terminal renderer error for strict
+    // backend rejection while preserving the historical shader-failure message.
+    explicit ShaderRecoveryError(const char* message) : std::runtime_error{message} {}
 };
 
 } // namespace VideoCore

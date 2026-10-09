@@ -104,3 +104,10 @@ jobs:
         env:
           LIBGL_ALWAYS_SOFTWARE: '1'
         run: /tmp/uberhar-test-env/bin/python tools/uberhar/compare_compute_rect.py --require-vulkan
+      # CodexAstraLocal: Compare both bounded scratch routes with the independent
+      # image oracle, original CPU vertices and validated production Vulkan shaders.
+      # Reuse only the source/payload-hashed fixture emitted by the preceding host gate.
+      - name: Compare isolated compute benchmark supported pixels
+        env:
+          LIBGL_ALWAYS_SOFTWARE: '1'
+        run: /tmp/uberhar-test-env/bin/python tools/uberhar/test_compute_benchmark.py --render --require-vulkan --reuse-build

@@ -27,6 +27,7 @@
 #endif
 #include "video_core/renderer_software/renderer_software.h"
 #include "video_core/video_core.h"
+#include "video_core/shader_recovery_error.h" // CodexAstraLocal: Contain strict backend refusal.
 
 #include "citra_libretro/citra_libretro.h"
 #include "citra_libretro/core_settings.h"
@@ -302,6 +303,16 @@ void retro_run() {
             }
 
             LibRetro::DisplayMessage(msg.c_str());
+            // CodexAstraLocal: A refused renderer or failed reset cannot submit
+            // the awaited frame. End this callback/session instead of spinning
+            // RunLoop forever on an unpowered or unusable core.
+            if (result == Core::System::ResultStatus::ErrorRendererRecovery ||
+                !Core::System::GetInstance().IsPoweredOn()) {
+                emu_instance->game_loaded = false;
+                Core::System::GetInstance().Shutdown();
+                LibRetro::Shutdown();
+                return;
+            }
         }
     }
 }
@@ -475,7 +486,19 @@ static void context_reset() {
     } else {
         // Game is already loaded, just recreate the renderer for the new GL context
         if (Settings::values.graphics_api.GetValue() == Settings::GraphicsAPI::OpenGL) {
-            Core::System::GetInstance().GPU().RecreateRenderer(*emu_instance->emu_window, nullptr);
+            // CodexAstraLocal: Context recreation is a C frontend callback, not
+            // System::Load. A strict-mode refusal must stop without escaping it
+            // or leaving retro_run spinning on a renderer that was not recreated.
+            try {
+                Core::System::GetInstance().GPU().RecreateRenderer(*emu_instance->emu_window, nullptr);
+            } catch (const VideoCore::ShaderRecoveryError& error) {
+                // CodexAstraLocal Log Line: One terminal context failure; no backend substitution.
+                LOG_ERROR(Frontend, "Renderer recreation stopped: {}", error.what());
+                emu_instance->game_loaded = false;
+                Core::System::GetInstance().Shutdown();
+                LibRetro::DisplayMessage(error.what());
+                LibRetro::Shutdown();
+            }
         }
     }
 }
@@ -733,6 +756,14 @@ bool retro_unserialize(const void* data, size_t size) {
         return system.LoadStateBuffer(std::move(buffer));
     } catch (const std::exception& e) {
         LOG_ERROR(Frontend, "Error loading state: {}", e.what());
+        // CodexAstraLocal: A failed renderer reinitialization leaves the core
+        // powered off. End that session rather than repeatedly entering RunLoop;
+        // ordinary rejected state files keep their still-running session intact.
+        if (!system.IsPoweredOn()) {
+            emu_instance->game_loaded = false;
+            system.Shutdown();
+            LibRetro::Shutdown();
+        }
         return false;
     }
 }

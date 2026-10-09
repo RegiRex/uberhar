@@ -112,9 +112,12 @@ void EmuThread::run() {
                 emit DebugModeLeft();
 
             const Core::System::ResultStatus result = system.RunLoop();
-            if (result == Core::System::ResultStatus::ShutdownRequested) {
-                // Notify frontend we shutdown
-                emit ErrorThrown(result, "");
+            // CodexAstraLocal: Failed renderer restores/resets end this worker;
+            // neither a GUI resume request nor another RunLoop can repair it.
+            if (result == Core::System::ResultStatus::ShutdownRequested ||
+                result == Core::System::ResultStatus::ErrorRendererRecovery ||
+                !system.IsPoweredOn()) {
+                emit ErrorThrown(result, system.GetStatusDetails());
                 // End emulation execution
                 break;
             }
@@ -131,7 +134,15 @@ void EmuThread::run() {
                 emit DebugModeLeft();
 
             exec_step = false;
-            [[maybe_unused]] const Core::System::ResultStatus result = system.SingleStep();
+            // CodexAstraLocal: SingleStep also processes RunLoop's restore/reset
+            // signals. A stopped core cannot return to the debugger's resume UI.
+            const Core::System::ResultStatus result = system.SingleStep();
+            if (result == Core::System::ResultStatus::ShutdownRequested ||
+                result == Core::System::ResultStatus::ErrorRendererRecovery ||
+                !system.IsPoweredOn()) {
+                emit ErrorThrown(result, system.GetStatusDetails());
+                break;
+            }
             emit DebugModeEntered();
             yieldCurrentThread();
 

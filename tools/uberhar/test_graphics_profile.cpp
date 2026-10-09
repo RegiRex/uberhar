@@ -48,6 +48,9 @@ int main() {
         Check(AllowsSpecializedFragments(mode) == (id == 3), "fragment capability changed");
         Check(UsesAutomaticCompute(mode) == (id == 3 || id == 4), "compute selector changed");
         Check(AllowsComputeRendering(mode) == (id >= 2), "compute capability changed");
+        // CodexAstraLocal: Isolation is exactly persisted mode2, independently
+        // of optional compute availability; all other modes keep recovery.
+        Check(RequiresComputeOnly(mode) == (id == 2), "strict compute isolation changed");
         Check(!values.async_shader_compilation.GetValue() &&
                   !values.uberhar_cpu_vertex_bridge.GetValue(),
               "preset introduced skip-on-pending or legacy bridge behavior");
@@ -77,7 +80,8 @@ int main() {
     // CodexAstraUlt: Unknown/Custom modes cannot accidentally enable diagnostic capabilities.
     for (const auto mode : {UberharTestMode::Custom, static_cast<UberharTestMode>(99)}) {
         Check(!IsUberharTestProfile(mode) && !UsesReadyGpuVertices(mode) &&
-                  !AllowsSpecializedFragments(mode) && !AllowsComputeRendering(mode),
+                  !AllowsSpecializedFragments(mode) && !AllowsComputeRendering(mode) &&
+                  !RequiresComputeOnly(mode),
               "invalid/custom mode gained preset capabilities");
     }
     std::puts("PASS: four native profiles, stable IDs, independent route matrix, ready guards, "

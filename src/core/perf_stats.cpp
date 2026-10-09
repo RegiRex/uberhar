@@ -301,7 +301,8 @@ void PerfStats::LogUberharSettings(const char* event) {
         "vsync_setting={} accurate_mul={} spirv_generator={} optimizer_disabled={} "
         "texture_filter={} texture_sampling={} custom_textures={} preload_textures={} "
         "skip_duplicate_frames={} render_thread_delay_us={} simulate_gpu_timings={} "
-        "ready_gpu_vertex_policy={} ready_gpu_fragment_policy={} ready_cpu_fragment_policy={}",
+        "ready_gpu_vertex_policy={} ready_gpu_fragment_policy={} ready_cpu_fragment_policy={} "
+        "calculated_fallback_policy={} calculated_vertex_policy={}",
         mode_index < mode_names.size() ? mode_names[mode_index] : "Unknown",
         api_index < api_names.size() ? api_names[api_index] : "Unknown",
         values.resolution_factor.GetValue(), values.resolution_factor.GetValue() ? "fixed" : "auto",
@@ -330,7 +331,11 @@ void PerfStats::LogUberharSettings(const char* event) {
         api == Settings::GraphicsAPI::Vulkan && values.uberhar_hybrid_tev.GetValue() &&
                 Settings::UsesReadyGpuVertices(mode) && Settings::AllowsSpecializedFragments(mode) &&
                 !values.uberhar_force_tev.GetValue()
-            ? "software_specialized_ready_v1" : "disabled");
+            ? "software_specialized_ready_v1" : "disabled",
+        // CodexAstraLocal: Declare the isolation contract without pretending the
+        // shared CPU vertex path or unused graphics startup work disappeared.
+        Settings::RequiresComputeOnly(mode) ? "disabled_omit_unsupported" : "graphics_allowed",
+        Settings::RequiresComputeOnly(mode) ? "shared_cpu" : "route_dependent");
     const bool changed = text != uberhar_settings;
     if (changed && !uberhar_settings.empty())
         ++uberhar_settings_changes;

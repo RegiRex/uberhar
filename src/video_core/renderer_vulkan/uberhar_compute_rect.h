@@ -17,8 +17,9 @@ namespace Vulkan {
 // AstraEH: The first compute rasterizer accepts only an exactly recognizable solid
 // rectangle. No textures, clipping, depth, stencil, blending or interpolation are
 // approximated.
-// CodexAstraLocal: Unsupported operations retain the existing graphics route
-// after CPU vertex processing; this helper does not invoke a native interpreter.
+// CodexAstraLocal: This helper proves only the compute packet. The caller keeps
+// graphics recovery in other modes, while strict Calculated records omissions;
+// both policies follow CPU vertices and neither invokes a native interpreter here.
 struct ComputeRectPacket {
     std::array<s32, 4> rect; // x, y, width, height in the current surface's pixels.
     u32 color;               // RGBA8 in the R32_UINT storage view's little-endian order.
@@ -35,7 +36,8 @@ struct ComputeRectPacket {
 static_assert(sizeof(ComputeRectPacket) == 32);
 
 // AstraEH: Non-exclusive reasons explain zero coverage without logging every draw.
-// Admission is unchanged: every unsafe component still selects native rendering.
+// CodexAstraLocal: Unsafe components still reject this subset; caller policy
+// chooses complete graphics recovery or an explicit strict-mode omission.
 enum class ComputeRectReject : unsigned {
     Shadow,
     ColorWrite,

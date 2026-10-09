@@ -288,8 +288,9 @@
     <string name="uberhar_test_modes">Virtual PICA test modes — choose one</string>
     <string name="uberhar_test_native">Virtual PICA: native rasterization</string>
     <string name="uberhar_test_native_description">Prototype: uses cached CPU shader translation and generic fragment processing. First-use CPU and GPU compilation can still pause. Restart the game after changing.</string>
-    <string name="uberhar_test_compute">Virtual PICA: compute rendering</string>
-    <string name="uberhar_test_compute_description">Prototype: compute rendering for supported solid rectangles; other draws use the native test path. Coverage is recorded in the log. Restart the game after changing.</string>
+    <!-- CodexAstraLocal: The owner requires isolated Calculated testing; make disabled recovery and incomplete output visible before selecting this mode. -->
+    <string name="uberhar_test_compute">Virtual PICA: Calculated (isolated test)</string>
+    <string name="uberhar_test_compute_description">Test only: Native rendering fallback is disabled. Only supported rectangles render; games can appear incomplete or blank. Coverage is recorded in the log. Restart the game after changing.</string>
     <string name="uberhar_test_auto">Virtual PICA: automatic combination</string>
     <!-- AstraPro: Combo now opts into ready-only GPU vertices; not full compute. -->
     <string name="uberhar_test_auto_description">Experimental Vulkan mode: uses ready GPU vertices and bounded specialized fragment shaders for eligible independent triangle lists. CPU generic rendering covers first-use and unsupported draws; performance may vary by game. Native remains the generic control. Not a full compute renderer. Restart the game after changing.</string>

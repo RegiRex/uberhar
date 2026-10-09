@@ -331,20 +331,23 @@ static Core::System::ResultStatus RunCitra(const std::string& filepath) {
     // At this point, the surface has already been used, so the mutex can be unlocked.
     surface_lock.unlock();
 
+    // CodexAstraUlt-2: Cache-loading failures need the same shutdown as gameplay failures.
+    // Install cleanup before loading resources, and clear startup/running state on every exit.
+    // CodexAstraLocal: Install this guard before the initial-load result check too.
+    // Load cleans the partial core on refusal; its already-created frontend
+    // windows/input still require TryShutdown after the surface lock is released.
+    SCOPE_EXIT({
+        stop_run = true;
+        Common::UberharActivity::SetStartup(false);
+        TryShutdown();
+    });
+
     if (load_result != Core::System::ResultStatus::Success) {
         return load_result;
     }
 
     stop_run = false;
     pause_emulation = false;
-
-    // CodexAstraUlt-2: Cache-loading failures need the same shutdown as gameplay failures.
-    // Install cleanup before loading resources, and clear startup/running state on every exit.
-    SCOPE_EXIT({
-        stop_run = true;
-        Common::UberharActivity::SetStartup(false);
-        TryShutdown();
-    });
 
     // AstraEH: This frontend progress screen is known non-interactive loading.
     Common::UberharActivity::SetStartup(true);
@@ -396,7 +399,11 @@ static Core::System::ResultStatus RunCitra(const std::string& filepath) {
             if (result == Core::System::ResultStatus::Success) {
                 continue;
             }
-            if (result == Core::System::ResultStatus::ShutdownRequested) {
+            // CodexAstraLocal: Restore refusal and failed resets cannot enter a
+            // continue dialog or access performance state destroyed by shutdown.
+            if (result == Core::System::ResultStatus::ShutdownRequested ||
+                result == Core::System::ResultStatus::ErrorRendererRecovery ||
+                !system.IsPoweredOn()) {
                 return result; // This also exits the emulation activity
             } else {
                 auto* handler = InputManager::NDKMotionHandler();

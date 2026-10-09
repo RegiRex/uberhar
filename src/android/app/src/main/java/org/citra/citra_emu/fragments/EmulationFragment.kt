@@ -1878,6 +1878,8 @@ class EmulationFragment :
                         Log.debug("[EmulationFragment] Starting emulation thread.")
                         // AstraEH: A fatal process exit leaves the active marker on disk. Normal
                         // native return flushes teardown totals and records an orderly title stop.
+                        // CodexAstraLocal: Pair the native call with its existing lifecycle hooks
+                        // on the owning thread; finally records teardown when the call unwinds.
                         org.citra.citra_emu.utils.CrashSessionLogs.beginRun()
                         try {
                             NativeLibrary.run(gamePath)

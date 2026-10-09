@@ -26,7 +26,9 @@ void ComputeRectRenderer::Initialize(vk::PipelineCache cache) {
     const auto physical = instance.GetPhysicalDevice();
     const auto family = physical.getQueueFamilyProperties()[instance.GetGraphicsQueueFamilyIndex()];
     if (!(family.queueFlags & vk::QueueFlagBits::eCompute)) {
-        // AstraEH Log Line: One capability rejection; all draws retain the native route.
+        // AstraEH Log Line: One capability rejection.
+        // CodexAstraLocal Log Line: Caller policy determines omission versus
+        // recovery; strict Calculated never replaces this with a graphics draw.
         LOG_WARNING(Render_Vulkan, "Uberhar compute unavailable: graphics queue lacks compute");
         return;
     }
@@ -77,8 +79,9 @@ void ComputeRectRenderer::Initialize(vk::PipelineCache cache) {
     // this remains a bounded fragment subset after CPU vertices, not full compute rendering.
     LOG_INFO(Render_Vulkan,
              "Uberhar compute prepared: coverage=solid_masked_endpoint_rectangles pipeline_count=1 "
-             "runtime_compilation=false timestamps={} mode={}",
-             bool(queries), static_cast<u32>(mode));
+             "runtime_compilation=false timestamps={} mode={} graphics_fallback={}",
+             bool(queries), static_cast<u32>(mode),
+             Settings::RequiresComputeOnly(mode) ? "disabled" : "allowed");
 }
 
 // CodexAstraLocal: Keep optional expanded proof work on immutable compute modes
@@ -105,34 +108,44 @@ void ComputeRectRenderer::Draw(Surface& surface, const ComputeRectPacket& packet
     // owned by the existing fenced surface cache; descriptors use fenced heap slots.
     scheduler.Record([image = surface.Image(), view_layout = *layout, target = *pipeline, set,
                       packet](vk::CommandBuffer cmdbuf) {
-        vk::ImageMemoryBarrier barrier{
-            .srcAccessMask = vk::AccessFlagBits::eMemoryRead | vk::AccessFlagBits::eMemoryWrite,
-            // CodexAstraLocal: Masked writes read preserved bytes from this
-            // same validated image. Keep the full-mask direct-write access scope.
-            .dstAccessMask = packet.byte_mask == 0xffffffff
-                ? vk::AccessFlags{vk::AccessFlagBits::eShaderWrite}
-                : vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eShaderWrite,
-            .oldLayout = vk::ImageLayout::eGeneral,
-            .newLayout = vk::ImageLayout::eGeneral,
-            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .image = image,
-            .subresourceRange{vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1}};
-        cmdbuf.pipelineBarrier(vk::PipelineStageFlagBits::eAllCommands,
-                               vk::PipelineStageFlagBits::eComputeShader, {}, {}, {}, barrier);
-        cmdbuf.bindPipeline(vk::PipelineBindPoint::eCompute, target);
-        cmdbuf.bindDescriptorSets(vk::PipelineBindPoint::eCompute, view_layout, 0, set, {});
-        cmdbuf.pushConstants(view_layout, vk::ShaderStageFlagBits::eCompute, 0, sizeof(packet),
-                             &packet);
-        cmdbuf.dispatch((packet.rect[2] + 7) / 8, (packet.rect[3] + 7) / 8, 1);
-        barrier.srcAccessMask = vk::AccessFlagBits::eShaderWrite;
-        barrier.dstAccessMask = vk::AccessFlagBits::eMemoryRead | vk::AccessFlagBits::eMemoryWrite;
-        cmdbuf.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader,
-                               vk::PipelineStageFlagBits::eAllCommands, {}, {}, {}, barrier);
+        // CodexAstraLocal: The shared recorder preserves the original barriers,
+        // bindings and dispatch; only this guest owner increments route counts.
+        RecordComputeRectCommands(cmdbuf, image, view_layout, target, set, packet);
     });
     scheduler.MakeDirty(StateFlags::Pipeline | StateFlags::DescriptorSets);
     ++compute_draws;
     compute_pixels += packet.PixelCount();
+}
+
+// CodexAstraLocal: Keep production and scratch commands identical without
+// making a synthetic benchmark a guest fallback or a selector observation.
+void RecordComputeRectCommands(vk::CommandBuffer cmdbuf, vk::Image image,
+                               vk::PipelineLayout view_layout, vk::Pipeline target,
+                               vk::DescriptorSet set, const ComputeRectPacket& packet) {
+    vk::ImageMemoryBarrier barrier{
+        .srcAccessMask = vk::AccessFlagBits::eMemoryRead | vk::AccessFlagBits::eMemoryWrite,
+        // CodexAstraLocal: Masked writes read preserved bytes from this
+        // same validated image. Keep the full-mask direct-write access scope.
+        .dstAccessMask = packet.byte_mask == 0xffffffff
+            ? vk::AccessFlags{vk::AccessFlagBits::eShaderWrite}
+            : vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eShaderWrite,
+        .oldLayout = vk::ImageLayout::eGeneral,
+        .newLayout = vk::ImageLayout::eGeneral,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image = image,
+        .subresourceRange{vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1}};
+    cmdbuf.pipelineBarrier(vk::PipelineStageFlagBits::eAllCommands,
+                           vk::PipelineStageFlagBits::eComputeShader, {}, {}, {}, barrier);
+    cmdbuf.bindPipeline(vk::PipelineBindPoint::eCompute, target);
+    cmdbuf.bindDescriptorSets(vk::PipelineBindPoint::eCompute, view_layout, 0, set, {});
+    cmdbuf.pushConstants(view_layout, vk::ShaderStageFlagBits::eCompute, 0, sizeof(packet),
+                         &packet);
+    cmdbuf.dispatch((packet.rect[2] + 7) / 8, (packet.rect[3] + 7) / 8, 1);
+    barrier.srcAccessMask = vk::AccessFlagBits::eShaderWrite;
+    barrier.dstAccessMask = vk::AccessFlagBits::eMemoryRead | vk::AccessFlagBits::eMemoryWrite;
+    cmdbuf.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader,
+                           vk::PipelineStageFlagBits::eAllCommands, {}, {}, {}, barrier);
 }
 
 int ComputeRectRenderer::ReserveSample(bool compute, u64 pixels) {
@@ -284,15 +297,19 @@ void ComputeRectRenderer::Report() {
              rejected_state[4], rejected_state[5], rejected_state[6], rejected_state[7],
              rejected_state[8], rejected_state[9], rejected_state[10]);
     // AstraEH Log Line: One final coverage/timing report; sampled GPU times are not frame times.
+    // CodexAstraLocal Log Line: Strict omissions are separately reported by the
+    // rasterizer; native_draws stays zero rather than counting missing output.
     LOG_INFO(
         Render_Vulkan,
         "Uberhar virtual routes totals: mode={} considered={} unsupported_state={} "
         "rejected_geometry={} "
         "rejected_format={} eligible_rectangles={} native_draws={} compute_draws={} "
         "compute_pixels={} "
-        "native_gpu_samples={} native_gpu_ms={:.3f} compute_gpu_samples={} compute_gpu_ms={:.3f}",
+        "native_gpu_samples={} native_gpu_ms={:.3f} compute_gpu_samples={} compute_gpu_ms={:.3f} "
+        "graphics_fallback={}",
         static_cast<u32>(mode), considered, unsupported, geometry_rejected, format_rejected,
         eligible, native_draws, compute_draws, compute_pixels, measured_draws[0],
-        measured_ns[0] / 1e6, measured_draws[1], measured_ns[1] / 1e6);
+        measured_ns[0] / 1e6, measured_draws[1], measured_ns[1] / 1e6,
+        Settings::RequiresComputeOnly(mode) ? "disabled" : "allowed");
 }
 } // namespace Vulkan

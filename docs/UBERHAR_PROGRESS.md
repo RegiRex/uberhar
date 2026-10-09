@@ -1,13 +1,34 @@
-# Uberhar progress — 0.1.32 reviewed; paused for owner inspection
+# Uberhar progress — 0.1.33 Calculated isolation and performance experiments
+
+<!-- CodexAstraLocal: Resume the owner's next two builds while preserving the completed .32 review as historical evidence. -->
+The owner has resumed work for **0.1.33 and 0.1.34**, followed by testing and
+another architecture/results and separate cleanliness audit. Calculated must
+disable Native/graphics fallback for the next build. Unsupported output will be
+explicit, and an empty or incomplete image will not count as a performance gain.
+The current kernel remains a restricted rectangle implementation; no complete
+independent Dark Moon renderer is claimed. The strict Draw path is implemented locally and passes focused route proof.
+Backend refusal and terminal reload handling pass their focused failure controls;
+the merged native build, full host probe and CTest pass, with five
+firmware-dependent skips. The bounded scratch benchmark passes its actual-owner
+and injected-failure controls, original-input pixels and Vulkan module validation.
+The merged compute pixel gate also passes, and the Android-only benchmark object
+compiles with the pinned NDK for ARM64/API 33.
+The private CPU input-recipe experiment passes whole-path output/lifetime checks
+and A64 compilation; host gains and fallback regressions remain provisional.
+The .33 Android delivery gates and device measurements remain pending.
+
+<!-- CodexAstraLocal: Retain the delivered review result below; its pause was superseded by the explicit two-build instruction above. -->
+## Completed 0.1.32 review checkpoint
 
 <!-- CodexAstraLocal: Keep the latest owner implementation order, consolidated testing and explicit review boundary visible above historical scope. -->
 The scheduled 0.1.31 adaptive CPU fragment work and 0.1.32 Calculated extension
 are delivered and tested, with one cold opening per method per build. The
 systematic architecture/correctness/performance and separate cleanliness/comment
-reviews are complete. **Development is paused for owner inspection**, as requested.
+reviews are complete. **That .32 checkpoint paused for owner inspection**; the current two-build
+authorization above supersedes the historical stop.
 Independent calculation, correct graphics and sustained 99%+ remain the goal;
-0.1.32 does not qualify them. No 0.1.33 build or automatic 0.2.0 continuation
-is scheduled.
+0.1.32 does not qualify them. The current .33/.34 batch is separately authorized; automatic 0.2.0
+continuation remains outside this batch.
 
 <!-- CodexAstraLocal: Bind verified delivery and bounded target results to the released source without claiming product qualification. -->
 **0.1.32 passed all 22 required release gates** in

@@ -31,6 +31,7 @@ template<class... A> void Log(Common::Log::Delivery delivery, fmt::format_string
 #undef LOG_INFO
 #define LOG_INFO_WITH_DELIVERY(category, delivery, ...) Log(delivery, __VA_ARGS__)
 #define LOG_INFO(category, ...) Log(Common::Log::Delivery::Reliable, __VA_ARGS__)
+#define MICROPROFILE_SCOPE(name) ((void)0)
 unsigned checks{};
 void Check(bool yes, const char* reason) {
     ++checks;
@@ -54,13 +55,17 @@ u64 Number(const Fields& f, const char* key) { return std::stoull(f.at(key)); }
 namespace vk { enum class Format { eR8G8B8A8Unorm, Other }; }
 namespace VideoCore { enum class PixelFormat { RGBA8, Other }; }
 namespace Vulkan {
-enum class SurfaceType { Color };
+enum class SurfaceType { Color, Depth };
 struct HardwareVertex { Common::Vec4f position, color; };
 struct Surface {
     struct { vk::Format native{vk::Format::eR8G8B8A8Unorm}; bool storage_support{true}; } traits;
     int image{7}; int Image() const { return image; }
 };
 struct Framebuffer {
+    // CodexAstraLocal: A null handle exercises the real early Draw exit without
+    // constructing a Vulkan framebuffer or changing its census denominator.
+    bool handle{true};
+    bool Handle() const { return handle; }
     unsigned color_id{1}, color_level{};
     VideoCore::PixelFormat format{VideoCore::PixelFormat::RGBA8};
     VideoCore::PixelFormat Format(SurfaceType) const { return format; }
@@ -68,7 +73,7 @@ struct Framebuffer {
 };
 class ComputeRectRenderer {
 public:
-    Settings::UberharTestMode mode{Settings::UberharTestMode::Compute}; bool selected{};
+    Settings::UberharTestMode mode{Settings::UberharTestMode::Automatic}; bool selected{};
     u64 considered{}, unsupported{}, geometry_rejected{}, format_rejected{}, eligible{},
         native_draws{}, compute_draws{}, compute_pixels{};
     std::array<u64, 11> rejected_state{};
@@ -88,28 +93,61 @@ public:
 };
 #include "report.inc"
 struct Fixture {
+    // CodexAstraLocal: Mode is selected once for this test owner, independently
+    // of compute-owner availability; ordinary fallback remains the default.
+    explicit Fixture(Settings::UberharTestMode mode = Settings::UberharTestMode::Automatic)
+        : strict_compute{Settings::RequiresComputeOnly(mode)} { owned.mode = mode; }
+    bool strict_compute;
+#include "strict_stats.inc"
+    StrictComputeStats strict_compute_stats{};
+    void ReportStrictCompute() const;
     ComputeRectRenderer owned;
     ComputeRectRenderer* compute_rect{&owned};
     bool accelerate{};
     Pica::RegsInternal regs{};
     std::vector<HardwareVertex> vertex_batch;
     Framebuffer target;
-    struct { Surface surface; Surface& GetSurface(unsigned) { return surface; } } res_cache;
-    struct {
+    // CodexAstraLocal: Record the framebuffer boundary calls and the terminal
+    // graphics sentinel. State masks and the entire pre-graphics Draw are real.
+    struct FramebufferHelper {
+        Vulkan::Framebuffer* target{};
+        unsigned* cancellations{};
         struct View { s32 x{}, y{}, width{64}, height{32}; };
         struct Rect { s32 left{}, bottom{}, right{64}, top{32}; };
+        Vulkan::Framebuffer* Framebuffer() const { return target; }
+        void CancelInvalidation() const { ++*cancellations; }
         View Viewport() const { return {}; }
         Rect DrawRect() const { return {}; }
-    } fb_helper;
+    };
+    struct {
+        Surface surface;
+        Vulkan::Framebuffer* target{};
+        unsigned cancellations{};
+        Surface& GetSurface(unsigned) { return surface; }
+        FramebufferHelper GetFramebufferSurfaces(bool, bool) { return {target, &cancellations}; }
+    } res_cache;
+    struct {
+        struct { struct { VideoCore::PixelFormat color{}, depth{}; } attachments;
+                 struct { bool stencil_test_enable{}; } depth_stencil; } state;
+        bool GetFinalColorWriteMask(int) const { return true; }
+        bool IsDepthWriteEnabled() const { return false; }
+    } pipeline_info;
+    int instance{}, cpu_bridge{};
+    unsigned graphics_fallthrough{}, sync_calls{}, nonempty_calls{};
+    void SyncDrawState() { ++sync_calls; }
     struct { unsigned ended{}; void EndRendering() { ++ended; } } renderpass_cache;
+    void EmptyBatch() {
+#include "empty.inc"
+        ++nonempty_calls;
+    }
     bool Route() {
-        const Framebuffer* framebuffer = &target;
-        std::optional<ComputeRectPacket> compute_packet;
-        int timing_slot = -1;
+        res_cache.target = &target;
 #include "admission.inc"
+        ++graphics_fallthrough;
         return false;
     }
 };
+#include "strict_report.inc"
 } // namespace Vulkan
 
 // CodexAstraLocal: Build every exact joint reason mask independently from
@@ -278,7 +316,8 @@ void TestEffectiveAdmission() {
     };
     for (M mode : {M::Custom, M::Native, M::Compute, M::Automatic, M::ComboGeneric}) {
         Fixture f = expanded(); f.compute_rect = &f.owned;
-        f.owned.mode = mode; f.owned.selected = true;
+        f.owned.mode = mode; f.strict_compute = Settings::RequiresComputeOnly(mode);
+        f.owned.selected = true;
         const bool enabled = mode == M::Compute || mode == M::Automatic || mode == M::ComboGeneric;
         Check(ComputeRectStateRejections(f.regs) == 1026, "expanded fixture retains exact raw mask");
         Check(f.Route() == enabled && f.owned.compute_draws == enabled &&
@@ -327,7 +366,73 @@ void TestEffectiveAdmission() {
         if (failure == 0) Check(summary.at("overflow") == "true", "raw counter saturation is explicit");
     }
 }
+
+// CodexAstraLocal: Unsupported strict work is consumed before any graphics
+// sentinel, never retries, never invalidates pixels, and is not useful compute.
+// The same failures in other modes retain their original complete-draw route.
+void TestStrictIsolation() {
+    using namespace Vulkan;
+    using M = Settings::UberharTestMode;
+    for (M mode : {M::Custom, M::Native, M::Compute, M::Automatic, M::ComboGeneric}) {
+        for (unsigned failure = 0; failure < 7; ++failure) {
+            Fixture f{mode}; f.regs = Registers(0); f.vertex_batch = Vertices(6);
+            f.owned.selected = true;
+            if (failure == 0) f.regs = Registers(4);
+            if (failure == 1) f.target.color_id = 0;
+            if (failure == 2) f.vertex_batch[0].position.w = 0;
+            if (failure == 3) f.owned.selected = false;
+            if (failure == 4) f.compute_rect = nullptr;
+            if (failure == 5) f.target.handle = false;
+            if (failure == 6) f.res_cache.surface.traits.storage_support = false;
+            const bool consumed = f.Route();
+            if (mode != M::Compute) {
+                Check(consumed == (failure == 5) && f.graphics_fallthrough == (failure != 5),
+                      "other modes retain graphics fallback and early no-target behavior");
+                Check(f.res_cache.cancellations == 0 && f.vertex_batch.size() == 6 &&
+                      f.strict_compute_stats.attempts == 0,
+                      "other modes retain batch ownership and no strict counters");
+                continue;
+            }
+            Check(consumed && f.graphics_fallthrough == 0,
+                  "strict rejected draw is consumed before graphics");
+            Check(f.res_cache.cancellations == 1, "strict omitted draw has no pixel ownership");
+            Check(f.vertex_batch.empty(), "strict omitted draw consumes vertex batch");
+            const auto& c = f.strict_compute_stats;
+            Check(c.attempts == 1 && c.computed == 0 && c.Omitted() == 1 &&
+                  c.state == (failure == 0) && c.format == (failure == 1 || failure == 6) &&
+                  c.geometry == (failure == 2) && c.not_ready == (failure == 3) &&
+                  c.no_renderer == (failure == 4) && c.no_target == (failure == 5),
+                  "strict reason partition includes unavailable owner and no target");
+            Check(f.owned.native_draws == 0 && f.owned.compute_draws == 0 &&
+                  f.owned.considered == (failure != 4 && failure != 5),
+                  "strict omission is not native or compute coverage");
+            logs.clear(); f.ReportStrictCompute();
+            const auto report = Parse(logs.at(0).text);
+            Check(report.at("incomplete_output") == "true" && report.at("zero_compute_work") == "true" &&
+                  report.at("conservation") == "true" && report.at("graphics_fallback") == "disabled" &&
+                  Number(report, "omitted") == 1, "strict report rejects incomplete performance evidence");
+        }
+    }
+    Fixture success{M::Compute}; success.regs = Registers(0); success.vertex_batch = Vertices(6);
+    success.owned.selected = true;
+    Check(success.Route() && success.strict_compute_stats.computed == 1 &&
+          success.strict_compute_stats.Omitted() == 0 && success.owned.compute_draws == 1 &&
+          success.owned.native_draws == 0 && success.res_cache.cancellations == 0 &&
+          success.graphics_fallthrough == 0 && success.vertex_batch.empty(),
+          "strict supported packet retains complete compute operation and invalidation");
+    Fixture empty{M::Compute}; empty.EmptyBatch();
+    Check(empty.strict_compute_stats.empty_batches == 1 && !empty.strict_compute_stats.attempts &&
+          !empty.nonempty_calls, "empty batches are outside strict draw attempts");
+    empty.vertex_batch = Vertices(3); empty.EmptyBatch();
+    Check(empty.nonempty_calls == 1 && empty.strict_compute_stats.empty_batches == 1,
+          "nonempty assembly is not mislabeled empty");
+    Fixture accelerated{M::Compute}; accelerated.accelerate = true;
+    accelerated.vertex_batch = Vertices(6);
+    Check(!accelerated.Route() && accelerated.sync_calls == 0 && accelerated.graphics_fallthrough == 0 &&
+          accelerated.strict_compute_stats.attempts == 0 && accelerated.vertex_batch.size() == 6,
+          "unexpected hardware entry requests unchanged CPU vertex preparation only");
+}
 int main() {
-    try { TestBins(); TestAdmission(); TestReports(); TestEffectiveAdmission(); std::printf("PASS checks=%u bank_bytes=%zu\n", checks, sizeof(Vulkan::ComputeStateCensus)); }
+    try { TestBins(); TestAdmission(); TestReports(); TestEffectiveAdmission(); TestStrictIsolation(); std::printf("PASS checks=%u bank_bytes=%zu\n", checks, sizeof(Vulkan::ComputeStateCensus)); }
     catch (const std::exception& error) { std::fprintf(stderr,"FAILED: %s\n",error.what()); return 1; }
 }
