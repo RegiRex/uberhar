@@ -39,7 +39,9 @@ jobs:
         # CodexAstraUlt: The real Libretro logger regression also needs its pinned API header;
         # a full local checkout already has it, but this narrow CI checkout must fetch it.
         # CodexAstraLocal: The mixed-depth regression executes the production x64 JIT.
-        run: git submodule update --init --depth 1 externals/fmt externals/xxHash externals/boost externals/nihstro externals/vulkan-headers externals/microprofile externals/xbyak externals/libretro-common/libretro-common
+        # CodexAstraLocal: The scratch regression executes the pinned runtime GLSL
+        # parser/preamble, rather than relying only on separately adapted CLI shaders.
+        run: git submodule update --init --depth 1 externals/fmt externals/xxHash externals/boost externals/nihstro externals/vulkan-headers externals/microprofile externals/xbyak externals/libretro-common/libretro-common externals/glslang
       - name: Install validation tools
         run: |
           sudo apt-get update

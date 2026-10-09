@@ -401,7 +401,7 @@ private:
     u64 ready_fragment_requests{}, ready_fragment_hits{}, ready_fragment_cold{},
         ready_fragment_busy{}, ready_fragment_capped{}, ready_fragment_mismatches{},
         ready_fragment_failed_hits{}, ready_fragment_unsupported{},
-        ready_fragment_lookup_only_misses{}; // CodexAstraLocal: Full CPU PSO bank cannot warm modules.
+        ready_fragment_lookup_only_misses{}; // CodexAstraLocal: All missing read-only module probes.
     std::atomic<u64> ready_fragment_builds{}, ready_fragment_failures{},
         ready_fragment_compile_ns{}, ready_fragment_max_compile_ns{};
 

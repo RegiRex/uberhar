@@ -440,6 +440,10 @@ private:
     // AstraEH: Fused-input admission/results, reset with the PICA instance at title start.
     std::array<u64, 5> native_input_results{};
     u64 native_input_maps{}, native_input_fused_vertices{}, native_input_legacy_vertices{};
+    // CodexAstraLocal: Five fixed actual-input invocation buckets consume 40B;
+    // update once after each completed FIFO draw, reset with this PICA owner,
+    // and report at the existing cadence. No guest state or per-vertex counter.
+    std::array<u64, 5> native_input_recipe_invocations{};
     // AstraPro: Exact-index retry coverage, reset with the PICA core.
     // AstraPro: Count only successfully submitted optional GPU batches.
     u64 ready_gpu_vertex_batches{}, ready_gpu_vertex_inputs{}, ready_gpu_vertex_attempts{};

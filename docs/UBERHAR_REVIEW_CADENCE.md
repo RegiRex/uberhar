@@ -1,5 +1,15 @@
 # Architecture review ledger
 
+<!-- CodexAstraLocal: Count the delivered .33 successor while retaining the explicit .34 review boundary and the failed scratch attempt. -->
+**Current batch status:** .33 passed all release gates, was installed with data
+preserved and completed one strict diagnostic plus one Native and one full Combo
+opening. It is the first released successor to the .32 review anchor. Strict
+Calculated performs zero computed draws and no graphics fallback; its independent
+scratch request failed preparation before work. The .34 input-recipe candidate
+now includes the narrow compiler-preamble correction and a production-compiler
+regression. Its release, device tests and both final review tracks remain pending.
+The earlier paused snapshots below are history. Stop after .34 tests and reviews.
+
 <!-- CodexAstraLocal: The October 8 owner instruction advances a bounded two-build batch and explicitly requires a review sooner than the standing three-build cadence. -->
 **Current owner scope:** deliver and test .33 and .34, then complete another
 results/architecture and separate cleanliness audit and stop for owner inspection.

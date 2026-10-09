@@ -1,6 +1,35 @@
 <!-- AstraEH: Attribution index for the Uberhar implementation, tests, packaging and documentation. -->
 # Uberhar code map
 
+<!-- CodexAstraLocal: Map complete input recipe selection and its actual invocation consumers without changing arithmetic, live-memory lifetime or draw coverage. -->
+## 0.1.34 — complete CPU input recipes
+
+- `pica/uberhar_vertex_input.h` selects one of four exact complete reader/default/
+  count sequences after the existing per-draw mapping and bounds checks. Each
+  recipe calls the original conversions in ascending attribute order, preserving
+  register aliases, live data/strides, missing-component fill and shader state.
+  Every preparation clears the executor and tag before rejection or retry. Other
+  layouts and defaults use the existing generic transport; empty draws skip
+  selection. This removes repeated reader dispatch for the selected sequences,
+  without changing guest shader arithmetic, FIFO behavior or output assembly.
+- `pica_core.{h,cpp}` enables selection for nonempty preparations and reuses the
+  existing post-FIFO invocation-minus-escape count once per finished draw. Five
+  cumulative `recipe0_vertices` through `recipe4_vertices` fields are emitted by
+  the existing vertex-input progress/final record, now schema 2. Slot 0 counts
+  generic prepared transport; slots 1–4 count the four actual recipes. Their sum
+  equals `fused_vertices`; FIFO hits, legacy escapes and unready work are excluded.
+  The fixed table is 40 bytes. There is no additional per-vertex count/clock or
+  log call. Delivered differences require the same lifecycle/time boundaries as
+  existing diagnostics; these counts do not attribute execution time or actors.
+- `test_vertex_input_recipes.py` and its runner/accounting fixtures compile real
+  production software components with synthetic mappings. The same-header generic
+  reference and actual legacy-loader oracle check live inputs, interpreter/x64-JIT
+  carry, FIFO, output and assembly. Actual-source lifetime/accounting mutants and
+  semantic controls must fail. This host gate has no timing option and does not
+  qualify Android, MemoryRef lifetime, Vulkan or target performance. The existing
+  `build_probe.sh` requires it before release gates can pass.
+
+
 <!-- CodexAstraLocal: Map .33 work in progress to real route and lifecycle consumers; delivery remains separately gated. -->
 ## 0.1.33 local implementation checkpoint
 
@@ -901,3 +930,16 @@ No new emulator dependency, public telemetry or permission. Full compute, strip/
 - `tools/uberhar/test_vertex_plan_cache.cpp` and `test_fixed_attribute_reserve.py`:
   live-payload equivalence and production writer capacity regression tests.
 - `docs/UBERHAR_LOG_ANALYSIS_0.1.12.md`: mode/marker-qualified data and limits.
+
+<!-- CodexAstraLocal: Close the runtime-compiler seam exposed by the .33 Thor scratch preparation failure. -->
+## 0.1.34 scratch compiler regression
+
+`vk_compute_benchmark.cpp` relies on glslang's built-in Vulkan macro; the former
+conflicting definition rejected the first shader before benchmark work began.
+`test_compute_benchmark.py` and `test_compute_benchmark_compiler.cpp` now compile
+the actual benchmark source/call through unchanged `vk_shader_util.cpp`, using
+pinned glslang and the explicit optimizer-disabled policy. Four feature profiles
+produce twelve validated modules; the original preamble is a failing control.
+The shader workflow fetches that pinned parser for the existing mandatory host
+gate. No optional optimizer path or handheld GPU performance is established by
+this regression; existing original-input pixel and owner/lifetime gates remain.

@@ -395,7 +395,9 @@ void ComputeBenchmark::Impl::Prepare() {
     const std::array stages{vk::ShaderStageFlagBits::eCompute, vk::ShaderStageFlagBits::eVertex,
                              vk::ShaderStageFlagBits::eFragment};
     for (u32 i = 0; i < modules.size(); ++i) {
-        const auto words = CompileGLSL(sources[i], stages[i], "#define VULKAN 1\n", true);
+        // CodexAstraLocal: Vulkan parsing already defines VULKAN=100; redefining
+        // it as 1 rejected every scratch shader before any benchmark commands.
+        const auto words = CompileGLSL(sources[i], stages[i], "", true);
         if (words.empty()) throw std::runtime_error("shader_compile");
         source_hashes[i] = Common::ComputeHash64(sources[i].data(), sources[i].size());
         module_hashes[i] = Common::ComputeHash64(words.data(), words.size() * sizeof(u32));

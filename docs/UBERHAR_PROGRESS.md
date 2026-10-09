@@ -1,4 +1,28 @@
-# Uberhar progress — 0.1.33 Calculated isolation and performance experiments
+# Uberhar progress — 0.1.33 delivery and 0.1.34 input work
+
+<!-- CodexAstraLocal: Bind the published .33 source and distinguish the next local candidate from delivered device behavior. -->
+The .33 source is published at `2dc50832c4fefa16f15ba86e6cccb76a6b432452`.
+[Android/shader prerelease run 37879803076](https://github.com/RegiRex/uberhar/actions/runs/37879803076)
+passed all 23 required shader/Android/signing/publication steps. Exact source,
+APK checksum, package and signing-compatibility checks passed before a
+data-preserving installation of .33 / 33991058. Its single strict
+Calculated diagnostic reports 837,453 unsupported draws omitted, zero computed
+draws and graphics fallback disabled. The separate scratch request failed shader
+preparation before recording work, so it provides no performance ratio. The one
+Native and full Combo openings completed normal return, with mean normal speeds
+29.099% and 28.310%. Their complete reporting windows all remain below 99%;
+different scene/observer/temperature conditions prevent a causal gain claim.
+Native records three isolated single-frame moon events and three separate ghost
+events in covered later phases; earlier quiet ghost checkpoints are unobserved.
+Combo records no comparable moon or ghost block events in its captured regions;
+its earlier near-ghost checkpoint is also unobserved. The .34 input recipes and
+narrow benchmark compiler-preamble correction are integrated. Final merged native
+compilation, CTest (with five firmware-dependent skips) and the full host probe
+(583.330 seconds) pass. The compiler regression executes the production Vulkan
+compiler: twelve modules validate and the original conflicting preamble fails as
+expected. Independent source and cleanliness reviews have closed implementation
+findings. Publication, target testing and the requested two-build results,
+architecture and separate cleanliness reviews remain open.
 
 <!-- CodexAstraLocal: Resume the owner's next two builds while preserving the completed .32 review as historical evidence. -->
 The owner has resumed work for **0.1.33 and 0.1.34**, followed by testing and
@@ -15,7 +39,7 @@ The merged compute pixel gate also passes, and the Android-only benchmark object
 compiles with the pinned NDK for ARM64/API 33.
 The private CPU input-recipe experiment passes whole-path output/lifetime checks
 and A64 compilation; host gains and fallback regressions remain provisional.
-The .33 Android delivery gates and device measurements remain pending.
+The .33 Android delivery and bounded device observations are recorded above.
 
 <!-- CodexAstraLocal: Retain the delivered review result below; its pause was superseded by the explicit two-build instruction above. -->
 ## Completed 0.1.32 review checkpoint

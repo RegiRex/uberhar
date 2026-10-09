@@ -11,6 +11,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -25,6 +26,85 @@ def run(command,log,timeout=120):
     result=subprocess.run(command,cwd=ROOT,capture_output=True,text=True,timeout=timeout)
     log.write_text(result.stdout+result.stderr)
     return result
+
+def check_runtime_compiler(out, text, block, command, objects):
+    # CodexAstraLocal: Prepare's Vulkan objects remain modeled, but its shader
+    # generation and exact CompileGLSL statement now run through the pinned real
+    # parser. The .33 macro defect escaped CLI validation, which removes defines.
+    prepare=block(text,'void ComputeBenchmark::Impl::Prepare()')
+    first=prepare.index('    if (!ComputeBenchmarkData::Prepare(0, workload))')
+    last=prepare.index('    for (u32 i = 0; i < modules.size(); ++i)')
+    (out/'benchmark-shader-preparation.inc').write_text(prepare[first:last])
+    loop=block(prepare,'for (u32 i = 0; i < modules.size(); ++i)')
+    calls=[line.strip() for line in loop.splitlines() if 'const auto words = CompileGLSL(' in line]
+    assert len(calls)==1 and calls[0].endswith(', "", true);'),calls
+    (out/'benchmark-compile-call.inc').write_text(calls[0]+'\n')
+    bad=out/'original-preamble';bad.mkdir()
+    (bad/'benchmark-compile-call.inc').write_text(
+        calls[0].replace(', "", true)',', "#define VULKAN 1\\n", true)')+'\n')
+    stubs=out/'compiler-stubs/common';stubs.mkdir(parents=True)
+    (stubs/'settings.h').write_text('''// CodexAstraLocal: The explicit-policy overload must never consult the UI setting.
+#pragma once
+#include <stdexcept>
+namespace Settings {
+struct ForbiddenOptimizerSetting {
+    bool GetValue() const { throw std::runtime_error("unexpected global optimizer read"); }
+};
+struct Values { ForbiddenOptimizerSetting disable_spirv_optimizer; };
+inline Values values;
+}
+''')
+    compiler_root=ROOT/'externals/glslang'
+    revision=subprocess.check_output(['git','-C',str(compiler_root),'rev-parse','HEAD'],text=True).strip()
+    expected=subprocess.check_output(['git','ls-files','--stage','externals/glslang'],cwd=ROOT,text=True).split()[1]
+    assert revision==expected,'glslang checkout must match its recorded pin'
+    subprocess.run(['git','-C',str(compiler_root),'diff','--quiet','HEAD'],check=True)
+    build=ROOT/'build/uberhar-probe/compute-benchmark-glslang'
+    # CodexAstraLocal: This mandatory call disables optimization. The real
+    # GlslangToSpv path therefore never enters SPIRV-Tools; build the same pinned
+    # parser/emitter without that unused optimizer and validate modules separately.
+    config=['cmake','-S',str(compiler_root),'-B',str(build),'-G','Ninja',
+            '-DCMAKE_BUILD_TYPE=Release','-DBUILD_SHARED_LIBS=OFF','-DBUILD_EXTERNAL=OFF',
+            '-DENABLE_OPT=OFF','-DENABLE_HLSL=OFF','-DENABLE_GLSLANG_BINARIES=OFF',
+            '-DGLSLANG_TESTS=OFF','-DGLSLANG_ENABLE_INSTALL=OFF','-DENABLE_SPIRV=ON']
+    build_command=['cmake','--build',str(build),'--target','glslang','-j2']
+    run(config,out/'runtime-compiler-configure.log').check_returncode()
+    run(build_command,out/'runtime-compiler-build.log',timeout=480).check_returncode()
+    library=build/'glslang/libglslang.a'
+    assert library.is_file()
+    base=command[:1]+['-I'+str(stubs.parent),'-I'+str(compiler_root)]+command[1:]
+    unit=ROOT/'src/video_core/renderer_vulkan/vk_shader_util.cpp'
+    driver=HERE/'test_compute_benchmark_compiler.cpp'
+    common=out/'runtime-compiler.o'
+    argv=base+['-c',str(unit),'-o',str(common)]
+    run(argv,out/'runtime-compiler-compile.log').check_returncode()
+    commands=[config,build_command,argv];results=[]
+    for name,include in [('current',out),('original-preamble',bad)]:
+        binary=out/('runtime-compiler-'+name)
+        argv=base[:1]+['-I'+str(include)]+base[1:]+[str(driver),str(common),*objects,
+                                                 str(library),'-pthread','-o',str(binary)]
+        run(argv,out/(name+'-compiler-link.log')).check_returncode();commands.append(argv)
+        argv=[str(binary),str(out/(name+'-modules'))]
+        result=run(argv,out/(name+'-compiler-run.log'),timeout=60);commands.append(argv)
+        if name=='current':
+            result.check_returncode()
+        else:
+            assert result.returncode==1 and 'Macro redefined' in result.stderr and 'VULKAN' in result.stderr
+            assert 'FAILED: production compiler returned no SPIR-V 1.3 module' in result.stderr
+        results.append({'case':name,'returncode':result.returncode,'output':result.stdout+result.stderr})
+    # CodexAstraLocal: Validate the exact runtime-produced modules, not sources
+    # recompiled by a CLI with a different preamble or environment setup.
+    validator=shutil.which('spirv-val') or str(ROOT/'build/uberhar-validators/spirv-tools/tools/spirv-val')
+    assert Path(validator).is_file(),'spirv-val required for actual runtime compiler modules'
+    modules=sorted((out/'current-modules').glob('*.spv'))
+    assert len(modules)==12
+    for module in modules:
+        argv=[validator,'--target-env','vulkan1.1',str(module)]
+        run(argv,module.with_suffix('.validation.log')).check_returncode();commands.append(argv)
+    return {'commands':commands,'cases':results,'glslang_revision':revision,
+            'library_sha256':sha(library),'validator_sha256':sha(Path(validator)),
+            'validated_modules':len(modules),
+            'scope':'Actual CompileGLSL and benchmark source/call; mandatory optimizer disabled; no Vulkan device'}
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
@@ -56,6 +136,9 @@ def main():
         'uberhar_compute_rect_shader.h','uberhar_push_constants.h',
         'vk_rasterizer.cpp','vk_pipeline_cache.h','vk_pipeline_cache.cpp','vk_scheduler.h')]
     paths += [HERE/'test_compute_benchmark.cpp',HERE/'compare_compute_benchmark.py',
+              HERE/'test_compute_benchmark_compiler.cpp',
+              ROOT/'src/video_core/renderer_vulkan/vk_shader_util.cpp',
+              ROOT/'src/video_core/renderer_vulkan/vk_shader_util.h',
               HERE/'compare_fragment_state.py',Path(__file__),HERE/'test_compute_census.py',
               HERE/'test_cpu_fragment_abi.py',ROOT/'src/common/uberhar_test_profile.h',
               ROOT/'src/common/settings.h',ROOT/'src/video_core/shader/generator/profile.h']
@@ -156,8 +239,10 @@ def main():
         results.append({'case':name,'returncode':result.returncode,'expected_failure':expected,'output':result.stdout+result.stderr})
     shader=ROOT/'src/video_core/renderer_vulkan/uberhar_compute_rect_shader.h'
     (out/'compute.comp').write_text(shader.read_text().split('R"glsl(',1)[1].split(')glsl"',1)[0])
+    compiler_proof=check_runtime_compiler(out,text,block,command,objects)
     if any(sha(ROOT/p)!=h for p,h in hashes.items()):raise AssertionError('Source changed during gate')
     manifest={'author':'CodexAstraLocal','source_sha256':hashes,'commands':commands,'cases':results,
+              'runtime_compiler':compiler_proof,
               'scope':'Actual owner/command bodies with named boundaries; actual CPU ABI/shader fixtures; no device execution',
               'artifacts':{str(p.relative_to(out)):sha(p) for p in out.rglob('*') if p.is_file()}}
     (out/'provenance.json').write_text(json.dumps(manifest,indent=2)+'\n')

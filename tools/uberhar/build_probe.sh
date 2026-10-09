@@ -208,6 +208,10 @@ c++ -std=c++20 -O2 -DFMT_HEADER_ONLY -Isrc -Iexternals/fmt/include -Iexternals/b
   tools/uberhar/test_vertex_input.cpp src/video_core/pica/shader_unit.cpp \
   -o build/uberhar-probe/test-vertex-input
 build/uberhar-probe/test-vertex-input
+# CodexAstraLocal: Complete recipes must preserve real legacy input decoding,
+# interpreter/JIT carry, FIFO/output/assembly and exact once-per-draw usage counts.
+# This synthetic gate requires both semantic and actual-source failing controls.
+python3 tools/uberhar/test_vertex_input_recipes.py --mutants
 
 # AstraPro: Optional GPU eligibility, real winding/assembly and framebuffer ownership must be exact.
 c++ -std=c++20 -O2 -DFMT_HEADER_ONLY -DXXH_INLINE_ALL \

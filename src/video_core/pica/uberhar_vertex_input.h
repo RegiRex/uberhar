@@ -32,7 +32,11 @@ public:
 
     template <typename Describe, typename Map>
     Result Prepare(const ShaderRegs& shader, u32 available_attributes, PAddr base, u64 last_vertex,
-                   Describe&& describe, Map&& map) {
+                   Describe&& describe, Map&& map, bool complete_recipe = false) {
+        // CodexAstraLocal: A retry or rejected mapping must never retain an
+        // executor selected from a different prepared plan.
+        recipe = nullptr;
+        recipe_slot = 0;
         count = 0;
         mapped_attributes = 0;
         ready = false;
@@ -68,6 +72,10 @@ public:
             op.read = Reader(desc.format, desc.elements);
         }
         count = requested;
+        // CodexAstraLocal: Select only after all original range/reader checks;
+        // the caller disables this bounded work for empty draws.
+        if (complete_recipe)
+            recipe = SelectRecipe();
         // AstraPro: Retain the validated bound for live-index checks after a retry.
         admitted_maximum = static_cast<u32>(last_vertex);
         ready = true;
@@ -79,11 +87,20 @@ public:
     bool CanLoad(u32 vertex) const { return ready && vertex <= admitted_maximum; }
     u32 MappedAttributes() const { return mapped_attributes; }
     u32 AttributeCount() const { return count; }
+    // CodexAstraLocal: Slot zero is generic prepared transport; the other four
+    // tags identify the current complete recipe for once-per-draw usage counts.
+    u32 RecipeSlot() const { return recipe_slot; }
 
     // AstraEH: Caller only invokes after Ready, for indices <= the admitted bound.
     // Retain ascending writes (including aliases), live defaults, exact f24
     // conversion, and untouched shader registers. No JIT math or FIFO policy changes.
     void Load(ShaderUnit& unit, const AttributeBuffer& defaults, u32 vertex) const {
+        // CodexAstraLocal: A complete recipe removes repeated reader dispatch
+        // while preserving exact conversion order and live per-miss reads.
+        if (recipe) {
+            recipe(*this, unit, vertex);
+            return;
+        }
         for (u32 attr = 0; attr < count; ++attr) {
             const auto& op = ops[attr];
             if (op.is_default) {
@@ -133,8 +150,78 @@ private:
         }
         return nullptr; // Prepare rejected every out-of-range format above.
     }
+    // CodexAstraLocal: Match complete reader/default/count sequences only.
+    // Destinations, addresses and strides stay in this draw's validated plan.
+    template <typename T_, u32 N_>
+    struct Element { using T = T_; static constexpr u32 N = N_; };
+    using F3 = Element<f32, 3>;
+    using F2 = Element<f32, 2>;
+    using B3 = Element<s8, 3>;
+    using B4 = Element<s8, 4>;
+    using S2 = Element<s16, 2>;
+    using S3 = Element<s16, 3>;
+    using S4 = Element<s16, 4>;
+    using U2 = Element<u8, 2>;
+    using U4 = Element<u8, 4>;
+    using Recipe = void (*)(const NativeVertexInputPlan&, ShaderUnit&, u32);
+    template <class... E>
+    bool MatchesRecipe() const {
+        constexpr std::array<Read, sizeof...(E)> readers{&Convert<typename E::T, E::N>...};
+        for (u32 index = 0; index < readers.size(); ++index)
+            if (ops[index].is_default || ops[index].read != readers[index])
+                return false;
+        return true;
+    }
+    // CodexAstraLocal: The comma fold sequences every original typed conversion;
+    // aliased destination registers keep ascending-attribute last-write behavior.
+    template <class E>
+    static void ConvertRecipeElement(const Op& op, ShaderUnit& unit, u32 vertex) {
+        Convert<typename E::T, E::N>(unit.input[op.reg],
+            op.data + static_cast<std::size_t>(op.stride) * vertex);
+    }
+    template <class... E>
+    static void LoadRecipe(const NativeVertexInputPlan& plan, ShaderUnit& unit, u32 vertex) {
+        u32 index = 0;
+        (ConvertRecipeElement<E>(plan.ops[index++], unit, vertex), ...);
+    }
+    // CodexAstraLocal: Publish the tag only with its exact matching executor.
+    // Early rejection and every retry retain the Prepare entry's generic tag.
+    Recipe SelectRecipe() {
+        switch (count) {
+        case 2:
+            if (MatchesRecipe<F3, F2>()) {
+                recipe_slot = 3;
+                return LoadRecipe<F3, F2>;
+            }
+            break;
+        case 4:
+            if (MatchesRecipe<F3, B3, S2, U4>()) {
+                recipe_slot = 4;
+                return LoadRecipe<F3, B3, S2, U4>;
+            }
+            break;
+        case 5:
+            if (MatchesRecipe<F3, B3, S2, S2, U4>()) {
+                recipe_slot = 1;
+                return LoadRecipe<F3, B3, S2, S2, U4>;
+            }
+            break;
+        case 11:
+            if (MatchesRecipe<S3, B4, S2, U2, S3, S4, S4, S4, S4, S4, S4>()) {
+                recipe_slot = 2;
+                return LoadRecipe<S3, B4, S2, U2, S3, S4, S4, S4, S4, S4, S4>;
+            }
+            break;
+        }
+        return nullptr;
+    }
+    // CodexAstraLocal: This value is valid only for the currently prepared ops;
+    // no extra owner, guest-data cache, generation lookup or allocation is added.
+    Recipe recipe{};
     std::array<Op, 16> ops{};
     u32 count{}, mapped_attributes{}, admitted_maximum{};
     bool ready{};
+    // CodexAstraLocal: Reset with the same prepared ops, never a cross-draw key.
+    u8 recipe_slot{};
 };
 } // namespace Pica

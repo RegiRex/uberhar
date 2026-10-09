@@ -313,8 +313,9 @@ std::optional<std::pair<u64, Shader* const>> ShaderDiskCache::UseReadyFragmentSh
         ++ready_fragment_hits;
         return std::make_pair(hash, &shader);
     }
-    // CodexAstraLocal: A caller without PSO capacity may still reuse a ready
-    // module above; a miss does not create demand/objects/queued compilation.
+    // CodexAstraLocal: A read-only probe can reuse a ready module above without
+    // creating demand or compilation on a miss. CPU admission starts with this
+    // probe before checking the remaining PSO/work capacity.
     if (!allow_build) {
         ++ready_fragment_lookup_only_misses;
         return {};

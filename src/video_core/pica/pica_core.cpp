@@ -170,14 +170,22 @@ void PicaCore::ReportVirtualVertices(const char* kind, std::chrono::steady_clock
              native_samples.draw_ns / 1e6, native_samples.draw_max_ns / 1e6);
     // AstraEH: Reuse the existing five-second/shutdown cadence; no per-vertex logs.
     // CodexAstraUlt Log Line: Replace AstraEH's blocking progress enqueue; totals stay reliable.
+    // CodexAstraLocal Log Line: The five actual-invocation buckets partition
+    // fused_vertices within this PICA owner; optional progress loss is not zero
+    // coverage. Tags 0/1/2/3/4 mean generic/5-attribute/11-attribute/2-attribute/
+    // 4-attribute complete recipes, not actor or elapsed-time attribution.
     LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
-             "Uberhar vertex input {}: schema=1 ready_batches={} missing_attribute={} "
+             "Uberhar vertex input {}: schema=2 ready_batches={} missing_attribute={} "
              "unconfigured={} address_wrap={} short_mapping={} mapped_attributes={} "
-             "fused_vertices={} legacy_vertices={} scope=no_gs_native_transport "
-             "memory_reuse=within_batch_only",
+             "fused_vertices={} legacy_vertices={} recipe0_vertices={} recipe1_vertices={} "
+             "recipe2_vertices={} recipe3_vertices={} recipe4_vertices={} "
+             "scope=no_gs_native_transport memory_reuse=within_batch_only",
              kind, native_input_results[0], native_input_results[1], native_input_results[2],
              native_input_results[3], native_input_results[4], native_input_maps,
-             native_input_fused_vertices, native_input_legacy_vertices);
+             native_input_fused_vertices, native_input_legacy_vertices,
+             native_input_recipe_invocations[0], native_input_recipe_invocations[1],
+             native_input_recipe_invocations[2], native_input_recipe_invocations[3],
+             native_input_recipe_invocations[4]);
     // AstraPro: Existing five-second/final cadence; no per-index clocks.
     // CodexAstraUlt Log Line: Replace AstraPro's blocking progress enqueue; totals stay reliable.
     LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
@@ -1402,7 +1410,10 @@ void PicaCore::LoadVertices(bool is_indexed, std::chrono::steady_clock::time_poi
                         auto& ref = input_refs[input_ref_count++];
                         ref = memory.GetPhysicalRef(address);
                         return {ref.GetPtr(), ref.GetSize()};
-                    });
+                    },
+                    // CodexAstraLocal: Whole recipes remain draw-local and are
+                    // reselected after each range retry; empty draws avoid selection.
+                    pipeline.num_vertices != 0);
             };
             auto input_result = prepare_input(maximum_vertex);
             bool rescued_input = false;
@@ -1570,7 +1581,12 @@ void PicaCore::LoadVertices(bool is_indexed, std::chrono::steady_clock::time_poi
             native_index_escapes += escaped_input_vertices;
             // AstraEH: Count actual misses using each transport, not all submitted indices.
             if (input_plan.Ready()) {
-                native_input_fused_vertices += counts.invocations - escaped_input_vertices;
+                // CodexAstraLocal: Reuse the completed FIFO count and existing
+                // escape count once; descriptor recognition and reused indices
+                // are not executed input transport. No per-vertex accounting is added.
+                const u64 prepared_invocations = counts.invocations - escaped_input_vertices;
+                native_input_fused_vertices += prepared_invocations;
+                native_input_recipe_invocations[input_plan.RecipeSlot()] += prepared_invocations;
                 native_input_legacy_vertices += escaped_input_vertices;
             } else {
                 native_input_legacy_vertices += counts.invocations;
