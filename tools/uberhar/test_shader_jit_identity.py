@@ -55,7 +55,13 @@ inline struct { Setting uberhar_test_mode; } values;
         ('ignore_descriptors', 'jit', 'entry.code == setup.GetProgramCode() && entry.swizzles == setup.GetSwizzleData()',
          'entry.code == setup.GetProgramCode()'),
         ('ignore_revision', 'jit', 'binding.revision == revision', 'true'),
-        ('reused_address', 'jit', 'setup.cached_shader == binding.entry->shader.get()', 'true'),
+        # CodexAstraLocal: Target SetupBatch's fast binding only. LeaseForDraw
+        # now repeats the pointer check and must remain intact in this control.
+        ('reused_address', 'jit',
+         'binding.revision == revision && binding.entry &&\n'
+         '            setup.cached_shader == binding.entry->shader.get()',
+         'binding.revision == revision && binding.entry &&\n'
+         '            true'),
         # CodexAstraLocal: Imported host metadata recreates the copy/assignment
         # hole even though the bucket's full-source comparison remains correct.
         ('copy_binding', 'setup', 'cached_shader = nullptr;', 'cached_shader = other.cached_shader;'),

@@ -240,6 +240,18 @@ jobs:
             --compiler "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/clang++" \
             --qemu "$(command -v qemu-aarch64)"
 
+          # CodexAstraLocal: Execute retained-code lifetime and stale-identity
+          # controls with the exact Android JIT before compiling the app.
+          python3 tools/uberhar/test_shader_jit_lease.py --a64 \
+            --compiler "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/clang++" \
+            --qemu "$(command -v qemu-aarch64)"
+
+          # CodexAstraLocal: Execute actual packet ownership, FIFO/state carry,
+          # work admission and terminal completion with the target shader JIT.
+          python3 tools/uberhar/test_cpu_draw_queue.py --a64 \
+            --compiler "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/clang++" \
+            --qemu "$(command -v qemu-aarch64)"
+
       - name: Build Android ARM64
         working-directory: src/android
         run: |
@@ -383,6 +395,12 @@ jobs:
             build/uberhar-probe/vertex-register-decode/**/*.stdout
             build/uberhar-probe/vertex-register-decode/**/*.stderr
             build/uberhar-probe/vertex-register-decode/**/*.output.bin
+            build/uberhar-probe/shader-jit-lease/**/provenance.json
+            build/uberhar-probe/shader-jit-lease/**/*.stdout
+            build/uberhar-probe/shader-jit-lease/**/*.stderr
+            build/uberhar-probe/cpu-draw-queue/**/provenance.json
+            build/uberhar-probe/cpu-draw-queue/**/*.stdout
+            build/uberhar-probe/cpu-draw-queue/**/*.stderr
           if-no-files-found: ignore
           retention-days: 14
 

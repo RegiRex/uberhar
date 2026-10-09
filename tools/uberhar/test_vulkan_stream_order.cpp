@@ -10,6 +10,8 @@
 #include <iostream>
 #include <map>
 #include <memory>
+#include <span>
+#include <limits>
 #include <mutex>
 #include <optional>
 #include <queue>
@@ -24,6 +26,7 @@ using u8 = std::uint8_t;
 using u32 = std::uint32_t;
 using u64 = std::uint64_t;
 using s32 = std::int32_t;
+namespace VideoCore { struct ShaderRecoveryError : std::runtime_error { ShaderRecoveryError():std::runtime_error("modeled typed failure"){} }; }
 static unsigned checks{};
 
 void Require(bool condition, const char* reason) {
@@ -148,6 +151,9 @@ struct ImageMemoryBarrier {
 struct MappedMemoryRange { DeviceMemory memory; u64 offset, size; };
 struct CommandBufferBeginInfo { CommandBufferUsageFlagBits flags; };
 struct Device {
+    void unmapMemory(u64) const {}
+    void destroyBuffer(u64) const {}
+    void freeMemory(u64) const {}
     void invalidateMappedMemoryRanges(MappedMemoryRange) {}
     void flushMappedMemoryRanges(MappedMemoryRange) {}
 };
@@ -220,6 +226,7 @@ struct Instance {
     bool should_flush{};
     u64 NonCoherentAtomSize() const { return 64; }
     bool ShouldFlush() const { return should_flush; }
+    void RecordRawStreamFree(u64) const {}
 };
 
 // CodexAstraLocal: Submission and completion are explicit deterministic events.
@@ -285,7 +292,10 @@ public:
         AllocateWorkerCommandBuffers();
     }
     template <class F>
-    void Record(F&& f) { chunk->commands.emplace_back(std::forward<F>(f)); }
+    void Record(F&& f) {
+        auto owned=std::make_shared<std::decay_t<F>>(std::forward<F>(f));
+        chunk->commands.emplace_back([owned](vk::CommandBuffer cb){(*owned)(cb);});
+    }
     void AcquireNewChunk() { chunk = std::make_unique<Chunk>(); }
     void Drain() {
         while (!work_queue.empty()) {
@@ -332,6 +342,9 @@ enum class BufferType : u32 { Upload, Download, Stream };
 constexpr u64 WATCHES_RESERVE_CHUNK = 0x1000;
 class StreamBuffer {
 public:
+    class Allocation;
+#include "stream-deferred-types.inc"
+
     struct Watch { u64 tick{}, upper_bound{}; };
     const Instance& instance;
     Scheduler& scheduler;
@@ -348,18 +361,28 @@ public:
     std::size_t current_watch_cursor{}, wait_cursor{};
     std::optional<std::size_t> invalidation_mark;
     u64 wait_bound{};
+    u64 mapping_generation{};
+    std::shared_ptr<Allocation> allocation;
 
-    StreamBuffer(const Instance& i, Scheduler& s, u32 bytes)
-        : instance(i), scheduler(s), data(bytes), mapped(data.data()), stream_buffer_size(bytes) {
-        s.driver.data = &data;
-    }
+    StreamBuffer(const Instance&, Scheduler&, u32);
     std::tuple<u8*, u32, bool> Map(u32, u64);
     void Commit(u32);
+    bool CanDeferUpload() const noexcept;
+    std::optional<DeferredMapping> MapDeferredUpload(u32,u64);
+    std::optional<DeferredUpload> CommitDeferredUpload(const DeferredMapping&);
     void ReserveWatches(std::vector<Watch>&, std::size_t);
     void WaitPendingOperations(u64);
     u64 Handle() const { return buffer; }
 };
 #include "production.inc"
+// CodexAstraLocal: Controlled backing bytes replace only device allocation;
+// source-derived leases and final watches are shared by all modeled commands.
+StreamBuffer::StreamBuffer(const Instance& i,Scheduler& s,u32 bytes)
+    :instance(i),scheduler(s),data(bytes),mapped(data.data()),stream_buffer_size(bytes) {
+    s.driver.data=&data;
+    allocation=std::make_shared<Allocation>(i,device,buffer,memory,mapped,bytes);
+}
+
 
 // CodexAstraLocal: Selection/token bookkeeping is a counter model; only the
 // selected pipeline/descriptor recording statements are production extracts.
@@ -400,6 +423,12 @@ struct PipelineCache {
 // actual HardwareVertex arithmetic/ABI already covered by other gates.
 struct HardwareVertex { std::array<u8, 88> bytes; };
 static_assert(sizeof(HardwareVertex) == 88);
+struct Packet {
+    std::vector<u8> bytes; u32 count{};
+    u32 VertexCount() const { return count; }
+    void Wait() const {}
+    std::span<const u8> HardwareBytes() const { return bytes; }
+};
 struct Raster {
     Scheduler& scheduler;
     RenderManager& renderpass_cache;
@@ -429,8 +458,16 @@ struct Raster {
         vertex_batch.resize(count);
         std::memset(vertex_batch.data(), pattern, count * 88);
     }
-    void Draw(u32 count, bool sampled, int mutant) {
+    void Draw(u32 count, bool sampled, int mutant, bool use_deferred=false) {
         Payload(count);
+        // CodexAstraLocal: Ordinary fixtures retain original vector upload;
+        // deferred fixtures own immutable bytes before any ring/setup operation.
+        std::shared_ptr<Packet> deferred;
+        if(use_deferred) {
+            deferred=std::make_shared<Packet>();deferred->count=count;
+            const auto* first=reinterpret_cast<const u8*>(vertex_batch.data());
+            deferred->bytes.assign(first,first+count*88);vertex_batch.clear();
+        }
         const bool accelerate = false;
         const auto* framebuffer = &this->framebuffer;
         const int timing_slot = sampled ? 0 : -1;
@@ -467,8 +504,13 @@ int main(int argc, char** argv) {
     try {
         using namespace Vulkan;
         const int mutant = argc > 1 ? std::stoi(argv[1]) : 0;
+        // CodexAstraLocal: Execute each intended defect on both independent routes.
+        const int route = argc > 2 ? std::stoi(argv[2]) : 0;
         unsigned cases{};
-        for (bool sampled : {false, true}) {
+        // CodexAstraLocal: Keep all prior ordinary sample/owner combinations;
+        // permanent-state deferred admission has no GPU sample query.
+        for (bool deferred : {false,true}) for (bool sampled : {false,true}) {
+            if((route==1 && deferred) || (route==2 && !deferred) || (deferred && sampled)) continue;
             for (bool optional : {false, true}) {
                 for (const std::string name : {"no_wrap", "old_pending", "old_complete",
                                                "current_wrap", "mali_pass_change", "wrap_and_mali"}) {
@@ -481,8 +523,8 @@ int main(int argc, char** argv) {
                     Raster raster{scheduler, manager, buffer, PipelineCache{optional, scheduler}};
                     const bool wraps = name == "old_pending" || name == "old_complete" ||
                                        name == "current_wrap" || name == "wrap_and_mali";
-                    raster.Draw(wraps ? 90 : 3, false, mutant);
-                    raster.Draw(3, false, mutant);
+                    raster.Draw(wraps ? 90 : 3, false, mutant, deferred);
+                    raster.Draw(3, false, mutant, deferred);
                     if (name == "old_pending" || name == "old_complete") {
                         scheduler.Flush();
                         if (name == "old_complete") {
@@ -495,7 +537,7 @@ int main(int argc, char** argv) {
                         manager.num_draws = MinDrawsToFlush + 1;
                         raster.framebuffer.handle = 3;
                     }
-                    raster.Draw(3, sampled, mutant);
+                    raster.Draw(3, sampled, mutant, deferred);
                     Require(manager.pass.render_pass != 0 &&
                                 !scheduler.IsStateDirty(StateFlags::Pipeline), "final owner state ready");
                     scheduler.DispatchWork();
@@ -517,7 +559,7 @@ int main(int argc, char** argv) {
                                     driver.query_end_ticks[0] == driver.draw_ticks.back(),
                                 "sample stays on final draw tick");
                     }
-                    std::cout << "CASE " << name << " sampled=" << sampled << " optional=" << optional
+                    std::cout << "CASE " << name << " deferred=" << deferred << " sampled=" << sampled << " optional=" << optional
                               << " tick=" << scheduler.CurrentTick()
                               << " bytes=exact draws=3 selects=3 watch_tick=" << driver.draw_ticks.back()
                               << " last_cb=" << driver.draws.back().cb

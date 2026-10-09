@@ -1,19 +1,100 @@
-# Uberhar progress — 0.1.38 preparing; 0.1.37 tested
+# Uberhar progress — 0.1.39 candidate; 0.1.38 installed
 
-<!-- CodexAstraLocal: Select the next bounded CPU-preparation/order candidate while keeping larger parallel designs private until qualified. -->
-**0.1.38 is integrated locally and awaiting final checks/publication.** It removes
+<!-- CodexAstraLocal: Latest owner scope ends after this candidate's consolidated
+Native/Combo tests; only architecture work may continue after the report. -->
+**0.1.39 is being qualified locally, not yet published or installed.** It adds
+bounded independently progressing CPU draw packets and ordered coherent Vulkan
+uploads. Correctness reviews and native integration passed; a finite full-path host
+comparison rejected blanket tiny-draw admission. The narrowed candidate admits
+substantial, inexpensive-to-copy work and preserves the old route elsewhere.
+Actual overlap, output and throughput still need the single cold Native/Combo
+Thor controls. After those tests, pause all non-architecture work and report best
+and slowest qualifying intervals with CPU, GPU and memory context. Measured DDR
+bandwidth remains unavailable; the new passive helper measures pressure/occupancy.
+See the [candidate notes](releases/0.1.39.md) for exact admission and ownership scope.
+
+
+<!-- CodexAstraLocal: Record the owner's coordinated architecture priority and separate planned diagnostics from measured bandwidth. -->
+The current priority is a coordinated portable CPU/GPU execution design. A
+dedicated CPU architect is developing bounded immutable draw work with ordered
+commits; a GPU coarchitect reviews useful stage placement, ownership and memory
+traffic. Worker budgets must respect available logical CPUs, SMT where present,
+heterogeneous capacity and other emulator/driver threads. The Thor exposes eight
+single-threaded cores with different capacity hints; a portable design must not
+assume that topology on other machines. More occupied cores alone are not a gain.
+
+Optional memory-bandwidth diagnostics are being qualified externally for the
+next update's tests. The Thor exposes bandwidth-monitor and memory-stall trace
+event metadata, but event existence does not establish readable traffic, units,
+scope or a percentage of peak bandwidth. Requested bus votes and frequency remain
+separate from measured traffic. The installed Perfetto producer crashes while
+parsing a vendor kernel event; its empty captures do not measure zero bandwidth.
+Direct CPU PMU access was denied. External diagnostics must retain these limits,
+and optional profiling must not silently change the device's security policy.
+
+<!-- CodexAstraLocal: Close the scoped implementation search and retain the owner's explicit deferral. -->
+**Circle Pad Pro Calibration is low priority after 1.0.0.** A scoped search of
+nine pinned public emulator/homebrew source snapshots found no usable calibration
+applet to port. The
+[Azahar factory](https://github.com/azahar-emu/azahar/blob/0e486b07e987b4c1ceb0b7006a1eb725f2494aca/src/core/hle/service/apt/applet_manager.cpp#L561)
+and [Panda3DS factory](https://github.com/wheremyfoodat/Panda3DS/blob/92e53d26b898eb89d865f8407460900a88e7c0fa/src/core/applets/applet_manager.cpp#L17)
+do not implement it; the
+[devkitPro example](https://github.com/devkitPro/3ds-examples/blob/be2001fee08cf8ec7d3366e095e83f6f75da8942/libapplet_launch/source/main.c#L48)
+only launches an existing system applet. Accessory IR calibration packets are not
+the missing APT applet lifecycle. Unavailable original Citra/PabloMK7 histories
+remain unexamined, so this is not a claim that no implementation exists anywhere.
+No speculative HLE replacement is scheduled during the multicore work.
+
+<!-- CodexAstraLocal: Bind actual gated delivery and independently closed single-run numerical/temporal evidence. -->
+**0.1.38 is released and installed**, source
+`4902aa2333ae536c786168ea4d6f2776ef296f83`. All 27 required steps in
+[run 37955914178](https://github.com/RegiRex/uberhar/actions/runs/37955914178)
+passed. APK checksum, compatible signer, actual installed identity and symbol
+build IDs were verified; the upgrade preserved application data and protected
+state. It removes
 packed-register temporary arrays, reserves CPU Vulkan vertices before potentially
 invalidated pass/pipeline setup, and permits explicit system-shell profiling of
 the optimized Uberhar flavor. Focused register gates pass on host and ARM64; the
 source-derived stream-order gate passes its finite recording controls. Native
-integration and CTest pass; independent combined review and delivery gates remain.
-No .38 APK is installed. The [release note](releases/0.1.38.md) records exact scope.
+integration and CTest pass, as do independent architecture and cleanliness reviews.
+The [release note](releases/0.1.38.md) records exact scope.
+
+One Native and one full Combo cold opening are complete, each with File 1 reset,
+verified empty application Vulkan caches, 2x resolution, the 100% limiter and
+normal return. Driver-internal cache state remains unknown. Independent numerical
+and temporal reviews are complete: Native averages 33.185% normal speed across
+36 complete windows; Combo 30.805% across 43. Native's complete CPU capture uses
+1.772 app core equivalents, including 0.837 across seven workers; Combo's two
+captures use 1.099/1.777 for the app, including 0.448/0.762 across workers. The
+missed early Native CPU window stays missing. Unequal scenes and observer coverage
+prevent causal speed comparisons. No opening is repeated to fill an evidence gap.
+Native has ten moon events/twelve affected frames and one isolated ghost event;
+Combo has no comparable event in its captured moon/earlier close-ghost scenes,
+with later wide ghost coverage absent. Sustained 99% speed, general graphics
+correctness and heavy useful multicore execution remain unmet.
+
+<!-- CodexAstraLocal: Owner-controlled broader testing is an explicit temporary
+device-operation change; development agents continue offline. -->
+Owner-controlled .38 testing has covered Sonic, Fire Emblem Awakening, LEGO City
+and Monster Hunter 4 Ultimate, followed by a live Metal Gear Solid 3 calibration
+applet freeze. Cold and warm runs, actual resolution and speed caps remain
+separate. Root collects serialized read-only
+per-core system CPU, app/thread CPU, aggregate exposed GPU busy/frequency,
+ordinary logs, brief screenshots and memory/power/temperature observations.
+The owner's first turbo toggle marks gameplay; later stable 400% cap periods
+measure headroom separately from normal 100% cap periods and mixed transitions.
+No automatic game inputs, installation or standalone benchmark runs during play.
+Per-GPU-core utilization is not exposed by the retained driver counters.
 
 Context reuse and typed dispatch were rejected after mixed/slower complete-path
 host results. Shared-wake coordination and safe overlap within a draw remain
-private experiments. The next single Native/Combo openings will include bounded
-CPU profiling if the installed build and device permit it; no profiling starts
-automatically and no extra game run is scheduled for preparation.
+private experiments. Both openings include one bounded CPU profile. Exact-release
+symbols identify the per-worker wake loop as about 11.5–11.8% of the owner's
+sampled cycle periods; this is CPU work, not waiting wall time or an available
+speedup budget. Large unresolved generated-code candidates remain unassigned.
+The finite standalone shared-cohort comparison stopped before any timing because
+its eight-processor precondition failed. The exact process context is being
+diagnosed; the failed attempt supplies no performance result.
 
 <!-- CodexAstraLocal: Bind current progress to gated delivery and actual finite device evidence, without turning coverage counts into throughput. -->
 Released **0.1.37** is `f6e0d88842ff8204e112a7368035e4565848146d`.

@@ -1,8 +1,24 @@
 # Architecture review ledger
 
+<!-- CodexAstraLocal: The latest owner-defined boundary applies even before the
+next full three-successor review; candidate preparation does not advance cadence. -->
+**Current batch:** finish .39 and one consolidated cold Native/Combo test each,
+then pause all non-architecture work and deliver best/slowest interval analysis.
+The .37 full-review anchor and one successful successor (.38) remain unchanged
+until .39 actually passes publication. Focused architecture, ownership, efficiency
+and purpose-comment reviews accompany .39; no third-successor audit is claimed.
+
+
 <!-- CodexAstraLocal: Close the third-successor review against actual delivered source and reset only the successful-build cadence. -->
 The new full-review anchor is **released .37**, source
-`f6e0d88842ff8204e112a7368035e4565848146d`, with **zero successful successors**.
+`f6e0d88842ff8204e112a7368035e4565848146d`, with **one successful successor (.38)**.
+<!-- CodexAstraLocal: Count the gated .38 release once; its focused source reviews do not replace the next full audit. -->
+.38 source `4902aa2333ae536c786168ea4d6f2776ef296f83` passed all 27 required
+release steps and completed one cold Native/Combo opening each. Focused independent
+architecture and cleanliness reviews passed before publication. Independent
+numerical and temporal device reviews are now closed; throughput remains
+unqualified. Owner-controlled Sonic comparisons supplement .38 coverage without
+advancing the build count or resetting the full-audit anchor.
 The separate [architecture](UBERHAR_ARCHITECTURE_0.1.37.md),
 [cleanliness](UBERHAR_CLEANLINESS_0.1.37.md) and [test](UBERHAR_TEST_REVIEW_0.1.37.md)
 reviews close .35–.37: exact delivery, 27 gates, compatible installation and one

@@ -1,197 +1,155 @@
 #!/usr/bin/env python3
-"""CodexAstraLocal: Check CPU stream reservation and final draw command order.
+"""CodexAstraLocal: Adapt the existing command-order gate to deferred coherent upload.
 
-Extract unchanged ring/scheduler/render-pass bodies and actual CPU reservation,
-prebind/pass/sample and draw call sites. Driver, queue completion, selection and
-query owners are explicit recording models. This is not Vulkan execution, pixel
-parity, accelerated/presentation coverage or a complete cached-resource proof.
-The default gate requires late-Map and early-Commit defects to fail.
+Actual ring/lease, scheduler submit/dispatch, render-pass and rasterizer setup/draw
+seams execute with recording driver/packet/selection endpoints. All original ordinary cases remain; only non-sampled
+deferred draws are added because permanent compute rejection cannot reserve a query.
+No Vulkan execution, pixels, executor behavior or full cached-UBO/LUT proof follows.
 """
 import argparse
 import hashlib
 import importlib.util
 import json
-import os
 from pathlib import Path
-import re
-import shlex
 import subprocess
 import tempfile
 
+HERE=Path(__file__).resolve().parent
+ROOT=HERE.parents[1]
 
-def digest(path):
-    return hashlib.sha256(path.read_bytes()).hexdigest()
-
-
-def require(condition, message):
-    if not condition:
-        raise RuntimeError(message)
-
-
-def section(source, start, end):
-    require(source.count(start) == 1, "Ambiguous start boundary: " + start)
-    begin = source.index(start)
-    finish = source.index(end, begin)
-    return source[begin:finish]
-
-
-def replace_once(source, old, new):
-    require(source.count(old) == 1, "Mutation boundary changed: " + old)
-    return source.replace(old, new, 1)
-
+def sha(p):return hashlib.sha256(p.read_bytes()).hexdigest()
+def need(b,why):
+    if not b:raise RuntimeError(why)
+def replace(source,old,new):
+    need(source.count(old)==1,'Changed adaptation anchor: '+old[:100]);return source.replace(old,new,1)
+def section(source,start,end):
+    need(source.count(start)==1,'Changed section start: '+start)
+    i=source.index(start);return source[i:source.index(end,i)]
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--output', type=Path,
-                        default=Path('build/uberhar-probe/vulkan-stream-order'))
-    args = parser.parse_args()
-    root = Path(__file__).resolve().parents[2]
-    args.output.mkdir(parents=True, exist_ok=True)
-    output = Path(tempfile.mkdtemp(prefix='run-', dir=args.output.resolve()))
-    proof = {'author': 'CodexAstraLocal', 'scope': __doc__, 'sources_before': {},
-             'function_seams': [], 'variants': [], 'passed': False}
-    inputs = []
-
-    # CodexAstraLocal: Reuse the existing balanced extractor, snapshot every
-    # input, and fail on changed boundaries instead of compiling a copied fix.
-    def read(rel):
-        path = root / rel
-        inputs.append(path)
-        proof['sources_before'][rel] = digest(path)
-        target = output / 'source' / rel
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(path.read_bytes())
-        return path.read_text()
-
+    global ROOT
+    # CodexAstraLocal: A source shadow supports finite defects/private review;
+    # normal CI extracts actual repository sources and writes a new proof folder.
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--repo',type=Path,default=ROOT)
+    parser.add_argument('--source-root',type=Path,default=ROOT)
+    parser.add_argument('--output',type=Path,default=Path('build/uberhar-probe/vulkan-stream-order'))
+    args=parser.parse_args()
+    ROOT=args.repo.resolve()
+    source_root=args.source_root.resolve()
+    args.output.mkdir(parents=True,exist_ok=True)
+    output=Path(tempfile.mkdtemp(prefix='deferred-order-',dir=args.output.resolve()))
+    proof={'author':'CodexAstraLocal','scope':__doc__,'inputs':{},'seams':{},'variants':[]}
+    def read(path):
+        path=path.resolve();rel=str(path);data=path.read_bytes()
+        proof['inputs'][rel]=hashlib.sha256(data).hexdigest()
+        target=output/'sources'/('input-'+str(len(proof['inputs']))+'-'+path.name);target.parent.mkdir(parents=True,exist_ok=True);target.write_bytes(data)
+        return data.decode()
+    helper=ROOT/'tools/uberhar/test_ready_cpu_fragments.py';read(helper)
+    spec=importlib.util.spec_from_file_location('extractor',helper)
+    extractor=importlib.util.module_from_spec(spec);spec.loader.exec_module(extractor)
+    def function(source,signature):
+        body=extractor.function(source,signature);proof['seams'][signature]=hashlib.sha256(body.encode()).hexdigest();return body
     try:
-        helper_rel = 'tools/uberhar/test_ready_cpu_fragments.py'
-        read(helper_rel)
-        spec = importlib.util.spec_from_file_location('stream_order_extraction', root / helper_rel)
-        extractor = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(extractor)
-        parts = []
-        for rel, signatures in [
-            ('src/video_core/renderer_vulkan/vk_stream_buffer.cpp', [
-                'std::tuple<u8*, u32, bool> StreamBuffer::Map(',
-                'void StreamBuffer::Commit(', 'void StreamBuffer::ReserveWatches(',
-                'void StreamBuffer::WaitPendingOperations(']),
-            ('src/video_core/renderer_vulkan/vk_scheduler.cpp', [
-                'void Scheduler::Flush(', 'void Scheduler::Wait(u64 tick)',
-                'void Scheduler::DispatchWork(', 'void Scheduler::SubmitExecution(',
-                'void Scheduler::AllocateWorkerCommandBuffers()']),
-            ('src/video_core/renderer_vulkan/vk_render_manager.cpp', [
-                'void RenderManager::BeginRendering(const Framebuffer*',
-                'void RenderManager::BeginRendering(const RenderPass&',
-                'void RenderManager::EndRendering()'])]:
-            source = read(rel)
-            for signature in signatures:
-                body = extractor.function(source, signature)
-                parts.append(body)
-                proof['function_seams'].append({'source': rel, 'signature': signature,
-                    'sha256': hashlib.sha256(body.encode()).hexdigest()})
-        (output / 'production.inc').write_text('\n\n'.join(parts) + '\n')
-
-        header = read('src/video_core/renderer_vulkan/vk_render_manager.h')
-        renderpass = section(header, 'struct RenderPass {', '\n};') + '\n};'
-        (output / 'renderpass.inc').write_text(renderpass)
-        pipeline = read('src/video_core/renderer_vulkan/vk_pipeline_cache.cpp')
-        bind = section(pipeline, '        if (is_dirty || bound_pipeline != selected) {',
-                       '        // AstraEH: Invalidate even')
-        (output / 'bind-commands.inc').write_text(bind)
-        rasterizer = read('src/video_core/renderer_vulkan/vk_rasterizer.cpp')
-        draw = extractor.function(rasterizer, 'bool RasterizerVulkan::Draw(')
-        prepare = section(draw, '    // CodexAstraLocal: Map may submit the current tick',
-                          '    const auto draw_rect = fb_helper.DrawRect();')
-        setup = section(draw, '    PipelineCache::CpuFragmentToken cpu_fragment_use{};',
-                        '    // AstraPro: Sample synchronized state')
-        tail = section(draw, '        // AstraEH: A ready bridge bypasses creation', '\n    }')
-        end_sample = section(draw, '    // AstraEH: This sample covers the native draw',
-                             '    // AstraPro: No draw occurred')
-        require(prepare.count('stream_buffer.Map(') == 1 and
-                'stream_buffer.Map(' not in setup + tail and
-                'stream_buffer.Commit(' not in prepare and
-                tail.count('stream_buffer.Commit(') == 1,
-                'CPU Map/Commit source population changed')
-        require(draw.index(prepare) < draw.index('compute_rect->ReserveSample(false,') < draw.index(setup),
-                'CPU reservation must precede query reservation and final setup')
-        require(tail.index('pipeline_cache.BindPipeline(') < tail.index('stream_buffer.Commit(') <
-                tail.index('scheduler.Record(') < tail.index('pipeline_cache.CompleteReadyCpuDraw('),
-                'CPU final binding/storage/draw/token order changed')
-        (output / 'setup.inc').write_text(setup)
-        (output / 'end-sample.inc').write_text(end_sample)
-
-        # CodexAstraLocal: Mutate only the actual reservation/commit seams.
-        # The first defect restores the old ordering; the second loses the
-        # final allocation tick when pass setup submits after reservation.
-        map_block = extractor.function(prepare, '    if (!accelerate)')
-        copy_commit = ('        std::memcpy(vertex_data, vertex_batch.data(), vertex_size);\n'
-                       '        stream_buffer.Commit(vertex_size);\n')
-        require(tail.count(copy_commit) == 1, 'CPU copy/commit boundary changed')
-        generated = {
-            'candidate-prepare.inc': prepare,
-            'candidate-tail.inc': tail,
-            'late-prepare.inc': replace_once(prepare, map_block, ''),
-            'late-tail.inc': replace_once(tail, '        // CodexAstraLocal: A pass change',
-                                          map_block + '\n        // CodexAstraLocal: A pass change'),
-            'early-prepare.inc': prepare + '\n' + copy_commit,
-            'early-tail.inc': replace_once(tail, copy_commit, ''),
-        }
-        for name, body in generated.items():
-            (output / name).write_text(body)
-        # CodexAstraLocal: Header/owner snapshots bind the modeled interface
-        # contract without claiming those modeled constructors were executed.
-        for rel in ['src/video_core/renderer_vulkan/vk_stream_buffer.h',
-                    'src/video_core/renderer_vulkan/vk_scheduler.h',
-                    'src/video_core/renderer_vulkan/vk_master_semaphore.h',
-                    'src/video_core/renderer_vulkan/vk_master_semaphore.cpp',
-                    'src/video_core/renderer_vulkan/vk_compute_rect.cpp']:
-            read(rel)
-        fixture_rel = 'tools/uberhar/test_vulkan_stream_order.cpp'
-        fixture = read(fixture_rel)
-        read('tools/uberhar/test_vulkan_stream_order.py')
-        (output / 'fixture.cpp').write_text(fixture)
-        compiler = shlex.split(os.environ.get('CXX', 'c++'))
-        require(bool(compiler), 'Empty CXX command')
-        binary = output / 'test'
-        command = compiler + ['-std=c++20', '-O2', '-g0', '-DNDEBUG', '-pthread',
-                              str(output / 'fixture.cpp'), '-o', str(binary)]
-        proof['compile_argv'] = command
-        compiled = subprocess.run(command, cwd=root, capture_output=True, timeout=60)
-        (output / 'compile.stdout').write_bytes(compiled.stdout)
-        (output / 'compile.stderr').write_bytes(compiled.stderr)
-        proof['compile_exit'] = compiled.returncode
-        require(compiled.returncode == 0, 'Recording fixture compile failed: ' + str(output))
-        proof['binary_sha256'] = digest(binary)
-        for name, number, expected in [
-                ('baseline', 0, None), ('late-map', 1, b'FAIL final owner state ready\n'),
-                ('early-commit', 2, b'FAIL geometry watch stamped at final draw tick\n')]:
-            result = subprocess.run([str(binary), str(number)], cwd=root,
-                                    capture_output=True, timeout=20)
-            (output / (name + '.stdout')).write_bytes(result.stdout)
-            (output / (name + '.stderr')).write_bytes(result.stderr)
-            record = {'name': name, 'exit': result.returncode}
-            proof['variants'].append(record)
-            if expected is None:
-                require(result.returncode == 0 and result.stderr == b'' and
-                        result.stdout.endswith(b'PASS cases=24 checks=768\n') and
-                        len(re.findall(rb'^CASE ', result.stdout, re.M)) == 24,
-                        'Recording control population or result changed')
-                record.update({'cases': 24, 'checks': 768})
-            else:
-                require(result.returncode == 1 and result.stderr == expected,
-                        'Defect did not fail the intended obligation: ' + name)
-            record['passed'] = True
-        proof['passed'] = True
+        read(Path(__file__).resolve())
+        fixture=read(HERE/'test_vulkan_stream_order.cpp')
+        stream=read(source_root/'src/video_core/renderer_vulkan/vk_stream_buffer.cpp')
+        header=read(source_root/'src/video_core/renderer_vulkan/vk_stream_buffer.h')
+        schedule=read(ROOT/'src/video_core/renderer_vulkan/vk_scheduler.cpp')
+        read(source_root/'src/video_core/renderer_vulkan/vk_scheduler.h')
+        render=read(ROOT/'src/video_core/renderer_vulkan/vk_render_manager.cpp')
+        render_header=read(ROOT/'src/video_core/renderer_vulkan/vk_render_manager.h')
+        pipeline=read(ROOT/'src/video_core/renderer_vulkan/vk_pipeline_cache.cpp')
+        raster=read(source_root/'src/video_core/renderer_vulkan/vk_rasterizer.cpp')
+        # CodexAstraLocal: Keep complete production bodies; adapters only provide
+        # Vulkan signatures, scheduler endpoints and controlled backing storage.
+        parts=[function(stream,'class StreamBuffer::Allocation final')+';']
+        for sig in ['bool StreamBuffer::DeferredUpload::Publish(',
+            'vk::Buffer StreamBuffer::DeferredUpload::Handle()',
+            'std::tuple<u8*, u32, bool> StreamBuffer::Map(', 'void StreamBuffer::Commit(',
+            'bool StreamBuffer::CanDeferUpload()',
+            'std::optional<StreamBuffer::DeferredMapping> StreamBuffer::MapDeferredUpload(',
+            'std::optional<StreamBuffer::DeferredUpload> StreamBuffer::CommitDeferredUpload(',
+            'void StreamBuffer::ReserveWatches(', 'void StreamBuffer::WaitPendingOperations(']:
+            parts.append(function(stream,sig))
+        for sig in ['void Scheduler::Flush(', 'void Scheduler::Wait(u64 tick)',
+            'void Scheduler::DispatchWork(', 'void Scheduler::SubmitExecution(',
+            'void Scheduler::AllocateWorkerCommandBuffers()']:parts.append(function(schedule,sig))
+        for sig in ['void RenderManager::BeginRendering(const Framebuffer*',
+            'void RenderManager::BeginRendering(const RenderPass&',
+            'void RenderManager::EndRendering()']:parts.append(function(render,sig))
+        (output/'production.inc').write_text('\n\n'.join(parts)+'\n')
+        (output/'renderpass.inc').write_text(section(render_header,'struct RenderPass {','\n};')+'\n};\n')
+        (output/'bind-commands.inc').write_text(section(pipeline,
+            '        if (is_dirty || bound_pipeline != selected) {','        // AstraEH: Invalidate even'))
+        draw=function(raster,'bool RasterizerVulkan::Draw(')
+        prepare=section(draw,'    // CodexAstraLocal: Map may submit the current tick',
+                        '    const auto draw_rect = fb_helper.DrawRect();')
+        setup=section(draw,'    PipelineCache::CpuFragmentToken cpu_fragment_use{};',
+                      '    // AstraPro: Sample synchronized state')
+        # CodexAstraLocal: Brace-balanced extraction includes both branches of
+        # the actual CPU tail while excluding the surrounding accelerated branch.
+        outer=function(draw,'    if (accelerate) {\n        succeeded = AccelerateDrawBatchInternal')
+        i=draw.index(outer)+len(outer)
+        need(draw[i:].startswith(' else {'),'CPU else boundary changed')
+        cpu=extractor.function('void SelectedCpuTail() '+draw[i+len(' else '):],
+                               'void SelectedCpuTail()')
+        tail=cpu[cpu.index('{')+1:-1]
+        end_sample=section(draw,'    // AstraEH: This sample covers the native draw',
+                           '    // AstraPro: No draw occurred')
+        for name,body in [('setup.inc',setup),('end-sample.inc',end_sample),
+                          ('candidate-prepare.inc',prepare),('candidate-tail.inc',tail)]:
+            (output/name).write_text(body+'\n')
+        need(prepare.count('MapDeferredUpload(')==1 and tail.count('CommitDeferredUpload(')==1,
+             'Deferred Map/seal population changed')
+        need('MapDeferredUpload(' not in setup+tail and 'CommitDeferredUpload(' not in prepare,
+             'Deferred reservation/seal moved out of required scopes')
+        need(tail.index('pipeline_cache.BindPipeline(')<tail.index('CommitDeferredUpload(')<
+             tail.index('scheduler.Record(')<tail.index('pipeline_cache.CompleteReadyCpuDraw('),
+             'Final bind/seal/record/token order changed')
+        map_block=prepare[prepare.index('    if (deferred) {'):]
+        late_prepare=replace(prepare,map_block,'')
+        late_tail=replace(tail,'        // CodexAstraLocal: A pass change',
+                          map_block+'\n        // CodexAstraLocal: A pass change')
+        early_prepare=prepare+'''\n    // CodexAstraLocal: Intentional defect stamps before final pass/bind.
+    std::optional<StreamBuffer::DeferredUpload> early_upload;
+    if(deferred) early_upload=stream_buffer.CommitDeferredUpload(*deferred_mapping);
+    else { std::memcpy(vertex_data,vertex_batch.data(),vertex_size);stream_buffer.Commit(vertex_size); }
+'''
+        early_tail=replace(tail,'auto upload = stream_buffer.CommitDeferredUpload(*deferred_mapping);',
+                           'auto upload = std::move(early_upload);')
+        early_tail=replace(early_tail,
+            '            std::memcpy(vertex_data, vertex_batch.data(), vertex_size);\n            stream_buffer.Commit(vertex_size);\n','')
+        for name,body in [('late-prepare.inc',late_prepare),('late-tail.inc',late_tail),
+                          ('early-prepare.inc',early_prepare),('early-tail.inc',early_tail)]:
+            (output/name).write_text(body+'\n')
+        nested='\n'.join(function(header,s)+';' for s in
+            ['    class DeferredMapping final {','    class DeferredUpload final {'])
+        (output/'stream-deferred-types.inc').write_text(nested+'\n')
+        (output/'fixture.cpp').write_text(fixture)
+        argv=['c++','-std=c++20','-O2','-g0','-DNDEBUG','-pthread',str(output/'fixture.cpp'),'-o',str(output/'test')]
+        built=subprocess.run(argv,cwd=ROOT,capture_output=True,timeout=90)
+        (output/'compile.stdout').write_bytes(built.stdout);(output/'compile.stderr').write_bytes(built.stderr)
+        proof['compile_argv']=argv;proof['compile_exit']=built.returncode
+        need(built.returncode==0,'Compile failed: '+str(output))
+        for name,number,route,error in [('candidate',0,0,None),
+                ('late_map_ordinary',1,1,b'FAIL final owner state ready\n'),
+                ('early_seal_ordinary',2,1,b'FAIL geometry watch stamped at final draw tick\n'),
+                ('late_map_deferred',1,2,b'FAIL final owner state ready\n'),
+                ('early_seal_deferred',2,2,b'FAIL geometry watch stamped at final draw tick\n')]:
+            result=subprocess.run([str(output/'test'),str(number),str(route)],cwd=ROOT,capture_output=True,timeout=20)
+            (output/(name+'.stdout')).write_bytes(result.stdout);(output/(name+'.stderr')).write_bytes(result.stderr)
+            proof['variants'].append({'name':name,'returncode':result.returncode})
+            if error:need(result.returncode==1 and result.stderr==error,'Unexpected defect result: '+name)
+            else:need(result.returncode==0 and result.stdout.endswith(b'PASS cases=36 checks=1144\n'),'Candidate population/result')
+            print(name+': PASS',flush=True)
+        proof['passed']=True
     finally:
-        proof['sources_after'] = {str(path.relative_to(root)): digest(path) for path in inputs}
-        proof['sources_unchanged'] = proof['sources_before'] == proof['sources_after']
-        proof['artifacts'] = {str(path.relative_to(output)): digest(path)
-                              for path in output.rglob('*') if path.is_file()}
-        (output / 'provenance.json').write_text(json.dumps(proof, indent=2) + '\n')
-        print('Proof: ' + str(output), flush=True)
-    require(proof['sources_unchanged'], 'Recording inputs changed during the gate')
-    print('PASS: 24 CPU recording cases, 768 checks and two intended ordering/tick defects', flush=True)
+        proof['inputs_after']={rel:sha(ROOT/rel) for rel in proof['inputs']}
+        proof['unchanged']=proof['inputs']==proof['inputs_after']
+        proof['artifacts']={str(p.relative_to(output)):sha(p) for p in output.rglob('*') if p.is_file()}
+        (output/'provenance.json').write_text(json.dumps(proof,indent=2)+'\n')
+        print('Proof: '+str(output),flush=True)
+    need(proof['unchanged'],'Source changed during finite control')
 
-
-if __name__ == '__main__':
-    main()
+if __name__=='__main__':main()

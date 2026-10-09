@@ -1,6 +1,47 @@
 <!-- AstraEH: Attribution index for the Uberhar implementation, tests, packaging and documentation. -->
 # Uberhar code map
 
+<!-- CodexAstraLocal: Attribute every new execution/ownership section and its
+actual consumers without presenting host evidence as title qualification. -->
+## 0.1.39 candidate — owned CPU draws and ordered coherent uploads
+
+- `shader.{h}`, `shader_jit.{h,cpp}` provide immutable `ShaderRunLease` ownership
+  of exact code/swizzles/entry and compiled execution. Existing setup bindings
+  remain validated; the synchronous path retains its original contract.
+- `pica/uberhar_cpu_draw_queue.{h,cpp}` captures owned raw inputs, exact FIFO
+  identities, uniforms and default attributes. One original serial shader unit
+  runs per packet; the existing pool overlaps packets behind an independent
+  sleeping coordinator. Completion/error publication and last-reference credit
+  prevent waits on orphaned tasks and unbounded retained packet output.
+- `uberhar_parallel_vertex.h` optionally computes a shortest terminating-path
+  arithmetic floor after full graph validation, before carry refusal. Existing
+  certificate callers omit the summary and perform no additional work pass.
+- `PicaCore` uses the first qualified ARM64/coherent-Vulkan scope with 96–255
+  inputs, at least 96 real FIFO misses, 35 minimum non-move arithmetic instructions
+  and bounded raw copies. It reconciles completed primitive tails at guest/state
+  boundaries and distinguishes deferred counters from synchronous stage timings.
+  `NativeVertexSampleBudget::Due` preserves the original sampled synchronous path.
+- `PrimitiveAssembler::AdoptCompletedTriangleTail` publishes only a validated
+  empty List/Shader final pair, without re-emitting triangles.
+  `RasterizerAccelerated::WriteDeferredTriangles` uses the original hardware
+  vertex construction and quaternion corrections into exactly sized storage.
+- The rasterizer interface defaults to refusing deferred work. Vulkan qualifies
+  actual worker/coherent storage and permanently rejected compute state; its owner
+  still prepares resources, while its ordered worker consumes a packet before
+  binding/drawing. A missing target retains converted vertices for the next draw.
+- `StreamBuffer` shares its complete allocation with move-only upload commands,
+  while partial creation retains the original cleanup. Map generations bind
+  reservations; final-tick Commit retains GPU retirement; one-shot Publish copies
+  exact bytes. Shared CPU ownership alone does not establish a GPU fence.
+- Actual-source lease, queue, retention and coherent-upload/stream-order tools
+  guard their respective contracts. Host synthetic data remain separate from
+  private retained title captures. CI keeps all existing publication gates.
+- `device_testing/memory_probe.py` is a finite explicit invocation using the
+  existing ADB client, with offline framing/parser/scheduler controls. PSI and
+  memory occupancy remain global context; absent DDR/counter readers yield null.
+- The plain version value advances to .39. No fragment placement, shader
+  arithmetic, worker transport or independent Calculated prototype is promoted.
+
 <!-- CodexAstraLocal: Attribute the unreleased register-preparation reduction and its actual inherited-layout consumer tests. -->
 ## 0.1.38 candidate — preparation, order and explicit profiling
 

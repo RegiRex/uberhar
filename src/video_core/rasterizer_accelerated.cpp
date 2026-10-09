@@ -3,6 +3,7 @@
 // Refer to the license.txt file included.
 
 #include "common/alignment.h"
+#include <cstring> // CodexAstraLocal: Exact owned CPU vertex bytes, no live renderer access.
 #include "common/math_util.h"
 #include "core/memory.h"
 #include "video_core/pica/pica_core.h"
@@ -87,6 +88,25 @@ void RasterizerAccelerated::AddTriangle(const Pica::OutputVertex& v0, const Pica
     vertex_batch.emplace_back(v0, false);
     vertex_batch.emplace_back(v1, AreQuaternionsOpposite(v0.quat, v1.quat));
     vertex_batch.emplace_back(v2, AreQuaternionsOpposite(v0.quat, v2.quat));
+}
+
+// CodexAstraLocal: Preserve all three original quaternion decisions and field
+// conversions. The packet's bounded preallocation removes allocation/error paths
+// from workers; no primitive order or guest-memory write moves to this function.
+void RasterizerAccelerated::WriteDeferredTriangles(
+    std::span<const Pica::OutputVertex> vertices, std::span<u8> destination) noexcept {
+    static_assert(sizeof(HardwareVertex) == 88);
+    ASSERT(vertices.size() % 3 == 0 && destination.size() == vertices.size() * 88);
+    for (std::size_t index = 0; index < vertices.size(); index += 3) {
+        const auto& a = vertices[index];
+        const auto& b = vertices[index + 1];
+        const auto& c = vertices[index + 2];
+        const std::array<HardwareVertex, 3> packed{
+            HardwareVertex{a, false},
+            HardwareVertex{b, AreQuaternionsOpposite(a.quat, b.quat)},
+            HardwareVertex{c, AreQuaternionsOpposite(a.quat, c.quat)}};
+        std::memcpy(destination.data() + index * 88, packed.data(), sizeof(packed));
+    }
 }
 
 RasterizerAccelerated::VertexArrayInfo RasterizerAccelerated::AnalyzeVertexArray(

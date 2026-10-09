@@ -38,6 +38,9 @@ add_library(video_core STATIC EXCLUDE_FROM_ALL
     # CodexAstraLocal: Certify independent invocations and preserve FIFO/assembly order across workers.
     pica/uberhar_parallel_vertex.h
     pica/uberhar_vertex_parallel_batch.h
+    # CodexAstraLocal: Owned independently progressing CPU packets feed ordered Vulkan draws.
+    pica/uberhar_cpu_draw_queue.cpp
+    pica/uberhar_cpu_draw_queue.h
     # CodexAstraLocal: Default-off finite owner-CPU/contiguous-loop observation.
     pica/uberhar_vertex_timing.h
     pica/uberhar_vertex_timing.cpp

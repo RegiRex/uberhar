@@ -126,8 +126,14 @@ public:
     using Clock = std::chrono::steady_clock;
     static constexpr auto Period = std::chrono::milliseconds{50};
 
+    // CodexAstraLocal: Deferred admission leaves each due ordinary diagnostic
+    // draw on its original synchronous path without consuming the sample here.
+    bool Due(Clock::time_point now, u32 vertices) const {
+        return vertices != 0 && now >= next;
+    }
+
     bool Admit(Clock::time_point now, u32 vertices) {
-        if (vertices == 0 || now < next)
+        if (!Due(now, vertices))
             return false;
         next = now + Period;
         return true;

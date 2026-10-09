@@ -27,7 +27,16 @@ def main() -> None:
     parser.add_argument("--sanitize", action="store_true")
     args = parser.parse_args()
     source = args.source.read_text()
-    production = "\n".join(extract(source, signature) for signature in (
+    # CodexAstraLocal: Complete allocations now share a mapping lease. Extract
+    # that owner as well; partial driver failures still run original cleanup.
+    allocation = ""
+    marker = "class StreamBuffer::Allocation final"
+    if marker in source:
+        if source.count(marker) != 1:
+            raise ValueError("Ambiguous shared allocation source")
+        start = source.index(marker)
+        allocation = source[start:source.index("\n};", start) + 3] + "\n"
+    production = allocation + "\n".join(extract(source, signature) for signature in (
         "StreamBuffer::StreamBuffer(", "StreamBuffer::~StreamBuffer()",
         "void StreamBuffer::DestroyBuffers()",
         "void StreamBuffer::CreateBuffers(u64 preferred_size)"))
@@ -36,6 +45,7 @@ def main() -> None:
 #include <array>
 #include <cstdint>
 #include <cstdio>
+#include <memory> // CodexAstraLocal: Actual complete-allocation shared owner.
 #include <stdexcept>
 #include <string_view>
 #include <tuple>
@@ -189,6 +199,9 @@ template<typename... T> void SetObjectName(vk::Device device,T&&...) {
     device.Fail(Failure::Naming);
 }
 struct StreamBuffer {
+    // CodexAstraLocal: This declaration matches the extracted complete owner.
+    class Allocation;
+    std::shared_ptr<Allocation> allocation;
     const Instance& instance;
     Scheduler& scheduler;
     vk::Device device;

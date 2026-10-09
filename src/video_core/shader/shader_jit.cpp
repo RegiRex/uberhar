@@ -27,10 +27,16 @@ namespace Pica::Shader {
 // exact even when prefix-size metadata or the inherited combined hash collides.
 struct JitEngine::CacheEntry {
     CacheEntry(const ProgramCode& source, const SwizzleData& descriptors)
-        : code{source}, swizzles{descriptors}, shader{std::make_unique<JitShader>()} {}
-    ProgramCode code;
-    SwizzleData swizzles;
-    std::unique_ptr<JitShader> shader;
+        : code{source}, swizzles{descriptors} {
+        // CodexAstraLocal: Build privately before publishing immutable code and
+        // descriptors to either ordinary bindings or deferred execution leases.
+        auto compiled = std::make_unique<JitShader>();
+        compiled->Compile(&code, &swizzles);
+        shader = std::move(compiled);
+    }
+    const ProgramCode code;
+    const SwizzleData swizzles;
+    std::unique_ptr<const JitShader> shader;
 };
 
 // AstraEH: Scope compilation timing to the experimental profiles; cache hits stay untimed.
@@ -65,12 +71,12 @@ void JitEngine::SetupBatch(ShaderSetup& setup, u32 entry_point) {
         }
     }
     const u64 cache_key = Common::HashCombine(code_hash, swizzle_hash);
-    const CacheEntry* selected{};
+    std::shared_ptr<const CacheEntry> selected;
     const auto [first, last] = cache.equal_range(cache_key);
     for (auto iter = first; iter != last; ++iter) {
         const auto& entry = *iter->second;
         if (entry.code == setup.GetProgramCode() && entry.swizzles == setup.GetSwizzleData()) {
-            selected = &entry;
+            selected = iter->second;
             break;
         }
     }
@@ -82,10 +88,9 @@ void JitEngine::SetupBatch(ShaderSetup& setup, u32 entry_point) {
         // CodexAstraLocal: Compile from the exact owner's snapshots and publish
         // the setup pointer only after insertion succeeds; allocation failure
         // cannot leave it pointing at a destroyed partial cache entry.
-        auto entry = std::make_unique<CacheEntry>(setup.GetProgramCode(), setup.GetSwizzleData());
-        entry->shader->Compile(&entry->code, &entry->swizzles);
-        selected = entry.get();
-        cache.emplace(cache_key, std::move(entry));
+        auto entry = std::make_shared<const CacheEntry>(setup.GetProgramCode(), setup.GetSwizzleData());
+        cache.emplace(cache_key, entry);
+        selected = std::move(entry);
         if (report_virtual) {
             const u64 ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
                                std::chrono::steady_clock::now() - start)
@@ -106,7 +111,7 @@ void JitEngine::SetupBatch(ShaderSetup& setup, u32 entry_point) {
         }
     }
     setup.cached_shader = selected->shader.get();
-    bindings[binding_cursor++ % bindings.size()] = {&setup, revision, selected};
+    bindings[binding_cursor++ % bindings.size()] = {&setup, revision, std::move(selected)};
 }
 
 // CodexAstraLocal: Resolve only the call arguments that the inherited Run would
@@ -120,6 +125,28 @@ ShaderRunContext JitEngine::BindForDraw(const ShaderSetup& setup) const {
         return {};
     const auto* shader = static_cast<const JitShader*>(setup.cached_shader);
     return shader->BindForDraw(setup, setup.entry_point);
+#endif
+}
+
+// CodexAstraLocal: Never infer executable identity from a raw cached pointer or
+// hash alone. Source writes, restoration, setup copies and address reuse must
+// pass SetupBatch again. Acquiring a lease is owner-thread-only; it does not
+// inspect mutable setup or engine state later on a worker.
+ShaderRunLease JitEngine::LeaseForDraw(const ShaderSetup& setup) const {
+#if MICROPROFILE_ENABLED
+    return {};
+#else
+    if (setup.entry_point >= MAX_PROGRAM_CODE_LENGTH)
+        return {};
+    for (const auto& binding : bindings) {
+        if (binding.setup == &setup && binding.revision == setup.GetCodeRevision() &&
+            binding.entry && setup.cached_shader == binding.entry->shader.get()) {
+            const auto& owner = binding.entry;
+            const auto context = owner->shader->BindForDraw(setup, setup.entry_point);
+            return {owner, context, owner->code, owner->swizzles, setup.entry_point};
+        }
+    }
+    return {};
 #endif
 }
 

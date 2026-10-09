@@ -5,6 +5,7 @@
 #pragma once
 
 #include <optional>
+#include <memory> // CodexAstraLocal: Queued coherent uploads retain their allocation.
 #include <span>
 #include <tuple>
 #include <vector>
@@ -24,7 +25,46 @@ class Scheduler;
 class StreamBuffer final {
     static constexpr std::size_t MAX_BUFFER_VIEWS = 3;
 
+    // CodexAstraLocal: One allocation owner is shared only with deferred upload
+    // commands. GPU retirement still uses the existing scheduler/tick contract.
+    class Allocation;
+
 public:
+    // CodexAstraLocal: A reservation is bound to one stream and Map generation;
+    // ring wrap cannot turn an old offset into a valid current reservation.
+    class DeferredMapping final {
+    private:
+        friend class StreamBuffer;
+        DeferredMapping(const StreamBuffer* owner_, u32 offset_, u32 size_, u64 generation_)
+            : owner{owner_}, offset{offset_}, size{size_}, generation{generation_} {}
+        const StreamBuffer* owner;
+        u32 offset;
+        u32 size;
+        u64 generation;
+    };
+
+    // CodexAstraLocal: A move-only command payload captures a sealed range. Only
+    // the ordered Vulkan worker publishes bytes; it never mutates ring cursors.
+    class DeferredUpload final {
+    public:
+        DeferredUpload(DeferredUpload&&) noexcept = default;
+        DeferredUpload& operator=(DeferredUpload&&) noexcept = default;
+        DeferredUpload(const DeferredUpload&) = delete;
+        DeferredUpload& operator=(const DeferredUpload&) = delete;
+        bool Publish(std::span<const u8> source) const noexcept;
+        vk::Buffer Handle() const noexcept;
+        u32 Offset() const noexcept { return offset; }
+
+    private:
+        friend class StreamBuffer;
+        DeferredUpload(std::shared_ptr<Allocation> owner_, u32 offset_, u32 size_)
+            : owner{std::move(owner_)}, offset{offset_}, size{size_} {}
+        std::shared_ptr<Allocation> owner;
+        u32 offset{};
+        u32 size{};
+        mutable bool published{}; // Single Vulkan-worker consumer, never shared between threads.
+    };
+
     explicit StreamBuffer(const Instance& instance, Scheduler& scheduler,
                           vk::BufferUsageFlags usage, u64 size,
                           BufferType type = BufferType::Stream);
@@ -39,6 +79,13 @@ public:
 
     /// Ensures that "size" bytes of memory are available to the GPU, potentially recording a copy.
     void Commit(u32 size);
+
+    // CodexAstraLocal: Admission must happen before Map. The normal owner Map
+    // reserves the range; seal it after final pipeline binding at the draw tick.
+    // Noncoherent/download buffers retain synchronous Commit and are not admitted.
+    bool CanDeferUpload() const noexcept;
+    std::optional<DeferredMapping> MapDeferredUpload(u32 size, u64 alignment);
+    std::optional<DeferredUpload> CommitDeferredUpload(const DeferredMapping& reservation);
 
     // CodexAstraLocal: Copy bounded already-written upload bytes for an armed
     // diagnostic. This never maps, invalidates, flushes, commits or waits.
@@ -74,6 +121,9 @@ private:
     vk::Buffer buffer;        ///< Mapped buffer.
     vk::DeviceMemory memory;  ///< Memory allocation.
     u8* mapped{};             ///< Pointer to the mapped memory
+    // CodexAstraLocal: Raw aliases above preserve ordinary ring operations;
+    // complete allocations are released by this owner after the last command lease.
+    std::shared_ptr<Allocation> allocation;
     u64 stream_buffer_size{}; ///< Stream buffer size.
     // CodexAstraUlt: Actual VkDeviceMemory requirement size, not requested buffer
     // capacity; VMA does not own these allocations.
@@ -84,6 +134,9 @@ private:
     u32 offset{};       ///< Buffer iterator.
     u32 mapped_size{};  ///< Size reserved for the current copy.
     bool is_coherent{}; ///< True if the buffer is coherent
+    // CodexAstraLocal: Saturation permanently closes deferred admission instead
+    // of allowing a stale reservation to become current after integer wrap.
+    u64 mapping_generation{};
 
     std::vector<Watch> current_watches;           ///< Watches recorded in the current iteration.
     std::size_t current_watch_cursor{};           ///< Count of watches, reset on invalidation.

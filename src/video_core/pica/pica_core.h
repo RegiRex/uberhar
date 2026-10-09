@@ -156,6 +156,10 @@ private:
 
     // AstraEH: Reuse the enclosing draw timestamp for sparse diagnostic admission.
     void LoadVertices(bool is_indexed, std::chrono::steady_clock::time_point batch_start);
+    // CodexAstraLocal: Owned complete-list CPU work may overlap renderer
+    // preparation; all guest-visible boundaries reconcile on this owner.
+    bool TryDeferredVertices(bool is_indexed, std::chrono::steady_clock::time_point batch_start);
+    void ReconcileDeferredVertices();
     // AstraEH: Aggregate progress, including the engine actually in use.
     void ReportVirtualVertices(const char* kind, std::chrono::steady_clock::time_point now);
     // AstraPro: GPU-heavy runs must not starve route progress diagnostics.
@@ -391,6 +395,9 @@ private:
     friend class boost::serialization::access;
     template <class Archive>
     void serialize(Archive& ar, const u32 file_version) {
+        // CodexAstraLocal: Host tickets never enter save state. Restore the exact
+        // completed assembler pair before saving or replacing any guest state.
+        ReconcileDeferredVertices();
         ar & regs_lcd;
         ar & regs.reg_array;
         ar & gs_unit;
@@ -434,6 +441,12 @@ private:
     struct ParallelVertexState;
     std::unique_ptr<ParallelVertexState> parallel_vertices;
     bool parallel_allocation_failed{};
+    // CodexAstraLocal: Published packets own all worker inputs; the bounded
+    // owner list retains only completion/statistics and serialized-tail duties.
+    struct DeferredVertexState;
+    std::unique_ptr<DeferredVertexState> deferred_vertices;
+    bool deferred_allocation_failed{};
+    unsigned deferred_processors{}; // CodexAstraLocal: Query process allowance once per PICA owner.
     // AstraEH: Window snapshots are host-only diagnostics and never enter save states.
     std::chrono::steady_clock::time_point virtual_window_start{};
     u64 virtual_vertex_invocations{}, virtual_vertex_hits{}, virtual_last_ns{},

@@ -53,6 +53,10 @@ public:
     /// Sends currently recorded work to the worker thread.
     void DispatchWork();
 
+    // CodexAstraLocal: Deferred CPU uploads require an independent ordered
+    // recorder. A future synchronous scheduler must retain ordinary draws.
+    bool HasWorkerThread() const noexcept { return use_worker_thread; }
+
     /// Records the command to the current chunk.
     template <typename T>
     void Record(T&& command) {

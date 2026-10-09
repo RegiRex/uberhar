@@ -4,6 +4,9 @@
 set -euo pipefail
 mkdir -p build/uberhar-probe
 python3 tools/uberhar/check_android_keys.py
+# CodexAstraLocal: Passive memory parser/schedule controls use a fake client and
+# clock only; this host gate never contacts ADB or invents bandwidth readings.
+python3 tools/uberhar/device_testing/test_memory_probe.py
 # CodexAstraLocal: Exercise alpha/beta release classification with the real shell
 # block and a local gh substitute; this gate performs no repository publication.
 python3 tools/uberhar/test_release_publication.py
@@ -92,6 +95,12 @@ python3 tools/uberhar/test_stream_buffer_ownership.py
 # while Commit retains the final draw tick. Recording controls require both
 # late-Map and early-Commit defects to fail; this is not Vulkan/pixel execution.
 python3 tools/uberhar/test_vulkan_stream_order.py
+# CodexAstraLocal: Deferred no-target returns retain original complete hardware
+# bytes and ordered concatenation; this host gate performs no Vulkan/device work.
+python3 tools/uberhar/test_deferred_vertex_retention.py
+# CodexAstraLocal: Actual coherent lease/ring methods reject stale reservations,
+# early retirement and duplicate publication under controlled driver endpoints.
+python3 tools/uberhar/test_deferred_upload.py
 c++ -std=c++20 -O2 -pthread -Isrc tools/uberhar/test_memory_diagnostics.cpp \
   -o build/uberhar-probe/test-memory-diagnostics
 timeout 30s build/uberhar-probe/test-memory-diagnostics
@@ -167,6 +176,12 @@ python3 tools/uberhar/test_parallel_cache.py --mutants
 # CodexAstraLocal: Execute deliberately colliding source keys through the real
 # JIT, including live-setup reuse, before trusting a compiled independence proof.
 python3 tools/uberhar/test_shader_jit_identity.py --mutants
+# CodexAstraLocal: Queued shaders retain exact immutable code after setup/cache
+# destruction; six broken ownership/identity paths must fail explicitly.
+python3 tools/uberhar/test_shader_jit_lease.py
+# CodexAstraLocal: Whole-draw queues own inputs and make independent progress;
+# synthetic JIT/FIFO/assembly/work-floor controls guard order and terminal failure.
+python3 tools/uberhar/test_cpu_draw_queue.py
 # CodexAstraLocal: Actual DSP/RPC ownership and pending async-job lifetimes must
 # refuse parallel guest-memory reads; configured settings alone cannot admit them.
 python3 tools/uberhar/test_parallel_memory.py --mutants

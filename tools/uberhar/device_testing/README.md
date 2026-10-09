@@ -110,3 +110,65 @@ curl --fail --location --proto '=https' --output device_probe.py \
 This downloads a file; inspect it before running `python3 device_probe.py`.
 The repository URL becomes available after the commit containing these tools is
 published to `uberhar/hybrid-shaders`; an unpublished draft link can return 404.
+
+## Passive memory observations
+
+<!-- CodexAstraLocal: Define the fixed external observer and its missing-bandwidth contract without changing emulator runtime. -->
+
+`memory_probe.py` records device-global memory pressure and occupancy through the
+same existing local ADB socket client. It requires an explicit serial and a new
+output directory. Keep it beside `device_probe.py`, or use `--repo PATH` to select
+that file from a checkout. One operator must serialize it with other device work.
+It does not start ADB, wake a screen, modify settings or device files, invoke a
+profiler, or retry through another transport.
+
+```bash
+python3 tools/uberhar/device_testing/memory_probe.py \
+  --serial YOUR_DEVICE_SERIAL --output NEW_PRIVATE_CAPTURE_DIRECTORY \
+  --samples 45 --period 5
+```
+
+The fixed read order is `/proc/uptime`, `/proc/pressure/memory`, `/proc/vmstat`,
+`/proc/meminfo`, then `/proc/uptime`. Per-file caps and return codes, total reply
+limits, a remote timeout and the socket deadline bound each attempt. The schedule
+allows 2–61 samples, 5–30 seconds apart, at most 300 seconds between first and last
+scheduled reads. An optional initial delay is at most 60 seconds. Missed slots
+remain missing; failed transport stops collection without catch-up or retries.
+
+The report preserves PSI cumulative stalled microseconds and its kernel rolling
+averages; selected vmstat counter increments; and meminfo kB gauges converted to
+bytes. These are global observations, not app-only accounting. Missing counters,
+permission errors, malformed replies, uptime resets and decreasing counters stay
+explicit. Overlapping memory gauges must not be summed. PSI is pressure, and free
+RAM is occupancy; neither measures memory-controller traffic.
+
+`ddr_bytes`, `ddr_bytes_per_second`, `bandwidth_percent`, CPU cache events and CPU
+memory-stall events are always null with an unavailable reason. No validated PMU
+or DDR reader is present. Frequency, requested bandwidth votes, inferred page
+traffic and theoretical peak throughput must not fill those fields.
+
+Uptime readings conservatively enclose each non-atomic batch, including printed
+quantization. Host timestamps retain failed-query intervals too. Join them to an
+explicit app lifecycle before comparing game windows, and treat every observer
+interval as potential overhead. The helper does not prove boot/process identity,
+exact event/frame alignment, or a performance cause. Raw files contain the serial
+and should remain private. Reply hashes describe the existing client's decoded
+UTF-8 text; arbitrary non-UTF8 wire bytes are not preserved.
+
+`passive_observed` requires at least one usable adjacent time enclosure and one
+passive source. It does not assert all scheduled reads succeeded. Consumers must
+retain requested/actual counts, every file's status, missed slots, report reasons
+and raw hashes. The [Linux PSI interface](https://docs.kernel.org/accounting/psi.html)
+and [proc documentation](https://docs.kernel.org/filesystems/proc.html) define the
+pressure and occupancy fields; they do not provide DDR bandwidth utilization.
+
+The host gate uses only synthetic replies and a fake clock/client; it performs no
+ADB request or socket connection:
+
+```bash
+python3 tools/uberhar/device_testing/test_memory_probe.py
+```
+
+Each invocation creates a separate result directory under
+`build/uberhar-probe/passive-memory/`, retaining exact source and parser/schedule
+controls. The existing LocalAdb wire implementation has separate tests.

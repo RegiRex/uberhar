@@ -1,5 +1,41 @@
 # Uberhar development instructions
 
+<!-- CodexAstraLocal: The owner's latest October 9 follow-up defines the next-build stopping boundary and requires critique of earlier placement decisions. -->
+- Complete the next candidate build and its consolidated device tests, then pause
+  all non-architecture work and provide a self-contained summary, results table
+  and interpretation. Compare the best and slowest qualifying performance
+  intervals, including CPU, GPU, memory and measured memory bandwidth where
+  available. Missing bandwidth counters remain unavailable; do not substitute
+  votes, frequency, pressure or inferred traffic as utilization.
+- Before moving additional GPU work to CPU cores, audit earlier CPU-to-GPU moves
+  and evaluate whether the portable CPU pipeline can now execute those stages
+  more efficiently. Critique prior choices using complete-frame cost and exact
+  output; no existing route is protected from evidence-based redesign.
+- This next-build/test boundary supersedes the open-ended multicore stopping
+  rule below. Architecture analysis may continue after the report; implementation,
+  builds, device operation and further experiments pause at that boundary.
+
+<!-- CodexAstraLocal: The owner's latest October 9 direction assigns coordinated CPU/GPU architecture and bounds the calibration compatibility work. -->
+- Portable multicore throughput is the primary development priority. Assign a
+  software architect to the CPU execution design and coordinate GPU placement
+  with the same architect or a collaborating GPU architect. Target useful work
+  across the process's available logical CPUs, including SMT where present,
+  heterogeneous cores and machines with fewer or more than eight cores. Minimize
+  serial bottlenecks without manufacturing utilization, oversubscribing existing
+  emulator/driver work, weakening ordering or skipping draws.
+- Investigate moving suitable GPU work to spare CPU capacity, especially for
+  Fire Emblem Awakening at 4x. Account for synchronization, memory traffic and
+  complete-frame cost; an idle core alone does not establish a beneficial route.
+  Keep CPU and GPU ownership, scheduling and backpressure designs compatible.
+- Qualify optional memory-bandwidth and stall measurements for the next update's
+  tests. Prefer bounded external device observations when available; preserve
+  unavailable counters explicitly and never label frequency, requested bandwidth
+  votes, cache misses or free RAM as measured DDR bandwidth utilization.
+- Search for a usable, license-compatible open-source Circle Pad Pro Calibration
+  applet implementation and port it if one exists. If no suitable implementation
+  is found, document the unsupported calibration applet as a low-priority item
+  **after 1.0.0**; do not build a new HLE implementation during this CPU effort.
+
 <!-- CodexAstraLocal: The owner's latest October 9 follow-up removes the hard two-build limit for the primary multicore upgrade. -->
 - Continue beyond .35/.36 when needed to demonstrate meaningful use of available
   CPU cores, improved throughput and no new division-of-work stalls, ordering or

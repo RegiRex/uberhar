@@ -21,6 +21,7 @@
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_rasterizer.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
+#include "video_core/pica/uberhar_cpu_draw_queue.h" // CodexAstraLocal: Owned CPU completion tickets.
 #include "video_core/texture/texture_decode.h"
 
 namespace Vulkan {
@@ -888,6 +889,42 @@ void RasterizerVulkan::SetupIndexArray() {
         });
 }
 
+// CodexAstraLocal: Refuse before dispatch if any route needs actual vertices for
+// an owner-side decision. A permanent compute-state rejection is independent of
+// shader output, including expanded blend/channel support; its census is retained.
+RasterizerVulkan::DeferredHardwareWriter RasterizerVulkan::PrepareDeferredVertices(u32 count) const {
+    if (!count || count % 3 || strict_compute || cpu_bridge.ready || vertex_capture ||
+        ready_vertex_attempt || !vertex_batch.empty() || !scheduler.HasWorkerThread() ||
+        !stream_buffer.CanDeferUpload())
+        return nullptr;
+    if (compute_rect) {
+        constexpr u32 expandable = (1U << unsigned(ComputeRectReject::ColorWrite)) |
+                                    (1U << unsigned(ComputeRectReject::Blend));
+        const u32 raw = ComputeRectStateRejections(regs);
+        if (!(raw & ~expandable))
+            return nullptr;
+    }
+    return &WriteDeferredTriangles;
+}
+
+bool RasterizerVulkan::DrawDeferredVertices(const std::shared_ptr<Pica::CpuDrawPacket>& packet) {
+    // CodexAstraLocal: Recheck the side-effect-free admission before touching
+    // renderer state. Published work is never re-shaded as recovery after enqueue.
+    if (!packet || !PrepareDeferredVertices(packet->VertexCount()))
+        throw VideoCore::ShaderRecoveryError{};
+    pipeline_info.state.rasterization.topology.Assign(Pica::PipelineRegs::TriangleTopology::List);
+    pipeline_info.state.vertex_layout = software_layout;
+    pipeline_cache.UseTrivialVertexShader();
+    pipeline_cache.UseTrivialGeometryShader();
+    return Draw(false, false, packet);
+}
+
+void RasterizerVulkan::DrainDeferredCommands() {
+    // CodexAstraLocal: CPU recording releases bounded packet captures. GPU
+    // submission/retirement still follows the original resource/tick machinery.
+    scheduler.WaitWorker();
+}
+
 void RasterizerVulkan::DrawTriangles() {
     if (vertex_batch.empty()) {
         // CodexAstraLocal: Empty assembly is distinct from an unsupported draw
@@ -918,7 +955,8 @@ void RasterizerVulkan::DrawTriangles() {
     cpu_bridge = {};
 }
 
-bool RasterizerVulkan::Draw(bool accelerate, bool is_indexed) {
+bool RasterizerVulkan::Draw(bool accelerate, bool is_indexed,
+                          const std::shared_ptr<Pica::CpuDrawPacket>& deferred) {
     MICROPROFILE_SCOPE(Vulkan_Drawing);
     // CodexAstraLocal: Reject an unexpected hardware entry before preparation;
     // the caller then performs the unchanged CPU vertex/assembly path once.
@@ -943,6 +981,15 @@ bool RasterizerVulkan::Draw(bool accelerate, bool is_indexed) {
     const auto fb_helper = res_cache.GetFramebufferSurfaces(using_color_fb, using_depth_fb);
     const Framebuffer* framebuffer = fb_helper.Framebuffer();
     if (!framebuffer->Handle()) {
+        if (deferred) {
+            // CodexAstraLocal: Ordinary non-strict draws retain their CPU batch
+            // when no framebuffer exists. Preserve those exact already-shaded
+            // bytes for the next draw; never drop them or execute the shader twice.
+            const auto bytes = deferred->HardwareBytes();
+            vertex_batch.resize(deferred->VertexCount());
+            ASSERT(bytes.size() == vertex_batch.size() * sizeof(HardwareVertex));
+            std::memcpy(vertex_batch.data(), bytes.data(), bytes.size());
+        }
         // CodexAstraLocal: A consumed no-target batch authored no framebuffer
         // pixels. Do not leave stale vertices or publish false cache ownership.
         if (strict_compute) {
@@ -969,9 +1016,13 @@ bool RasterizerVulkan::Draw(bool accelerate, bool is_indexed) {
         // raw mask for census. Native keeps the inherited gate; only compute
         // modes examine new endpoint replacements. No guest register copy occurs.
         const auto vertices = std::span<const HardwareVertex>{vertex_batch};
-        const auto compute_state = PrepareComputeRectState(
-            regs, vertices, compute_rect->AllowsExpandedRectangles());
-        compute_rect->ObserveState(compute_state.raw_rejections, vertex_batch.size());
+        // CodexAstraLocal: Deferred admission proved rejection by a permanent
+        // register-state bit, so no empty-vertex approximation enters admission.
+        const auto compute_state = deferred
+            ? ComputeRectState{ComputeRectStateRejections(regs), 0, true}
+            : PrepareComputeRectState(regs, vertices, compute_rect->AllowsExpandedRectangles());
+        compute_rect->ObserveState(compute_state.raw_rejections,
+                                  deferred ? deferred->VertexCount() : vertex_batch.size());
         if (!compute_state) {
             ++compute_rect->unsupported;
             if (strict_compute)
@@ -1080,11 +1131,19 @@ bool RasterizerVulkan::Draw(bool accelerate, bool is_indexed) {
     // CodexAstraLocal: Map may submit the current tick while waiting for ring reuse.
     // Reserve CPU storage before query/pass/pipeline setup, then commit below at
     // the final draw tick; no other geometry Map intervenes on this CPU path.
-    const u32 vertex_count = accelerate ? 0 : static_cast<u32>(vertex_batch.size());
+    const u32 vertex_count = accelerate ? 0 : deferred ? deferred->VertexCount()
+                                                       : static_cast<u32>(vertex_batch.size());
     const u32 vertex_size = vertex_count * sizeof(HardwareVertex);
     u8* vertex_data{};
     u32 vertex_offset{};
-    if (!accelerate) {
+    // CodexAstraLocal: Deferred reservation carries no worker-visible mutable
+    // stream fields. Map may flush; sealing remains after final pass/binding.
+    std::optional<StreamBuffer::DeferredMapping> deferred_mapping;
+    if (deferred) {
+        deferred_mapping = stream_buffer.MapDeferredUpload(vertex_size, sizeof(HardwareVertex));
+        if (!deferred_mapping)
+            throw VideoCore::ShaderRecoveryError{};
+    } else if (!accelerate) {
         const auto [buffer, offset, _] = stream_buffer.Map(vertex_size, sizeof(HardwareVertex));
         vertex_data = buffer;
         vertex_offset = offset;
@@ -1165,13 +1224,30 @@ bool RasterizerVulkan::Draw(bool accelerate, bool is_indexed) {
 
         // CodexAstraLocal: A pass change may have submitted since reservation.
         // Keep the original bytes and stamp their allocation after final binding.
-        std::memcpy(vertex_data, vertex_batch.data(), vertex_size);
-        stream_buffer.Commit(vertex_size);
-
-        scheduler.Record([this, offset = vertex_offset, vertex_count](vk::CommandBuffer cmdbuf) {
-            cmdbuf.bindVertexBuffers(0, stream_buffer.Handle(), offset);
-            cmdbuf.draw(vertex_count, 1, 0, 0);
-        });
+        if (deferred) {
+            // CodexAstraLocal: Producer stamps the actual draw tick. The ordered
+            // recorder waits only independently published CPU work, copies exact
+            // coherent bytes, then records its draw before eventual QueueSubmit.
+            auto upload = stream_buffer.CommitDeferredUpload(*deferred_mapping);
+            if (!upload)
+                throw VideoCore::ShaderRecoveryError{};
+            scheduler.Record([upload = std::move(*upload), deferred, vertex_count]
+                             (vk::CommandBuffer cmdbuf) {
+                // CodexAstraLocal: HardwareBytes performs the single completion
+                // wait and typed failure check; do not lock the ticket twice.
+                if (!upload.Publish(deferred->HardwareBytes()))
+                    throw VideoCore::ShaderRecoveryError{};
+                cmdbuf.bindVertexBuffers(0, upload.Handle(), upload.Offset());
+                cmdbuf.draw(vertex_count, 1, 0, 0);
+            });
+        } else {
+            std::memcpy(vertex_data, vertex_batch.data(), vertex_size);
+            stream_buffer.Commit(vertex_size);
+            scheduler.Record([this, offset = vertex_offset, vertex_count](vk::CommandBuffer cmdbuf) {
+                cmdbuf.bindVertexBuffers(0, stream_buffer.Handle(), offset);
+                cmdbuf.draw(vertex_count, 1, 0, 0);
+            });
+        }
         // CodexAstraLocal: Stamp after actual draw enqueue so optional pipeline
         // ownership covers recorded GPU use, beyond the earlier selection.
         if (cpu_fragment_use) pipeline_cache.CompleteReadyCpuDraw(cpu_fragment_use);

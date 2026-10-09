@@ -46,6 +46,14 @@ enum class ParallelVertexStatus : u8 {
 // isolation. The contract must participate in any cached certificate identity.
 enum class ParallelVertexContract : u8 { FullArithmeticReads, SelectedOutputValues };
 
+// CodexAstraLocal: Optional whole-draw scheduling evidence counts the fewest
+// non-move arithmetic instructions on any validated terminating path. It is an
+// exact instruction floor, never a host-time or available-concurrency estimate.
+struct ParallelVertexWork {
+    u32 minimum_arithmetic{};
+    bool valid{};
+};
+
 struct ParallelVertexCertificate {
     ParallelVertexStatus status{ParallelVertexStatus::InvalidContract};
     u32 pc{};
@@ -321,9 +329,11 @@ inline ParallelVertexCertificate AnalyzeParallelVertex(std::span<const u32> prog
                                                        u32 entry, u16 uniform_bools,
                                                        u32 output_register_mask,
                                                        ParallelVertexContract contract =
-                                                           ParallelVertexContract::FullArithmeticReads) {
+                                                           ParallelVertexContract::FullArithmeticReads,
+                                                       ParallelVertexWork* work = nullptr) {
     using namespace ParallelVertexDetail;
     ParallelVertexCertificate result;
+    if (work) *work = {}; // CodexAstraLocal: Refusal cannot leak a prior work bound.
     // CodexAstraLocal: Invalid contract values never widen admission.
     if (contract != ParallelVertexContract::FullArithmeticReads &&
         contract != ParallelVertexContract::SelectedOutputValues) return result;
@@ -506,6 +516,33 @@ inline ParallelVertexCertificate AnalyzeParallelVertex(std::span<const u32> prog
         }
     }
     if (order.size() != nodes.size()) return fail(ParallelVertexStatus::CyclicFlow, entry);
+    // CodexAstraLocal: Reuse the fully validated graph before carry checks can
+    // return. Shortest paths include repeated call contexts and exact Boolean
+    // choices; dynamic condition branches use the smaller arithmetic total.
+    // Existing certificate callers pass null and allocate no new work storage.
+    if (work) {
+        constexpr u32 Unknown = MaxNodes + 1;
+        std::vector<u32> minimum(nodes.size(), Unknown);
+        minimum[first] = 0;
+        u32 terminal_minimum = Unknown;
+        for (const u32 index : order) {
+            if (minimum[index] == Unknown) continue;
+            const auto& node = nodes[index];
+            const nihstro::Instruction instruction{program[node.context.pc]};
+            const auto opcode = instruction.opcode.Value();
+            const auto effective = opcode.EffectiveOpCode();
+            const auto type = opcode.GetInfo().type;
+            const bool arithmetic = (type == Op::Type::Arithmetic || type == Op::Type::MultiplyAdd) &&
+                effective != Op::Id::MOV && effective != Op::Id::MOVA;
+            const u32 total = minimum[index] + static_cast<u32>(arithmetic);
+            if (node.terminal) terminal_minimum = std::min(terminal_minimum, total);
+            for (u32 n = 0; n < node.successors; ++n) {
+                const u32 successor = node.next[n];
+                minimum[successor] = std::min(minimum[successor], total);
+            }
+        }
+        if (terminal_minimum != Unknown) *work = {terminal_minimum, true};
+    }
     if (contract == ParallelVertexContract::SelectedOutputValues) {
         // CodexAstraLocal: Initial mutable fields represent values produced by a
         // preceding invocation. Never-written fields retain identical draw-initial

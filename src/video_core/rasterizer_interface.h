@@ -6,10 +6,13 @@
 
 #include <atomic>
 #include <functional>
+#include <memory> // CodexAstraLocal: Deferred CPU packets retain their owned results.
+#include <span>   // CodexAstraLocal: Stateless, preallocated hardware conversion.
 #include "common/common_types.h"
 
 namespace Pica {
 struct OutputVertex;
+class CpuDrawPacket; // CodexAstraLocal: Forward declaration avoids renderer/queue coupling.
 }
 
 namespace Pica {
@@ -49,6 +52,19 @@ public:
 
     /// Draw the current batch of triangles
     virtual void DrawTriangles() = 0;
+
+    // CodexAstraLocal: Opt-in has no renderer side effects. Unknown backends
+    // retain synchronous rendering. An admitted packet is independently running
+    // before DrawDeferredVertices; that call consumes exactly one complete draw.
+    using DeferredHardwareWriter = void (*)(std::span<const Pica::OutputVertex>,
+                                            std::span<u8>) noexcept;
+    virtual DeferredHardwareWriter PrepareDeferredVertices(u32) const { return nullptr; }
+    virtual bool DrawDeferredVertices(const std::shared_ptr<Pica::CpuDrawPacket>&) {
+        return false;
+    }
+    // CodexAstraLocal: Release captured CPU tickets at bounded backpressure;
+    // implementations may drain command recording without a new GPU idle wait.
+    virtual void DrainDeferredCommands() {}
 
     /// Notify rasterizer that all caches should be flushed to 3DS memory
     virtual void FlushAll() = 0;

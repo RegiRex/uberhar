@@ -56,6 +56,11 @@ public:
                                   const VideoCore::DiskResourceLoadCallback& callback) override;
 
     void DrawTriangles() override;
+    // CodexAstraLocal: Ordered state preparation and independently owned CPU
+    // vertices meet only at the final coherent upload command.
+    DeferredHardwareWriter PrepareDeferredVertices(u32 count) const override;
+    bool DrawDeferredVertices(const std::shared_ptr<Pica::CpuDrawPacket>& packet) override;
+    void DrainDeferredCommands() override;
     void FlushAll() override;
     void FlushRegion(PAddr addr, u32 size) override;
     void InvalidateRegion(PAddr addr, u32 size) override;
@@ -104,7 +109,10 @@ private:
     void UploadUniforms(bool accelerate_draw);
 
     /// Generic draw function for DrawTriangles and AccelerateDrawBatch
-    bool Draw(bool accelerate, bool is_indexed);
+    // CodexAstraLocal: Deferred CPU output changes only geometry readiness;
+    // live draw state and every resource decision stay on the current owner.
+    bool Draw(bool accelerate, bool is_indexed,
+              const std::shared_ptr<Pica::CpuDrawPacket>& deferred = {});
 
     // CodexAstraLocal: Report explicit isolation omissions independently of the
     // optional compute owner and its valid-framebuffer census denominator.

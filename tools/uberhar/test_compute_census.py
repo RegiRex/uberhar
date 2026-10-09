@@ -67,13 +67,22 @@ def main():
     # existing denominator and cadence, rather than only testing an orphan helper.
     # CodexAstraLocal: Use the exact prepared-state callsite, preserving one raw
     # observation while effective state rejection has its separate route counter.
-    observation = 'ObserveState(compute_state.raw_rejections, vertex_batch.size())'
+    # CodexAstraLocal: Deferred packets have no owner-side vertex vector yet.
+    # Bind their actual count selection and the real permanent-rejection
+    # preflight; an empty vector must never turn a deferred six into other.
+    match = re.search(r'ObserveState\(compute_state.raw_rejections,\s*'
+                      r'deferred \? deferred->VertexCount\(\) : vertex_batch.size\(\)\)', admission)
+    assert match is not None, 'actual ordinary/deferred census count'
+    observation = match[0]
+    preflight = block(rasterizer, 'RasterizerVulkan::DeferredHardwareWriter RasterizerVulkan::PrepareDeferredVertices(')
+    preflight = preflight.replace('RasterizerVulkan::DeferredHardwareWriter RasterizerVulkan::', 'DeferredHardwareWriter ')
     assert admission.count('PrepareComputeRectState(') == 1
     assert admission.count('MakeComputeRectPrepared(') == 1
     assert admission.count('AllowsExpandedRectangles()') == 1
     assert admission.count(observation) == 1
     assert admission.index('++compute_rect->considered') < admission.index('ObserveState(') < admission.index('if (!compute_state)')
-    assert 'ComputeRectStateRejections(regs)' not in admission
+    assert admission.count('ComputeRectState{ComputeRectStateRejections(regs), 0, true}') == 1
+    assert admission.count('ComputeRectStateRejections(regs)') == 1
     assert 'RejectState' not in admission
     draw = block(rasterizer, 'bool RasterizerVulkan::Draw(')
     # CodexAstraLocal: Execute the actual complete pre-graphics Draw prefix,
@@ -126,6 +135,7 @@ def main():
     # CodexAstraLocal: Mutations must fail a specific behavioral assertion, not
     # merely fail compilation. All subprocesses have finite time limits.
     variants = [('normal', helper, prefix, observe, report, None)]
+    preflight_defects = {}
     if args.mutants:
         variants += [
             ('drop-zero-mask', helper.replace('auto& counts = mask < Bins', 'if (mask == 0) return;\n        auto& counts = mask < Bins'), prefix, observe, report, 'joint populations include mask zero'),
@@ -144,7 +154,14 @@ def main():
             ('strict-false-retry', helper, prefix.replace('vertex_batch.clear();\n        return true;', 'vertex_batch.clear();\n        return false;'), observe, report, 'strict rejected draw is consumed before graphics'),
             ('strict-false-invalidation', helper, prefix.replace('fb_helper.CancelInvalidation();', '(void)fb_helper;'), observe, report, 'strict omitted draw has no pixel ownership'),
             ('strict-stale-batch', helper, prefix.replace('vertex_batch.clear();\n        return true;', '(void)vertex_batch;\n        return true;'), observe, report, 'strict omitted draw consumes vertex batch'),
+            # CodexAstraLocal: Keep the new packet denominator/raw mask and its
+            # prerequisite separate; each defect must reach a behavioral check.
+            ('deferred-empty-count', helper, prefix.replace(observation, 'ObserveState(compute_state.raw_rejections, vertex_batch.size())'), observe, report, 'deferred census counts packet vertices exactly once'),
+            ('deferred-zero-mask', helper, prefix.replace('ComputeRectState{ComputeRectStateRejections(regs), 0, true}', 'ComputeRectState{0, 0, true}'), observe, report, 'deferred census preserves exact raw mask'),
+            ('deferred-unsafe-preflight', helper, prefix, observe, report, 'deferred preflight requires permanent rejection'),
         ]
+        preflight_defects['deferred-unsafe-preflight'] = preflight.replace('if (!(raw & ~expandable))', 'if (false)')
+        assert preflight_defects['deferred-unsafe-preflight'] != preflight
     cases = []
     for name, census_source, route, observation_source, report_source, expected in variants:
         target = out / name
@@ -154,7 +171,7 @@ def main():
         # CodexAstraLocal: A shadow-source run must compile its prepared-state
         # helper, not silently fall back to the checkout's older classifier API.
         (include / 'uberhar_compute_rect.h').write_text(rectangle)
-        for filename, body in [('observe.inc', observation_source), ('members.inc', members), ('report.inc', report_source), ('admission.inc', route), ('policy.inc', policy), ('strict_stats.inc', strict_stats), ('strict_report.inc', strict_report), ('empty.inc', empty)]:
+        for filename, body in [('observe.inc', observation_source), ('members.inc', members), ('report.inc', report_source), ('admission.inc', route), ('deferred_preflight.inc', preflight_defects.get(name, preflight)), ('policy.inc', policy), ('strict_stats.inc', strict_stats), ('strict_report.inc', strict_report), ('empty.inc', empty)]:
             (target / filename).write_text(body + '\n')
         command = [os.environ.get('CXX', 'c++'), '-std=c++20', '-O2', '-DFMT_HEADER_ONLY',
                    '-I' + str(target), '-I' + str(root / 'src'),
@@ -172,7 +189,7 @@ def main():
         if not passed:
             raise RuntimeError(f'case {name} failed: {ran.stdout}')
     result = {'author': 'CodexAstraLocal', 'inputs': inputs, 'cases': cases,
-              'scope': 'Real helper/classifier/geometry, complete Draw prefix before graphics and extracted reports/empty branch; recording resource/log endpoints. No Vulkan or device performance proof.'}
+              'scope': 'Real helper/classifier/geometry, complete Draw prefix before graphics, deferred preflight and extracted reports/empty branch; recording resource/log/packet-metadata endpoints. No CPU executor, Vulkan or device performance proof.'}
     (out / 'provenance.json').write_text(json.dumps(result, indent=2) + '\n')
     print(json.dumps({'pass': True, 'cases': [(c['name'], c['output']) for c in cases], 'provenance': str(out / 'provenance.json')}, indent=2))
 

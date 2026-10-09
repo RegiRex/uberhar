@@ -27,6 +27,12 @@ public:
     void AddTriangle(const Pica::OutputVertex& v0, const Pica::OutputVertex& v1,
                      const Pica::OutputVertex& v2) override;
 
+    // CodexAstraLocal: Pure complete-list conversion shares the original
+    // quaternion correction and exact HardwareVertex constructor with AddTriangle.
+    // Callers preallocate precisely 88 bytes per vertex; no renderer is borrowed.
+    static void WriteDeferredTriangles(std::span<const Pica::OutputVertex> vertices,
+                                       std::span<u8> destination) noexcept;
+
     // CodexAstraLocal: This sink only packs vertices into its owned batch during
     // AddTriangle; guest framebuffer/cache writes occur after loading joins.
     bool DefersGuestMemoryWritesUntilDraw() const override {

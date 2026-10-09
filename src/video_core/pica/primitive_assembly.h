@@ -80,6 +80,15 @@ struct PrimitiveAssembler {
         return topology;
     }
 
+    // CodexAstraLocal: A completed deferred List/Shader draw has emitted every
+    // triangle in order. Reconcile its exact serialized trailing pair on the
+    // owner without replaying all vertices or emitting the draw a second time.
+    void AdoptCompletedTriangleTail(const std::array<OutputVertex, 2>& last_pair) {
+        ASSERT((topology == PipelineRegs::TriangleTopology::List ||
+                topology == PipelineRegs::TriangleTopology::Shader) && IsEmpty() && !winding);
+        buffer = last_pair;
+    }
+
     // AstraEH: An accelerated host draw assembles its own primitives and leaves
     // this persistent assembler untouched. A ready CPU bridge must do the same:
     // otherwise a strip/fan tail forces later draws onto the ordinary CPU path.

@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
+#include <cstring>
 #include <limits>
 #include <map>
 #include <sstream>
@@ -37,6 +38,10 @@ void Check(bool yes, const char* reason) {
     ++checks;
     if (!yes) throw std::runtime_error(reason);
 }
+#undef ASSERT
+// CodexAstraLocal: Source-extracted no-target retention assertions must fail the
+// fixture visibly; they do not invoke the emulator's process-level abort path.
+#define ASSERT(condition) Check(condition, "source retention size assertion")
 using Fields = std::map<std::string, std::string>;
 Fields Parse(const std::string& s) {
     Fields fields;
@@ -106,6 +111,26 @@ struct Fixture {
     bool accelerate{};
     Pica::RegsInternal regs{};
     std::vector<HardwareVertex> vertex_batch;
+    // CodexAstraLocal: The census consumes packet metadata without waiting for
+    // hardware output. This endpoint counts accidental payload reads; separate
+    // retention/queue gates cover the real 88B transport and asynchronous work.
+    struct Packet {
+        std::vector<HardwareVertex> hardware;
+        mutable unsigned reads{};
+        u32 VertexCount() const { return static_cast<u32>(hardware.size()); }
+        std::span<const u8> HardwareBytes() const {
+            ++reads;
+            return {reinterpret_cast<const u8*>(hardware.data()), hardware.size() * sizeof(HardwareVertex)};
+        }
+    } packet;
+    Packet* deferred{};
+    bool vertex_capture{}, ready_vertex_attempt{};
+    struct { bool ready{}; } cpu_bridge;
+    struct { bool enabled{true}; bool HasWorkerThread() const { return enabled; } } scheduler;
+    struct { bool enabled{true}; bool CanDeferUpload() const { return enabled; } } stream_buffer;
+    using DeferredHardwareWriter = void (*)();
+    static void WriteDeferredTriangles() {}
+#include "deferred_preflight.inc"
     Framebuffer target;
     // CodexAstraLocal: Record the framebuffer boundary calls and the terminal
     // graphics sentinel. State masks and the entire pre-graphics Draw are real.
@@ -132,7 +157,7 @@ struct Fixture {
         bool GetFinalColorWriteMask(int) const { return true; }
         bool IsDepthWriteEnabled() const { return false; }
     } pipeline_info;
-    int instance{}, cpu_bridge{};
+    int instance{};
     unsigned graphics_fallthrough{}, sync_calls{}, nonempty_calls{};
     void SyncDrawState() { ++sync_calls; }
     struct { unsigned ended{}; void EndRendering() { ++ended; } } renderpass_cache;
@@ -251,6 +276,69 @@ void TestAdmission() {
         if (absent) f.compute_rect = nullptr; else f.accelerate = true;
         Check(!f.Route() && f.owned.considered == 0 && f.owned.state_census.Consume({0,0}).draws == 0, "accelerated and absent-renderer exclusion");
     }
+}
+
+// CodexAstraLocal: A full raw-mask matrix independently predicts the permanent
+// state subset from the synthetic register setup. Ordinary complete vertices
+// remain the reference for each deferred population; no payload wait is needed.
+void TestDeferredAdmission() {
+    using namespace Vulkan;
+    for (u32 mask = 0; mask < 2048; ++mask) for (auto count : {0U, 3U, 6U, 12U, 95U, 96U, 255U}) {
+        Fixture f; f.regs = Registers(mask); f.packet.hardware = Vertices(count);
+        const bool permanent = (mask & ~(2U | 1024U)) != 0;
+        const bool expected = count && count % 3 == 0 && permanent;
+        Check(bool(f.PrepareDeferredVertices(count)) == expected,
+              "deferred preflight requires permanent rejection");
+        if (!expected) continue;
+        Fixture ordinary; ordinary.regs = Registers(mask); ordinary.vertex_batch = Vertices(count);
+        f.deferred = &f.packet;
+        Check(!f.Route() && !ordinary.Route(), "deferred and ordinary rejected routes reach graphics");
+        Check(f.owned.considered == 1 && f.owned.unsupported == 1 && f.owned.native_draws == 1 &&
+              f.owned.compute_draws == 0 && f.owned.geometry_rejected == 0 &&
+              f.owned.format_rejected == 0 && f.owned.eligible == 0 && f.packet.reads == 0 &&
+              f.vertex_batch.empty(), "deferred rejection needs no geometry payload or wait");
+        const auto seen = f.owned.state_census.Consume({0x180, 0x1a2});
+        const auto reference = ordinary.owned.state_census.Consume({0x180, 0x1a2});
+        Check(seen.draws == 1 && seen.total.six == (count == 6) && seen.total.other == (count != 6),
+              "deferred census counts packet vertices exactly once");
+        Check(seen.groups == 1 && seen.top[0].mask == mask && seen.rejected == 1 &&
+              seen.marginal == reference.marginal && seen.total.six == reference.total.six &&
+              seen.total.other == reference.total.other && f.owned.raw_unsupported == 1,
+              "deferred census preserves exact raw mask");
+    }
+    // CodexAstraLocal: The preflight also rejects routes that need live output
+    // or cannot safely delay the upload. These capabilities are recording inputs.
+    for (unsigned failure = 0; failure < 7; ++failure) {
+        Fixture f; f.regs = Registers(4);
+        if (failure == 0) f.strict_compute = true;
+        if (failure == 1) f.cpu_bridge.ready = true;
+        if (failure == 2) f.vertex_capture = true;
+        if (failure == 3) f.ready_vertex_attempt = true;
+        if (failure == 4) f.vertex_batch = Vertices(3);
+        if (failure == 5) f.scheduler.enabled = false;
+        if (failure == 6) f.stream_buffer.enabled = false;
+        Check(!f.PrepareDeferredVertices(6), "deferred route capabilities remain guarded");
+    }
+    for (bool no_target : {false, true}) {
+        Fixture f; f.regs = Registers(4); f.packet.hardware = Vertices(6); f.deferred = &f.packet;
+        if (no_target) f.target.handle = false;
+        else f.compute_rect = nullptr;
+        Check(f.Route() == no_target && f.owned.considered == 0 &&
+              f.owned.state_census.Consume({0x180, 0x1a2}).draws == 0,
+              "deferred no-target and absent-renderer remain outside census");
+        Check(f.packet.reads == no_target && f.vertex_batch.size() == (no_target ? 6U : 0U),
+              "only no-target retention reads deferred payload before graphics");
+    }
+    // CodexAstraLocal: Retain an actual report-level mixed ordinary/deferred
+    // interval so raw/effective conservation is checked beyond helper snapshots.
+    Fixture f; f.regs = Registers(4); f.vertex_batch = Vertices(3); f.Route();
+    f.vertex_batch.clear(); f.packet.hardware = Vertices(6); f.deferred = &f.packet; f.Route();
+    logs.clear(); f.owned.ReportCensus(std::chrono::steady_clock::now());
+    const auto report = Parse(logs[0].text);
+    Check(Number(report, "considered") == 2 && Number(report, "six") == 1 &&
+          Number(report, "other") == 1 && Number(report, "unsupported") == 2 &&
+          Number(report, "raw_unsupported") == 2 && report.at("conservation") == "true",
+          "ordinary and deferred reports conserve one mixed interval");
 }
 
 // CodexAstraLocal: Exercise actual final/interval output including silent partial
@@ -433,6 +521,6 @@ void TestStrictIsolation() {
           "unexpected hardware entry requests unchanged CPU vertex preparation only");
 }
 int main() {
-    try { TestBins(); TestAdmission(); TestReports(); TestEffectiveAdmission(); TestStrictIsolation(); std::printf("PASS checks=%u bank_bytes=%zu\n", checks, sizeof(Vulkan::ComputeStateCensus)); }
+    try { TestBins(); TestAdmission(); TestReports(); TestEffectiveAdmission(); TestStrictIsolation(); TestDeferredAdmission(); std::printf("PASS checks=%u bank_bytes=%zu\n", checks, sizeof(Vulkan::ComputeStateCensus)); }
     catch (const std::exception& error) { std::fprintf(stderr,"FAILED: %s\n",error.what()); return 1; }
 }

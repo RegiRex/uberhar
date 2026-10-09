@@ -97,6 +97,44 @@ constexpr u64 WATCHES_RESERVE_CHUNK = 0x1000;
 
 } // Anonymous namespace
 
+// CodexAstraLocal: A queued upload may outlive ring bookkeeping after a canceled
+// command. Retain the actual mapping, buffer and memory as one allocation. The
+// Instance/device must outlive scheduler drainage, as in ordinary renderer teardown.
+class StreamBuffer::Allocation final {
+public:
+    Allocation(const Instance& instance_, vk::Device device_, vk::Buffer buffer_,
+               vk::DeviceMemory memory_, u8* mapped_, u64 bytes_)
+        : instance{instance_}, device{device_}, buffer{buffer_}, memory{memory_},
+          mapped{mapped_}, bytes{bytes_} {}
+    ~Allocation() {
+        device.unmapMemory(memory);
+        device.destroyBuffer(buffer);
+        device.freeMemory(memory);
+        instance.RecordRawStreamFree(bytes);
+    }
+    const Instance& instance;
+    vk::Device device;
+    vk::Buffer buffer;
+    vk::DeviceMemory memory;
+    u8* mapped;
+    u64 bytes;
+};
+
+// CodexAstraLocal: Publish exactly once on the ordered recording thread, before
+// that draw's eventual queue submission provides host-to-device visibility.
+// A malformed payload returns failure for the caller's terminal error channel.
+bool StreamBuffer::DeferredUpload::Publish(std::span<const u8> source) const noexcept {
+    if (!owner || published || source.size() != size)
+        return false;
+    std::memcpy(owner->mapped + offset, source.data(), size);
+    published = true;
+    return true;
+}
+
+vk::Buffer StreamBuffer::DeferredUpload::Handle() const noexcept {
+    return owner ? owner->buffer : vk::Buffer{};
+}
+
 StreamBuffer::StreamBuffer(const Instance& instance_, Scheduler& scheduler_,
                            vk::BufferUsageFlags usage_, u64 size, BufferType type_)
     : instance{instance_}, scheduler{scheduler_}, device{instance.GetDevice()},
@@ -121,6 +159,16 @@ StreamBuffer::~StreamBuffer() {
 }
 
 void StreamBuffer::DestroyBuffers() noexcept {
+    // CodexAstraLocal: Complete allocations have shared ownership; raw handles
+    // below are aliases. Partial creation still follows the original cleanup.
+    if (allocation) {
+        allocation.reset();
+        mapped = nullptr;
+        buffer = VK_NULL_HANDLE;
+        memory = VK_NULL_HANDLE;
+        allocation_bytes = 0;
+        return;
+    }
     if (mapped) {
         device.unmapMemory(memory);
         mapped = nullptr;
@@ -138,6 +186,9 @@ void StreamBuffer::DestroyBuffers() noexcept {
 }
 
 std::tuple<u8*, u32, bool> StreamBuffer::Map(u32 size, u64 alignment) {
+    // CodexAstraLocal: Any new map invalidates previous deferred reservations.
+    if (mapping_generation != std::numeric_limits<u64>::max())
+        ++mapping_generation;
     if (!is_coherent && type == BufferType::Stream) {
         size = Common::AlignUp(size, instance.NonCoherentAtomSize());
     }
@@ -170,6 +221,9 @@ std::tuple<u8*, u32, bool> StreamBuffer::Map(u32 size, u64 alignment) {
 }
 
 void StreamBuffer::Commit(u32 size) {
+    // CodexAstraLocal: An ordinary commit also consumes a deferred reservation.
+    if (mapping_generation != std::numeric_limits<u64>::max())
+        ++mapping_generation;
     if (!is_coherent && type == BufferType::Stream) {
         size = Common::AlignUp(size, instance.NonCoherentAtomSize());
     }
@@ -198,6 +252,41 @@ void StreamBuffer::Commit(u32 size) {
     auto& watch = current_watches[current_watch_cursor++];
     watch.upper_bound = offset;
     watch.tick = scheduler.CurrentTick();
+}
+
+// CodexAstraLocal: Coherence is an observed allocation property, not a device
+// name or requested flag. No implicit flush may race a later deferred write.
+bool StreamBuffer::CanDeferUpload() const noexcept {
+    return is_coherent && type == BufferType::Stream && allocation && mapped &&
+           mapping_generation != std::numeric_limits<u64>::max();
+}
+
+std::optional<StreamBuffer::DeferredMapping> StreamBuffer::MapDeferredUpload(u32 size,
+                                                                           u64 alignment) {
+    // CodexAstraLocal: Reject unsupported/empty reservations before ring state
+    // changes. Ordinary Map retains its existing capacity/wait behavior.
+    if (!CanDeferUpload() || size == 0 || size > stream_buffer_size)
+        return std::nullopt;
+    const auto [data, position, invalidated] = Map(size, alignment);
+    if (!CanDeferUpload())
+        return std::nullopt;
+    return DeferredMapping{this, position, size, mapping_generation};
+}
+
+std::optional<StreamBuffer::DeferredUpload> StreamBuffer::CommitDeferredUpload(
+    const DeferredMapping& reservation) {
+    // CodexAstraLocal: Refuse before modifying the ordinary cursor on an invalid
+    // or stale reservation. Caller permits no intervening geometry Map/Commit.
+    const u32 size = reservation.size;
+    if (!CanDeferUpload() || reservation.owner != this ||
+        reservation.generation != mapping_generation || size == 0 ||
+        offset != reservation.offset ||
+        size > mapped_size || offset > stream_buffer_size ||
+        size > stream_buffer_size - offset)
+        return std::nullopt;
+    DeferredUpload upload{allocation, offset, size};
+    Commit(size); // Owner only: advances ring and stamps the final draw tick.
+    return upload;
 }
 
 bool StreamBuffer::CopyHostWrittenBytes(u64 read_offset,
@@ -288,6 +377,10 @@ void StreamBuffer::CreateBuffers(u64 preferred_size) {
                               vk::to_string(mem_type.propertyFlags));
             }
 
+            // CodexAstraLocal: Transfer complete resources only after every
+            // creation step succeeds. Allocation failure retains raw cleanup.
+            allocation = std::make_shared<Allocation>(instance, device, buffer, memory,
+                                                       mapped, allocation_bytes);
             return;
         } catch (const vk::SystemError& err) {
             // CodexAstraUlt: Replace inherited buffer-only retry cleanup, which

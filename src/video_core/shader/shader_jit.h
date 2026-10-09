@@ -33,6 +33,10 @@ public:
     // CodexAstraLocal: Bind after unchanged SetupBatch; no generated instructions change.
     ShaderRunContext BindForDraw(const ShaderSetup& setup) const override;
 
+    // CodexAstraLocal: Lease only a currently validated prepared binding. An
+    // evicted or stale setup must pass SetupBatch again before deferred use.
+    ShaderRunLease LeaseForDraw(const ShaderSetup& setup) const override;
+
     // CodexAstraLocal: The A64 emitter's unchanged result dependencies and lack
     // of external calls in the certified opcode domain have an executed proof.
     // x64/interpreter semantics retain the previous arithmetic-read contract.
@@ -53,9 +57,11 @@ private:
     struct Binding {
         const ShaderSetup* setup{};
         u64 revision{};
-        const CacheEntry* entry{};
+        std::shared_ptr<const CacheEntry> entry;
     };
-    std::unordered_multimap<u64, std::unique_ptr<CacheEntry>> cache;
+    // CodexAstraLocal: Executable code survives cache/engine destruction until
+    // the final queued lease releases it; unchanged synchronous draws add no copy.
+    std::unordered_multimap<u64, std::shared_ptr<const CacheEntry>> cache;
     std::array<Binding, 2> bindings{};
     u32 binding_cursor{};
     // AstraEH: Count only actual compilation; cached SetupBatch calls do not read clocks.

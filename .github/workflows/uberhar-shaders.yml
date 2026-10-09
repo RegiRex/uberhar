@@ -139,5 +139,18 @@ jobs:
             build/uberhar-probe/vulkan-stream-order/**/provenance.json
             build/uberhar-probe/vulkan-stream-order/**/*.stdout
             build/uberhar-probe/vulkan-stream-order/**/*.stderr
+            build/uberhar-probe/shader-jit-lease/**/provenance.json
+            build/uberhar-probe/shader-jit-lease/**/*.stdout
+            build/uberhar-probe/shader-jit-lease/**/*.stderr
+            build/uberhar-probe/cpu-draw-queue/**/provenance.json
+            build/uberhar-probe/cpu-draw-queue/**/*.stdout
+            build/uberhar-probe/cpu-draw-queue/**/*.stderr
+            build/uberhar-probe/deferred-upload/**/provenance.json
+            build/uberhar-probe/deferred-upload/**/*.stdout
+            build/uberhar-probe/deferred-upload/**/*.stderr
+            build/uberhar-probe/passive-memory/**/provenance.json
+            build/uberhar-probe/deferred-vertex-retention/**/provenance.json
+            build/uberhar-probe/deferred-vertex-retention/**/*.stdout
+            build/uberhar-probe/deferred-vertex-retention/**/*.stderr
           if-no-files-found: ignore
           retention-days: 14
