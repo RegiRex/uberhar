@@ -35,6 +35,29 @@ struct ARM_Interface { virtual ~ARM_Interface()=default; @CPU_DEFAULT@ };
 struct ARM_Dynarmic final : ARM_Interface { @CPU_JIT@ };
 struct ShaderEngine { virtual ~ShaderEngine()=default; @SHADER_DEFAULT@ };
 struct JitEngine final : ShaderEngine { @SHADER_JIT@ };
+// CodexAstraLocal: The production sink capabilities and Pica guard are extracted
+// below; modeled aliased memory demonstrates why submission cannot be deferred.
+struct RasterizerInterface { virtual ~RasterizerInterface()=default; @RASTER_DEFAULT@ };
+struct RasterizerAccelerated final : RasterizerInterface { @RASTER_ACCELERATED@ };
+static void Need(bool ok, const char* label);
+static bool AllowsDeferredLoad([[maybe_unused]] const RasterizerInterface* rasterizer) {
+    [[maybe_unused]] struct { unsigned submission_writes{}; } parallel;
+    @RASTER_GUARD@
+    return true;
+}
+static void CheckSubmissionAlias() {
+    RasterizerInterface software;
+    RasterizerAccelerated accelerated;
+    Need(!AllowsDeferredLoad(&software), "immediate submission must refuse");
+    Need(AllowsDeferredLoad(&accelerated), "append-only submission must admit");
+    // CodexAstraLocal: First-triangle rasterization changes the next vertex's
+    // input byte. Serial loading observes 99; unsafe plan-ahead observes 4.
+    int later_input = 4;
+    const bool deferred = AllowsDeferredLoad(&software);
+    const int prepared = deferred ? later_input : 0;
+    later_input = 99;
+    Need((deferred ? prepared : later_input) == 99, "aliased submission input changed");
+}
 struct System {
     bool IsHostFpStatusIsolated() const;
     std::vector<ARM_Interface*> cpu_cores;
@@ -93,6 +116,7 @@ static void CheckFpBoundaries() {
 }
 static void Check() {
     CheckFpBoundaries();
+    CheckSubmissionAlias();
     System s;
     Need(s.HasConcurrentGuestMemoryWriters(), "absent runtime must refuse");
     s.kernel=std::make_unique<KernelSystem>();

@@ -152,6 +152,10 @@ c++ -std=c++20 -O2 -pthread -DFMT_HEADER_ONLY -Isrc -Iexternals/fmt/include \
   -Iexternals/boost tools/uberhar/test_parallel_batch.cpp \
   src/video_core/pica/primitive_assembly.cpp -o build/uberhar-probe/test-parallel-batch
 timeout 60s build/uberhar-probe/test-parallel-batch
+# CodexAstraLocal: Execute actual sleeping transport/lifetime controls and exact
+# serialized assembly, including callback throws and deliberately broken paths.
+python3 tools/uberhar/test_parallel_work_transport.py
+python3 tools/uberhar/test_parallel_assembly.py
 python3 tools/uberhar/test_parallel_vertex.py --mutants
 # CodexAstraLocal: Exact source identity must survive uploads, cache collisions,
 # descriptor/entry/uniform/output changes and serialized guest-state restoration.

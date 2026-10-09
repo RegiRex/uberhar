@@ -52,6 +52,13 @@ def main():
         "shader_jit": "src/video_core/shader/shader_jit.h",
         "pica": "src/video_core/pica/pica_core.cpp",
         "contract": "src/video_core/pica/uberhar_parallel_vertex.h",
+        # CodexAstraLocal: Pin the actual sink contract and both implementation
+        # families; software submission can synchronously change guest inputs.
+        "raster_default": "src/video_core/rasterizer_interface.h",
+        "raster_accelerated": "src/video_core/rasterizer_accelerated.h",
+        "raster_append": "src/video_core/rasterizer_accelerated.cpp",
+        "raster_software": "src/video_core/renderer_software/sw_rasterizer.h",
+        "raster_software_body": "src/video_core/renderer_software/sw_rasterizer.cpp",
     }
 
     def hashes():
@@ -82,6 +89,14 @@ def main():
             ("shader_jit", "bool SupportsObservableVertexContract() const override")):
             blocks[key] = definition(sources[key], signature)
         blocks["fp_system"] = definition(sources["core"], "bool System::IsHostFpStatusIsolated() const")
+        # CodexAstraLocal: Exercise the production submission guard with unknown
+        # and accelerated sinks instead of inferring safety from a graphics setting.
+        blocks["raster_default"] = definition(sources["raster_default"],
+            "virtual bool DefersGuestMemoryWritesUntilDraw() const")
+        blocks["raster_accelerated"] = definition(sources["raster_accelerated"],
+            "bool DefersGuestMemoryWritesUntilDraw() const override")
+        blocks["raster_guard"] = definition(sources["pica"],
+            "if (!rasterizer->DefersGuestMemoryWritesUntilDraw())")
         start = "enum class ParallelVertexContract"
         if sources["contract"].count(start) != 1:
             raise RuntimeError("Ambiguous actual contract enum")
@@ -112,6 +127,10 @@ def main():
             "constructed_lle_mode": "multithread(multithread)" in sources["lle"],
             "directory_worker_writes": directory.index("async_data->buffer->Write(entries.data(), 0,") < directory.index("IPC::RequestBuilder"),
             "actual_runtime_not_settings": "Settings::" not in blocks["core"] + blocks["lle"],
+            # CodexAstraLocal: Bind the default-refusing software declaration
+            # and ensure the actual guard precedes any parallel batch execution.
+            "software_retains_default": "DefersGuestMemoryWritesUntilDraw" not in sources["raster_software"],
+            "submission_guard_before_parallel": sources["pica"].index(blocks["raster_guard"]) < sources["pica"].index("counts = parallel.batch.Run("),
         }
         proof["source_checks"] = checks
         if not all(checks.values()):
@@ -157,6 +176,10 @@ def main():
             ("missing-cpu-capability", "system.IsHostFpStatusIsolated()\n", "true\n", "empty CPU selector must refuse"),
             ("missing-shader-capability", "shader_engine->SupportsObservableVertexContract() &&", "true &&", "both actual engines must opt in"),
             ("empty-owners-optin", blocks["fp_system"], "bool System::IsHostFpStatusIsolated() const { return true; }", "empty CPU owners must refuse"),
+            # CodexAstraLocal: Unsafe default opt-in and a missing consumer guard
+            # must both fail at runtime, not merely trigger a source-text check.
+            ("unknown-submission-optin", blocks["raster_default"], blocks["raster_default"].replace("return false;", "return true;"), "immediate submission must refuse"),
+            ("missing-submission-guard", blocks["raster_guard"], "", "immediate submission must refuse"),
         ] if args.mutants else []
         for name, old, new, message in capability_mutations:
             if arm64_source.count(old) != 1:

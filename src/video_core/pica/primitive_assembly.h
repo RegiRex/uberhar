@@ -6,6 +6,7 @@
 
 #include <array>
 #include <functional>
+#include <type_traits> // CodexAstraLocal: Enforce the immutable borrowed getter contract.
 #include <boost/serialization/access.hpp>
 #include <boost/serialization/array.hpp>
 #include "common/assert.h"     // AstraEH: Enforce the accelerated-batch entry contract.
@@ -95,6 +96,59 @@ struct PrimitiveAssembler {
             winding = saved_winding;
         });
         std::forward<Draw>(draw)();
+    }
+
+    // CodexAstraLocal: The accelerated append-only sink cannot inspect/reenter
+    // this assembler. Borrow immutable references through the full call and skip
+    // redundant first/second-vertex copies for interior List/Shader triangles.
+    // On normal exit or callback exception, restore the exact last buffered pair
+    // so subsequent tails and serialized (even currently unused) values match.
+    // This specialized API requires a noexcept getter and a non-reentrant handler;
+    // general scalar submission and Strip/Fan behavior remain inherited.
+    template <typename Getter>
+    void SubmitOrdered(u32 count, Getter&& get, const TriangleHandler& handler) {
+        static_assert(noexcept(get(u32{})), "borrowed getter must not throw");
+        static_assert(std::is_same_v<decltype(get(u32{})), const OutputVertex&>,
+                      "borrowed getter must retain immutable vertices");
+        if (topology != PipelineRegs::TriangleTopology::List &&
+            topology != PipelineRegs::TriangleTopology::Shader) {
+            for (u32 index = 0; index < count; ++index)
+                SubmitVertex(get(index), handler);
+            return;
+        }
+        u32 index{};
+        while (index < count && buffer_index != 0)
+            SubmitVertex(get(index++), handler);
+        const OutputVertex* last_first{};
+        const OutputVertex* last_second{};
+        const auto preserve_pair = [&] {
+            if (last_first) {
+                buffer[0] = *last_first;
+                buffer[1] = *last_second;
+            }
+        };
+        try {
+            while (count - index >= 3) {
+                const auto& first = get(index);
+                const auto& second = get(index + 1);
+                const auto& third = get(index + 2);
+                last_first = &first;
+                last_second = &second;
+                if (topology == PipelineRegs::TriangleTopology::Shader && winding) {
+                    handler(second, first, third);
+                    winding = false;
+                } else {
+                    handler(first, second, third);
+                }
+                index += 3;
+            }
+        } catch (...) {
+            preserve_pair();
+            throw;
+        }
+        preserve_pair();
+        while (index < count)
+            SubmitVertex(get(index++), handler);
     }
 
 private:

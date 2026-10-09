@@ -27,6 +27,12 @@ public:
     void AddTriangle(const Pica::OutputVertex& v0, const Pica::OutputVertex& v1,
                      const Pica::OutputVertex& v2) override;
 
+    // CodexAstraLocal: This sink only packs vertices into its owned batch during
+    // AddTriangle; guest framebuffer/cache writes occur after loading joins.
+    bool DefersGuestMemoryWritesUntilDraw() const override {
+        return true;
+    }
+
 protected:
     /// Sync vertex and framgent uniforms from PICA registers
     void SyncDrawUniforms();

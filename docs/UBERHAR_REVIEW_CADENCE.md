@@ -1,5 +1,17 @@
 # Architecture review ledger
 
+<!-- CodexAstraLocal: Count .36 only after gated delivery and its two completed
+controls; this focused implementation/device review is not a new full anchor. -->
+Released **.36** is the **second successful successor** to the full .34 audit.
+Its gates, compatible installation, single Native/Combo controls and independent
+numerical/temporal reviews are complete. The [test review](UBERHAR_TEST_REVIEW_0.1.36.md)
+records broad parallel admission but unmet CPU/speed goals and bounded visual
+findings. Next full architecture/correctness/performance review plus a separate
+cleanliness/purpose-comment audit is due after .37, or earlier for contradictory
+evidence. The current dispatch candidate remains unpublished. Older checkpoints
+below retain their historical status; none restores an expired two-build stop.
+
+
 <!-- CodexAstraLocal: Count the delivered .35 successor while preserving
 independent code reviews and the measured shortfall as separate evidence. -->
 Released **.35** has passed all release/package gates and completed one cold

@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <cassert>
+#include <chrono> // CodexAstraLocal: Sparse owner-side phase clocks, never per vertex.
 #include <limits>
 #include <span>
 #include <vector>
@@ -26,6 +27,10 @@ public:
     struct Work {
         u64 owner_invocations{}, worker_invocations{}, chunks{};
         unsigned peak_threads{};
+        // CodexAstraLocal: These totals cover only explicitly sampled draws.
+        // Owner/worker invocation totals above continue to cover every job.
+        u64 sampled_inputs{}, sampled_invocations{}, sampled_chunks{};
+        u64 plan_ns{}, pool_ns{}, owner_process_ns{}, join_ns{}, submit_ns{};
     };
     static constexpr u32 Grain = 64;
 
@@ -36,6 +41,8 @@ public:
     unsigned Available() const { return pool.Available(); }
     unsigned CreatedWorkers() const { return pool.CreatedWorkers(); }
     unsigned StartupFailures() const { return pool.StartupFailures(); }
+    // CodexAstraLocal: Expose the selected sleeping mechanism at the ordinary log cadence.
+    const char* WaitTransport() const { return pool.WaitTransport(); }
     const Work& LastWork() const { return work; }
 
     bool Prepare(u32 inputs) {
@@ -60,13 +67,17 @@ public:
 
     template <typename VertexAt, typename Shade, typename Submit>
     NativeVertexCounts Run(u32 count, bool indexed, VertexAt&& vertex_at,
-                           Shade&& shade, Submit&& submit) {
+                           Shade&& shade, Submit&& submit, bool measure = false) {
         assert(capacity != 0 || count == 0);
         VertexCacheIndex fifo;
         std::array<OutputVertex, VertexCacheIndex::Capacity> previous;
         NativeVertexCounts counts;
         work = {};
         for (u64 begin = 0; begin < count; begin += capacity) {
+            // CodexAstraLocal: Conditional clocks partition this owner's sampled
+            // chunk wall time; they are not a worker CPU or full-frame budget.
+            using Clock = std::chrono::steady_clock;
+            const auto plan_start = measure ? Clock::now() : Clock::time_point{};
             const auto size = static_cast<u32>(std::min<u64>(capacity, count - begin));
             std::array<u32, VertexCacheIndex::Capacity> cache_sources;
             // CodexAstraLocal: Unindexed inputs never consult FIFO payloads, so
@@ -98,18 +109,29 @@ public:
             // host replay found worker wakeups outweighed savings for 142/168
             // misses; keep fewer than 256 actual invocations on the owner.
             const u32 grain = misses < 256 ? std::max(1U, misses) : Grain;
+            const auto pool_start = measure ? Clock::now() : Clock::time_point{};
             const auto completed = pool.Run(misses, grain, [&](u32 first, u32 last) {
                 shade(std::span<const Invocation>{invocations}.subspan(first, last - first),
                       std::span<OutputVertex>{results}.subspan(first, last - first));
-            });
+            }, measure);
+            const auto submit_start = measure ? Clock::now() : Clock::time_point{};
             counts.invocations += misses;
             work.owner_invocations += completed.owner_items;
             work.worker_invocations += completed.worker_items;
             work.peak_threads = std::max(work.peak_threads, completed.working_threads);
             ++work.chunks;
-            for (u32 offset = 0; offset < size; ++offset) {
+            // CodexAstraLocal: One immutable result generation remains alive
+            // through ordered submission. Qualified sinks consume a whole range;
+            // ordinary callable sinks retain scalar delivery and ownership.
+            const auto get = [&](u32 offset) noexcept -> const OutputVertex& {
                 const u32 source = references[offset];
-                submit(source < capacity ? results[source] : previous[source - capacity]);
+                return source < capacity ? results[source] : previous[source - capacity];
+            };
+            if constexpr (requires { submit(size, get); }) {
+                submit(size, get);
+            } else {
+                for (u32 offset = 0; offset < size; ++offset)
+                    submit(get(offset));
             }
             // CodexAstraLocal: Carry exactly the FIFO's final payloads across
             // storage chunks, without re-shading hits or resetting primitive tails.
@@ -119,6 +141,22 @@ public:
                     if (cache_sources[slot] < capacity)
                         previous[slot] = results[cache_sources[slot]];
                 }
+            }
+            // CodexAstraLocal: Include between-chunk FIFO payload copies in ordered
+            // submission work and expose exact sample sizes beside durations.
+            if (measure) {
+                const auto submit_end = Clock::now();
+                const auto ns = [](auto duration) -> u64 {
+                    return std::chrono::duration_cast<std::chrono::nanoseconds>(duration).count();
+                };
+                work.sampled_inputs += size;
+                work.sampled_invocations += misses;
+                ++work.sampled_chunks;
+                work.plan_ns += ns(pool_start - plan_start);
+                work.pool_ns += ns(submit_start - pool_start);
+                work.owner_process_ns += completed.owner_process_ns;
+                work.join_ns += completed.join_ns;
+                work.submit_ns += ns(submit_end - submit_start);
             }
         }
         return counts;

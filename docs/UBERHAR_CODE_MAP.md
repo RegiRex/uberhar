@@ -1,9 +1,58 @@
 <!-- AstraEH: Attribution index for the Uberhar implementation, tests, packaging and documentation. -->
 # Uberhar code map
 
-<!-- CodexAstraLocal: Map the new proof domain to its real caller and ordered
-output consumer; unused host state is not a broader standalone JIT promise. -->
-## 0.1.36 candidate — selected vertex-output independence
+<!-- CodexAstraLocal: Map .37 coordination/assembly reductions and bounded
+measurement to actual consumers, retained fallbacks and correctness gates. -->
+## 0.1.37 candidate — cheaper ordered CPU batches
+
+- `common/uberhar_parallel_work.h` selects aligned compiler-atomic futex words on
+  supported Linux/Android, with the inherited condition-variable path otherwise.
+  Release/acquire generation publication and joined completion protect every
+  borrowed job and FP environment. Workers sleep immediately; there is no timed
+  polling or spin. The startup mismatch probe can select the portable path;
+  permanent later transport errors terminate instead of returning with live
+  borrowers. Available processor count remains affinity-based and uncapped at eight.
+- `PrimitiveAssembler::SubmitOrdered` borrows immutable const references from one
+  joined batch generation. List/Shader triangles avoid redundant intermediate
+  buffer copies while preserving final stored bytes, winding, cross-draw tails and
+  callback-exception state. Strip/Fan use scalar assembly. `NativeParallelBatch`
+  supports this qualified two-argument callback and retains scalar callable sinks.
+- `RasterizerInterface::DefersGuestMemoryWritesUntilDraw` defaults false. The
+  inspected accelerated sink opts in because AddTriangle only appends owned
+  vertices without observing/reentering/reconfiguring the assembler. Pica checks
+  the actual sink before parallel planning, preserving software framebuffer/input
+  alias order. Opt-in also requires synchronous consumption of borrowed references.
+- `NativeParallelBatch` optionally records FIFO planning, pool and ordered
+  submission chunk-phase wall time, with exact sampled input/miss/chunk counts.
+  Pica selects one admitted draw per 257 and reports schema 3 plus actual
+  `WaitTransport()`. Nested owner-process/join fields measure that owner's wall
+  intervals, not worker CPU time. Preparation, input/shader/proof setup, initial
+  locals and post-Run bookkeeping are outside these brackets. Periodic samples
+  are not assumed unbiased or scaled into a whole-frame budget. Unmeasured draws
+  perform no new clock reads.
+- `test_parallel_work_transport.{cpp,py}` executes actual futex, forced portable,
+  near-wrap and missing-syscall-macro paths, exact work/FP/lifetime controls,
+  delayed final-wake/new-job scheduling and modeled syscall errors. Separate
+  counted-clock cases reject unconditional reads. Private copied headers host
+  the fault seams; production has no diagnostic hooks. The existing ARM64 return
+  workflow step also executes this gate with the app's NDK and QEMU.
+- `test_parallel_assembly.{cpp,py}` compares scalar and bulk output plus all
+  retained serialized assembler state across partitions, winding, topology cases
+  and callback throws. Deliberately missing final-pair and premature-winding
+  changes must fail exact-state assertions. `test_parallel_batch.cpp` exercises
+  scalar and bulk callbacks over 3,744 draws/11,073,888 inputs, preserving exact
+  FIFO, miss populations, cross-chunk payloads and persistent primitive order.
+  Runtime capability tests reject unsafe sink opt-in and missing checks.
+- Both new durable gates join `build_probe.sh`; Android packaging still requires
+  all existing shader, ARM64, application, signing and publication gates. The plain
+  `UBERHAR_VERSION` value selects .37; this map explains it without invalid data
+  comments. Private host timings motivated the candidate but do not qualify Thor
+  speed or sustained CPU utilization. No Calculated prototype or separate narrow
+  memory-return experiment is included.
+
+<!-- CodexAstraLocal: The following .36 implementation is now delivered and tested;
+retain its original design explanation while superseding pre-delivery status. -->
+## 0.1.36 delivered — selected vertex-output independence
 
 - `uberhar_parallel_vertex.h` retains one bounded exact-context graph for both
   `FullArithmeticReads` and explicit `SelectedOutputValues`. The latter unions
@@ -26,8 +75,8 @@ output consumer; unused host state is not a broader standalone JIT promise. -->
   future backend or observer changes must revalidate.
 
 <!-- CodexAstraLocal: Map the local writeback optimization and its real
-consumer/oracle; this is not a delivered .36 or measured performance result. -->
-## Next candidate — ARM64 partial writeback in validation
+consumer/oracle; .36 is delivered, while isolated performance benefit is unproved. -->
+## 0.1.36 delivered — ARM64 partial writeback
 
 - `shader_jit_a64_compiler.cpp::Compile_DestEnable` retains preceding arithmetic
   and uses raw narrow stores for single lanes and aligned XY/ZW pairs. Zero masks
@@ -46,7 +95,7 @@ consumer/oracle; this is not a delivered .36 or measured performance result. -->
 
 <!-- CodexAstraLocal: A narrower renderer result contract must identify its
 actual CPU/emitter boundary and retain an executed guest-state gate. -->
-## Next candidate — explicit guest floating-status isolation
+## 0.1.36 delivered — explicit guest floating-status isolation
 
 - `ARM_Interface::IsHostFpStatusIsolated` defaults to false. The constructed
   `ARM_Dynarmic` opts in only on ARM64; `System` queries the live backend safely,
@@ -66,11 +115,11 @@ actual CPU/emitter boundary and retain an executed guest-state gate. -->
 
 <!-- CodexAstraLocal: Invocation-weighted refusals distinguish frequent small
 batches from costly serial work without adding a hot-loop observer. -->
-## Next candidate — serial coverage diagnostics
+## 0.1.36 delivered — serial coverage diagnostics
 
-The numeric `UBERHAR_VERSION` file selects 0.1.36 without comments because its
-package consumers require a plain version. Release notes describe the candidate;
-installed .35 device findings remain a separate completed test record.
+For delivered .36, the numeric `UBERHAR_VERSION` file selected 0.1.36 without comments because its
+package consumers require a plain version. Release notes describe the delivered
+implementation; .35 and .36 device findings remain separate completed records.
 
 `PicaCore` CPU-parallel schema 2 adds completed FIFO-miss counts for small,
 temporary/address/condition/output carry and other refused attempted draws.

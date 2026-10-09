@@ -1,47 +1,55 @@
-# Uberhar progress — 0.1.35 tested; broader CPU parallelism in development
+# Uberhar progress — 0.1.37 CPU coordination candidate
 
-<!-- CodexAstraLocal: Distinguish delivered work, measured use and the next
-unreleased candidate; created threads alone do not qualify CPU scaling. -->
-Released **0.1.35** is source `7d2fb88864499dffe67bebc4bd8a9f7de3dc666b`.
-All 24 required gates passed in
-[run 37911046064](https://github.com/RegiRex/uberhar/actions/runs/37911046064),
-followed by exact APK/checksum/signing checks and a data-preserving installation.
-One cold-cache Native opening and one full Combo opening have completed on Thor,
-with File 1 reset, Vulkan 2x, normal 100% limiter and normal game-list returns.
-No Calculated device run was repeated. The multicore performance goal is unmet.
-The [test review](UBERHAR_TEST_REVIEW_0.1.35.md) records scope and limitations.
+<!-- CodexAstraLocal: Replace the pre-delivery .36 checkpoint with actual gated
+release/device results; admission counts do not establish all-core throughput. -->
+Released **0.1.36** is `b438a453925d27b991ecaedda89e2a66e9e51734`. All 27 required
+steps passed in [run 37924207205](https://github.com/RegiRex/uberhar/actions/runs/37924207205),
+followed by independent source/APK/checksum/signing checks and a compatible
+installation preserving app data and the protected .22 state. One cold Native
+and one full Combo Dark Moon opening are complete, with File 1 reset, Vulkan 2x,
+normal 100% limiter and normal returns. Both panels are off during development.
+The [test review](UBERHAR_TEST_REVIEW_0.1.36.md) records exact scope and limitations.
 
-Native and Combo averaged **27.664% and 28.279%** in their complete opening
-reporting windows. Their different durations, scenes and conditions preclude a
-causal comparison. Separately aligned cumulative counters show certified
-parallel batches handled **2.100% and 0.403%** of their respective no-GS CPU
-shader invocations. Seven workers existed, but their combined CPU time was
-only 0.08/0.12 seconds across Native's two 20-second samples and 0.01/0.16
-seconds across Combo's. These are finite samples, not whole-run utilization.
-Temporary-state carry and small submitted draws dominate serial decisions.
+Native and Combo averaged **30.500% and 30.411%** in their retained complete
+report windows. All windows remain below the 99% target. Selected-output
+independence now admits **92.097% and 93.034%** of the measured completed attempted
+CPU vertex invocations; carry refusals are zero. Nevertheless, the seven workers
+combined average under one busy accounted core in each finite activity sample.
+Scene/condition differences prevent a causal .35/.36 or mode speed comparison.
+The primary multicore throughput objective remains unmet.
 
-The local **0.1.36 candidate** now integrates a general proof that carried
-mutable state cannot influence selected vertex outputs or control flow. It keeps
-original arithmetic and uses an explicitly audited ARM64 shader/CPU pair plus all
-existing draw guards. A stronger ordered carry/status replay alternative remains
-private; the selected route avoids that recording work. The
-[consumer contract](UBERHAR_OBSERVABLE_VERTEX_CONTRACT.md) records the exact boundary.
+Native clips contain three isolated one-frame moon events and seven separate
+ghost block events, including one lasting three captured frames. Combo contains
+no comparable event in its covered clips, but lacks Native's implicated late
+left-book close shot. No full visual cure or causal regression is established.
+The tolerated moon threshold does not waive the separate ghost finding.
 
-Current-emitter tests pass 2,785,280 A64 calls and 168 composed FIFO/assembly draws,
-with nine wrong-certificate controls and an order defect detected. The original
-certificate suite still passes. A separate real A32-on-A64 CPU test passes 29,952
-executions and three status-isolation defects. Exact partial writeback passes
-29,568 raw-state/FP pairs and four machine defects. Cache/runtime integration,
-merged native build and CTest pass; five existing firmware-dependent tests skip.
-Independent architecture and cleanliness review found no remaining code blocker.
-These are finite source/host qualifications. The gated prerelease, compatible APK
-installation and single Native/Combo Thor runs are the next required steps;
-no .36 device gain or overall CPU-utilization improvement is established yet.
+The next unpublished work combines cheaper sleeping-worker dispatch/join and
+bulk ordered triangle assembly, with sparse phase timings to distinguish costs.
+A per-job shader-state reuse candidate and a private condition-variable redesign
+were rejected after mixed or slower host results; neither is promoted. At least
+90.2% of Native certified draws are single-chunk, limiting within-draw overlap
+opportunities by count. A conservative actual-rasterizer capability guard also
+retains serial loading where software submission can overwrite later inputs.
+No new candidate release or device gain is claimed yet.
 
-The independent Calculated triangle prototype also remains private and does
-not qualify general guest rendering. Device artifacts remain private; published
-reports contain only bounded findings. The ordinary screen timeout is restored
-and both panels are confirmed off during development.
+<!-- CodexAstraLocal: Distinguish prepared source from a published/tested build. -->
+Candidate **0.1.37** integrates the reviewed sleeping futex transport and ordered
+bulk assembly, with the software-sink guard and sampled phase report. The portable
+condition-variable path remains available. Merged native compilation, CTest
+(with five inherited skips) and 3,744 FIFO/assembly draws pass. Exact assembler
+state/exception and host/A64 transport controls also pass. Final merged actual
+shader/FIFO/hardware-output composition passes both callback shapes across 56
+cohorts. Independent architecture and cleanliness reviews found no blocker.
+No .37 APK is installed and no .37 title result is claimed.
+
+The .36 ARM64 writeback, selected-output proof and guest floating-status gates
+are delivered. A separate inherited narrow memory-callback return hazard has a
+private executed correction; independent Calculated textured triangles now also
+pass a finite actual Lavapipe Vulkan sequence, with no graphics/Native fallback.
+That work remains a private host prototype. Neither is general title/device qualification.
+Further CPU iterations remain authorized; the next full architecture plus
+separate cleanliness audit is due after .37, the third successor to .34.
 
 <!-- CodexAstraLocal: The owner's latest October 9 follow-up removes the hard two-build limit for the primary multicore upgrade. -->
 - Continue beyond .35/.36 when needed to demonstrate meaningful use of available

@@ -208,6 +208,11 @@ jobs:
         run: |
           export ANDROID_NDK_HOME="$ANDROID_SDK_ROOT/ndk/27.3.13750724"
           python3 tools/uberhar/test_shader_a64_return.py
+          # CodexAstraLocal: Qualify sleeping dispatch, fallback and borrowed-job
+          # lifetime on the app's NDK target within the existing required gate.
+          python3 tools/uberhar/test_parallel_work_transport.py \
+            --compiler "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/clang++" \
+            --qemu "$(command -v qemu-aarch64)"
 
       # CodexAstraLocal: Narrow writeback must preserve raw disabled lanes,
       # current output banks and preceding arithmetic/FP effects before packaging.
@@ -338,6 +343,8 @@ jobs:
       # even when the ARM contract gate stops a candidate before app packaging.
       # CodexAstraLocal: Include the observable gate's separate raw compiler/run
       # streams and synthetic exports, not only its hashed provenance summary.
+      # CodexAstraLocal: Retain the new transport gate's raw outcomes on failure
+      # too, distinguishing deliberate terminal controls from a stalled job.
       - name: Upload ARM64 shader contract evidence
         if: always()
         uses: actions/upload-artifact@v7
@@ -359,6 +366,9 @@ jobs:
             build/uberhar-probe/parallel-vertex-observable/**/*.stdout
             build/uberhar-probe/parallel-vertex-observable/**/*.stderr
             build/uberhar-probe/parallel-vertex-observable/**/cases.json
+            build/uberhar-probe/parallel-transport/**/provenance.json
+            build/uberhar-probe/parallel-transport/**/*.stdout
+            build/uberhar-probe/parallel-transport/**/*.stderr
           if-no-files-found: ignore
           retention-days: 14
 

@@ -116,7 +116,15 @@ struct PicaCore::ParallelVertexState {
     u64 small{}, observer{}, context_missing{}, input_bounds{}, single_core{}, allocation_failures{};
     u64 float_traps{}; // CodexAstraLocal: Preserve owner-thread exception delivery.
     u64 concurrent_memory{}; // CodexAstraLocal: Retain serial live-memory observers.
+    // CodexAstraLocal: Distinguish sinks that can change later input bytes during
+    // ordered submission from independent background guest-memory writers.
+    u64 submission_writes{};
     u64 owner_invocations{}, worker_invocations{}, chunks{};
+    // CodexAstraLocal: One in 257 completed admitted draws measures phase wall
+    // time. The prime stride avoids always sampling the same power-of-two slot;
+    // these are sampled costs, never scaled into an asserted whole-run budget.
+    u64 sampled_draws{}, sampled_inputs{}, sampled_invocations{}, sampled_chunks{};
+    u64 plan_ns{}, pool_ns{}, owner_process_ns{}, join_ns{}, submit_ns{};
     // CodexAstraLocal: Attribute useful work to the explicitly narrower A64
     // contract; total-minus-observable remains the original contract population.
     u64 observable_batches{}, observable_owner_invocations{}, observable_worker_invocations{};
@@ -302,13 +310,15 @@ void PicaCore::ReportVirtualVertices(const char* kind, std::chrono::steady_clock
                 other_refusals += parallel.admissions[i];
         }
         LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
-            "Uberhar CPU parallel {}: schema=2 available={} created_workers={} peak_threads={} "
+            "Uberhar CPU parallel {}: schema=3 available={} created_workers={} peak_threads={} "
             "checks={} batches={} chunks={} owner_invocations={} worker_invocations={} "
             "observable_batches={} observable_owner_invocations={} observable_worker_invocations={} "
-            "small={} observer={} context_missing={} input_bounds={} single_core={} float_traps={} concurrent_memory={} "
+            "small={} observer={} context_missing={} input_bounds={} single_core={} float_traps={} concurrent_memory={} submission_writes={} "
             "allocation_failures={} startup_failures={} proof_hits={} proof_builds={} code_compares={} "
             "independent={} temporary_carry={} address_carry={} condition_carry={} output_carry={} other_refusals={} "
             "serial_small_invocations={} serial_carry_invocations={} serial_other_invocations={} "
+            "sampled_draws={} sampled_inputs={} sampled_invocations={} sampled_chunks={} "
+            "plan_ns={} pool_ns={} owner_process_ns={} join_ns={} submit_ns={} timing_stride=257 wait_transport={} "
             "scope=certified_no_gs_fifo_misses serial_scope=completed_attempted_draws submit=ordered_owner observer_policy=serial",
             kind, parallel.batch.Available(), parallel.batch.CreatedWorkers(), parallel.peak_threads,
             parallel.checks, parallel.parallel_batches, parallel.chunks, parallel.owner_invocations,
@@ -316,7 +326,7 @@ void PicaCore::ReportVirtualVertices(const char* kind, std::chrono::steady_clock
             parallel.observable_owner_invocations, parallel.observable_worker_invocations,
             parallel.small, parallel.observer, parallel.context_missing,
             parallel.input_bounds, parallel.single_core, parallel.float_traps,
-            parallel.concurrent_memory, parallel.allocation_failures,
+            parallel.concurrent_memory, parallel.submission_writes, parallel.allocation_failures,
             parallel.batch.StartupFailures(), parallel.proof_hits, parallel.proof_builds,
             parallel.code_compares,
             parallel.admissions[static_cast<std::size_t>(ParallelVertexStatus::Independent)],
@@ -325,7 +335,11 @@ void PicaCore::ReportVirtualVertices(const char* kind, std::chrono::steady_clock
             parallel.admissions[static_cast<std::size_t>(ParallelVertexStatus::ConditionCarry)],
             parallel.admissions[static_cast<std::size_t>(ParallelVertexStatus::OutputCarry)],
             other_refusals, parallel.serial_small_invocations,
-            parallel.serial_carry_invocations, parallel.serial_other_invocations);
+            parallel.serial_carry_invocations, parallel.serial_other_invocations,
+            parallel.sampled_draws, parallel.sampled_inputs, parallel.sampled_invocations,
+            parallel.sampled_chunks, parallel.plan_ns, parallel.pool_ns,
+            parallel.owner_process_ns, parallel.join_ns, parallel.submit_ns,
+            parallel.batch.WaitTransport());
     }
 
     // AstraPro: Existing five-second/final cadence; no per-index clocks.
@@ -1705,6 +1719,14 @@ void PicaCore::LoadVertices(bool is_indexed, std::chrono::steady_clock::time_poi
                     return false;
                 }
                 if (!context) { ++parallel.context_missing; return false; }
+                // CodexAstraLocal: Shader independence alone does not make live
+                // vertex memory immutable. Software triangle submission can
+                // overwrite later inputs through framebuffer aliasing; query
+                // the actual sink before planning/shading ahead of submission.
+                if (!rasterizer->DefersGuestMemoryWritesUntilDraw()) {
+                    ++parallel.submission_writes;
+                    return false;
+                }
                 if (parallel.batch.Available() < 2) { ++parallel.single_core; return false; }
                 // CodexAstraLocal: The guest CPU/GSP command path is synchronous,
                 // but threaded DSP/RPC can write guest spans independently. Check
@@ -1781,6 +1803,9 @@ void PicaCore::LoadVertices(bool is_indexed, std::chrono::steady_clock::time_poi
                 // arithmetic. The selected-output proof permits only unused
                 // state/status differences; converted vertex bytes stay exact.
                 // Only the owner touches FIFO discovery and primitive assembly.
+                // CodexAstraLocal: Sample every chunk of selected admitted draws without
+                // disabling their workers or adding per-vertex timing hooks.
+                const bool measure_parallel = parallel.parallel_batches % 257 == 0;
                 counts = parallel.batch.Run(pipeline.num_vertices, is_indexed, vertex_at,
                     [&](std::span<const NativeParallelBatch::Invocation> inputs,
                         std::span<OutputVertex> outputs) {
@@ -1790,11 +1815,27 @@ void PicaCore::LoadVertices(bool is_indexed, std::chrono::steady_clock::time_poi
                             context.Run(independent);
                             outputs[i] = plan.Convert(independent);
                         }
-                    }, submit);
+                    }, [&](u32 size, const auto& get) {
+                        // CodexAstraLocal: The admitted accelerated sink only
+                        // appends owned vertices: it neither observes/reenters
+                        // this assembler nor retains these borrowed references.
+                        primitive_assembler.SubmitOrdered(size, get, triangle);
+                    }, measure_parallel);
                 const auto& work = parallel.batch.LastWork();
                 ++parallel.parallel_batches;
                 parallel.owner_invocations += work.owner_invocations;
                 parallel.worker_invocations += work.worker_invocations;
+                if (measure_parallel) {
+                    ++parallel.sampled_draws;
+                    parallel.sampled_inputs += work.sampled_inputs;
+                    parallel.sampled_invocations += work.sampled_invocations;
+                    parallel.sampled_chunks += work.sampled_chunks;
+                    parallel.plan_ns += work.plan_ns;
+                    parallel.pool_ns += work.pool_ns;
+                    parallel.owner_process_ns += work.owner_process_ns;
+                    parallel.join_ns += work.join_ns;
+                    parallel.submit_ns += work.submit_ns;
+                }
                 // CodexAstraLocal: Count completed work once, outside the vertex
                 // loop; owner-only accepted chunks are still explicitly visible.
                 if (contract == ParallelVertexContract::SelectedOutputValues) {

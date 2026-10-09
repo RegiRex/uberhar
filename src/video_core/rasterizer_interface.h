@@ -37,6 +37,16 @@ public:
     virtual void AddTriangle(const Pica::OutputVertex& v0, const Pica::OutputVertex& v1,
                              const Pica::OutputVertex& v2) = 0;
 
+    // CodexAstraLocal: Parallel vertex loading may precede ordered submission.
+    // Unknown/software sinks can write guest framebuffer RAM in AddTriangle,
+    // which may alias later vertex inputs; they must retain serial load/submit.
+    // CodexAstraLocal: Opt-in also qualifies ordered bulk assembly: consume all
+    // references synchronously, without observing, reentering or reconfiguring
+    // the primitive assembler during AddTriangle.
+    virtual bool DefersGuestMemoryWritesUntilDraw() const {
+        return false;
+    }
+
     /// Draw the current batch of triangles
     virtual void DrawTriangles() = 0;
 
