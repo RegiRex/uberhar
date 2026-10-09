@@ -58,6 +58,11 @@ public:
     // CodexAstraLocal: Unsupported/interpreter engines retain their existing Run
     // path. Callers select the prepared or inherited loop once, outside the FIFO.
     virtual ShaderRunContext BindForDraw(const ShaderSetup&) const { return {}; }
+
+    // CodexAstraLocal: Only an audited emitter may opt into selected-output
+    // independence. Callers still prove the program and exclude GS/observers,
+    // preserve FP controls and establish guest-backend status isolation.
+    virtual bool SupportsObservableVertexContract() const { return false; }
 };
 
 std::unique_ptr<ShaderEngine> CreateEngine(bool use_jit);

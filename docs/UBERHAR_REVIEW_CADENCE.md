@@ -1,15 +1,20 @@
 # Architecture review ledger
 
-<!-- CodexAstraLocal: Record candidate reviews without prematurely advancing the released/tested anchor. -->
-The .35 multicore candidate has completed an independent architecture review and
-separate code-cleanliness/purpose review. The executed ARM64 return repair,
-exact JIT ownership/copy fix and actual concurrent-memory-writer guards also
-received independent review. Local native, host and NDK/QEMU checks pass, with
-the documented source-stability rerun. Remote release/package gates and Thor
-Native/Combo tests remain pending; .34 is still the released/tested audit anchor.
-The latest owner instruction permits further builds for meaningful multicore
-progress while retaining regular reports and reviews.
+<!-- CodexAstraLocal: Count the delivered .35 successor while preserving
+independent code reviews and the measured shortfall as separate evidence. -->
+Released **.35** has passed all release/package gates and completed one cold
+Native and one full Combo Thor opening. It is **one successful release successor**
+to the full .34 review anchor. Its independent implementation architecture and
+cleanliness reviews passed before publication; numerical device reviews now
+confirm very low parallel coverage and an unmet speed target. The [test review](UBERHAR_TEST_REVIEW_0.1.35.md)
+closes the bounded numerical and consecutive visual evidence. This is not a new full-audit anchor.
 
+The latest owner instruction permits further builds for meaningful multicore
+progress. The next candidate targets safe admission of more useful work, with
+separate architecture and cleanliness reviews before release. The next full
+review is due after three successors to .34, or earlier for contradictory
+correctness/performance evidence. Historical stop instructions below describe
+completed earlier batches and do not override current authorization.
 
 <!-- CodexAstraLocal: The owner's latest October 9 follow-up removes the hard two-build limit for the primary multicore upgrade. -->
 - Continue beyond .35/.36 when needed to demonstrate meaningful use of available

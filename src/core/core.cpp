@@ -677,6 +677,12 @@ bool System::HasConcurrentGuestMemoryWriters() const {
     return false;
 }
 
+// CodexAstraLocal: An absent/shut-down core never opts in. CPU teardown clears
+// the owners before reinitialization replaces running_core, so guard both.
+bool System::IsHostFpStatusIsolated() const {
+    return !cpu_cores.empty() && running_core && running_core->IsHostFpStatusIsolated();
+}
+
 VideoCore::GPU& System::GPU() {
     return *gpu;
 }

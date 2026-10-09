@@ -1,20 +1,47 @@
-# Uberhar progress — 0.1.35 multicore candidate in validation
+# Uberhar progress — 0.1.35 tested; broader CPU parallelism in development
 
-<!-- CodexAstraLocal: The new numeric alpha identifies the ordered multicore
-candidate; it is not a delivered/device-qualified release until its gates pass. -->
-The .35 candidate adds affinity-sized joined CPU vertex work, exact shader-source
-identity and the executed ARM64 CALL-return correction. Native compilation and
-CTest pass with the five existing firmware-dependent skips. Focused and merged host controls,
-actual ARM64/QEMU execution, and independent architecture/cleanliness reviews pass.
-Publication/signing gates and one cold Native/Combo Thor opening
-per method remain pending. The connected Thor still has .34 installed.
+<!-- CodexAstraLocal: Distinguish delivered work, measured use and the next
+unreleased candidate; created threads alone do not qualify CPU scaling. -->
+Released **0.1.35** is source `7d2fb88864499dffe67bebc4bd8a9f7de3dc666b`.
+All 24 required gates passed in
+[run 37911046064](https://github.com/RegiRex/uberhar/actions/runs/37911046064),
+followed by exact APK/checksum/signing checks and a data-preserving installation.
+One cold-cache Native opening and one full Combo opening have completed on Thor,
+with File 1 reset, Vulkan 2x, normal 100% limiter and normal game-list returns.
+No Calculated device run was repeated. The multicore performance goal is unmet.
+The [test review](UBERHAR_TEST_REVIEW_0.1.35.md) records scope and limitations.
 
-Complete-path host replay showed useful scaling for larger independent batches
-and a small-batch regression; actual FIFO misses below 256 now remain owner-only.
-Host ratios do not establish Thor speed or all-core utilization. The independent
-Calculated triangle prototype has real synthetic output but remains outside the
-production candidate and does not qualify guest rendering. Details are in the
-[candidate notes](releases/0.1.35.md) and [code map](UBERHAR_CODE_MAP.md).
+Native and Combo averaged **27.664% and 28.279%** in their complete opening
+reporting windows. Their different durations, scenes and conditions preclude a
+causal comparison. Separately aligned cumulative counters show certified
+parallel batches handled **2.100% and 0.403%** of their respective no-GS CPU
+shader invocations. Seven workers existed, but their combined CPU time was
+only 0.08/0.12 seconds across Native's two 20-second samples and 0.01/0.16
+seconds across Combo's. These are finite samples, not whole-run utilization.
+Temporary-state carry and small submitted draws dominate serial decisions.
+
+The local **0.1.36 candidate** now integrates a general proof that carried
+mutable state cannot influence selected vertex outputs or control flow. It keeps
+original arithmetic and uses an explicitly audited ARM64 shader/CPU pair plus all
+existing draw guards. A stronger ordered carry/status replay alternative remains
+private; the selected route avoids that recording work. The
+[consumer contract](UBERHAR_OBSERVABLE_VERTEX_CONTRACT.md) records the exact boundary.
+
+Current-emitter tests pass 2,785,280 A64 calls and 168 composed FIFO/assembly draws,
+with nine wrong-certificate controls and an order defect detected. The original
+certificate suite still passes. A separate real A32-on-A64 CPU test passes 29,952
+executions and three status-isolation defects. Exact partial writeback passes
+29,568 raw-state/FP pairs and four machine defects. Cache/runtime integration,
+merged native build and CTest pass; five existing firmware-dependent tests skip.
+Independent architecture and cleanliness review found no remaining code blocker.
+These are finite source/host qualifications. The gated prerelease, compatible APK
+installation and single Native/Combo Thor runs are the next required steps;
+no .36 device gain or overall CPU-utilization improvement is established yet.
+
+The independent Calculated triangle prototype also remains private and does
+not qualify general guest rendering. Device artifacts remain private; published
+reports contain only bounded findings. The ordinary screen timeout is restored
+and both panels are confirmed off during development.
 
 <!-- CodexAstraLocal: The owner's latest October 9 follow-up removes the hard two-build limit for the primary multicore upgrade. -->
 - Continue beyond .35/.36 when needed to demonstrate meaningful use of available

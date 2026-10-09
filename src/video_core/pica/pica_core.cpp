@@ -87,6 +87,9 @@ struct PicaCore::ParallelVertexState {
     struct Key {
         u32 entry{}, outputs{};
         u16 booleans{};
+        // CodexAstraLocal: Identical source may have different proofs when the
+        // caller's observable-state contract changes without a code revision.
+        ParallelVertexContract contract{ParallelVertexContract::FullArithmeticReads};
         bool operator==(const Key&) const = default;
     };
     struct Proof {
@@ -114,10 +117,17 @@ struct PicaCore::ParallelVertexState {
     u64 float_traps{}; // CodexAstraLocal: Preserve owner-thread exception delivery.
     u64 concurrent_memory{}; // CodexAstraLocal: Retain serial live-memory observers.
     u64 owner_invocations{}, worker_invocations{}, chunks{};
+    // CodexAstraLocal: Attribute useful work to the explicitly narrower A64
+    // contract; total-minus-observable remains the original contract population.
+    u64 observable_batches{}, observable_owner_invocations{}, observable_worker_invocations{};
+    // CodexAstraLocal: Weight serial refusals by actual completed FIFO misses,
+    // not submitted indices or draw frequency; no per-vertex observer is needed.
+    u64 serial_small_invocations{}, serial_carry_invocations{}, serial_other_invocations{};
     unsigned peak_threads{};
     std::array<u64, static_cast<std::size_t>(ParallelVertexStatus::Count)> admissions{};
 
-    const ParallelVertexCertificate& Get(ShaderSetup& setup, u32 output_mask) {
+    const ParallelVertexCertificate& Get(ShaderSetup& setup, u32 output_mask,
+        ParallelVertexContract contract = ParallelVertexContract::FullArithmeticReads) {
         if (!current || revision != setup.GetCodeRevision()) {
             const u64 program_hash = setup.GetProgramCodeHash();
             const u64 swizzle_hash = setup.GetSwizzleDataHash();
@@ -145,7 +155,8 @@ struct PicaCore::ParallelVertexState {
             }
             revision = setup.GetCodeRevision();
         }
-        const Key key{setup.entry_point, output_mask, ParallelVertexBooleanUniforms(setup.uniforms)};
+        const Key key{setup.entry_point, output_mask,
+                      ParallelVertexBooleanUniforms(setup.uniforms), contract};
         for (const auto& proof : current->proofs) {
             if (proof.valid && proof.key == key) {
                 ++proof_hits;
@@ -156,7 +167,7 @@ struct PicaCore::ParallelVertexState {
         proof.valid = false;
         proof.key = key;
         proof.result = AnalyzeParallelVertex(current->code, current->swizzles,
-                                             key.entry, key.booleans, key.outputs);
+                                             key.entry, key.booleans, key.outputs, key.contract);
         proof.valid = true;
         ++proof_builds;
         return proof.result;
@@ -291,15 +302,19 @@ void PicaCore::ReportVirtualVertices(const char* kind, std::chrono::steady_clock
                 other_refusals += parallel.admissions[i];
         }
         LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
-            "Uberhar CPU parallel {}: schema=1 available={} created_workers={} peak_threads={} "
+            "Uberhar CPU parallel {}: schema=2 available={} created_workers={} peak_threads={} "
             "checks={} batches={} chunks={} owner_invocations={} worker_invocations={} "
+            "observable_batches={} observable_owner_invocations={} observable_worker_invocations={} "
             "small={} observer={} context_missing={} input_bounds={} single_core={} float_traps={} concurrent_memory={} "
             "allocation_failures={} startup_failures={} proof_hits={} proof_builds={} code_compares={} "
             "independent={} temporary_carry={} address_carry={} condition_carry={} output_carry={} other_refusals={} "
-            "scope=certified_no_gs_fifo_misses submit=ordered_owner observer_policy=serial",
+            "serial_small_invocations={} serial_carry_invocations={} serial_other_invocations={} "
+            "scope=certified_no_gs_fifo_misses serial_scope=completed_attempted_draws submit=ordered_owner observer_policy=serial",
             kind, parallel.batch.Available(), parallel.batch.CreatedWorkers(), parallel.peak_threads,
             parallel.checks, parallel.parallel_batches, parallel.chunks, parallel.owner_invocations,
-            parallel.worker_invocations, parallel.small, parallel.observer, parallel.context_missing,
+            parallel.worker_invocations, parallel.observable_batches,
+            parallel.observable_owner_invocations, parallel.observable_worker_invocations,
+            parallel.small, parallel.observer, parallel.context_missing,
             parallel.input_bounds, parallel.single_core, parallel.float_traps,
             parallel.concurrent_memory, parallel.allocation_failures,
             parallel.batch.StartupFailures(), parallel.proof_hits, parallel.proof_builds,
@@ -309,7 +324,8 @@ void PicaCore::ReportVirtualVertices(const char* kind, std::chrono::steady_clock
             parallel.admissions[static_cast<std::size_t>(ParallelVertexStatus::AddressCarry)],
             parallel.admissions[static_cast<std::size_t>(ParallelVertexStatus::ConditionCarry)],
             parallel.admissions[static_cast<std::size_t>(ParallelVertexStatus::OutputCarry)],
-            other_refusals);
+            other_refusals, parallel.serial_small_invocations,
+            parallel.serial_carry_invocations, parallel.serial_other_invocations);
     }
 
     // AstraPro: Existing five-second/final cadence; no per-index clocks.
@@ -1659,6 +1675,12 @@ void PicaCore::LoadVertices(bool is_indexed, std::chrono::steady_clock::time_poi
             // prepared-input draws. Calculated, debugger, geometry and timing
             // observers keep their existing paths. Every refusal still runs the
             // complete serial shader; no guest draw or input is dropped.
+            // CodexAstraLocal: Retain one reason until the existing serial runner
+            // returns its actual miss count. Unattempted modes/allocation-disabled
+            // paths stay outside this accounting, and exceptions count no completion.
+            enum class SerialReason { Other, Small, Carry };
+            SerialReason serial_reason = SerialReason::Other;
+            ParallelVertexState* attempted_parallel = nullptr;
             const auto try_parallel = [&]() {
                 const auto mode = Settings::values.uberhar_test_mode.GetValue();
                 if (mode != Settings::UberharTestMode::Native &&
@@ -1674,9 +1696,14 @@ void PicaCore::LoadVertices(bool is_indexed, std::chrono::steady_clock::time_poi
                     return false;
                 }
                 auto& parallel = *parallel_vertices;
+                attempted_parallel = &parallel;
                 ++parallel.checks;
                 if (timing_range || native_batch_sampled) { ++parallel.observer; return false; }
-                if (pipeline.num_vertices < 256) { ++parallel.small; return false; }
+                if (pipeline.num_vertices < 256) {
+                    ++parallel.small;
+                    serial_reason = SerialReason::Small;
+                    return false;
+                }
                 if (!context) { ++parallel.context_missing; return false; }
                 if (parallel.batch.Available() < 2) { ++parallel.single_core; return false; }
                 // CodexAstraLocal: The guest CPU/GSP command path is synchronous,
@@ -1718,11 +1745,27 @@ void PicaCore::LoadVertices(bool is_indexed, std::chrono::steady_clock::time_poi
                         return false;
                     }
                 }
+                // CodexAstraLocal: Only the constructed, separately audited A64
+                // CPU and shader engines opt into selected-output independence.
+                // Existing no-GS/observer/trap/memory guards remain mandatory;
+                // arbitrary backends keep the original arithmetic-read proof.
+                const auto contract = shader_engine->SupportsObservableVertexContract() &&
+                                      Core::System::GetInstance().IsHostFpStatusIsolated()
+                    ? ParallelVertexContract::SelectedOutputValues
+                    : ParallelVertexContract::FullArithmeticReads;
                 try {
-                    const auto& proof = parallel.Get(vs_setup, regs.internal.vs.output_mask);
+                    const auto& proof = parallel.Get(vs_setup, regs.internal.vs.output_mask, contract);
                     ++parallel.admissions[static_cast<std::size_t>(proof.status)];
-                    if (!proof.Supported())
+                    if (!proof.Supported()) {
+                        // CodexAstraLocal: Weight all live carry refusals under
+                        // either contract, including selected-output dependence.
+                        if (proof.status == ParallelVertexStatus::TemporaryCarry ||
+                            proof.status == ParallelVertexStatus::AddressCarry ||
+                            proof.status == ParallelVertexStatus::ConditionCarry ||
+                            proof.status == ParallelVertexStatus::OutputCarry)
+                            serial_reason = SerialReason::Carry;
                         return false;
+                    }
                     if (!parallel.batch.Prepare(pipeline.num_vertices)) {
                         ++parallel.allocation_failures;
                         parallel_allocation_failed = true;
@@ -1733,10 +1776,11 @@ void PicaCore::LoadVertices(bool is_indexed, std::chrono::steady_clock::time_poi
                     parallel_allocation_failed = true;
                     return false;
                 }
-                // CodexAstraLocal: A proved-independent grain starts from the
-                // same zeroed per-draw state. Workers load immutable prepared
-                // inputs, run the unchanged JIT and convert disjoint outputs;
-                // only the owner touches FIFO discovery and primitive assembly.
+                // CodexAstraLocal: Each grain starts from the same zeroed draw
+                // state, loads immutable prepared inputs and runs unchanged JIT
+                // arithmetic. The selected-output proof permits only unused
+                // state/status differences; converted vertex bytes stay exact.
+                // Only the owner touches FIFO discovery and primitive assembly.
                 counts = parallel.batch.Run(pipeline.num_vertices, is_indexed, vertex_at,
                     [&](std::span<const NativeParallelBatch::Invocation> inputs,
                         std::span<OutputVertex> outputs) {
@@ -1751,6 +1795,13 @@ void PicaCore::LoadVertices(bool is_indexed, std::chrono::steady_clock::time_poi
                 ++parallel.parallel_batches;
                 parallel.owner_invocations += work.owner_invocations;
                 parallel.worker_invocations += work.worker_invocations;
+                // CodexAstraLocal: Count completed work once, outside the vertex
+                // loop; owner-only accepted chunks are still explicitly visible.
+                if (contract == ParallelVertexContract::SelectedOutputValues) {
+                    ++parallel.observable_batches;
+                    parallel.observable_owner_invocations += work.owner_invocations;
+                    parallel.observable_worker_invocations += work.worker_invocations;
+                }
                 parallel.chunks += work.chunks;
                 parallel.peak_threads = std::max(parallel.peak_threads, work.peak_threads);
                 return true;
@@ -1804,6 +1855,17 @@ void PicaCore::LoadVertices(bool is_indexed, std::chrono::steady_clock::time_poi
             } else {
                 counts = RunNativeVertexBatch<false>(pipeline.num_vertices, is_indexed, vertex_at,
                                                      inherited_shade, submit, native_samples);
+            }
+            // CodexAstraLocal: Consume the completed count once after rendering.
+            // Certified batches already account for owner/worker work, including
+            // accepted batches below the separate actual-miss parallel cutoff.
+            if (!parallel_completed && attempted_parallel) {
+                auto& serial_count = serial_reason == SerialReason::Small
+                    ? attempted_parallel->serial_small_invocations
+                    : serial_reason == SerialReason::Carry
+                        ? attempted_parallel->serial_carry_invocations
+                        : attempted_parallel->serial_other_invocations;
+                serial_count += counts.invocations;
             }
             // AstraPro: Separate recovered invocation coverage from batch counts.
             if (rescued_input)

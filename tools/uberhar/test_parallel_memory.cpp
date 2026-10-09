@@ -4,6 +4,8 @@
 // CodexAstraLocal: Only ownership/dependency shells are modeled. Every predicate
 // and counter method below is extracted verbatim from the current production file.
 #include <atomic>
+#include <cstdint>
+#include <vector>
 #include <future>
 #include <iostream>
 #include <memory>
@@ -23,7 +25,20 @@ struct KernelSystem {
     @PENDING@
     std::atomic<int> pending_async_operations{};
 };
+// CodexAstraLocal: Only containing types/architecture selection are modeled;
+// the CPU/emitter capability methods and selected contract enum are verbatim.
+#define UBERHAR_FP_HOST 0
+#define CITRA_ARCH(NAME) UBERHAR_FP_HOST
+using u8 = std::uint8_t;
+@CONTRACT@
+struct ARM_Interface { virtual ~ARM_Interface()=default; @CPU_DEFAULT@ };
+struct ARM_Dynarmic final : ARM_Interface { @CPU_JIT@ };
+struct ShaderEngine { virtual ~ShaderEngine()=default; @SHADER_DEFAULT@ };
+struct JitEngine final : ShaderEngine { @SHADER_JIT@ };
 struct System {
+    bool IsHostFpStatusIsolated() const;
+    std::vector<ARM_Interface*> cpu_cores;
+    ARM_Interface* running_core{};
     bool HasConcurrentGuestMemoryWriters() const;
     std::unique_ptr<DspInterface> dsp_core;
     std::unique_ptr<KernelSystem> kernel;
@@ -32,12 +47,52 @@ struct System {
 #endif
 };
 @CORE@
+@FP_SYSTEM@
 static unsigned checks;
 static void Need(bool ok, const char* label) {
     ++checks;
     if (!ok) throw std::runtime_error(label);
 }
+// CodexAstraLocal: Execute the actual selector expression with only its global
+// singleton lookup rebound to the modeled owner, including empty/null/teardown.
+// CodexAstraLocal: Deliberate omission mutants may stop consuming one argument;
+// keep those binaries compilable so only the runtime oracle can detect them.
+static ParallelVertexContract Select([[maybe_unused]] System& system,
+                                    [[maybe_unused]] const ShaderEngine* shader_engine) {
+    @SELECTOR@
+    return contract;
+}
+static void CheckFpBoundaries() {
+    ARM_Interface unknown_cpu;
+    ARM_Dynarmic jit_cpu;
+    ShaderEngine unknown_shader;
+    JitEngine jit_shader;
+    System system;
+    const auto full = ParallelVertexContract::FullArithmeticReads;
+    const auto selected = ParallelVertexContract::SelectedOutputValues;
+    Need(!unknown_cpu.IsHostFpStatusIsolated(), "unknown CPU status must refuse");
+    Need(!unknown_shader.SupportsObservableVertexContract(), "unknown shader contract must refuse");
+    Need(jit_cpu.IsHostFpStatusIsolated() == bool(UBERHAR_FP_HOST), "CPU host scope changed");
+    Need(jit_shader.SupportsObservableVertexContract() == bool(UBERHAR_FP_HOST), "shader host scope changed");
+    Need(!system.IsHostFpStatusIsolated(), "empty CPU owners must refuse");
+    Need(Select(system, &jit_shader) == full, "empty CPU selector must refuse");
+    system.cpu_cores.push_back(&jit_cpu);
+    Need(!system.IsHostFpStatusIsolated(), "null running CPU must refuse");
+    Need(Select(system, &jit_shader) == full, "null CPU selector must refuse");
+    for (ARM_Interface* cpu : {&unknown_cpu, static_cast<ARM_Interface*>(&jit_cpu)}) {
+        system.running_core = cpu;
+        for (const ShaderEngine* shader : {static_cast<const ShaderEngine*>(&unknown_shader), static_cast<const ShaderEngine*>(&jit_shader)}) {
+            const bool both = UBERHAR_FP_HOST && cpu == &jit_cpu && shader == &jit_shader;
+            Need(Select(system, shader) == (both ? selected : full), "both actual engines must opt in");
+        }
+    }
+    system.running_core = &jit_cpu;
+    system.cpu_cores.clear();
+    Need(!system.IsHostFpStatusIsolated(), "cleared CPU owners must refuse");
+    Need(Select(system, &jit_shader) == full, "teardown selector must refuse");
+}
 static void Check() {
+    CheckFpBoundaries();
     System s;
     Need(s.HasConcurrentGuestMemoryWriters(), "absent runtime must refuse");
     s.kernel=std::make_unique<KernelSystem>();

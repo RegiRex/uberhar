@@ -209,6 +209,27 @@ jobs:
           export ANDROID_NDK_HOME="$ANDROID_SDK_ROOT/ndk/27.3.13750724"
           python3 tools/uberhar/test_shader_a64_return.py
 
+      # CodexAstraLocal: Narrow writeback must preserve raw disabled lanes,
+      # current output banks and preceding arithmetic/FP effects before packaging.
+      - name: Execute ARM64 shader writeback contract
+        run: |
+          export ANDROID_NDK_HOME="$ANDROID_SDK_ROOT/ndk/27.3.13750724"
+          python3 tools/uberhar/test_shader_a64_writeback.py
+
+      # CodexAstraLocal: Selected-output shader independence requires guest CPU
+      # status isolation across real A64 service and memory callback boundaries.
+      - name: Execute ARM64 guest FP status contract
+        run: |
+          export ANDROID_NDK_HOME="$ANDROID_SDK_ROOT/ndk/27.3.13750724"
+          python3 tools/uberhar/test_guest_a64_fpsr.py
+
+      # CodexAstraLocal: Widen admission only after current A64 arithmetic,
+      # ordered FIFO/assembly and output-sensitive negative controls pass.
+      - name: Execute ARM64 observable vertex contract
+        run: |
+          export ANDROID_NDK_HOME="$ANDROID_SDK_ROOT/ndk/27.3.13750724"
+          python3 tools/uberhar/test_parallel_vertex_observable.py
+
       - name: Build Android ARM64
         working-directory: src/android
         run: |
@@ -315,6 +336,8 @@ jobs:
 
       # CodexAstraLocal: Preserve synthetic execution/failure-control evidence
       # even when the ARM contract gate stops a candidate before app packaging.
+      # CodexAstraLocal: Include the observable gate's separate raw compiler/run
+      # streams and synthetic exports, not only its hashed provenance summary.
       - name: Upload ARM64 shader contract evidence
         if: always()
         uses: actions/upload-artifact@v7
@@ -324,6 +347,18 @@ jobs:
             build/uberhar-probe/shader-a64-return/**/provenance.json
             build/uberhar-probe/shader-a64-return/**/*.log
             build/uberhar-probe/shader-a64-return/**/*.jsonl
+            build/uberhar-probe/shader-a64-writeback/**/provenance.json
+            build/uberhar-probe/shader-a64-writeback/**/*.log
+            build/uberhar-probe/shader-a64-writeback/**/*.jsonl
+            build/uberhar-probe/guest-a64-fpsr/**/provenance.json
+            build/uberhar-probe/guest-a64-fpsr/**/*.log
+            build/uberhar-probe/guest-a64-fpsr/**/*.jsonl
+            build/uberhar-probe/parallel-vertex-observable/**/provenance.json
+            build/uberhar-probe/parallel-vertex-observable/**/*.log
+            build/uberhar-probe/parallel-vertex-observable/**/*.jsonl
+            build/uberhar-probe/parallel-vertex-observable/**/*.stdout
+            build/uberhar-probe/parallel-vertex-observable/**/*.stderr
+            build/uberhar-probe/parallel-vertex-observable/**/cases.json
           if-no-files-found: ignore
           retention-days: 14
 

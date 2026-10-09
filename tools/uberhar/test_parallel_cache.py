@@ -21,7 +21,8 @@ def main():
     paths = [Path(__file__).resolve(), Path(__file__).with_suffix('.cpp'),
              root / 'src/video_core/pica/pica_core.cpp',
              root / 'src/video_core/pica/shader_setup.h',
-             root / 'src/video_core/pica/shader_setup.cpp']
+             root / 'src/video_core/pica/shader_setup.cpp',
+             root / 'src/video_core/pica/uberhar_parallel_vertex.h']
     def hashes():
         return {str(p.relative_to(root)): hashlib.sha256(p.read_bytes()).hexdigest() for p in paths}
     proof = {'author': 'CodexAstraLocal', 'sources_before': hashes(), 'variants': []}
@@ -38,6 +39,10 @@ def main():
         ('booleans', 'cache', 'ParallelVertexBooleanUniforms(setup.uniforms)', '0'),
         ('entry', 'cache', 'const Key key{setup.entry_point,', 'const Key key{0,'),
         ('outputs', 'cache', 'setup.entry_point, output_mask,', 'setup.entry_point, 1,'),
+        # CodexAstraLocal: A repeated identical source revision still needs two
+        # independent domain keys; omitting this field must corrupt admission.
+        ('contract', 'cache', 'ParallelVertexBooleanUniforms(setup.uniforms), contract}',
+         'ParallelVertexBooleanUniforms(setup.uniforms), ParallelVertexContract::FullArithmeticReads}'),
         ('restore', 'setup', '++code_revision;\n            uniforms_dirty = true;', 'uniforms_dirty = true;'),
     ] if args.mutants else []
     flags = shlex.split(os.environ.get('CXX', 'c++')) + [

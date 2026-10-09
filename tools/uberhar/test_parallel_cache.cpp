@@ -71,11 +71,14 @@ void ConsumeHashes(ShaderSetup& setup) {
     setup.GetProgramCodeHash();
     setup.GetSwizzleDataHash();
 }
-void Compare(ParallelVertexState& cache, ShaderSetup& setup, u32 outputs) {
+// CodexAstraLocal: Recompute the requested proof domain independently; a
+// same-source cache hit must not inherit a different caller contract.
+void Compare(ParallelVertexState& cache, ShaderSetup& setup, u32 outputs,
+             ParallelVertexContract contract = ParallelVertexContract::FullArithmeticReads) {
     ConsumeHashes(setup);
-    const auto actual = cache.Get(setup, outputs);
+    const auto actual = cache.Get(setup, outputs, contract);
     const auto expected = AnalyzeParallelVertex(setup.GetProgramCode(), setup.GetSwizzleData(),
-        setup.entry_point, ParallelVertexBooleanUniforms(setup.uniforms), outputs);
+        setup.entry_point, ParallelVertexBooleanUniforms(setup.uniforms), outputs, contract);
     Need(actual.status == expected.status && actual.pc == expected.pc &&
          actual.reg == expected.reg && actual.lanes == expected.lanes,
          "cached certificate differs from current source/state");
@@ -206,6 +209,30 @@ int main() {
     Need(setup.GetCodeRevision() != before_copy, "assignment retained host revision");
     Compare(*cache, setup, 1);
     Need(!cache->Get(setup, 1).Supported(), "assignment retained safe proof");
+
+    // CodexAstraLocal: Dead carried arithmetic rejects the old contract while
+    // selected outputs remain independent. Alternate contracts on the identical
+    // revision in both insertion orders, preserving both bounded cache entries.
+    ProgramCode discarded = safe;
+    discarded[0] = carry[0];
+    discarded[1] = safe[0];
+    setup.UpdateProgramCode(discarded);
+    setup.UpdateSwizzleData(0, identity.hex);
+    const auto domain_revision = setup.GetCodeRevision();
+    for (unsigned order = 0; order < 2; ++order) {
+        auto domain_cache = std::make_unique<ParallelVertexState>();
+        for (unsigned round = 0; round < 12; ++round) {
+            const auto contract = ((round + order) & 1)
+                ? ParallelVertexContract::SelectedOutputValues
+                : ParallelVertexContract::FullArithmeticReads;
+            Compare(*domain_cache, setup, 1, contract);
+            Need(domain_cache->Get(setup, 1, contract).Supported() ==
+                     (contract == ParallelVertexContract::SelectedOutputValues),
+                 "cached certificate differs across caller contracts");
+            Need(setup.GetCodeRevision() == domain_revision, "contract changed guest source revision");
+        }
+        Need(domain_cache->proof_builds == 2, "same-source contracts not separately cached");
+    }
 
     // CodexAstraLocal: More than eight distinct programs forces bounded cache
     // eviction; revisiting the original must still reconstruct the right proof.

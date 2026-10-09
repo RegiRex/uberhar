@@ -7,6 +7,7 @@
 #include <map>
 #include <memory>
 #include <dynarmic/interface/A32/a32.h>
+#include "common/arch.h" // CodexAstraLocal: Limit audited callback status isolation to ARM64.
 #include "common/common_types.h"
 #include "core/arm/arm_interface.h"
 #include "core/arm/dynarmic/arm_dynarmic_cp15.h"
@@ -29,6 +30,17 @@ public:
                           std::shared_ptr<Core::Timing::Timer> timer,
                           Core::ExclusiveMonitor& exclusive_monitor_);
     ~ARM_Dynarmic() override;
+
+    // CodexAstraLocal: The actual A32-on-A64 collector spills before SVC/MMIO
+    // callbacks and clears before fresh guest FP. The executed guest-status gate
+    // binds this promise; other host backends require their own consumer proof.
+    bool IsHostFpStatusIsolated() const override {
+#if CITRA_ARCH(arm64)
+        return true;
+#else
+        return false;
+#endif
+    }
 
     void Run() override;
     void Step() override;

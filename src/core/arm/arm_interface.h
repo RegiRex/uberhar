@@ -69,6 +69,11 @@ public:
         }
     };
 
+    // CodexAstraLocal: Unknown backends must retain the stronger shader contract.
+    // A true implementation isolates incidental host callback FP status from all
+    // subsequent guest FPSCR/context consumers; controls remain a separate duty.
+    virtual bool IsHostFpStatusIsolated() const { return false; }
+
     /// Runs the CPU until an event happens
     virtual void Run() = 0;
 

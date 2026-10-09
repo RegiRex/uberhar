@@ -40,6 +40,12 @@ enum class ParallelVertexStatus : u8 {
     Count,
 };
 
+// CodexAstraLocal: Preserve the published arithmetic-read contract by
+// default. SelectedOutputValues requires a no-GS A64 caller with no observers,
+// traps disabled, immutable exact source/uniforms, and proved host-status
+// isolation. The contract must participate in any cached certificate identity.
+enum class ParallelVertexContract : u8 { FullArithmeticReads, SelectedOutputValues };
+
 struct ParallelVertexCertificate {
     ParallelVertexStatus status{ParallelVertexStatus::InvalidContract};
     u32 pc{};
@@ -131,8 +137,8 @@ struct Region {
 };
 
 // CodexAstraLocal: Check reads before writes, with exact swizzles and relative
-// uniform addressing. Conservatively require every loaded operand lane, including
-// discarded SIMD arithmetic, so grain resets cannot change sticky FP flags via
+// uniform addressing. FullArithmeticReads requires every loaded operand lane,
+// including discarded SIMD arithmetic, so grain resets cannot change FP flags via
 // a masked-away carry value. This is stricter than output-only dependence; inputs
 // remain read-only and must be supplied by the caller for each invocation.
 inline ParallelVertexStatus Decode(nihstro::Instruction instruction,
@@ -234,18 +240,93 @@ inline ParallelVertexStatus Decode(nihstro::Instruction instruction,
     }
     return ParallelVertexStatus::Independent;
 }
+// CodexAstraLocal: Propagate value dependence, independently of discarded SIMD
+// host status. This certificate has a distinct caller contract: no-GS A64 JIT,
+// exact immutable source/uniforms, copied FPCR, traps off, observer off, and a
+// separately established absence of post-draw host-FPSR consumers. The original
+// shader arithmetic is never rewritten by this analysis.
+inline void TransferObservable(nihstro::Instruction instruction,
+                               std::span<const u32> swizzles,
+                               ParallelVertexDetail::Definitions& state) {
+    const auto opcode = instruction.opcode.Value();
+    const auto op = opcode.EffectiveOpCode();
+    const auto info = opcode.GetInfo();
+    if (info.type != Op::Type::Arithmetic && info.type != Op::Type::MultiplyAdd) return;
+    const bool mad = info.type == Op::Type::MultiplyAdd;
+    const bool inverted = (info.subtype & Op::Info::SrcInversed) != 0;
+    const u32 descriptor = mad ? u32(instruction.mad.operand_desc_id)
+                               : u32(instruction.common.operand_desc_id);
+    const nihstro::SwizzlePattern swizzle{swizzles[descriptor]};
+    std::array<nihstro::SourceRegister, 3> registers{};
+    if (mad) registers = {instruction.mad.GetSrc1(inverted), instruction.mad.GetSrc2(inverted),
+                          instruction.mad.GetSrc3(inverted)};
+    else registers = {instruction.common.GetSrc1(inverted), instruction.common.GetSrc2(inverted), {}};
+    const u32 count = mad ? 3 : (info.subtype & Op::Info::Src2) ? 2 : 1;
+    // CodexAstraLocal: Read every swizzled source before an aliased destination
+    // write. Inputs/uniforms are invocation-local/immutable; relative addressing
+    // has already been checked separately for carried address dependencies.
+    std::array<std::array<bool, 4>, 3> source{};
+    for (u32 n = 0; n < count; ++n) {
+        if (registers[n].GetRegisterType() != nihstro::RegisterType::Temporary) continue;
+        for (u32 lane = 0; lane < 4; ++lane) {
+            const u32 selector = u32(n == 0 ? swizzle.GetSelectorSrc1(lane)
+                                     : n == 1 ? swizzle.GetSelectorSrc2(lane)
+                                              : swizzle.GetSelectorSrc3(lane));
+            source[n][lane] = (state.temporary[registers[n].GetIndex()] & (1U << selector)) != 0;
+        }
+    }
+    std::array<bool, 4> value{};
+    for (u32 lane = 0; lane < 4; ++lane)
+        for (u32 n = 0; n < count; ++n) value[lane] |= source[n][lane];
+    if (op == Op::Id::CMP) {
+        state.conditions = u8(value[0]) | (u8(value[1]) << 1);
+        return;
+    }
+    if (op == Op::Id::MOVA) {
+        for (u32 lane = 0; lane < 2; ++lane) if (swizzle.DestComponentEnabled(lane))
+            state.addresses = (state.addresses & ~(1U << lane)) | (u8(source[0][lane]) << lane);
+        return;
+    }
+    // CodexAstraLocal: Reduction/scalar dependencies match the actual unchanged
+    // A64 result path. DP3 discards W after multiplication; DPH replaces src1.W
+    // with one. Their discarded status is outside this certificate's contract.
+    if (op == Op::Id::DP3 || op == Op::Id::DP4 || op == Op::Id::DPH || op == Op::Id::DPHI) {
+        bool reduced{};
+        for (u32 lane = 0; lane < 4; ++lane) {
+            if (op == Op::Id::DP3 && lane == 3) continue;
+            reduced |= source[1][lane];
+            if ((op != Op::Id::DPH && op != Op::Id::DPHI) || lane != 3)
+                reduced |= source[0][lane];
+        }
+        value.fill(reduced);
+    } else if (op == Op::Id::RCP || op == Op::Id::RSQ || op == Op::Id::EX2 || op == Op::Id::LG2) {
+        value.fill(source[0][0]);
+    }
+    const auto destination = mad ? instruction.mad.dest.Value() : instruction.common.dest.Value();
+    auto& target = destination.GetRegisterType() == nihstro::RegisterType::Temporary
+        ? state.temporary[destination.GetIndex()] : state.output[destination.GetIndex()];
+    for (u32 lane = 0; lane < 4; ++lane) if (swizzle.DestComponentEnabled(lane))
+        target = (target & ~(1U << lane)) | (u8(value[lane]) << lane);
+}
+
 } // namespace ParallelVertexDetail
 
 // CodexAstraLocal: Build a bounded acyclic graph for this exact Boolean-uniform
-// snapshot, then intersect definitions at all joins. Unsupported flow retains
-// serial execution. Temporary containers exist only during certificate creation;
+// snapshot. FullArithmeticReads intersects definite writes at joins; the qualified
+// SelectedOutputValues contract unions carried value taint instead. Unsupported
+// flow retains serial execution. Containers exist only during certificate creation;
 // callers cache the small result, not per-vertex graphs or guest payloads.
 inline ParallelVertexCertificate AnalyzeParallelVertex(std::span<const u32> program,
                                                        std::span<const u32> swizzles,
                                                        u32 entry, u16 uniform_bools,
-                                                       u32 output_register_mask) {
+                                                       u32 output_register_mask,
+                                                       ParallelVertexContract contract =
+                                                           ParallelVertexContract::FullArithmeticReads) {
     using namespace ParallelVertexDetail;
     ParallelVertexCertificate result;
+    // CodexAstraLocal: Invalid contract values never widen admission.
+    if (contract != ParallelVertexContract::FullArithmeticReads &&
+        contract != ParallelVertexContract::SelectedOutputValues) return result;
     if (program.empty() || program.size() > MAX_PROGRAM_CODE_LENGTH ||
         swizzles.empty() || swizzles.size() > MAX_SWIZZLE_DATA_LENGTH ||
         entry >= program.size() || entry >= MAX_PROGRAM_CODE_LENGTH - 1 ||
@@ -425,6 +506,42 @@ inline ParallelVertexCertificate AnalyzeParallelVertex(std::span<const u32> prog
         }
     }
     if (order.size() != nodes.size()) return fail(ParallelVertexStatus::CyclicFlow, entry);
+    if (contract == ParallelVertexContract::SelectedOutputValues) {
+        // CodexAstraLocal: Initial mutable fields represent values produced by a
+        // preceding invocation. Never-written fields retain identical draw-initial
+        // bytes and need no taint. Union joins preserve every predecessor influence.
+        std::vector<Definitions> taint(nodes.size());
+        std::vector<bool> arrived(nodes.size());
+        taint[first] = possible;
+        arrived[first] = true;
+        bool terminal{};
+        for (const u32 index : order) {
+            const auto& node = nodes[index];
+            auto state = taint[index];
+            const u8 address = node.access.reads.addresses & state.addresses;
+            if (address) return fail(ParallelVertexStatus::AddressCarry, node.context.pc, 0, address);
+            const u8 condition = node.access.reads.conditions & state.conditions;
+            if (condition) return fail(ParallelVertexStatus::ConditionCarry, node.context.pc, 0, condition);
+            TransferObservable(nihstro::Instruction{program[node.context.pc]}, swizzles, state);
+            if (node.terminal) {
+                terminal = true;
+                for (u32 reg = 0; reg < 16; ++reg) {
+                    const u8 carried = state.output[reg];
+                    if ((output_register_mask & (1U << reg)) && carried)
+                        return fail(ParallelVertexStatus::OutputCarry, node.context.pc, reg, carried);
+                }
+            }
+            for (u32 n = 0; n < node.successors; ++n) {
+                const u32 successor = node.next[n];
+                if (!arrived[successor]) taint[successor] = state;
+                else Union(taint[successor], state);
+                arrived[successor] = true;
+            }
+        }
+        if (!terminal) return fail(ParallelVertexStatus::MissingEnd, entry);
+        result.status = ParallelVertexStatus::Independent;
+        return result;
+    }
     std::vector<Definitions> definitions(nodes.size());
     std::vector<bool> arrived(nodes.size());
     arrived[first] = true;

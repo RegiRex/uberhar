@@ -334,6 +334,47 @@ void JitShader::Compile_DestEnable(Instruction instr, QReg src) {
 
     constexpr int OutputBankShift = std::countr_zero(ShaderUnit::OutputBankSize);
 
+    // CodexAstraLocal: Arithmetic has already executed. A zero mask changes no
+    // ShaderUnit bytes; keep its preceding arithmetic and exception effects.
+    const u32 mask = swiz.dest_mask;
+    if (mask == 0) {
+        return;
+    }
+
+    // CodexAstraLocal: Replace only single lanes and aligned XY/ZW pairs with
+    // raw stores. Every output write still resolves the current bank; this
+    // creates no register residency across entries, helpers, CALLs or EMITs.
+    if (mask == 8 || mask == 4 || mask == 2 || mask == 1 || mask == 12 || mask == 3) {
+        static_assert(sizeof(f24) == 4 && sizeof(Common::Vec4<f24>) == 16);
+        static_assert(ShaderUnit::TemporaryOffset(0) % 16 == 0);
+        static_assert(ShaderUnit::OutputOffset(0) % 16 == 0);
+        XReg base = STATE;
+        std::size_t displacement = dest_offset_disp;
+        if (dest.GetRegisterType() == RegisterType::Output) {
+            ADD(XSCRATCH0, STATE, dest_offset_disp);
+            LDRB(XSCRATCH1.toW(), STATE, ShaderUnit::OutputBankOffset());
+            LSL(XSCRATCH1, XSCRATCH1, OutputBankShift);
+            ADD(XSCRATCH0, XSCRATCH0, XSCRATCH1);
+            base = XSCRATCH0;
+            displacement = 0;
+        }
+        // CodexAstraLocal: X5 is existing writeback scratch, never a persistent
+        // shader register. UMOV preserves raw NaNs, zeros and subnormal bits.
+        if (mask == 8) {
+            STR(src.toS(), base, displacement);
+        } else if (mask == 12) {
+            STR(src.toD(), base, displacement);
+        } else if (mask == 3) {
+            UMOV(XSCRATCH1, src.Delem()[1]);
+            STR(XSCRATCH1, base, displacement + 8);
+        } else {
+            const u32 lane = mask == 4 ? 1 : mask == 2 ? 2 : 3;
+            UMOV(XSCRATCH1.toW(), src.Selem()[lane]);
+            STR(XSCRATCH1.toW(), base, displacement + lane * 4);
+        }
+        return;
+    }
+
     // If all components are enabled, write the result to the destination register
     if (swiz.dest_mask == NO_DEST_REG_MASK) {
         // Store dest back to memory

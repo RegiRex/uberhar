@@ -1,6 +1,83 @@
 <!-- AstraEH: Attribution index for the Uberhar implementation, tests, packaging and documentation. -->
 # Uberhar code map
 
+<!-- CodexAstraLocal: Map the new proof domain to its real caller and ordered
+output consumer; unused host state is not a broader standalone JIT promise. -->
+## 0.1.36 candidate — selected vertex-output independence
+
+- `uberhar_parallel_vertex.h` retains one bounded exact-context graph for both
+  `FullArithmeticReads` and explicit `SelectedOutputValues`. The latter unions
+  carried-value dependencies and requires clean selected output/control/address
+  consumers. Original arithmetic-read behavior remains the default.
+- `PicaCore::ParallelVertexState::Get` keys the contract with entry, Boolean
+  uniforms and output mask on exact source snapshots. The owner selects the
+  wider domain only after both constructed-engine capabilities and all existing
+  draw guards pass. Existing FIFO workers and ordered primitive assembly consume
+  the exact converted vertices; no replay buffer or extra shader execution is added.
+- `test_parallel_vertex_observable.{cpp,py}` and its synthetic case header execute
+  actual current A64 code, pool grains and input/FIFO/output/assembly composition.
+  Nine incorrect certificates and one output-order defect must corrupt actual
+  selected bytes. The workflow requires this gate before Android packaging and
+  retains raw compiler/runtime streams plus synthetic case exports on failure.
+- Extended cache and runtime-query tests cover unchanged-revision contract
+  switching, unknown/absent/cleared cores and both engine opt-ins. Schema 2 reports
+  completed observable batches and owner/worker invocations as subsets of totals.
+  The [consumer contract](UBERHAR_OBSERVABLE_VERTEX_CONTRACT.md) records the scope
+  future backend or observer changes must revalidate.
+
+<!-- CodexAstraLocal: Map the local writeback optimization and its real
+consumer/oracle; this is not a delivered .36 or measured performance result. -->
+## Next candidate — ARM64 partial writeback in validation
+
+- `shader_jit_a64_compiler.cpp::Compile_DestEnable` retains preceding arithmetic
+  and uses raw narrow stores for single lanes and aligned XY/ZW pairs. Zero masks
+  omit only destination access; full and other masks keep their inherited writer.
+  Every output write resolves the current output bank. No cross-instruction
+  register cache, guest ABI change or arithmetic shortcut is introduced.
+- `test_shader_a64_writeback.{cpp,py}` executes the actual production emitter and
+  an isolated reconstruction of its original writer under NDK/QEMU. It compares
+  complete semantic state, ABI and FP status, including actual EMIT bank switches,
+  all masks and raw special-value MOV rotations. Four deliberate machine defects
+  must fail their intended assertion. Generated FP instruction sequences remain
+  identical. No private game input or shader asset enters this durable gate.
+- The existing prerelease workflow requires this writeback proof after the
+  separate ARM64 return contract and before Android packaging. Evidence uploads
+  retain both gates' finite provenance and result logs on failure.
+
+<!-- CodexAstraLocal: A narrower renderer result contract must identify its
+actual CPU/emitter boundary and retain an executed guest-state gate. -->
+## Next candidate — explicit guest floating-status isolation
+
+- `ARM_Interface::IsHostFpStatusIsolated` defaults to false. The constructed
+  `ARM_Dynarmic` opts in only on ARM64; `System` queries the live backend safely,
+  including absence/teardown. Mutable CPU settings do not establish this property.
+- `ShaderEngine::SupportsObservableVertexContract` also defaults to false;
+  only the ARM64 `JitEngine` opts in. These capabilities supplement the separate
+  program proof and draw guards. They do not alter standalone shader execution.
+- `test_guest_a64_fpsr.{cpp,py}` builds the actual vendored A32 frontend/ARM64
+  backend. Synthetic guest SVC and byte/half/word/doubleword memory operations
+  test callback-only, null-page fallback and mapped-page paths, all rounding/
+  flush/default-NaN modes, seeded guest flags and two Run histories. Immediate
+  VMRS, fresh FP, software FPSCR and rounding/data results are checked. Three
+  actual backend defects must fail; no emulator or dependency source is patched.
+- The workflow requires this gate before Android packaging. Its narrow memory
+  callbacks deliberately load narrow storage; an inherited assumption about
+  upper return-register bits remains a separate finding, not a status result.
+
+<!-- CodexAstraLocal: Invocation-weighted refusals distinguish frequent small
+batches from costly serial work without adding a hot-loop observer. -->
+## Next candidate — serial coverage diagnostics
+
+The numeric `UBERHAR_VERSION` file selects 0.1.36 without comments because its
+package consumers require a plain version. Release notes describe the candidate;
+installed .35 device findings remain a separate completed test record.
+
+`PicaCore` CPU-parallel schema 2 adds completed FIFO-miss counts for small,
+temporary/address/condition/output carry and other refused attempted draws.
+It consumes the existing serial runner's returned count once per completed draw. Unattempted modes and disabled
+allocation paths remain outside these buckets; certified owner-only batches keep
+their existing owner count. These counts measure work population, not CPU time.
+
 <!-- CodexAstraLocal: Map the multicore candidate's producers, consumers and
 correctness guards without crediting prototype Calculated work as shipped code. -->
 ## 0.1.35 candidate — ordered multicore CPU vertices

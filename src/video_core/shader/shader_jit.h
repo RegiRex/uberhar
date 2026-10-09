@@ -33,6 +33,17 @@ public:
     // CodexAstraLocal: Bind after unchanged SetupBatch; no generated instructions change.
     ShaderRunContext BindForDraw(const ShaderSetup& setup) const override;
 
+    // CodexAstraLocal: The A64 emitter's unchanged result dependencies and lack
+    // of external calls in the certified opcode domain have an executed proof.
+    // x64/interpreter semantics retain the previous arithmetic-read contract.
+    bool SupportsObservableVertexContract() const override {
+#if CITRA_ARCH(arm64)
+        return true;
+#else
+        return false;
+#endif
+    }
+
 private:
     // CodexAstraLocal: Hashes only select a bucket. Each compiled owner retains
     // exact source bytes, so a colliding key cannot bind different arithmetic

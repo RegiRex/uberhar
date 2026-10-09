@@ -242,6 +242,10 @@ public:
     // not settings or buffer pinning, before borrowing guest input across workers.
     [[nodiscard]] bool HasConcurrentGuestMemoryWriters() const;
 
+    // CodexAstraLocal: Query the constructed guest backend, not a mutable setting,
+    // before allowing a renderer contract that leaves unused host flags unequal.
+    [[nodiscard]] bool IsHostFpStatusIsolated() const;
+
     [[nodiscard]] VideoCore::GPU& GPU();
 
     /**

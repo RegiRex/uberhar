@@ -45,6 +45,13 @@ def main():
         "directory": "src/core/hle/service/fs/directory.cpp",
         "script": "tools/uberhar/test_parallel_memory.py",
         "fixture": "tools/uberhar/test_parallel_memory.cpp",
+        # CodexAstraLocal: Bind every actual capability and its Pica consumer.
+        "cpu_default": "src/core/arm/arm_interface.h",
+        "cpu_jit": "src/core/arm/dynarmic/arm_dynarmic.h",
+        "shader_default": "src/video_core/shader/shader.h",
+        "shader_jit": "src/video_core/shader/shader_jit.h",
+        "pica": "src/video_core/pica/pica_core.cpp",
+        "contract": "src/video_core/pica/uberhar_parallel_vertex.h",
     }
 
     def hashes():
@@ -66,6 +73,29 @@ def main():
             "begin_end": definition(sources["kernel"], "void ReportAsyncState(bool state)"),
             "pending": definition(sources["kernel"], "bool AreAsyncOperationsPending()"),
         }
+        # CodexAstraLocal: Execute the current domain selector and capability
+        # bodies, substituting only the fixture's owner for the global singleton.
+        for key, signature in (
+            ("cpu_default", "virtual bool IsHostFpStatusIsolated() const"),
+            ("cpu_jit", "bool IsHostFpStatusIsolated() const override"),
+            ("shader_default", "virtual bool SupportsObservableVertexContract() const"),
+            ("shader_jit", "bool SupportsObservableVertexContract() const override")):
+            blocks[key] = definition(sources[key], signature)
+        blocks["fp_system"] = definition(sources["core"], "bool System::IsHostFpStatusIsolated() const")
+        start = "enum class ParallelVertexContract"
+        if sources["contract"].count(start) != 1:
+            raise RuntimeError("Ambiguous actual contract enum")
+        begin = sources["contract"].index(start)
+        blocks["contract"] = sources["contract"][begin:sources["contract"].index(";", begin)+1]
+        start = "const auto contract = shader_engine->SupportsObservableVertexContract()"
+        if sources["pica"].count(start) != 1:
+            raise RuntimeError("Ambiguous actual contract selector")
+        begin = sources["pica"].index(start)
+        selector = sources["pica"][begin:sources["pica"].index(";", begin)+1]
+        blocks["selector"] = selector.replace("Core::System::GetInstance()", "system")
+        if blocks["selector"] == selector:
+            raise RuntimeError("Actual owner lookup seam changed")
+
         # CodexAstraLocal: Bind the source scheduling facts outside the modeled
         # owners: increment before dispatch and decrement after owner completion.
         # A real asynchronous directory write makes this guard materially needed.
@@ -98,6 +128,13 @@ def main():
         proof["extracted"] = blocks
         variants = [("baseline-no-rpc", source, False, None),
                     ("baseline-rpc", source, True, None)]
+        # CodexAstraLocal: Cross both compiled host branches independently of
+        # the execution machine; the separate NDK/QEMU gate proves ARM64 status.
+        arm64_source = source.replace("#define UBERHAR_FP_HOST 0", "#define UBERHAR_FP_HOST 1")
+        if arm64_source == source:
+            raise RuntimeError("Fixture architecture seam changed")
+        variants += [("baseline-a64-no-rpc", arm64_source, False, None),
+                     ("baseline-a64-rpc", arm64_source, True, None)]
         # CodexAstraLocal: Every deliberate unsafe predicate must compile and fail
         # its named runtime assertion; a parser/compiler error is not a passed mutant.
         mutations = [
@@ -111,6 +148,20 @@ def main():
             if source.count(old) != 1:
                 raise RuntimeError(f"Nonunique mutation: {name}")
             variants.append((name, source.replace(old, new), True, message))
+
+        # CodexAstraLocal: Deliberate opt-ins must reach a named domain assertion;
+        # omitted engine checks or lifetime guards cannot masquerade as coverage.
+        capability_mutations = [
+            ("unknown-cpu-status", blocks["cpu_default"], blocks["cpu_default"].replace("return false;", "return true;"), "unknown CPU status must refuse"),
+            ("unknown-shader-status", blocks["shader_default"], blocks["shader_default"].replace("return false;", "return true;"), "unknown shader contract must refuse"),
+            ("missing-cpu-capability", "system.IsHostFpStatusIsolated()\n", "true\n", "empty CPU selector must refuse"),
+            ("missing-shader-capability", "shader_engine->SupportsObservableVertexContract() &&", "true &&", "both actual engines must opt in"),
+            ("empty-owners-optin", blocks["fp_system"], "bool System::IsHostFpStatusIsolated() const { return true; }", "empty CPU owners must refuse"),
+        ] if args.mutants else []
+        for name, old, new, message in capability_mutations:
+            if arm64_source.count(old) != 1:
+                raise RuntimeError(f"Nonunique capability mutation: {name}")
+            variants.append((name, arm64_source.replace(old, new), True, message))
 
         # CodexAstraLocal: This is a predicate/lifetime oracle, not a microbenchmark.
         # Avoid optimizer-specific speculative devirtualization warnings in minimal
