@@ -1,6 +1,26 @@
 <!-- AstraEH: Attribution index for the Uberhar implementation, tests, packaging and documentation. -->
 # Uberhar code map
 
+<!-- CodexAstraLocal: Bind the two-build review and benchmark compiler correction to released .34 without changing emulator behavior in this documentation checkpoint. -->
+## 0.1.34 review and benchmark correction
+
+The delivered source is `6893c10b5dab28bb60135efa4a5ebe07f82bd349`.
+The [test review](UBERHAR_TEST_REVIEW_0.1.34.md),
+[architecture review](UBERHAR_ARCHITECTURE_0.1.34.md) and
+[separate cleanliness review](UBERHAR_CLEANLINESS_0.1.34.md) distinguish
+strict guest omissions, validated synthetic work and ordinary complete rendering.
+
+- `vk_compute_benchmark.cpp` removes the explicit Vulkan macro preamble already
+  supplied by the production compiler. This fixes the actual .33 preparation
+  failure without widening supported guest states or enabling fallback.
+- `test_compute_benchmark_compiler.cpp`, driven by the existing Python gate, links the unchanged production Vulkan
+  compiler and checks the extracted benchmark generation/call across four
+  profiles and three stages. The original conflicting preamble is a failing
+  control. The pinned glslang dependency is required by the existing mandatory
+  shader gate; this reduced host build covers the optimizer-disabled path.
+- The two shader-cache comments clarify repeated read-only module probes and
+  capacity decisions. They do not change cache ownership or rendering behavior.
+
 <!-- CodexAstraLocal: Map complete input recipe selection and its actual invocation consumers without changing arithmetic, live-memory lifetime or draw coverage. -->
 ## 0.1.34 — complete CPU input recipes
 

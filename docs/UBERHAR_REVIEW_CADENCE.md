@@ -1,5 +1,58 @@
 # Architecture review ledger
 
+<!-- CodexAstraLocal: Close the owner-requested two-successor audit earlier than the standing three-build cadence and record the explicit development stop. -->
+**Current batch status:** released .33 and .34 completed their required gates,
+compatible installations, single strict diagnostics and single Native/Combo Dark
+Moon openings. The systematic architecture/correctness/performance review and
+separate independent cleanliness/purpose audit are complete. **Development stops
+for owner inspection; no .35 is authorized.** The additional bounded MH4U
+observation ended normally; its transition-only scope does not qualify gameplay.
+
+<!-- CodexAstraLocal: Bind the new anchor to the actual released and tested source rather than to documentation or a local candidate. -->
+## Current review anchor — released 0.1.34
+
+The [architecture review](UBERHAR_ARCHITECTURE_0.1.34.md),
+[independent cleanliness audit](UBERHAR_CLEANLINESS_0.1.34.md) and
+[test review](UBERHAR_TEST_REVIEW_0.1.34.md) are complete against released
+**0.1.34, `6893c10b5dab28bb60135efa4a5ebe07f82bd349`**. All 23 required steps
+passed in [run 37885064863](https://github.com/RegiRex/uberhar/actions/runs/37885064863),
+followed by independent source/asset/package/signing checks and the compatible
+.34 / 33991465 installation. This closes the two successful successors to .32:
+**.33 and .34**. The owner explicitly required this review after two builds.
+The new anchor has **zero successful release successors**; documentation-only
+closure does not add another build.
+
+<!-- CodexAstraLocal: Audit completion records bounded evidence and unresolved contracts; it does not qualify incomplete Calculated output or broader product goals. -->
+The .34 supported-work scratch benchmark completes its full population and image
+checks after .33's preserved preparation failure. Guest Calculated rendering
+still computes no title draws and explicitly omits unsupported work without
+Native/graphics fallback. Native and Combo retain their complete draw routes,
+with measured means of 29.333% and 26.241% and all accepted windows below 99%.
+Recipe invocation coverage, synthetic queue-route ratios and sampled hardware
+activity do not establish a causal title gain or maximum hardware capacity.
+Inherited correctness concerns and missing scene/long-game evidence remain in
+the architecture review. Sustained 99%, 4x, full independent Calculated rendering,
+longer-game memory and the broader beta baseline are not qualified.
+
+<!-- CodexAstraLocal: Close the separately added bounded observation after normal exit and verified save restoration, without qualifying an unobserved gameplay comparison. -->
+The MH4U observations are transition/cinematic evidence only; no verified gameplay
+sample or save confirmation occurred. The run exited normally after pausing at
+the save prompt. A detected save-file change was restored under hash guards, with
+all 15 original title/save/extdata files verified afterward. This closes the
+bounded observation, not complete-gameplay or maximum-capacity qualification.
+It does not select another build or reopen the unchanged source audit.
+
+<!-- CodexAstraLocal: Keep the standing cadence conditional on a later owner resumption; the present two-build instruction requires a stop. -->
+No .35 work begins at this checkpoint. If the owner resumes development, retain
+the standing full review after three successful successors, or earlier when
+contradictory evidence warrants it. The explicit two-build review/stop instruction
+has been satisfied for code delivery and the Dark Moon controls. The added bounded
+MH4U observation is closed, while verified gameplay and the broader project
+objective remain unqualified.
+
+<!-- CodexAstraLocal: Preserve the .32 anchor and the then-open .33/.34 checkpoints verbatim as history, superseded by the completed .34 anchor above. -->
+<details><summary>Completed .32 anchor and .33/.34 preparation checkpoints — historical</summary>
+
 <!-- CodexAstraLocal: Count the delivered .33 successor while retaining the explicit .34 review boundary and the failed scratch attempt. -->
 **Current batch status:** .33 passed all release gates, was installed with data
 preserved and completed one strict diagnostic plus one Native and one full Combo
@@ -50,6 +103,8 @@ separate ghost events and missing scene coverage remain explicit.
 Next work is proposed in the architecture review but does not begin before owner
 inspection. Once resumed, audit after three successful successors or earlier
 when contradictory evidence requires it. No .33 build is scheduled.
+
+</details>
 
 <details><summary>Completed .29 anchor and its three successors, retained as history</summary>
 

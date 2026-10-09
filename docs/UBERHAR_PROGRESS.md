@@ -1,4 +1,75 @@
-# Uberhar progress — 0.1.33 delivery and 0.1.34 input work
+# Uberhar progress — 0.1.34 delivered and reviewed
+
+<!-- CodexAstraLocal: Close the authorized two-build delivery and Dark Moon audit batch without qualifying the broader performance or gameplay goals. -->
+**Released .33 and .34 are built, tested and reviewed. Development stops for
+owner inspection; no .35 is authorized.** The completed batch includes one strict
+Calculated diagnostic and one Native and full Combo opening per build, normal
+returns, systematic architecture/correctness/performance review and a separate
+independent code-cleanliness/purpose audit. The added bounded MH4U observation
+has also ended normally, but verified gameplay remains unqualified.
+
+The final [test review](UBERHAR_TEST_REVIEW_0.1.34.md),
+[architecture review](UBERHAR_ARCHITECTURE_0.1.34.md) and
+[independent cleanliness audit](UBERHAR_CLEANLINESS_0.1.34.md) retain the exact
+scope, failures, scene coverage and outstanding correctness obligations.
+
+<!-- CodexAstraLocal: Bind the completed .34 delivery to verified source and gates; keep earlier failed diagnostic evidence intact. -->
+Released .34 is `6893c10b5dab28bb60135efa4a5ebe07f82bd349`.
+[Run 37885064863](https://github.com/RegiRex/uberhar/actions/runs/37885064863)
+passed all 23 required release steps. Exact source, APK checksum, package and
+signing compatibility were independently verified before the data-preserving
+installation of **.34 / 33991465**. The protected .22 state remains unchanged.
+Native compilation, CTest with five inherited firmware-dependent skips, the
+full host probe (583.330 seconds), production-compiler regression and pixel
+checks passed. The four CPU input recipes and narrow benchmark compiler-preamble
+correction are delivered; the failed .33 scratch attempt remains a separate
+preparation failure, without a performance ratio.
+
+<!-- CodexAstraLocal: Summarize measured work and throughput separately so coverage counts and synthetic timings cannot imply a title speedup. -->
+The .34 strict Calculated launch explicitly omitted all **1,032,364** guest draw
+attempts for unsupported state, with zero computed guest draws and zero graphics
+fallback. Shared CPU vertex processing still ran. Blank output is not a complete
+rendering or speed result. Its separate supported-work scratch benchmark completed
+all **32 pairs / 64 routes / 2,048 operations**, with full-image checks and finite
+timestamps. The four paired compute/graphics median route ratios range from
+0.905 to 1.007; they do not measure complete-title throughput.
+
+The single .34 Native and Combo openings averaged **29.333% and 26.241%** normal
+speed, respectively; every accepted reporting window remained below 99%.
+Actual recipe use covered **86.444% and 84.442%** of retained no-GS CPU input
+invocations. These counts establish use, not cost or a causal improvement.
+The separate inclusive LoadVertices wall brackets remain about **82.293% and
+67.533%**. Different scenes, process ordering, temperature and Combo's roughly
+eleven-minute menu preparation prevent a matched mode/version comparison.
+Combo's 1,012.491 ms worst reported interval remains explicit.
+
+Consecutive .34 review found five isolated moon and five separate ghost events
+in Native, and no comparable events in Combo's retained clips. The moon priority
+threshold was not exceeded; unequal and absent phases remain unqualified.
+The bounded CPU/GPU activity observations describe running time, sampled driver
+windows and endpoint frequencies, not maximum hardware capacity. Longer gameplay
+memory growth and full-title correctness remain unqualified.
+
+<!-- CodexAstraLocal: Close the bounded cross-title observation and verified save restoration without treating transition evidence as completed gameplay qualification. -->
+**The added bounded MH4U observation ended normally.** It covers loading/cinematic
+transitions only; no verified gameplay sample or save confirmation occurred.
+After an explicit pause at the save prompt, the run exited without continuing
+beyond that boundary. One save file changed despite no confirmation; the guarded
+restoration from retained backups completed, and all 15 original title/save/extdata
+files match. The screen timeout was restored and the device put to sleep. This
+closes the bounded observation, not a complete-gameplay or maximum-capacity
+comparison; it does not reopen the completed .33/.34 source audits.
+
+<!-- CodexAstraLocal: Reset the finite audit cadence only after delivered controls and both independent review tracks close, then honor the requested development stop. -->
+The new [review anchor](UBERHAR_REVIEW_CADENCE.md) is **released .34, with zero
+successors**. No .35 implementation or release is selected. Sustained 99% at 2x,
+the longer-term 4x target, independent general Calculated rendering, longer-play
+memory behavior and the broader beta qualification remain unmet. Follow-up
+proposals and inherited correctness concerns are documented for owner review;
+this checkpoint does not resume automatic development toward 0.2.0.
+
+<!-- CodexAstraLocal: Retain prior progress text verbatim as historical checkpoints; its then-current instructions do not override the completed .34 stop above. -->
+<details><summary>Earlier .33/.34 preparation and .32/older progress checkpoints — historical</summary>
 
 <!-- CodexAstraLocal: Bind the published .33 source and distinguish the next local candidate from delivered device behavior. -->
 The .33 source is published at `2dc50832c4fefa16f15ba86e6cccb76a6b432452`.
@@ -970,3 +1041,5 @@ Android/signing/publication and cold Thor comparison were pending; installed
 
 See [0.1.18 notes](releases/0.1.18.md), [roadmap](Uberhar_Roadmap.html),
 [code map](UBERHAR_CODE_MAP.md), and [review](UBERHAR_ARCHITECTURE_0.1.17.md).
+
+</details>
