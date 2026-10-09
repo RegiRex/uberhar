@@ -68,8 +68,10 @@ struct PipelineCache {
     TestDevice instance;
     struct { bool enable_accurate_mul = true; } profile;
     // CodexAstraLocal: The extracted production selector also scopes precise
-    // DP4/DPH generation to a ready-worker owner with a frozen enabled CPU JIT.
+    // DP4/DPH generation to immutable GPU eligibility and an enabled CPU JIT.
+    // An optional CPU-fragment worker does not grant this GPU capability.
     void* ready_vertex_worker{};
+    bool allow_ready_gpu_vertices{};
     bool shader_jit_enabled{};
     ExtraVSConfig CalcExtraConfig(const PicaVSConfig& config);
 };
@@ -174,13 +176,18 @@ int main(int argc, char** argv) {
                     const auto extra = cache.CalcExtraConfig(config);
                     // CodexAstraLocal: Exercise the exact extracted selector's
                     // two immutable gates without changing the padding fixture.
-                    for (bool ready : {false, true}) for (bool jit : {false, true}) {
-                        cache.ready_vertex_worker = ready ? &cache : nullptr;
+                    for (bool ready : {false, true}) for (bool jit : {false, true})
+                    for (bool worker : {false, true}) {
+                        // CodexAstraLocal: Keep worker presence independent so
+                        // Native's CPU-only compiler cannot change dot generation.
+                        cache.ready_vertex_worker = worker ? &cache : nullptr;
+                        cache.allow_ready_gpu_vertices = ready;
                         cache.shader_jit_enabled = jit;
                         Check(bool(cache.CalcExtraConfig(config).precise_jit_dot) == (ready && jit),
                               "precise JIT arithmetic escaped the Combo/CPU-JIT gates");
                     }
                     cache.ready_vertex_worker = nullptr;
+                    cache.allow_ready_gpu_vertices = false;
                     cache.shader_jit_enabled = false;
                     const auto generated = GLSL::GenerateVertexShader(setup, config, extra);
                     Check(!generated.empty(), "shader generation failed");

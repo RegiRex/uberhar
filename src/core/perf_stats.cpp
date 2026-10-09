@@ -302,6 +302,7 @@ void PerfStats::LogUberharSettings(const char* event) {
         "texture_filter={} texture_sampling={} custom_textures={} preload_textures={} "
         "skip_duplicate_frames={} render_thread_delay_us={} simulate_gpu_timings={} "
         "ready_gpu_vertex_policy={} ready_gpu_fragment_policy={} ready_cpu_fragment_policy={} "
+        "static_cpu_fragment_policy={} "
         "calculated_fallback_policy={} calculated_vertex_policy={}",
         mode_index < mode_names.size() ? mode_names[mode_index] : "Unknown",
         api_index < api_names.size() ? api_names[api_index] : "Unknown",
@@ -332,6 +333,12 @@ void PerfStats::LogUberharSettings(const char* event) {
                 Settings::UsesReadyGpuVertices(mode) && Settings::AllowsSpecializedFragments(mode) &&
                 !values.uberhar_force_tev.GetValue()
             ? "software_specialized_ready_v1" : "disabled",
+        // CodexAstraLocal: Native's new static-TEV tier is independent of full
+        // specialization and GPU vertices. Log configured eligibility separately;
+        // only renderer selections establish actual execution or performance.
+        api == Settings::GraphicsAPI::Vulkan && values.uberhar_hybrid_tev.GetValue() &&
+                Settings::AllowsStaticCpuTev(mode)
+            ? "software_static_tev_ready_v1" : "disabled",
         // CodexAstraLocal: Declare the isolation contract without pretending the
         // shared CPU vertex path or unused graphics startup work disappeared.
         Settings::RequiresComputeOnly(mode) ? "disabled_omit_unsupported" : "graphics_allowed",

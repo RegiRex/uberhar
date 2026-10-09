@@ -2,16 +2,25 @@
 
 <!-- CodexAstraLocal: The latest owner-defined boundary applies even before the
 next full three-successor review; candidate preparation does not advance cadence. -->
-**Current batch:** finish .39 and one consolidated cold Native/Combo test each,
-then pause all non-architecture work and deliver best/slowest interval analysis.
-The .37 full-review anchor and one successful successor (.38) remain unchanged
-until .39 actually passes publication. Focused architecture, ownership, efficiency
-and purpose-comment reviews accompany .39; no third-successor audit is claimed.
+**Current batch:** .39 is released and its single cold Native/Combo controls are
+complete. The owner extended work through .40 and its consolidated tests, followed
+by a pause of all non-architecture work and best/slowest interval analysis.
+The .37 full-review anchor now has two successful successors (.38 and .39).
+Separate architecture and cleanliness/purpose/consumer audits are in progress;
+.40 remains a candidate and does not count until its publication gates pass.
+The full third-successor review closes only after .40 delivery and test evidence.
 
 
 <!-- CodexAstraLocal: Close the third-successor review against actual delivered source and reset only the successful-build cadence. -->
 The new full-review anchor is **released .37**, source
-`f6e0d88842ff8204e112a7368035e4565848146d`, with **one successful successor (.38)**.
+`f6e0d88842ff8204e112a7368035e4565848146d`, with **two successful successors (.38 and .39)**.
+<!-- CodexAstraLocal: Actual .39 publication advances cadence once; its low
+throughput and coordinator-only packets do not qualify the multicore objective. -->
+.39 source `ebd770c713d2d335494578711f3b4f17e168eea7` passed all 27 required
+release steps, compatible installation and one cold Native/Combo opening each.
+The numerical and temporal reviews retain scene/observer limits, unmet speed
+targets and Native moon-event counts above the owner's threshold. These focused
+reviews do not reset the full-review anchor.
 <!-- CodexAstraLocal: Count the gated .38 release once; its focused source reviews do not replace the next full audit. -->
 .38 source `4902aa2333ae536c786168ea4d6f2776ef296f83` passed all 27 required
 release steps and completed one cold Native/Combo opening each. Focused independent

@@ -393,6 +393,10 @@ void OwnerTests(const std::filesystem::path& out){
             Check(compute_in==32,"all production compute barriers");
             Check(e.scheduler.dirty==(StateFlags::Pipeline|StateFlags::DescriptorSets|StateFlags::FragmentConstants),"graphics state fully dirty");
             if(pair==0){
+                // CodexAstraLocal: The new partial fragment route shares this
+                // runtime transport. Retain the old generic restoration check
+                // and require the same dirty-state repair after partial selection.
+                for(const bool static_tev_cpu : {false,true}){
                 // CodexAstraLocal: Execute the real next-graphics restore
                 // branches with the SAME cached owner/dynamic/constants values.
                 // Scratch work must force binding and pushes despite equality.
@@ -404,13 +408,14 @@ void OwnerTests(const std::filesystem::path& out){
                 struct Dynamic {Common::Rectangle<s32> viewport{0,0,64,32};Common::Rectangle<u32> scissor{0,32,64,0};};
                 Dynamic dynamic,current_dynamic;
                 ExactPushConstants<std::array<u32,32>> tev_push_constants;
-                std::array<u32,32> constants{};const bool selected_fallback=true;
+                std::array<u32,32> constants{};const bool selected_fallback=!static_tev_cpu;
                 Handle<vk::PipelineLayout> pipeline_layout{H<vk::PipelineLayout>(202)};
                 tev_push_constants.UploadIfChanged(constants,[](const auto&){});
 #include "graphics-restore.inc"
                 Check(std::count_if(restore.events.begin(),restore.events.end(),[](const Event& v){return v.kind=="bind";})==1,"same graphics owner rebound after scratch");
                 Check(std::count_if(restore.events.begin(),restore.events.end(),[](const Event& v){return v.kind=="viewport"||v.kind=="scissor";})==2,"equal dynamic viewport/scissor restored");
                 Check(tev_push_constants.Stats().uploads==2,"same fragment constants reuploaded after scratch");
+                }
             }
             e.Complete(*b);Clock::value+=std::chrono::milliseconds{1};++e.scheduler.current;b->Poll(Title);
             if(pair+1<CaseCount*PairsPerCase)initial=b->impl->workload.packets;

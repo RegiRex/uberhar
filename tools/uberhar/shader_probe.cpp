@@ -138,6 +138,16 @@ int main(int argc, char** argv) {
         std::ofstream constants(prefix.string() + ".bin", std::ios::binary);
         const auto state = Generator::GLSL::MakeDynamicTevState(config, profile);
         constants.write(reinterpret_cast<const char*>(&state), sizeof(state));
+#ifdef UBERHAR_STATIC_TEV_TEST
+        // CodexAstraLocal: Emit the optional tier from the same original state;
+        // normal probes retain their existing specialized/generic corpus only.
+        const auto static_plan = Generator::GLSL::MakeStaticTevPlan(state);
+        const auto family = Generator::GLSL::MakeDynamicTevFamilyConfig(config, profile);
+        std::ofstream(prefix.string() + "-partial.frag")
+            << "#version 450\n"
+            << Generator::GLSL::GenerateStaticTevFragmentShader(family, user, profile, static_plan);
+#endif
+
         // AstraEH: Keep independent guest-register evidence for fetch expectations.
         // Reading the prepared transport as raw PICA would mask normalization bugs.
         auto effective = config;

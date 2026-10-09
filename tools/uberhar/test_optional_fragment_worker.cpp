@@ -20,6 +20,9 @@
 #include "common/thread_worker.h"
 #include "video_core/shader/generator/pica_fs_config.h"
 #include "video_core/renderer_vulkan/uberhar_fragment_policy.h"
+#ifdef UBERHAR_STATIC_TEV_WORKER
+#include "video_core/renderer_vulkan/uberhar_static_tev_policy.h"
+#endif
 #include "video_core/renderer_vulkan/uberhar_shader_compile_policy.h"
 
 using Pica::Shader::FSConfig;
@@ -36,6 +39,9 @@ std::condition_variable condition;
 bool pause{}, entered{}, released{};
 std::optional<FSConfig> observed_config;
 std::optional<Profile> observed_profile;
+#ifdef UBERHAR_STATIC_TEV_WORKER
+std::optional<Pica::Shader::Generator::GLSL::StaticTevPlan> observed_plan;
+#endif
 thread_local long fail_allocation_after = -1;
 thread_local unsigned intercepted_allocations{};
 
@@ -119,6 +125,19 @@ std::string GenerateFragmentShader(const FSConfig& config, const UserConfig&,
 }
 }
 
+#ifdef UBERHAR_STATIC_TEV_WORKER
+namespace Pica::Shader::Generator::GLSL {
+// CodexAstraLocal: Actual support guards precede a recording generator endpoint;
+// pixel/depth parity belongs to the separate real-generator execution gate.
+#include "static_support.inc"
+std::string GenerateStaticTevFragmentShader(const FSConfig& family,const UserConfig& user,
+        const Profile& profile,const StaticTevPlan& plan) {
+    { std::lock_guard lock(Probe::mutex); Probe::observed_plan=plan; }
+    return GenerateFragmentShader(family,user,profile);
+}
+}
+#endif
+
 namespace Vulkan {
 namespace GLSL = Pica::Shader::Generator::GLSL;
 class Instance { public: vk::Device GetDevice() const { return {}; } };
@@ -143,7 +162,14 @@ struct Queue {
     }
     void WaitForRequests() { worker.WaitForRequests(); }
 };
-struct Parent { Instance instance; Profile profile{}; Queue shader_workers; };
+// CodexAstraLocal: The existing real worker is now the shared optional lane;
+// keep the original failure controls attached to that same queue instance.
+struct Parent {
+    Instance instance; Profile profile{}; Queue shader_workers;
+    Queue* ready_vertex_worker=&shader_workers;
+    Shader* warming_ready_vertex{};
+    bool allow_static_cpu_tev=true;
+};
 class ShaderDiskCache {
 public:
     Parent& parent;
@@ -153,6 +179,10 @@ public:
     explicit ShaderDiskCache(Parent& owner) : parent(owner) {}
     std::optional<std::pair<u64, Shader* const>> UseReadyFragmentShader(
         const FSConfig&, const UserConfig&, bool allow_build = true);
+#ifdef UBERHAR_STATIC_TEV_WORKER
+    std::optional<std::pair<u64, Shader* const>> UseStaticTevFragmentShader(
+        const FSConfig&,const GLSL::StaticTevPlan&,const UserConfig&,bool allow_build=true);
+#endif
 };
 
 // CodexAstraLocal: Fail at each external optional compilation stage, including
@@ -359,6 +389,10 @@ void BoundedLogging() {
             f.cache.ready_fragment_builds == 12, "failure diagnostic budget eight, all jobs accounted");
 }
 
+#ifdef UBERHAR_STATIC_TEV_WORKER
+#include "static_tev_worker_cases.h"
+#endif
+
 // CodexAstraLocal: Select one bounded mutation witness or the fixed complete positive corpus.
 int main(int argc, char** argv) {
     try {
@@ -370,6 +404,9 @@ int main(int argc, char** argv) {
         else if (which == "profile") SnapshotAndPending();
         else {
             SnapshotAndPending(); LookupAndCapacity(); QueueFailure(); Allocations(); BoundedLogging();
+#ifdef UBERHAR_STATIC_TEV_WORKER
+            PartialSnapshot(); PartialLimits(); PartialFailures(); SharedLane();
+#endif
             for (unsigned failure = 1; failure <= 8; ++failure)
                 for (bool logger : {false, true}) Failure(failure, logger);
         }

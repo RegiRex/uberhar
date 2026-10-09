@@ -16,6 +16,7 @@
 #include "video_core/rasterizer_interface.h"
 #include "video_core/renderer_vulkan/vk_graphics_pipeline.h"
 #include "video_core/renderer_vulkan/uberhar_fragment_policy.h"
+#include "video_core/renderer_vulkan/uberhar_static_tev_policy.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/shader/generator/pica_fs_config.h"
 #include "video_core/shader/generator/profile.h"
@@ -45,6 +46,19 @@ public:
     std::optional<std::pair<u64, Shader* const>> UseReadyFragmentShader(
         const Pica::Shader::FSConfig& config, const Pica::Shader::UserConfig& user,
         bool allow_build = true);
+
+    // CodexAstraLocal: Partial CPU-FS modules keep runtime lighting/transport;
+    // absent or pending work returns immediately to the complete generic draw.
+    // CodexAstraLocal: Share one bounded optional lane across module and PSO
+    // creation without enqueueing a job which waits on a later lane dependency.
+    bool OptionalFragmentPending() const {
+        return warming_ready_fragment && !warming_ready_fragment->IsDone();
+    }
+
+    std::optional<std::pair<u64, Shader* const>> UseStaticTevFragmentShader(
+        const Pica::Shader::FSConfig& family,
+        const Pica::Shader::Generator::GLSL::StaticTevPlan& plan,
+        const Pica::Shader::UserConfig& user, bool allow_build = true);
 
     GraphicsPipeline* GetPipeline(const PipelineInfo& info);
     // AstraEH: Read renderer-owned cache sizes and foreground VS translation costs.
@@ -406,6 +420,23 @@ private:
         ready_fragment_compile_ns{}, ready_fragment_max_compile_ns{};
 
     std::unordered_map<size_t, Shader> fixed_geometry_shaders;
+    // CodexAstraLocal: Fixed-title partial entries are map-stable, memory-only
+    // and never evicted before all parent compiler/command/pipeline users drain.
+    // Per-entry metrics are readable only after IsDone acquires publication.
+    struct StaticTevEntry {
+        StaticTevEntry(const Instance& instance, const StaticTevPolicy::Key& value)
+            : key(value), shader(instance) {}
+        StaticTevPolicy::Key key;
+        Shader shader;
+        u64 source_bytes{}, spirv_bytes{}, generation_ns{}, frontend_ns{}, module_ns{};
+    };
+    std::unordered_map<u64, std::unique_ptr<StaticTevEntry>> static_tev_fragments;
+    ReadyFragmentPolicy::DemandGate<StaticTevPolicy::Key> static_tev_demand;
+    std::size_t static_tev_attempts{};
+    u64 static_tev_requests{}, static_tev_hits{}, static_tev_cold{}, static_tev_busy{},
+        static_tev_capped{}, static_tev_mismatches{}, static_tev_failed_hits{},
+        static_tev_unsupported{}, static_tev_lookup_misses{}, static_tev_allocation_failures{};
+
     std::unordered_set<u64> known_geometry_shaders;
 
     tsl::robin_map<u64, std::unique_ptr<GraphicsPipeline>, Common::IdentityHash<u64>>

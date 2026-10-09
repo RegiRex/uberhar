@@ -70,6 +70,11 @@ python3 tools/uberhar/test_shader_compile_policy.py
 # GPU image/transport execution remains a separate mandatory shader-workflow gate.
 python3 tools/uberhar/test_optional_fragment_worker.py
 python3 tools/uberhar/test_ready_cpu_fragments.py --mutants
+# CodexAstraLocal: Preserve both legacy populations, then qualify the additional
+# static-TEV tier's exact keys, reserved budgets, promotion and shared worker lane.
+# Actual generated pixels remain a separate shader-workflow requirement.
+python3 tools/uberhar/test_optional_fragment_worker.py --static-tev
+python3 tools/uberhar/test_ready_cpu_fragments.py --static-tev --mutants
 # CodexAstraLocal: Real worker release, completed GPU use and fixed ownership
 # must all permit reuse; intended broken lifetime/admission policies fail closed.
 python3 tools/uberhar/test_adaptive_cpu_cache.py --mutants
@@ -120,6 +125,10 @@ c++ -std=c++20 -O2 -DFMT_HEADER_ONLY -DXXH_INLINE_ALL \
   src/video_core/shader/generator/pica_fs_config.cpp \
   -o build/uberhar-probe/fragment-state-probe
 build/uberhar-probe/fragment-state-probe build/uberhar-probe/fragment-state
+
+# CodexAstraLocal: Emit the portable static-TEV plan/family/CPU corpus and run
+# ownership controls; its separate mandatory workflow step executes the pixels.
+python3 tools/uberhar/test_static_tev_generator.py
 
 # AstraEH: Profile/compute admission gates exercise the same code compiled into Android.
 c++ -std=c++20 -O2 -DFMT_HEADER_ONLY -Isrc -Iexternals/fmt/include -Iexternals/boost \

@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <optional>
 #include "video_core/shader/generator/pica_fs_config.h"
 
 namespace Pica::Shader::Generator::GLSL {
@@ -33,6 +34,9 @@ inline constexpr u32 DynamicTevAbiVersion = 7;
 // Alpha modifiers use RGBA=0..3. Multipliers are literal 1/2/4 at bits 0 and 16.
 struct DynamicTevStage {
     u32 sources{}, modifiers{}, operations{}, multipliers{};
+
+    // CodexAstraLocal: Optional static-TEV keys compare every prepared word, not only its hash.
+    bool operator==(const DynamicTevStage&) const = default;
 };
 static_assert(sizeof(DynamicTevStage) == 16);
 struct DynamicTevState {
@@ -69,11 +73,24 @@ static_assert(offsetof(DynamicTevState, lighting_ops_hi) == 124);
 /// AstraEH: Capture effective runtime state before family canonicalization removes it.
 DynamicTevState MakeDynamicTevState(const FSConfig& config, const Profile& profile);
 
+// CodexAstraLocal: Own the exact prepared TEV structure while leaving framebuffer,
+// textures, lighting controls and uniform values in the existing runtime ABI.
+// No padding or unused-field normalization may weaken the optional-module key.
+struct StaticTevPlan {
+    std::array<DynamicTevStage, 6> stages{};
+    u32 buffer_mask{};
+    bool operator==(const StaticTevPlan&) const = default;
+};
+static_assert(sizeof(StaticTevPlan) == 100);
+static_assert(offsetof(StaticTevPlan, buffer_mask) == 96);
+StaticTevPlan MakeStaticTevPlan(const DynamicTevState& state);
+
 class FragmentModule {
 public:
     // AstraEH: Existing callers stay specialized; Vulkan fallback callers opt into dynamic TEV.
     explicit FragmentModule(const FSConfig& config, const UserConfig& user, const Profile& profile,
-                            bool dynamic_tev = false);
+                            bool dynamic_tev = false,
+                            std::optional<StaticTevPlan> static_tev = std::nullopt);
     ~FragmentModule();
 
     /// Emits GLSL source corresponding to the provided pica fragment configuration
@@ -133,6 +150,11 @@ private:
     void DefineDynamicState();
     void WriteDynamicTevLoop();
 
+    // CodexAstraLocal: Bake only prepared TEV choices, preserving consumed-operand
+    // order, one fetch per referenced texture, byte rounding and delayed writes.
+    void WriteStaticTev();
+    std::string GetStaticTevSource(u32 source, u32 stage, u32& sampled);
+
     void AppendProcTexShiftOffset(std::string_view v, Pica::TexturingRegs::ProcTexShift mode,
                                   Pica::TexturingRegs::ProcTexClamp clamp_mode);
 
@@ -158,6 +180,8 @@ private:
     std::string out;
     bool
         dynamic_tev{}; // AstraEH: Select runtime TEV instructions instead of baked stage constants.
+    // CodexAstraLocal: The optional compiler owns its plan beyond the submitting draw.
+    std::optional<StaticTevPlan> static_tev;
     bool use_blend_fallback{};
     bool use_fragment_shader_interlock{};
     bool use_fragment_shader_barycentric{};
@@ -171,5 +195,10 @@ private:
  */
 std::string GenerateFragmentShader(const FSConfig& config, const UserConfig& user,
                                    const Profile& profile);
+
+// CodexAstraLocal: Callers retain the existing dynamic-support admission and full
+// family/profile/interface key. Only TEV is static; all other dynamic state stays live.
+std::string GenerateStaticTevFragmentShader(const FSConfig& family, const UserConfig& user,
+                                          const Profile& profile, const StaticTevPlan& plan);
 
 } // namespace Pica::Shader::Generator::GLSL

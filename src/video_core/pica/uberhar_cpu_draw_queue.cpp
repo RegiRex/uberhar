@@ -326,9 +326,12 @@ std::shared_ptr<CpuDrawPacket> CpuDrawExecutor::Capture(const CpuDrawCapture& so
         }
     }
     if (misses < 96) return refuse(false, true);
+    // CodexAstraLocal: This temporary validates guest mappings only; it never
+    // loads vertices or reports recipe use. Skip its unused recipe selection,
+    // retaining every range check and the executed packet's complete recipe.
     NativeVertexInputPlan checked;
     if (checked.Prepare(source.shader, source.available_attributes, source.base_address, maximum,
-        [&](u32 n) { return source.attributes[n]; }, [&](PAddr address) { return Map(source, address); }, true)
+        [&](u32 n) { return source.attributes[n]; }, [&](PAddr address) { return Map(source, address); }, false)
         != NativeVertexInputPlan::Result::Ready) return refuse();
     auto output = std::make_unique<NativeVertexPlan>(source.shader, source.rasterizer);
     if (!output->Supported()) return refuse();

@@ -31,7 +31,12 @@ for name, expected_hash in manifest['fixture_sha256'].items():
     assert hashlib.sha256((out / name).read_bytes()).hexdigest() == expected_hash, name
 for name, expected_hash in manifest['corpus_sha256'].items():
     assert hashlib.sha256((out / 'corpus-false' / name).read_bytes()).hexdigest() == expected_hash, name
-assert len(manifest['corpus_sha256']) == 4224
+# CodexAstraLocal: A requested partial corpus cannot silently fall back to two-route validation.
+static_tev = manifest.get('static_tev', False)
+assert isinstance(static_tev, bool)
+assert len(manifest['corpus_sha256']) == (5280 if static_tev else 4224)
+for i in range(1056):
+    assert (f'{i}-partial.frag' in manifest['corpus_sha256']) == static_tev
 run = Path(tempfile.mkdtemp(prefix='render-', dir=out))
 os.environ['MESA_SHADER_CACHE_DIR']=str(run/'mesa-cache')
 ctx=moderngl.create_standalone_context(require=450,backend='egl')
@@ -194,12 +199,16 @@ mutations.append({'mutation':'stale_vertex_flip_UBO','different_tf_bytes':sum(a!
 p.release()
 # CodexAstraLocal: Reference renders complete before the actual contiguous mixed sequence; reads do not insert other draws.
 sequences=[]
-for trio in [(192,416,928),(1055,143,700),(49,415,927),(416,700,700)]:
-    draw_specs=[(i,j%3+1,True,j%4,j%3,j%2) for j,i in enumerate(trio)]
-    expected=[draw(i,'specialized',f,c,u,slot,bank) for i,f,c,u,slot,bank in draw_specs]
-    actual=[draw(i,route,f,c,u,slot,bank) for (i,f,c,u,slot,bank),route in zip(draw_specs,['generic','specialized','generic'])]
-    comparisons=[comparison(e,a) for e,a in zip(expected,actual)];assert all(c['equal'] for c in comparisons)
-    sequences.append({'states':trio,'routes':['generic','specialized','generic'],'draws_contiguous':True,'readback_after_every_draw':True,'clear_before_each_draw':True,'comparisons':comparisons})
+# CodexAstraLocal: Retain all original G/S/G sequences and add G/partial/G,
+# preparing references before each uninterrupted actual sequence.
+for middle in (['specialized','partial'] if static_tev else ['specialized']):
+    for trio in [(192,416,928),(1055,143,700),(49,415,927),(416,700,700)]:
+        draw_specs=[(i,j%3+1,True,j%4,j%3,j%2) for j,i in enumerate(trio)]
+        expected=[draw(i,'specialized',f,c,u,slot,bank) for i,f,c,u,slot,bank in draw_specs]
+        routes=['generic',middle,'generic']
+        actual=[draw(i,route,f,c,u,slot,bank) for (i,f,c,u,slot,bank),route in zip(draw_specs,routes)]
+        comparisons=[comparison(e,a) for e,a in zip(expected,actual)];assert all(c['equal'] for c in comparisons)
+        sequences.append({'states':trio,'routes':routes,'draws_contiguous':True,'readback_after_every_draw':True,'clear_before_each_draw':True,'comparisons':comparisons})
 # CodexAstraLocal: The generic after specialized must use the current constants even when the FS identity did not change.
 # This is a bad-resource witness, not an execution model of the candidate's dirty-state owner.
 witness=None
@@ -227,6 +236,15 @@ for i in range(limit):
         expected=draw(i,'specialized',fixture,clip,u,i%3,i%2)
         actual=draw(i,'generic',fixture,clip,u,(i+1)%3,i%2)
         row={'case':i,'fixture':fixture,'clip':clip,'ubo':u,**comparison(expected,actual),'specialized_color_sha256':hashlib.sha256(expected[0]).hexdigest(),'generic_color_sha256':hashlib.sha256(actual[0]).hexdigest()}
+        if static_tev:
+            # CodexAstraLocal: Keep specialized tolerance unchanged; partial must
+            # additionally match generic color and raw depth bytes exactly.
+            partial=draw(i,'partial',fixture,clip,u,(i+2)%3,i%2)
+            row['partial_color_sha256']=hashlib.sha256(partial[0]).hexdigest()
+            row['partial_vs_generic_color_exact']=partial[0]==actual[0]
+            row['partial_vs_generic_depth_bytes_exact']=partial[1]==actual[1]
+            row['partial_vs_specialized']=comparison(expected,partial)
+            row['equal']=row['equal'] and row['partial_vs_generic_color_exact'] and row['partial_vs_generic_depth_bytes_exact'] and row['partial_vs_specialized']['equal']
         rows.append(row)
         if not row['equal']:failures.append(row)
         if i>0 and stale_witness is None:
@@ -241,6 +259,8 @@ for i in range(limit):
 report = {
     'author': 'CodexAstraLocal', 'renderer': ctx.info['GL_RENDERER'],
     'complete_state_cases': limit, 'paired_draws': len(rows),
+    'static_tev': static_tev, 'actual_matrix_draws': (3 if static_tev else 2)*len(rows),
+    'partial_generic_depth_comparison': 'exact bytes' if static_tev else None,
     'compared_framebuffer_pixels_including_clear_discard_clip': len(rows) * 1024,
     'depth_tolerance': 1e-6, 'transform_checks': tf_rows,
     'contiguous_mixed_sequences': sequences, 'host_buffer_range_alignment': alignments,
@@ -259,7 +279,7 @@ assert not failures, f'{len(failures)} CPU ABI corpus mismatches; see {run}'
 for cached_program in programs.values():
     cached_program.release()
 programs.clear()
-print(f'PASS {len(rows)} paired CPU ABI draws, 32 transform controls and four contiguous mixed sequences', flush=True)
+print(f'PASS {len(rows)} paired CPU ABI draws, 32 transform controls and {len(sequences)} contiguous mixed sequences', flush=True)
 
 if args.require_spirv:
     assert 'GL_ARB_gl_spirv' in ctx.extensions
@@ -299,7 +319,7 @@ if args.require_spirv:
         if key in raw_programs:raw_programs.move_to_end(key);return raw_programs[key]
         if len(raw_programs)>=16:_,old=raw_programs.popitem(last=False);gl.glDeleteProgram(old)
         shaders=[]
-        for text,stage,kind,opt in [(vs,'vert',0x8B31,False),(fs,'frag',0x8B30,route=='specialized')]:
+        for text,stage,kind,opt in [(vs,'vert',0x8B31,False),(fs,'frag',0x8B30,route in ('specialized','partial'))]:
             compile_module(text,stage,opt,'vulkan')
             binary=compile_module(adapt(text),stage,opt,'opengl').read_bytes()
             shader=gl.glCreateShader(kind);handle=U(shader);raw=ctypes.create_string_buffer(binary)
@@ -325,9 +345,23 @@ if args.require_spirv:
         for fixture,clip,u in [(0,False,0),(1,False,1),(2,True,0),(3,True,3)]:
             specialized=binary_draw(i,'specialized',fixture,clip,u,0,k%2);generic=binary_draw(i,'generic',fixture,clip,u,1,k%2)
             row={'case':i,'fixture':fixture,'clip':clip,'ubo':u,**comparison(specialized,generic),'specialized_color_sha256':hashlib.sha256(specialized[0]).hexdigest(),'generic_color_sha256':hashlib.sha256(generic[0]).hexdigest()};rows.append(row)
+            if static_tev:
+                # CodexAstraLocal: Import the optimized partial binary itself;
+                # preserve original specialized/generic checks and strict partial depth.
+                partial=binary_draw(i,'partial',fixture,clip,u,2,k%2)
+                row['partial_color_sha256']=hashlib.sha256(partial[0]).hexdigest()
+                row['partial_vs_generic_color_exact']=partial[0]==generic[0]
+                row['partial_vs_generic_depth_bytes_exact']=partial[1]==generic[1]
+                row['partial_vs_specialized']=comparison(specialized,partial)
+                row['equal']=row['equal'] and row['partial_vs_generic_color_exact'] and row['partial_vs_generic_depth_bytes_exact'] and row['partial_vs_specialized']['equal']
             if not row['equal']:failures.append(row)
         print(f'Executed optimized binary states {k+1}/{len(selected)}; differences={len(failures)}',flush=True)
     report={'author':'CodexAstraLocal','renderer':ctx.info['GL_RENDERER'],'selected_states':selected,'paired_draws':len(rows),'compared_framebuffer_pixels_including_clear_discard':len(rows)*1024,'max_resident_linked_programs':max_raw,'module_validation':module_rows,'comparisons':rows,'failures':failures,'scope':'Actual Mesa GL_ARB_gl_spirv binary specialization/link/draw: optimized specialized FS versus unoptimized generic FS, required trivial VS unoptimized. Vulkan1.1 sibling modules validated only. All32 selected states use actual CPU88B data and production trivialVS; no Vulkan/Adreno pixel or timing proof.'}
+    report['static_tev']=static_tev
+    report['actual_matrix_draws']=(3 if static_tev else 2)*len(rows)
+    report['partial_generic_depth_comparison']='exact bytes' if static_tev else None
+    if static_tev:
+        report['scope']=report['scope'].replace('optimized specialized FS versus unoptimized generic FS', 'optimized specialized/partial FS versus unoptimized generic FS')
     with(run/'binary-report.json').open('x') as f:json.dump(report,f,indent=2);f.write('\n')
     for p in raw_programs.values():gl.glDeleteProgram(p)
     assert not failures,f'{len(failures)} optimized binary mismatches'

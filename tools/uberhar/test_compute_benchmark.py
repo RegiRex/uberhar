@@ -177,7 +177,9 @@ def main():
         'if (is_dirty || bound_pipeline != selected)', 'if (constants_dirty)'))
     tail=pipeline[pipeline.index('if (is_dirty || bound_pipeline != selected)'):]
     tail=tail[:tail.index('\n    current_info = info;')]
-    restoration+='\n'+block(tail,'if (selected_fallback)')
+    # CodexAstraLocal: Both generic and partial TEV consume the dynamic push
+    # transport; execute the exact current restoration condition for each route.
+    restoration+='\n'+block(tail,'if (selected_fallback || static_tev_cpu)')
     (out/'graphics-restore.inc').write_text(restoration+'\n')
     rect=(ROOT/'src/video_core/renderer_vulkan/vk_compute_rect.cpp').read_text()
     signatures=('void RequireVma(', 'void ImageBarrier(', 'bool WriteExclusive(',

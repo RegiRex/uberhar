@@ -325,8 +325,12 @@ std::optional<std::pair<u64, Shader* const>> ShaderDiskCache::UseReadyFragmentSh
         ++ready_fragment_cold;
         return {};
     }
-    const bool pending = warming_ready_fragment && !warming_ready_fragment->IsDone();
-    if (!ReadyFragmentPolicy::CanAdmit(ready_fragments.size(), pending)) {
+    // CodexAstraLocal: Full and partial optional fragments share the existing
+    // one-thread optional pipeline lane. Neither queues behind an unfinished
+    // optional PSO; required generic preparation uses its existing separate lane.
+    const bool pending = (warming_ready_fragment && !warming_ready_fragment->IsDone()) ||
+        (parent.warming_ready_vertex && !parent.warming_ready_vertex->IsDone());
+    if (!parent.ready_vertex_worker || !ReadyFragmentPolicy::CanAdmit(ready_fragments.size(), pending)) {
         if (pending) ++ready_fragment_busy;
         else ++ready_fragment_capped;
         return {};
@@ -341,7 +345,9 @@ std::optional<std::pair<u64, Shader* const>> ShaderDiskCache::UseReadyFragmentSh
     // CodexAstraLocal: Optional queue allocation can fail after owner insertion.
     // Publish failed completion so every route keeps its existing complete draw.
     try {
-        parent.shader_workers.QueueWork([this, entry, device] {
+        // CodexAstraLocal: Reuse the existing optional lane; this ready-only
+        // module is never a dependency of an already queued waiting PSO.
+        parent.ready_vertex_worker->QueueWork([this, entry, device] {
             const auto start = std::chrono::steady_clock::now();
             bool failed = false;
             try {
@@ -399,6 +405,113 @@ std::optional<std::pair<u64, Shader* const>> ShaderDiskCache::UseReadyFragmentSh
         return {};
     }
     ++ready_fragment_busy;
+    return {};
+}
+
+// CodexAstraLocal: Optional partial modules retain exact immutable inputs and
+// terminal completion. A miss never waits, changes the generic shader, or writes
+// transferable/disk cache data; GPU vertex work is unrelated to this CPU-FS API.
+std::optional<std::pair<u64, Shader* const>> ShaderDiskCache::UseStaticTevFragmentShader(
+    const FSConfig& family, const GLSL::StaticTevPlan& plan,
+    const UserConfig& user, bool allow_build) {
+    ++static_tev_requests;
+    if (!user.IsCacheable() || !parent.allow_static_cpu_tev ||
+        !parent.ready_vertex_worker || parent.profile.has_fragment_shader_barycentric ||
+        GLSL::CheckDynamicTevSupport(family, user) != GLSL::DynamicTevSupport::Ready) {
+        ++static_tev_unsupported;
+        return {};
+    }
+    const u64 hash = StaticTevPolicy::Key::Hash(family, plan);
+    if (const auto found = static_tev_fragments.find(hash); found != static_tev_fragments.end()) {
+        auto& entry = *found->second;
+        // CodexAstraLocal: Avoid copying the large profile on ready hits, while
+        // retaining every equality that a full key comparison would require.
+        if (!(entry.key.family == family) || !(entry.key.profile == parent.profile) ||
+            !(entry.key.plan == plan) || entry.key.interface_abi != StaticTevPolicy::CpuInterface ||
+            entry.key.policy != StaticTevPolicy::GeneratorPolicy) {
+            ++static_tev_mismatches;
+            return {};
+        }
+        if (!entry.shader.IsDone()) { ++static_tev_busy; return {}; }
+        if (entry.shader.HasFailed() || !entry.shader.Handle()) {
+            ++static_tev_failed_hits;
+            return {};
+        }
+        ++static_tev_hits;
+        return std::make_pair(hash, &entry.shader);
+    }
+    if (!allow_build) { ++static_tev_lookup_misses; return {}; }
+    if (static_tev_fragments.size() >= StaticTevPolicy::MaxModules ||
+        static_tev_attempts >= StaticTevPolicy::MaxModuleAttempts) {
+        ++static_tev_capped;
+        return {};
+    }
+    const StaticTevPolicy::Key key{family, parent.profile, plan};
+    if (!static_tev_demand.Observe(hash, key)) { ++static_tev_cold; return {}; }
+    if ((warming_ready_fragment && !warming_ready_fragment->IsDone()) ||
+        (parent.warming_ready_vertex && !parent.warming_ready_vertex->IsDone())) {
+        ++static_tev_busy;
+        return {};
+    }
+    // CodexAstraLocal: Charge before every throwing owner allocation/insertion.
+    // A failed entry remains terminal; an allocation failure consumes the finite
+    // title attempt budget even when no entry could be retained.
+    ++static_tev_attempts;
+    StaticTevEntry* entry{};
+    try {
+        auto owner = std::make_unique<StaticTevEntry>(parent.instance, key);
+        entry = owner.get();
+        static_tev_fragments.emplace(hash, std::move(owner));
+    } catch (...) {
+        ++static_tev_allocation_failures;
+        return {};
+    }
+    warming_ready_fragment = &entry->shader;
+    const auto device = parent.instance.GetDevice();
+    try {
+        parent.ready_vertex_worker->QueueWork([entry, device] {
+            bool failed = false;
+            try {
+                const auto elapsed = [](auto begin) {
+                    return static_cast<u64>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                        std::chrono::steady_clock::now() - begin).count());
+                };
+                // CodexAstraLocal: Every compiler input comes from this stable
+                // owner. Lighting, textures and framebuffer values still arrive
+                // through the unchanged per-draw 128-byte push transport.
+                const auto& key = entry->key;
+                auto begin = std::chrono::steady_clock::now();
+                const auto source = GLSL::GenerateStaticTevFragmentShader(
+                    key.family, {}, key.profile, key.plan);
+                entry->generation_ns = elapsed(begin);
+                entry->source_bytes = source.size();
+                begin = std::chrono::steady_clock::now();
+                // CodexAstraLocal: Partial specialization is optional work and
+                // explicitly uses the optimized frontend, even though non-TEV
+                // generation remains dynamic. Required generic policy is intact.
+                const auto spirv = CompileGLSL(source, vk::ShaderStageFlagBits::eFragment, "",
+                    DisableShaderOptimizer(true, key.profile.vk_disable_spirv_optimizer != 0));
+                entry->frontend_ns = elapsed(begin);
+                entry->spirv_bytes = spirv.size() * sizeof(u32);
+                if (spirv.empty()) throw std::runtime_error("empty static TEV module");
+                begin = std::chrono::steady_clock::now();
+                entry->shader.module = CompileSPV(spirv, device);
+                entry->module_ns = elapsed(begin);
+                if (!entry->shader.module) throw std::runtime_error("null static TEV module");
+            } catch (...) {
+                failed = true;
+            }
+            // CodexAstraLocal: Completion is the last owner write; progress reads
+            // metrics only after acquiring it, and the parent drains this lane
+            // before any shader, layout, pipeline or driver-cache destruction.
+            if (failed) entry->shader.MarkFailed();
+            else entry->shader.MarkDone();
+        });
+    } catch (...) {
+        entry->shader.MarkFailed();
+        return {};
+    }
+    ++static_tev_busy;
     return {};
 }
 
@@ -553,6 +666,36 @@ void ShaderDiskCache::ReportUberharStats(const char* kind) const {
              ready_fragment_compile_ns.load() / 1e6, ready_fragment_max_compile_ns.load() / 1e6,
              ready_fragment_demand.Replacements(), ReadyFragmentPolicy::MaxModules,
              ReadyFragmentPolicy::WarmupDraws);
+    // CodexAstraLocal Log Line: Bounded title counts and generated byte/time
+    // totals identify real partial compilation and failure. Generated bytes are
+    // neither retained source storage nor opaque driver/GPU memory consumption.
+    if (parent.allow_static_cpu_tev) {
+        u64 done{}, failed{}, source_bytes{}, spirv_bytes{}, generation_ns{}, frontend_ns{}, module_ns{};
+        for (const auto& [hash, entry] : static_tev_fragments) {
+            if (!entry->shader.IsDone()) continue;
+            ++done; failed += entry->shader.HasFailed();
+            source_bytes += entry->source_bytes; spirv_bytes += entry->spirv_bytes;
+            generation_ns += entry->generation_ns; frontend_ns += entry->frontend_ns;
+            module_ns += entry->module_ns;
+        }
+        // CodexAstraLocal Log Line: Consume the partial tier's existing demand
+        // replacement count at this bounded cadence. It explains probation
+        // turnover, not module eviction, driver memory or GPU execution cost.
+        LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
+            "Uberhar static CPU TEV modules {}: schema=1 scope=current_title requests={} ready_hits={} "
+            "cold={} busy={} capped={} mismatches={} failed_hits={} unsupported={} lookup_misses={} "
+            "modules={} attempts={} allocation_failures={} done={} failed={} "
+            "generated_glsl_bytes={} generated_spirv_bytes={} generation_ms={:.3f} "
+            "frontend_ms={:.3f} module_ms={:.3f} max_modules=8 max_attempts=16 "
+            "storage=memory_only generator=static_tev_runtime_lighting optimizer=enabled "
+            "cpu_vertex_abi=88 push_bytes=128 weighting=lookups demand_replacements={}",
+            kind, static_tev_requests, static_tev_hits, static_tev_cold, static_tev_busy,
+            static_tev_capped, static_tev_mismatches, static_tev_failed_hits,
+            static_tev_unsupported, static_tev_lookup_misses, static_tev_fragments.size(),
+            static_tev_attempts, static_tev_allocation_failures, done, failed, source_bytes,
+            spirv_bytes, generation_ns / 1e6, frontend_ns / 1e6, module_ns / 1e6,
+            static_tev_demand.Replacements());
+    }
     // AstraPro: Existing bounded cadence; counts don't imply GPU timings.
     // CodexAstraUlt Log Line: Retain bounded reporting and identify the effective optional
     // compiler policy separately from the generic/Custom requested optimizer setting.

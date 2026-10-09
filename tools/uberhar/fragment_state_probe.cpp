@@ -201,6 +201,15 @@ int main(int argc, char** argv) {
         std::ofstream(prefix.string() + "-generic.frag")
             << "#version 450\n"
             << GLSL::FragmentModule{family, user, profile, true}.Generate();
+
+#ifdef UBERHAR_STATIC_TEV_TEST
+        // CodexAstraLocal: Preserve the full original state/uniform corpus while
+        // adding only the new fragment route for the real CPU-vertex ABI gate.
+        std::ofstream(prefix.string() + "-partial.frag")
+            << "#version 450\n"
+            << GLSL::GenerateStaticTevFragmentShader(family, user, profile,
+                                                    GLSL::MakeStaticTevPlan(state));
+#endif
         Binary(prefix.string() + "-state.bin", state);
         FSUniformData uniforms{};
         uniforms.framebuffer_scale = 1;

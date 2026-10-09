@@ -1,17 +1,50 @@
-# Uberhar progress — 0.1.39 candidate; 0.1.38 installed
+# Uberhar progress — 0.1.40 candidate; 0.1.39 installed
 
-<!-- CodexAstraLocal: Latest owner scope ends after this candidate's consolidated
-Native/Combo tests; only architecture work may continue after the report. -->
-**0.1.39 is being qualified locally, not yet published or installed.** It adds
-bounded independently progressing CPU draw packets and ordered coherent Vulkan
-uploads. Correctness reviews and native integration passed; a finite full-path host
-comparison rejected blanket tiny-draw admission. The narrowed candidate admits
-substantial, inexpensive-to-copy work and preserves the old route elsewhere.
-Actual overlap, output and throughput still need the single cold Native/Combo
-Thor controls. After those tests, pause all non-architecture work and report best
-and slowest qualifying intervals with CPU, GPU and memory context. Measured DDR
-bandwidth remains unavailable; the new passive helper measures pressure/occupancy.
-See the [candidate notes](releases/0.1.39.md) for exact admission and ownership scope.
+<!-- CodexAstraLocal: The owner extends this finite batch through .40; its new
+fragment tier does not replace the unmet portable CPU throughput objective. -->
+**0.1.40 is a candidate; 0.1.39 is released and installed.** The next candidate
+adds bounded static prepared TEV with runtime lighting for CPU vertex draws in
+Native and full Combo. Native is no longer generic-fragment-only; Combo retains
+ready full-specialized priority and continued full promotion. Generic rendering
+remains complete while optional entries are missing, pending, failed or capped.
+No additional guest vertices move to the GPU. Finite generator, cache and worker
+controls passed; integrated publication and target .40 results remain pending.
+See the [candidate notes](releases/0.1.40.md) for ownership and budgets.
+
+One cold Native and one cold Combo .39 Dark Moon opening have completed at Vulkan
+2x and the normal 100% limiter. The independently reviewed primary means are
+30.476% and 28.763%, with p05 window speeds 17.586% and 17.246%. Slowest/best windows
+are 14.591%/68.868% and 16.275%/65.106%; worst frame intervals are 209.405/240.760 ms.
+Different scene timing, observers and process history prevent a causal mode/version
+comparison. Whole opening-contained telemetry averages 1.551/1.462 app logical-core
+equivalents, which already include every worker. Per-core system activity does not
+measure app residency or heterogeneous CPU maximum capacity.
+
+<!-- CodexAstraLocal: Consecutive recorded frames qualify only their visible
+scene coverage; moon-event thresholds remain separate from ghost review. -->
+The .39 Native moon clip contains ten brief events across eleven decoded frames,
+maximum two consecutive frames, exceeding the owner's occurrence threshold.
+Combo's 743 recorded moon frames contain no identified block/band event.
+No abrupt ghost corruption was identified in either run's reviewed post-moon
+clips; scene coverage differs and leaves unrecorded gaps, including the later
+angry-book phase. This is not full-opening visual qualification or a causal
+improvement claim. Private evidence and charts remain outside public artifacts.
+
+The .39 deferred queue executed 129,171 Native and 129,119 Combo packets in its
+interior delivered report spans, with zero failures. Every packet ran in a
+one-packet wave on the coordinator; no auxiliary fan-out was observed. Its new
+route therefore executed useful shader work without demonstrating the intended
+multi-packet scaling. Existing same-draw workers remained active. Tiny/light CPU
+draws are still excluded, and increasing thread count alone is not a remedy.
+The .40 GPU fragment change addresses a different cost hypothesis and does not
+qualify the CPU objective as complete.
+
+The owner authorizes .40 implementation and its consolidated tests, then a pause
+of all non-architecture work with a self-contained results/interpretation report.
+Keep exact graphics review separate from the numeric pass. Best/slowest CPU
+observations that only overlap a frame window remain contextual; GPU busy is a
+driver window, memory scopes are non-additive and DDR/PMU measurements remain
+unavailable. Passive pressure/occupancy readings are not bandwidth utilization.
 
 
 <!-- CodexAstraLocal: Record the owner's coordinated architecture priority and separate planned diagnostics from measured bandwidth. -->

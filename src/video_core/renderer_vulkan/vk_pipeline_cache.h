@@ -170,7 +170,7 @@ private:
     // CodexAstraLocal: Optional CPU-fragment selection requires a completed generic
     // draw and the caller's real software layout. Failure changes no draw state.
     GraphicsPipeline* PrepareReadyCpuFragment(PipelineInfo& info, GraphicsPipeline* generic,
-                                              const VertexLayout& software_layout, CpuFragmentToken* cpu_use) noexcept;
+                                              const VertexLayout& software_layout, CpuFragmentToken* cpu_use, bool* partial_use) noexcept;
 
     // AstraEH: Only the serial TEV worker reads/writes generic modules; reports use atomics.
     // AstraEH: Compiler workers receive the exact options/path captured with their profile.
@@ -241,12 +241,15 @@ private:
     // AstraEH: Optional fallback work must not occupy workers needed by specialized draws.
     // Created only in hybrid mode; shader and driver compilation run as one serial job.
     std::unique_ptr<Common::ThreadWorker> tev_worker;
-    // AstraPro: Combo-only, one in-flight pipeline and a separate bounded cache.
+    // AstraPro: Originally Combo-only, one in-flight pipeline and a separate bounded cache.
+    // CodexAstraLocal: Existing single optional lane now also serves Native
+    // static CPU fragments; its queues contain ready-dependency work only.
     // Drain this worker before releasing ANY referenced shaders/driver cache.
     std::unique_ptr<Common::ThreadWorker> ready_vertex_worker;
     std::unordered_map<u64, std::unique_ptr<GraphicsPipeline>> ready_vertex_pipelines;
-    // CodexAstraLocal: Allocate metadata only for full Combo; every active,
-    // retired and destruction-queued CPU owner remains inside the same eight.
+    // CodexAstraLocal: CPU fragment metadata is independent of GPU promotion.
+    // Active, retired and destruction-queued owners remain charged to their
+    // original tier: eight full plus eight partial, at most sixteen combined.
     std::unique_ptr<ReadyCpuBank> ready_cpu_bank;
     // CodexAstraLocal: Eviction never refunds creation attempts. Charge GPU and
     // CPU before allocation so repeated failures cannot grow unbounded work.
@@ -254,6 +257,9 @@ private:
     std::size_t ReadyCpuOwned() const { return ready_cpu_bank ? ready_cpu_bank->Owned() : 0; }
     GraphicsPipeline* warming_ready_vertex{};
     PipelineBuildStats ready_cpu_build_stats;
+    // CodexAstraLocal: Actual partial/full selections are disjoint draw counts;
+    // neither a module hit nor a pending PSO is credited as rendered work.
+    u64 ready_cpu_static_selected{}, ready_cpu_full_selected{};
     u64 ready_cpu_requests{}, ready_cpu_selected{}, ready_cpu_dependencies{},
         ready_cpu_deferred{}, ready_cpu_capped{}, ready_cpu_mismatches{},
         ready_cpu_failed_hits{}, ready_cpu_admission_failures{};
@@ -336,6 +342,10 @@ private:
     GraphicsPipeline* warming_tev_pipeline{};
     // AstraEH: Profiles use generic fragments as the primary path, with explicit recovery.
     std::optional<Pica::Shader::FSConfig> virtual_fs_config;
+    // CodexAstraLocal: Draw-local borrowed pure cache result. Only the owner reads
+    // it between GetTevFallback and CPU admission; jobs receive owned Key copies.
+    // Next fragment preparation/cache reset invalidates it before any reuse.
+    const Pica::Shader::FSConfig* prepared_cpu_family{};
     u64 virtual_generic_draws{}, virtual_recovery_draws{}, virtual_waits{}, virtual_wait_ns{},
         virtual_max_wait_ns{};
     // AstraEH: Exclusive per-draw recovery reasons; indices 1..7 match support enum,
@@ -358,6 +368,11 @@ private:
     const bool force_tev;
     // CodexAstraUlt: Captured with the preset; changing this diagnostic choice requires restart.
     const bool allow_specialized_fragments;
+    // CodexAstraLocal: Independent CPU fragment capability never enables GPU
+    // vertex promotion. The renderer captures this policy once for its lifetime.
+    const bool allow_static_cpu_tev;
+    // CodexAstraLocal: CPU-only optional compilation cannot enable GPU vertices.
+    const bool allow_ready_gpu_vertices;
     // AstraEH: A/B switch captured at startup, effective only in normal hybrid mode.
     const bool cpu_vertex_bridge;
     // CodexAstraLocal: A renderer-owned cache must not reuse a config after a

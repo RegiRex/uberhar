@@ -86,6 +86,9 @@ def prepare(directory):
         "src/video_core/pica/primitive_assembly.h",
         "src/video_core/shader/generator/glsl_shader_gen.cpp",
         "src/video_core/shader/generator/glsl_fs_shader_gen.cpp",
+        "src/video_core/shader/generator/glsl_fs_shader_gen.h",
+        "tools/uberhar/test_cpu_fragment_abi.py",
+        "tools/uberhar/compare_cpu_fragment_abi.py",
         "src/video_core/shader/generator/pica_fs_config.cpp",
         "src/video_core/shader/generator/shader_uniforms.h",
     )]
@@ -95,6 +98,8 @@ def prepare(directory):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, default=ROOT / "build/uberhar-probe/cpu-fragment-abi")
+    # CodexAstraLocal: The optional mode adds a third route without removing any legacy ABI checks.
+    parser.add_argument("--static-tev", action="store_true")
     parser.add_argument("--render", action="store_true")
     parser.add_argument("--require-spirv", action="store_true")
     args = parser.parse_args()
@@ -108,11 +113,13 @@ def main():
              "-DXXH_INLINE_ALL", "-ffunction-sections", "-fdata-sections", "-Isrc",
              "-Iexternals/fmt/include", "-Iexternals/boost", "-Iexternals/xxHash",
              "-Iexternals/nihstro/include", "-Iexternals/json", "-Wl,--gc-sections"]
+    # CodexAstraLocal: Only the corpus producer consumes this test-only emission flag.
+    fragment_flags = flags + (["-DUBERHAR_STATIC_TEV_TEST"] if args.static_tev else [])
     commands = [
         flags + [str(directory / "probe.cpp"), "src/video_core/pica/primitive_assembly.cpp",
                  "src/video_core/shader/generator/glsl_shader_gen.cpp",
                  "-o", str(directory / "probe")],
-        flags + [str(directory / "fragment-state-probe.cpp"),
+        fragment_flags + [str(directory / "fragment-state-probe.cpp"),
                  "src/video_core/shader/generator/glsl_fs_shader_gen.cpp",
                  "src/video_core/shader/generator/pica_fs_config.cpp",
                  "-o", str(directory / "fragment-probe")],
@@ -126,13 +133,15 @@ def main():
     left = directory / "corpus-false"
     right = directory / "corpus-true"
     files = sorted(left.iterdir())
-    if len(files) != 4224 or sorted(path.name for path in files) != sorted(path.name for path in right.iterdir()):
+    expected_files = 1056 * (5 if args.static_tev else 4)
+    if len(files) != expected_files or sorted(path.name for path in files) != sorted(path.name for path in right.iterdir()):
         raise AssertionError("Expected exactly 1056 complete shader/state/uniform groups per profile")
     if any(path.read_bytes() != (right / path.name).read_bytes() for path in files):
         raise AssertionError("Accurate-multiply now affects fragment source; extend the two-profile oracle")
     # CodexAstraLocal: Source/payload fingerprints and an atomic latest pointer keep repeated runs reviewable.
     manifest = {
         "author": "CodexAstraLocal", "directory": str(directory), "source_sha256": hashes,
+        "static_tev": args.static_tev,
         "compile_commands": commands, "accurate_mul_profiles_identical_files": len(files),
         "fixture_sha256": {str(path.relative_to(directory)): digest(path)
                            for path in (directory / "fixtures").iterdir()},

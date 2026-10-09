@@ -1,5 +1,18 @@
 # Uberhar development instructions
 
+<!-- CodexAstraLocal: The owner's later October 9 direction extends the boundary through .40 and coordinates manual .39 tests without transferring device ownership to agents. -->
+- Complete 0.1.39 Dark Moon Native/Combo cold tests and report their charts, then
+  continue through 0.1.40 and its consolidated tests. The owner may test FEA and
+  Sonic on .39 while .40 develops. Once .40 passes all existing gates, advance
+  after the current game exits normally, even if the remaining .39 manual list
+  is unfinished. Root alone operates ADB; agents may analyze retained evidence.
+- Do not solve a CPU bottleneck by adding GPU offload. Distribute independent
+  CPU work across available CPU cores and reduce GPU work per complete frame.
+  Preserve complete output, ordering and the existing correctness/signing gates.
+- After .40 testing and the three-build architecture plus separate cleanliness
+  review, pause all non-architecture work and provide the combined results and
+  interpretation. No automatic .41. This supersedes the earlier next-build stop.
+
 <!-- CodexAstraLocal: The owner's latest October 9 follow-up defines the next-build stopping boundary and requires critique of earlier placement decisions. -->
 - Complete the next candidate build and its consolidated device tests, then pause
   all non-architecture work and provide a self-contained summary, results table

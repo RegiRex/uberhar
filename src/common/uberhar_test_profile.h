@@ -18,6 +18,13 @@ constexpr bool AllowsSpecializedFragments(UberharTestMode mode) {
     return mode == UberharTestMode::Automatic;
 }
 
+// CodexAstraLocal: CPU fragment preparation is independent of GPU vertex
+// promotion. Native and full Combo may reuse bounded static TEV; the explicit
+// ComboGeneric comparison and Calculated isolation retain their current paths.
+constexpr bool AllowsStaticCpuTev(UberharTestMode mode) {
+    return mode == UberharTestMode::Native || mode == UberharTestMode::Automatic;
+}
+
 constexpr bool UsesAutomaticCompute(UberharTestMode mode) {
     return mode == UberharTestMode::Automatic || mode == UberharTestMode::ComboGeneric;
 }

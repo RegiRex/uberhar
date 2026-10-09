@@ -20,7 +20,9 @@ jobs:
   shaders:
     runs-on: ubuntu-24.04
     # AstraEH: Expanded lighting corpus validates both optimizer modes and offscreen pixels.
-    timeout-minutes: 40
+    # CodexAstraLocal: The .39 shader job took 31.78 minutes before adding the
+    # static-TEV/cache/ABI controls. Keep a finite margin without dropping checks.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v6
         with:
@@ -59,6 +61,12 @@ jobs:
         env:
           LIBGL_ALWAYS_SOFTWARE: '1'
         run: /tmp/uberhar-test-env/bin/python tools/uberhar/compare_tev.py build/uberhar-probe/cases
+      # CodexAstraLocal: Keep the legacy TEV gate and require the new partial
+      # route's exact prepared-plan pixels, lazy fetches and validated modules.
+      - name: Compare static TEV prepared plan, pixels and modules
+        env:
+          LIBGL_ALWAYS_SOFTWARE: '1'
+        run: /tmp/uberhar-test-env/bin/python tools/uberhar/test_static_tev_generator.py --reuse-build --render --require-spirv
       # AstraEH: Exercise runtime alpha/fog/scissor/depth/texture state on complete fragment shaders.
       - name: Compare full fragment color and depth
         env:
@@ -70,7 +78,9 @@ jobs:
       - name: Compare CPU vertex fragment ABI and optimized binaries
         env:
           LIBGL_ALWAYS_SOFTWARE: '1'
-        run: /tmp/uberhar-test-env/bin/python tools/uberhar/test_cpu_fragment_abi.py --render --require-spirv
+        # CodexAstraLocal: Preserve full/generic comparisons and add the partial
+        # route, its dynamic transport and mixed-route restoration to this gate.
+        run: /tmp/uberhar-test-env/bin/python tools/uberhar/test_cpu_fragment_abi.py --static-tev --render --require-spirv
       # CodexAstraUlt: Vary actual vertex outputs; constant-quaternion fragment
       # fixtures cannot catch missing per-triangle hemisphere correction.
       - name: Compare quaternion interpolation with CPU triangles
@@ -120,6 +130,10 @@ jobs:
       # digests alongside the other prerequisite CPU contracts.
       # CodexAstraLocal: Retain source-derived stream-order compile and mutation
       # evidence so a CI-only command-order failure remains inspectable.
+      # CodexAstraLocal: Preserve actual cache/worker .log diagnostics and
+      # provenance for both legacy and static-tier controls, including failure.
+      # CodexAstraLocal: Keep the compiler-policy fixture and exact assertion
+      # diagnostics when optional-lane or frontend controls reject a candidate.
       - name: Upload CPU coordination contract evidence
         if: always()
         uses: actions/upload-artifact@v7
@@ -152,5 +166,16 @@ jobs:
             build/uberhar-probe/deferred-vertex-retention/**/provenance.json
             build/uberhar-probe/deferred-vertex-retention/**/*.stdout
             build/uberhar-probe/deferred-vertex-retention/**/*.stderr
+            build/uberhar-probe/ready-cpu-fragments/**/provenance.json
+            build/uberhar-probe/ready-cpu-fragments/**/*.log
+            build/uberhar-probe/optional-fragment-worker/**/provenance.json
+            build/uberhar-probe/optional-fragment-worker/**/*.log
+            build/uberhar-probe/test-shader-compile-policy*.cpp
+            build/uberhar-probe/test-shader-compile-policy*.stdout
+            build/uberhar-probe/test-shader-compile-policy*.stderr
+            build/uberhar-probe/static-tev-generator/**
+            build/uberhar-probe/cpu-fragment-abi/**
+            !build/uberhar-probe/static-tev-generator/**/mesa-cache/**
+            !build/uberhar-probe/cpu-fragment-abi/**/mesa-cache/**
           if-no-files-found: ignore
           retention-days: 14

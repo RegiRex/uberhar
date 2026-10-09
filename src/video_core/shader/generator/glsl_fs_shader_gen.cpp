@@ -347,11 +347,22 @@ DynamicTevState MakeDynamicTevState(const FSConfig& original, const Profile& pro
     return state;
 }
 
+// CodexAstraLocal: Copy the entire prepared structural prefix for exact optional
+// ownership and equality; runtime values are neither baked nor normalized here.
+StaticTevPlan MakeStaticTevPlan(const DynamicTevState& state) {
+    return {state.stages, state.buffer_mask};
+}
+
 FragmentModule::FragmentModule(const FSConfig& config_, const UserConfig& user_,
-                               const Profile& profile_, bool dynamic_tev_)
-    : config{config_}, user{user_}, profile{profile_}, dynamic_tev{dynamic_tev_} {
+                               const Profile& profile_, bool dynamic_tev_,
+                               std::optional<StaticTevPlan> static_tev_)
+    : config{config_}, user{user_}, profile{profile_}, dynamic_tev{dynamic_tev_},
+      static_tev{std::move(static_tev_)} {
     // AstraEH: The interpreter uses Vulkan push constants; OpenGL retains specialized generation.
     ASSERT(!dynamic_tev || profile.is_vulkan);
+    // CodexAstraLocal: The partial tier retains the dynamic interface and accepts
+    // only the six-stage bound produced by the existing preparation routine.
+    ASSERT(!static_tev || (dynamic_tev && ((static_tev->buffer_mask >> 8) & 7U) <= 6));
     config.ApplyProfile(profile_);
     out.reserve(RESERVE_SIZE);
     DefineExtensions();
@@ -372,7 +383,7 @@ FragmentModule::FragmentModule(const FSConfig& config_, const UserConfig& user_,
         DefineTexUnitSampler(i);
     }
     // AstraEH: Emit interpreter helpers after the sampling functions they call.
-    if (dynamic_tev) {
+    if (dynamic_tev && !static_tev) {
         DefineDynamicTev();
     }
 }
@@ -416,7 +427,11 @@ vec4 secondary_fragment_color = vec4(0.0);
 
     // AstraEH: Share one interpreter body across all six stages to reduce the
     // compiler input. Thor logs show driver creation dominates fallback latency.
-    if (dynamic_tev) {
+    // CodexAstraLocal: Optional straight-line TEV changes no lighting, texture,
+    // framebuffer or output path; generic and inherited specialized paths remain intact.
+    if (static_tev) {
+        WriteStaticTev();
+    } else if (dynamic_tev) {
         WriteDynamicTevLoop();
     } else {
         for (u32 index = 0; index < config.texture.tev_stages.size(); index++) {
@@ -938,6 +953,117 @@ if (tev_index < 4u) {
 }
 }
 )";
+}
+
+// CodexAstraLocal: Emit each first consumed texture read at its original stage
+// and operand position. Static structure removes the runtime source/cache switch
+// without moving reads ahead of lighting or materializing unused operands.
+std::string FragmentModule::GetStaticTevSource(u32 source, u32 stage, u32& sampled) {
+    switch (source) {
+    case 0:
+        return "rounded_primary_color";
+    case 1:
+        return "primary_fragment_color";
+    case 2:
+        return "secondary_fragment_color";
+    case 3:
+    case 4:
+    case 5:
+    case 6: {
+        const u32 unit = source - 3;
+        if ((sampled & (1U << unit)) == 0) {
+            out += fmt::format("vec4 uber_static_texel{0} = sampleTexUnit{0}();\n", unit);
+            sampled |= 1U << unit;
+        }
+        return fmt::format("uber_static_texel{}", unit);
+    }
+    case 13:
+        return "combiner_buffer";
+    case 14:
+        return fmt::format("const_color[{}]", stage);
+    case 15:
+        return "combiner_output";
+    default:
+        return "vec4(0.0)";
+    }
+}
+
+void FragmentModule::WriteStaticTev() {
+    using Operation = TexturingRegs::TevStageConfig::Operation;
+    const auto& plan = *static_tev;
+    const u32 end = (plan.buffer_mask >> 8) & 7U;
+    u32 sampled = 0;
+    constexpr std::array components{'r', 'g', 'b', 'a'};
+    const auto arity = [](u32 operation) {
+        return operation == 0 ? 1U : operation == 4 || operation == 8 || operation == 9 ? 3U : 2U;
+    };
+    out += "// CodexAstraLocal: Exact prepared TEV plan; other fragment state stays runtime.\n";
+    for (u32 stage = 0; stage < end; ++stage) {
+        if ((plan.buffer_mask & (1U << (16 + stage))) != 0) {
+            const auto& instruction = plan.stages[stage];
+            const u32 color_op = instruction.operations & 15U;
+            const u32 alpha_op = (instruction.operations >> 16) & 15U;
+            // CodexAstraLocal: Select the already-prepared component/inversion
+            // directly. Stage-zero Previous remapping was done exactly once.
+            for (u32 input = 0; input < arity(color_op); ++input) {
+                const auto source = GetStaticTevSource(
+                    (instruction.sources >> (input * 4)) & 15U, stage, sampled);
+                const u32 modifier = (instruction.modifiers >> (input * 4)) & 15U;
+                const u32 component = modifier >> 1;
+                std::string value = component == 4 ? fmt::format("{}.rgb", source)
+                                    : component < 4
+                                        ? fmt::format("{0}.{1}{1}{1}", source, components[component])
+                                        : "vec3(0.0)";
+                if (component <= 4 && (modifier & 1U) != 0) {
+                    value = fmt::format("vec3(1.0) - {}", value);
+                }
+                out += fmt::format("color_results_{} = {};\n", input + 1, value);
+            }
+            // CodexAstraLocal: Reuse the existing operation emitters unchanged;
+            // retain round-before-scale and the generic reserved-operation result.
+            out += fmt::format("vec3 color_output_{} = byteround(", stage);
+            if (color_op <= 9) {
+                AppendColorCombiner(static_cast<Operation>(color_op));
+            } else {
+                out += "vec3(0.0)";
+            }
+            out += ");\n";
+            if (color_op == 7) {
+                out += fmt::format("float alpha_output_{0} = color_output_{0}.r;\n", stage);
+            } else {
+                for (u32 input = 0; input < arity(alpha_op); ++input) {
+                    const auto source = GetStaticTevSource(
+                        (instruction.sources >> (16 + input * 4)) & 15U, stage, sampled);
+                    const u32 modifier = (instruction.modifiers >> (12 + input * 4)) & 7U;
+                    std::string value = fmt::format("{}.{}", source, components[modifier >> 1]);
+                    if ((modifier & 1U) != 0) {
+                        value = fmt::format("1.0 - {}", value);
+                    }
+                    out += fmt::format("alpha_results_{} = {};\n", input + 1, value);
+                }
+                out += fmt::format("float alpha_output_{} = byteround(", stage);
+                if (alpha_op <= 5 || alpha_op == 8 || alpha_op == 9) {
+                    AppendAlphaCombiner(static_cast<Operation>(alpha_op));
+                } else {
+                    out += "0.0";
+                }
+                out += ");\n";
+            }
+            out += fmt::format(
+                "combiner_output = vec4(clamp(color_output_{0} * {1}.0, vec3(0.0), vec3(1.0)), "
+                "clamp(alpha_output_{0} * {2}.0, 0.0, 1.0));\n",
+                stage, instruction.multipliers & 7U, (instruction.multipliers >> 16) & 7U);
+        }
+        // CodexAstraLocal: Passthrough stages still advance the one-stage-delayed
+        // buffer; no stage after the prepared end can consume a later write.
+        out += "combiner_buffer = next_combiner_buffer;\n";
+        if (stage < 4 && (plan.buffer_mask & (1U << stage)) != 0) {
+            out += "next_combiner_buffer.rgb = combiner_output.rgb;\n";
+        }
+        if (stage < 4 && (plan.buffer_mask & (1U << (stage + 4))) != 0) {
+            out += "next_combiner_buffer.a = combiner_output.a;\n";
+        }
+    }
 }
 
 void FragmentModule::WriteLighting() {
@@ -2377,6 +2503,14 @@ void FragmentModule::DefineTexUnitSampler(u32 texture_unit) {
 std::string GenerateFragmentShader(const FSConfig& config, const UserConfig& user,
                                    const Profile& profile) {
     FragmentModule module{config, user, profile};
+    return module.Generate();
+}
+
+// CodexAstraLocal: A separate entry keeps optional partial generation explicit;
+// it owns the plan and preserves the full dynamic-state ABI for each later draw.
+std::string GenerateStaticTevFragmentShader(const FSConfig& family, const UserConfig& user,
+                                          const Profile& profile, const StaticTevPlan& plan) {
+    FragmentModule module{family, user, profile, true, plan};
     return module.Generate();
 }
 

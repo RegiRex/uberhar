@@ -64,11 +64,17 @@ def child_limits():
 # CodexAstraLocal: Explicit source/output arguments support a reviewed candidate
 # without overwriting published fixtures or using private files in CI.
 def main():
+    global ROOT
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--source', type=Path, default=DEFAULT_SOURCE)
     parser.add_argument('--output', type=Path, default=ROOT / 'build/uberhar-probe/optional-fragment-worker')
     parser.add_argument('--cxx', default=os.environ.get('CXX', 'c++'))
+    parser.add_argument('--repo-root',type=Path,default=ROOT)
+    parser.add_argument('--source-root',type=Path)
+    parser.add_argument('--static-tev',action='store_true')
     args = parser.parse_args()
+    ROOT=args.repo_root.resolve()
+    source_root=(args.source_root or ROOT).resolve()
     args.output.mkdir(parents=True, exist_ok=True)
     index = 1
     while (args.output / f'run-{index:02d}').exists(): index += 1
@@ -83,6 +89,20 @@ def main():
     text = header.read_text()
     members = text[text.index('    struct ReadyFragmentKey {'):
                    text.index('    std::unordered_map<size_t, Shader> fixed_geometry_shaders;')]
+    # CodexAstraLocal: The extended mode shares the real worker/completion and
+    # all legacy controls; add exact partial-owned fields and actual support guards.
+    static_function=''
+    if args.static_tev:
+        static_function=extract(cpp.read_text(),
+            'std::optional<std::pair<u64, Shader* const>> ShaderDiskCache::UseStaticTevFragmentShader(')
+        members+=text[text.index('    struct StaticTevEntry {'):
+                      text.index('    std::unordered_set<u64> known_geometry_shaders;')]
+        generator=source_root/'src/video_core/shader/generator/glsl_fs_shader_gen.cpp'
+        support='\n'.join(extract(generator.read_text(),s) for s in (
+            'static u32 EncodeLightingScale(', 'static auto LightingLuts(',
+            'DynamicTevSupport CheckDynamicTevSupport('))
+        write(out/'static_support.inc',support)
+        write(out/'static_tev_worker_cases.h',(D/'static_tev_worker_cases.h').read_text())
     write(out / 'shader.inc', shader_decl)
     write(out / 'members.inc', members)
     write(out / 'candidate-source.cpp', cpp.read_text())
@@ -114,6 +134,18 @@ def main():
         'lookup-warms': (function.replace(lookup, ''), 'lookup', 'lookup-only'),
         'profile-alias': (function.replace(profile_token, ''), 'profile', 'profile mismatch'),
     }
+    if args.static_tev:
+        variants={name:(body+'\n'+static_function,selected,expected)
+                  for name,(body,selected,expected) in variants.items()}
+        for name,old,new,expected in [
+            ('partial-optimizer','DisableShaderOptimizer(true, key.profile.vk_disable_spirv_optimizer != 0)',
+             'DisableShaderOptimizer(false, key.profile.vk_disable_spirv_optimizer != 0)','partial explicitly optimized'),
+            ('partial-markdone','else entry->shader.MarkDone();\n        });',
+             'else (void)entry;\n        });','partial completion published'),
+            ('partial-ignores-lane','(warming_ready_fragment && !warming_ready_fragment->IsDone()) ||\n        (parent.warming_ready_vertex && !parent.warming_ready_vertex->IsDone())) {',
+             'false) {','partial cannot queue behind held full compilation')]:
+            if static_function.count(old)!=1:raise ValueError('partial boundary changed: '+name)
+            variants[name]=(function+'\n'+static_function.replace(old,new),'all',expected)
     inputs = [D / 'test_optional_fragment_worker.cpp', Path(__file__), cpp, header, shader,
               ROOT / 'src/common/thread_worker.h', ROOT / 'src/common/async_handle.h',
               ROOT / 'src/common/unique_function.h',
@@ -122,18 +154,23 @@ def main():
               ROOT / 'src/video_core/shader/generator/pica_fs_config.cpp',
               ROOT / 'src/video_core/shader/generator/pica_fs_config.h',
               ROOT / 'src/video_core/shader/generator/profile.h']
+    if args.static_tev:
+        inputs += [D/'static_tev_worker_cases.h',generator,
+            source_root/'src/video_core/shader/generator/glsl_fs_shader_gen.h',
+            source_root/'src/video_core/renderer_vulkan/uberhar_static_tev_policy.h']
     provenance = {'author': 'CodexAstraLocal', 'utc': datetime.datetime.now(datetime.timezone.utc).isoformat(),
         'scope': 'Exact candidate optional-FS function and owned declarations; real ThreadWorker, AsyncHandle, UniqueFunction, FSConfig/Profile and DemandGate. Generator/compiler/driver/log endpoint controls, no GPU execution or device. Allocation countdown affects owner thread only.',
         'inputs': {str(p): sha(p) for p in inputs}, 'cases': [],
         'compiler': subprocess.run([args.cxx, '--version'], capture_output=True, text=True,
                                    check=True, timeout=10).stdout}
-    includes = [out, ROOT / 'src', ROOT / 'externals/fmt/include', ROOT / 'externals/boost',
+    includes = [out, source_root/'src', ROOT / 'src', ROOT / 'externals/fmt/include', ROOT / 'externals/boost',
                 ROOT / 'externals/xxHash', ROOT / 'externals/nihstro/include',
                 ROOT / 'externals/vulkan-headers/include']
     for name, (body, selected, expected) in variants.items():
         write(out / f'{name}.inc', body + '\n')
         binary = out / name
         command = [args.cxx, '-std=c++20', '-O2', '-pthread', '-DFMT_HEADER_ONLY', '-DXXH_INLINE_ALL',
+                   *(['-DUBERHAR_STATIC_TEV_WORKER'] if args.static_tev else []),
                    f'-DEXTRACTED_FUNCTION="{name}.inc"', *[f'-I{p}' for p in includes],
                    str(out / 'harness.cpp'),
                    str(ROOT / 'src/video_core/shader/generator/pica_fs_config.cpp'), '-o', str(binary)]
@@ -152,7 +189,7 @@ def main():
                     stdout=result.stdout, stderr=result.stderr)
         if expected == 'pass':
             passed = result.returncode == 0 and re.fullmatch(
-                r'PASS checks=498 actual_thread_worker=true gpu_execution=false\n', result.stdout) is not None
+                (r'PASS checks=560 actual_thread_worker=true gpu_execution=false\n' if args.static_tev else r'PASS checks=498 actual_thread_worker=true gpu_execution=false\n'), result.stdout) is not None
         elif expected == 'abort':
             passed = result.returncode == -signal.SIGABRT
         else:
@@ -164,7 +201,7 @@ def main():
             return 1
     provenance['passed'] = all(case['expected_outcome_observed'] for case in provenance['cases'])
     write(out / 'provenance.json', json.dumps(provenance, indent=2) + '\n')
-    print('PASS all six real-worker controls:', out)
+    print(f'PASS all {len(variants)} real-worker controls:', out)
     return 0
 
 
