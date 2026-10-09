@@ -30,6 +30,12 @@ public:
     explicit DspHle(Core::System& system, Memory::MemorySystem& memory, Core::Timing& timing);
     ~DspHle();
 
+    // CodexAstraLocal: HLE guest-memory updates run in owner-thread service and
+    // CoreTiming callbacks; the audio sink consumes host samples separately.
+    bool MayWriteMemoryConcurrently() const override {
+        return false;
+    }
+
     u16 RecvData(u32 register_number) override;
     bool RecvDataIsReady(u32 register_number) const override;
     void SetSemaphore(u16 semaphore_value) override;

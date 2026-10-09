@@ -34,6 +34,35 @@ namespace Pica {
 
 ShaderSetup::ShaderSetup() = default;
 
+// CodexAstraLocal: OpenGL cache preparation copies setups. Keep that supported
+// without importing another object's compiled pointer or local revision history.
+ShaderSetup::ShaderSetup(const ShaderSetup& other) : ShaderSetup() {
+    *this = other;
+}
+
+ShaderSetup& ShaderSetup::operator=(const ShaderSetup& other) {
+    if (this == &other)
+        return *this;
+    // CodexAstraLocal: Copy guest fields and their derived hash metadata exactly.
+    // Host artifact/proof identity belongs to this destination: clear its binding
+    // and advance its own epoch even when two source histories used equal epochs.
+    uniforms = other.uniforms;
+    uniform_queue = other.uniform_queue;
+    entry_point = other.entry_point;
+    uniforms_dirty = other.uniforms_dirty;
+    program_code = other.program_code;
+    swizzle_data = other.swizzle_data;
+    program_code_hash_dirty = other.program_code_hash_dirty;
+    swizzle_data_hash_dirty = other.swizzle_data_hash_dirty;
+    biggest_program_size = other.biggest_program_size;
+    biggest_swizzle_size = other.biggest_swizzle_size;
+    program_code_hash = other.program_code_hash;
+    swizzle_data_hash = other.swizzle_data_hash;
+    cached_shader = nullptr;
+    ++code_revision;
+    return *this;
+}
+
 ShaderSetup::~ShaderSetup() = default;
 
 void ShaderSetup::WriteUniformBoolReg(u32 value) {

@@ -24,6 +24,10 @@ public:
                     bool multithread);
     ~DspLle() override;
 
+    // CodexAstraLocal: Query the constructed engine, since live audio settings
+    // need not describe whether its Teakra worker can write shared guest memory.
+    bool MayWriteMemoryConcurrently() const override;
+
     u16 RecvData(u32 register_number) override;
     bool RecvDataIsReady(u32 register_number) const override;
     void SetSemaphore(u16 semaphore_value) override;

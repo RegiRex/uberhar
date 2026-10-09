@@ -22,6 +22,17 @@
 
 namespace Pica::Shader {
 
+// CodexAstraLocal: Source snapshots live with their generated program, including
+// all uploaded and padded words the backend compiles. Code identity is therefore
+// exact even when prefix-size metadata or the inherited combined hash collides.
+struct JitEngine::CacheEntry {
+    CacheEntry(const ProgramCode& source, const SwizzleData& descriptors)
+        : code{source}, swizzles{descriptors}, shader{std::make_unique<JitShader>()} {}
+    ProgramCode code;
+    SwizzleData swizzles;
+    std::unique_ptr<JitShader> shader;
+};
+
 // AstraEH: Scope compilation timing to the experimental profiles; cache hits stay untimed.
 JitEngine::JitEngine()
     : report_virtual{Settings::values.uberhar_test_mode.GetValue() !=
@@ -43,19 +54,38 @@ void JitEngine::SetupBatch(ShaderSetup& setup, u32 entry_point) {
     const u64 code_hash = setup.GetProgramCodeHash();
     const u64 swizzle_hash = setup.GetSwizzleDataHash();
 
+    // CodexAstraLocal: Hash consumption above makes the next source mutation
+    // advance the setup revision. The cached pointer also excludes a newly
+    // constructed setup that later reuses an old setup's address/revision.
+    const u64 revision = setup.GetCodeRevision();
+    for (const auto& binding : bindings) {
+        if (binding.setup == &setup && binding.revision == revision && binding.entry &&
+            setup.cached_shader == binding.entry->shader.get()) {
+            return;
+        }
+    }
     const u64 cache_key = Common::HashCombine(code_hash, swizzle_hash);
-    auto iter = cache.find(cache_key);
-    if (iter != cache.end()) {
-        setup.cached_shader = iter->second.get();
-    } else {
+    const CacheEntry* selected{};
+    const auto [first, last] = cache.equal_range(cache_key);
+    for (auto iter = first; iter != last; ++iter) {
+        const auto& entry = *iter->second;
+        if (entry.code == setup.GetProgramCode() && entry.swizzles == setup.GetSwizzleData()) {
+            selected = &entry;
+            break;
+        }
+    }
+    if (!selected) {
         // AstraEH: Compile once per program/swizzle pair, with a bounded first-8 detail budget.
         const auto start = report_virtual ? std::chrono::steady_clock::now()
                                           : std::chrono::steady_clock::time_point{};
         const auto activity_start = Common::UberharActivity::Capture();
-        auto shader = std::make_unique<JitShader>();
-        shader->Compile(&setup.GetProgramCode(), &setup.GetSwizzleData());
-        setup.cached_shader = shader.get();
-        cache.emplace_hint(iter, cache_key, std::move(shader));
+        // CodexAstraLocal: Compile from the exact owner's snapshots and publish
+        // the setup pointer only after insertion succeeds; allocation failure
+        // cannot leave it pointing at a destroyed partial cache entry.
+        auto entry = std::make_unique<CacheEntry>(setup.GetProgramCode(), setup.GetSwizzleData());
+        entry->shader->Compile(&entry->code, &entry->swizzles);
+        selected = entry.get();
+        cache.emplace(cache_key, std::move(entry));
         if (report_virtual) {
             const u64 ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
                                std::chrono::steady_clock::now() - start)
@@ -75,6 +105,8 @@ void JitEngine::SetupBatch(ShaderSetup& setup, u32 entry_point) {
             }
         }
     }
+    setup.cached_shader = selected->shader.get();
+    bindings[binding_cursor++ % bindings.size()] = {&setup, revision, selected};
 }
 
 // CodexAstraLocal: Resolve only the call arguments that the inherited Run would

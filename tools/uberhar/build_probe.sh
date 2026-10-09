@@ -143,6 +143,25 @@ python3 tools/uberhar/test_gpu_dot_depth.py
 # CodexAstraLocal: Execute real draw-local dispatch, FIFO/state carry and the
 # extracted diagnostic call sites with profiler disabled and enabled.
 python3 tools/uberhar/test_shader_draw_context.py
+# CodexAstraLocal: Joined workers preserve controls/lifetimes; full ordered batches
+# and actual interpreter/JIT differential mutants gate parallel shader admission.
+c++ -std=c++20 -O2 -pthread -frounding-math -Isrc tools/uberhar/test_parallel_work.cpp \
+  -o build/uberhar-probe/test-parallel-work
+timeout 45s build/uberhar-probe/test-parallel-work
+c++ -std=c++20 -O2 -pthread -DFMT_HEADER_ONLY -Isrc -Iexternals/fmt/include \
+  -Iexternals/boost tools/uberhar/test_parallel_batch.cpp \
+  src/video_core/pica/primitive_assembly.cpp -o build/uberhar-probe/test-parallel-batch
+timeout 60s build/uberhar-probe/test-parallel-batch
+python3 tools/uberhar/test_parallel_vertex.py --mutants
+# CodexAstraLocal: Exact source identity must survive uploads, cache collisions,
+# descriptor/entry/uniform/output changes and serialized guest-state restoration.
+python3 tools/uberhar/test_parallel_cache.py --mutants
+# CodexAstraLocal: Execute deliberately colliding source keys through the real
+# JIT, including live-setup reuse, before trusting a compiled independence proof.
+python3 tools/uberhar/test_shader_jit_identity.py --mutants
+# CodexAstraLocal: Actual DSP/RPC ownership and pending async-job lifetimes must
+# refuse parallel guest-memory reads; configured settings alone cannot admit them.
+python3 tools/uberhar/test_parallel_memory.py --mutants
 
 # AstraEH: Exact CPU cache/stack behavior and safe generic-module reuse gate the next build.
 c++ -std=c++20 -O2 -Isrc -Iexternals/boost tools/uberhar/test_vertex_runtime.cpp \

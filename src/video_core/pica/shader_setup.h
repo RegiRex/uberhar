@@ -53,17 +53,27 @@ struct ShaderRegs;
 struct ShaderSetup {
 private:
     void MakeProgramCodeDirty() {
+        // CodexAstraLocal: Invalidate host-only parallel certificates on the first
+        // edit after hash consumption; SetupBatch consumes hashes before lookup.
+        ++code_revision;
         program_code_hash_dirty = true;
         // program_code_pending_fixup = true;
         // has_fixup = false;
     }
 
     void MakeSwizzleDataDirty() {
+        // CodexAstraLocal: Operand descriptors change independence too; never
+        // reuse a proof merely because an entry point or program hash matches.
+        ++code_revision;
         swizzle_data_hash_dirty = true;
     }
 
 public:
     explicit ShaderSetup();
+    // CodexAstraLocal: Copies retain guest shader state, not a source owner's
+    // compiled binding or revision; assignment invalidates destination proofs.
+    ShaderSetup(const ShaderSetup& other);
+    ShaderSetup& operator=(const ShaderSetup& other);
     ~ShaderSetup();
 
     void WriteUniformBoolReg(u32 value);
@@ -82,6 +92,10 @@ public:
     u64 GetProgramCodeHash();
 
     u64 GetSwizzleDataHash();
+
+    // CodexAstraLocal: Nonserialized identity for this live setup's code and
+    // descriptors. Call only after SetupBatch has consumed their dirty hashes.
+    u64 GetCodeRevision() const { return code_revision; }
 
     void DoProgramCodeFixup();
 
@@ -171,6 +185,9 @@ private:
     bool swizzle_data_hash_dirty{true};
     u32 biggest_program_size = 0;
     u32 biggest_swizzle_size = 0;
+    // CodexAstraLocal: Host optimization state is deliberately absent from save
+    // formats; state restoration below invalidates every earlier certificate.
+    u64 code_revision{};
     u64 program_code_hash{0};
     u64 swizzle_data_hash{0};
 
@@ -196,6 +213,9 @@ private:
         // ar & requires_fixup;
         // ar & has_fixup;
         if (Archive::is_loading::value) {
+            // CodexAstraLocal: Restored bytes may equal old hashes or bypass the
+            // normal write methods; a pre-restore proof must still be discarded.
+            ++code_revision;
             uniforms_dirty = true;
         }
     }

@@ -497,4 +497,10 @@ DspLle::DspLle(Core::System& system, Memory::MemorySystem& memory, Core::Timing&
 }
 DspLle::~DspLle() = default;
 
+// CodexAstraLocal: The persistent multithreaded engine can write DSP RAM and
+// FCRAM through AHBM callbacks between owner events, including during a draw.
+bool DspLle::MayWriteMemoryConcurrently() const {
+    return impl->multithread;
+}
+
 } // namespace AudioCore

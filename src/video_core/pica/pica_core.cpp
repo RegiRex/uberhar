@@ -10,6 +10,7 @@
 #include "common/microprofile.h"
 #include "common/scope_exit.h"
 #include "common/settings.h"
+#include "common/thread.h" // CodexAstraLocal: Identify real CPU vertex workers in activity samples.
 #include "common/uberhar_test_profile.h" // CodexAstraUlt: Shared Combo admission policy.
 #include "core/core.h"
 #include "core/memory.h"
@@ -18,6 +19,8 @@
 #include "video_core/pica/pica_core.h"
 #include "video_core/pica/uberhar_vertex_cache.h" // AstraEH: Exact FIFO with indexed lookup.
 #include "video_core/pica/vertex_loader.h"
+#include "video_core/pica/uberhar_parallel_vertex.h" // CodexAstraLocal: Prove invocation independence.
+#include "video_core/pica/uberhar_vertex_parallel_batch.h" // CodexAstraLocal: Ordered parallel FIFO misses.
 #include "video_core/pica/uberhar_index_bounds.h" // AstraPro: Exact bounded retry.
 #include "video_core/pica/uberhar_vertex_timing_batch.h" // CodexAstraLocal: Separate diagnostic loop.
 #include "video_core/renderer_vulkan/uberhar_gpu_vertex_policy.h" // AstraPro: Pure admission.
@@ -75,6 +78,90 @@ union CommandHeader {
     BitField<31, 1, u32> group_commands;
 };
 static_assert(sizeof(CommandHeader) == sizeof(u32), "CommandHeader has incorrect size!");
+
+// CodexAstraLocal: Keep proof storage bounded and separate from guest state.
+// Ordinary draws reuse their current code identity without hashing or comparing
+// shader arrays. On a source revision, hashes only shortlist candidates: exact
+// bytes establish identity, so collisions cannot authorize unsafe parallel work.
+struct PicaCore::ParallelVertexState {
+    struct Key {
+        u32 entry{}, outputs{};
+        u16 booleans{};
+        bool operator==(const Key&) const = default;
+    };
+    struct Proof {
+        bool valid{};
+        Key key;
+        ParallelVertexCertificate result;
+    };
+    struct Program {
+        bool valid{};
+        u64 program_hash{}, swizzle_hash{};
+        ProgramCode code{};
+        SwizzleData swizzles{};
+        std::array<Proof, 16> proofs{};
+        u32 cursor{};
+    };
+    NativeParallelBatch batch{Common::Uberhar::AvailableProcessors(), +[] {
+        Common::SetCurrentThreadName("UberharVertex");
+    }};
+    std::array<Program, 8> programs{};
+    Program* current{};
+    u64 revision{};
+    u32 cursor{};
+    u64 proof_hits{}, proof_builds{}, code_compares{}, checks{}, parallel_batches{};
+    u64 small{}, observer{}, context_missing{}, input_bounds{}, single_core{}, allocation_failures{};
+    u64 float_traps{}; // CodexAstraLocal: Preserve owner-thread exception delivery.
+    u64 concurrent_memory{}; // CodexAstraLocal: Retain serial live-memory observers.
+    u64 owner_invocations{}, worker_invocations{}, chunks{};
+    unsigned peak_threads{};
+    std::array<u64, static_cast<std::size_t>(ParallelVertexStatus::Count)> admissions{};
+
+    const ParallelVertexCertificate& Get(ShaderSetup& setup, u32 output_mask) {
+        if (!current || revision != setup.GetCodeRevision()) {
+            const u64 program_hash = setup.GetProgramCodeHash();
+            const u64 swizzle_hash = setup.GetSwizzleDataHash();
+            current = nullptr;
+            for (auto& candidate : programs) {
+                if (!candidate.valid || candidate.program_hash != program_hash ||
+                    candidate.swizzle_hash != swizzle_hash)
+                    continue;
+                ++code_compares;
+                if (candidate.code == setup.GetProgramCode() &&
+                    candidate.swizzles == setup.GetSwizzleData()) {
+                    current = &candidate;
+                    break;
+                }
+            }
+            if (!current) {
+                current = &programs[cursor++ % programs.size()];
+                current->valid = true;
+                current->program_hash = program_hash;
+                current->swizzle_hash = swizzle_hash;
+                current->code = setup.GetProgramCode();
+                current->swizzles = setup.GetSwizzleData();
+                current->proofs = {};
+                current->cursor = 0;
+            }
+            revision = setup.GetCodeRevision();
+        }
+        const Key key{setup.entry_point, output_mask, ParallelVertexBooleanUniforms(setup.uniforms)};
+        for (const auto& proof : current->proofs) {
+            if (proof.valid && proof.key == key) {
+                ++proof_hits;
+                return proof.result;
+            }
+        }
+        auto& proof = current->proofs[current->cursor++ % current->proofs.size()];
+        proof.valid = false;
+        proof.key = key;
+        proof.result = AnalyzeParallelVertex(current->code, current->swizzles,
+                                             key.entry, key.booleans, key.outputs);
+        proof.valid = true;
+        ++proof_builds;
+        return proof.result;
+    }
+};
 
 PicaCore::PicaCore(Memory::MemorySystem& memory_, std::shared_ptr<DebugContext> debug_context_)
     : memory{memory_}, debug_context{std::move(debug_context_)},
@@ -186,6 +273,45 @@ void PicaCore::ReportVirtualVertices(const char* kind, std::chrono::steady_clock
              native_input_recipe_invocations[0], native_input_recipe_invocations[1],
              native_input_recipe_invocations[2], native_input_recipe_invocations[3],
              native_input_recipe_invocations[4]);
+    // CodexAstraLocal Log Line: Reuse the existing report cadence. Count actual
+    // completed worker invocations and refusals, not created threads as useful
+    // work. Sparse vertex observers remain serial and cannot time worker kernels.
+    if (parallel_vertices) {
+        const auto& parallel = *parallel_vertices;
+        // CodexAstraLocal: Close refusal accounting without per-draw formatting;
+        // detailed carry reasons remain separate from other unsupported contracts.
+        u64 other_refusals = 0;
+        for (std::size_t i = 0; i < parallel.admissions.size(); ++i) {
+            const auto status = static_cast<ParallelVertexStatus>(i);
+            if (status != ParallelVertexStatus::Independent &&
+                status != ParallelVertexStatus::TemporaryCarry &&
+                status != ParallelVertexStatus::AddressCarry &&
+                status != ParallelVertexStatus::ConditionCarry &&
+                status != ParallelVertexStatus::OutputCarry)
+                other_refusals += parallel.admissions[i];
+        }
+        LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
+            "Uberhar CPU parallel {}: schema=1 available={} created_workers={} peak_threads={} "
+            "checks={} batches={} chunks={} owner_invocations={} worker_invocations={} "
+            "small={} observer={} context_missing={} input_bounds={} single_core={} float_traps={} concurrent_memory={} "
+            "allocation_failures={} startup_failures={} proof_hits={} proof_builds={} code_compares={} "
+            "independent={} temporary_carry={} address_carry={} condition_carry={} output_carry={} other_refusals={} "
+            "scope=certified_no_gs_fifo_misses submit=ordered_owner observer_policy=serial",
+            kind, parallel.batch.Available(), parallel.batch.CreatedWorkers(), parallel.peak_threads,
+            parallel.checks, parallel.parallel_batches, parallel.chunks, parallel.owner_invocations,
+            parallel.worker_invocations, parallel.small, parallel.observer, parallel.context_missing,
+            parallel.input_bounds, parallel.single_core, parallel.float_traps,
+            parallel.concurrent_memory, parallel.allocation_failures,
+            parallel.batch.StartupFailures(), parallel.proof_hits, parallel.proof_builds,
+            parallel.code_compares,
+            parallel.admissions[static_cast<std::size_t>(ParallelVertexStatus::Independent)],
+            parallel.admissions[static_cast<std::size_t>(ParallelVertexStatus::TemporaryCarry)],
+            parallel.admissions[static_cast<std::size_t>(ParallelVertexStatus::AddressCarry)],
+            parallel.admissions[static_cast<std::size_t>(ParallelVertexStatus::ConditionCarry)],
+            parallel.admissions[static_cast<std::size_t>(ParallelVertexStatus::OutputCarry)],
+            other_refusals);
+    }
+
     // AstraPro: Existing five-second/final cadence; no per-index clocks.
     // CodexAstraUlt Log Line: Replace AstraPro's blocking progress enqueue; totals stay reliable.
     LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
@@ -1529,7 +1655,111 @@ void PicaCore::LoadVertices(bool is_indexed, std::chrono::steady_clock::time_poi
             const auto diagnostic_shade = [&]<bool Sample>(u32 vertex, u32 index) {
                 return shade_with_run.template operator()<Sample>(vertex, index, run_diagnostic);
             };
-            if (timing_range) {
+            // CodexAstraLocal: Parallelize only established Native/Combo no-GS
+            // prepared-input draws. Calculated, debugger, geometry and timing
+            // observers keep their existing paths. Every refusal still runs the
+            // complete serial shader; no guest draw or input is dropped.
+            const auto try_parallel = [&]() {
+                const auto mode = Settings::values.uberhar_test_mode.GetValue();
+                if (mode != Settings::UberharTestMode::Native &&
+                    !Settings::UsesReadyGpuVertices(mode))
+                    return false;
+                if (parallel_allocation_failed)
+                    return false;
+                try {
+                    if (!parallel_vertices)
+                        parallel_vertices = std::make_unique<ParallelVertexState>();
+                } catch (const std::bad_alloc&) {
+                    parallel_allocation_failed = true;
+                    return false;
+                }
+                auto& parallel = *parallel_vertices;
+                ++parallel.checks;
+                if (timing_range || native_batch_sampled) { ++parallel.observer; return false; }
+                if (pipeline.num_vertices < 256) { ++parallel.small; return false; }
+                if (!context) { ++parallel.context_missing; return false; }
+                if (parallel.batch.Available() < 2) { ++parallel.single_core; return false; }
+                // CodexAstraLocal: The guest CPU/GSP command path is synchronous,
+                // but threaded DSP/RPC can write guest spans independently. Check
+                // constructed engines, not settings that may have since changed.
+                if (Core::System::GetInstance().HasConcurrentGuestMemoryWriters()) {
+                    ++parallel.concurrent_memory;
+                    return false;
+                }
+                // CodexAstraLocal: Enabled host FP traps retain serial fault
+                // ordering; worker sticky-flag merging alone cannot preserve it.
+                if (!Common::Uberhar::ParallelFloatEnvironment::AllowsParallel()) {
+                    ++parallel.float_traps;
+                    return false;
+                }
+                // CodexAstraLocal: Keep exact-index rescues on their established
+                // per-input escape check. This path requires the entire index
+                // domain to fit, so no worker may invoke the legacy memory loader.
+                if (maximum_vertex > std::numeric_limits<u32>::max() ||
+                    !input_plan.CanLoad(static_cast<u32>(maximum_vertex))) {
+                    ++parallel.input_bounds;
+                    return false;
+                }
+                // CodexAstraLocal: Validate and pin the full index span before
+                // parallel planning. The owner retains every memory reference,
+                // code and uniform until synchronous workers have joined.
+                MemoryRef parallel_indices;
+                if (is_indexed) {
+                    const u64 address = static_cast<u64>(base_address) + index_info.offset;
+                    if (address > std::numeric_limits<u32>::max()) {
+                        ++parallel.input_bounds;
+                        return false;
+                    }
+                    parallel_indices = memory.GetPhysicalRef(static_cast<PAddr>(address));
+                    if (!parallel_indices.GetPtr() ||
+                        static_cast<u64>(pipeline.num_vertices) * (index_u16 ? 2 : 1) >
+                            parallel_indices.GetSize()) {
+                        ++parallel.input_bounds;
+                        return false;
+                    }
+                }
+                try {
+                    const auto& proof = parallel.Get(vs_setup, regs.internal.vs.output_mask);
+                    ++parallel.admissions[static_cast<std::size_t>(proof.status)];
+                    if (!proof.Supported())
+                        return false;
+                    if (!parallel.batch.Prepare(pipeline.num_vertices)) {
+                        ++parallel.allocation_failures;
+                        parallel_allocation_failed = true;
+                        return false;
+                    }
+                } catch (const std::bad_alloc&) {
+                    ++parallel.allocation_failures;
+                    parallel_allocation_failed = true;
+                    return false;
+                }
+                // CodexAstraLocal: A proved-independent grain starts from the
+                // same zeroed per-draw state. Workers load immutable prepared
+                // inputs, run the unchanged JIT and convert disjoint outputs;
+                // only the owner touches FIFO discovery and primitive assembly.
+                counts = parallel.batch.Run(pipeline.num_vertices, is_indexed, vertex_at,
+                    [&](std::span<const NativeParallelBatch::Invocation> inputs,
+                        std::span<OutputVertex> outputs) {
+                        ShaderUnit independent;
+                        for (u32 i = 0; i < inputs.size(); ++i) {
+                            input_plan.Load(independent, input_default_attributes, inputs[i].vertex);
+                            context.Run(independent);
+                            outputs[i] = plan.Convert(independent);
+                        }
+                    }, submit);
+                const auto& work = parallel.batch.LastWork();
+                ++parallel.parallel_batches;
+                parallel.owner_invocations += work.owner_invocations;
+                parallel.worker_invocations += work.worker_invocations;
+                parallel.chunks += work.chunks;
+                parallel.peak_threads = std::max(parallel.peak_threads, work.peak_threads);
+                return true;
+            };
+            const bool parallel_completed = try_parallel();
+            if (parallel_completed) {
+                // CodexAstraLocal: Counts below consume the same actual FIFO
+                // misses/hits; completed parallel output must never execute twice.
+            } else if (timing_range) {
                 // CodexAstraLocal: Preserve the old sparse-admission cadence but
                 // suppress its whole batch consistently in boundary/detail modes.
                 // No old setup/vertex/draw counters receive partial new samples.

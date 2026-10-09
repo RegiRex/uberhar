@@ -238,6 +238,10 @@ public:
         return *dsp_core;
     }
 
+    // CodexAstraLocal: Owner-thread draw admission uses actual engine/job state,
+    // not settings or buffer pinning, before borrowing guest input across workers.
+    [[nodiscard]] bool HasConcurrentGuestMemoryWriters() const;
+
     [[nodiscard]] VideoCore::GPU& GPU();
 
     /**

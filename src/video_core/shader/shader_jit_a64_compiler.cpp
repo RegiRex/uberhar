@@ -117,6 +117,9 @@ constexpr XReg COND0 = X13;
 constexpr XReg COND1 = X14;
 /// Pointer to the UnitState instance for the current VS unit
 constexpr XReg STATE = X15;
+// CodexAstraLocal: Keep the active CALL end independent of SP changes made by
+// loops and helpers. The existing main ABI save/restore preserves caller X19.
+constexpr XReg RETURN_OFFSET = X19;
 /// Scratch registers
 constexpr XReg XSCRATCH0 = X4;
 constexpr XReg XSCRATCH1 = X5;
@@ -699,16 +702,16 @@ void JitShader::Compile_BREAKC(Instruction instr) {
 }
 
 void JitShader::Compile_CALL(Instruction instr) {
-    // Push offset of the return and link-register
-    MOV(XSCRATCH0, instr.flow_control.dest_offset + instr.flow_control.num_instructions);
-    STP(XSCRATCH0, X30, SP, POST_INDEXED, -16);
+    // CodexAstraLocal: Preserve the enclosing marker (including main's sentinel)
+    // with LR. Keep the existing reserved stack slot for post-indexed helpers.
+    STP(RETURN_OFFSET, X30, SP, POST_INDEXED, -16);
+    MOV(RETURN_OFFSET, instr.flow_control.dest_offset + instr.flow_control.num_instructions);
 
     // Call the subroutine
     BL(instruction_labels[instr.flow_control.dest_offset]);
 
-    // Restore the link-register
-    // Skip over the return offset that's on the stack
-    LDP(XZR, X30, SP, PRE_INDEXED, 16);
+    // CodexAstraLocal: A nested return restores both its caller's boundary and LR.
+    LDP(RETURN_OFFSET, X30, SP, PRE_INDEXED, 16);
 }
 
 void JitShader::Compile_CALLC(Instruction instr) {
@@ -912,9 +915,9 @@ void JitShader::Compile_Block(u32 end) {
 }
 
 void JitShader::Compile_Return() {
-    // Peek return offset on the stack and check if we're at that offset
-    LDR(XSCRATCH0, SP, 16);
-    CMP(XSCRATCH0.toW(), program_counter);
+    // CodexAstraLocal: Main must compare its sentinel, not saved host X19 at
+    // SP+16; a register also survives loop frames and EX2/LG2 stack workspace.
+    CMP(RETURN_OFFSET.toW(), program_counter);
 
     // If so, jump back to before CALL
     Label b;
@@ -995,12 +998,11 @@ void JitShader::Compile(const std::array<u32, MAX_PROGRAM_CODE_LENGTH>* program_
     // Find all `CALL` instructions and identify return locations
     FindReturnOffsets();
 
-    // The stack pointer is 8 modulo 16 at the entry of a procedure
-    // We reserve 16 bytes and assign a dummy value to the first 8 bytes, to catch any potential
-    // return checks (see Compile_Return) that happen in shader main routine.
+    // CodexAstraLocal: Retain the aligned 16-byte workspace used by CALL and
+    // helper saves, but keep main's nonmatching sentinel in saved register X19.
+    // Reading SP+16 here would instead inspect the caller's arbitrary X19 value.
     ABI_PushRegisters(*this, ABI_ALL_CALLEE_SAVED, 16);
-    MVN(XSCRATCH0, XZR);
-    STR(XSCRATCH0, SP, 8);
+    MVN(RETURN_OFFSET, XZR);
 
     MOV(UNIFORMS, ABI_PARAM1);
     MOV(STATE, ABI_PARAM2);

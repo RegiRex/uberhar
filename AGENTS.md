@@ -1,5 +1,39 @@
 # Uberhar development instructions
 
+<!-- CodexAstraLocal: The owner's latest October 9 follow-up removes the hard two-build limit for the primary multicore upgrade. -->
+- Continue beyond .35/.36 when needed to demonstrate meaningful use of available
+  CPU cores, improved throughput and no new division-of-work stalls, ordering or
+  buffering faults. Use evidence and engineering judgment for a resumable stopping
+  point. The earlier two-build boundary is superseded, while periodic progress
+  summaries and independent architecture/cleanliness reviews remain required.
+- Treat the suggested 70–100% aggregate CPU use as an aspiration, not a correctness
+  or performance definition: serial dependencies, synchronization and GPU work can
+  limit speed earlier. Report actual per-thread/core work, normal speed and stalls;
+  do not consume cycles merely to increase utilization. Root alone operates Thor.
+
+
+<!-- CodexAstraLocal: The owner's October 9 instruction starts a new two-build batch and makes portable multicore Native/Combo execution the primary objective. -->
+- Resume for the next two candidate builds, .35 and .36. Primary: substantially
+  parallelize Native and Combo CPU work using the CPUs available to the process,
+  adapting to six, eight or more cores instead of a fixed Thor-only worker count.
+  Preserve exact rendering, state carry and draw order; measure useful work and
+  speed rather than manufacturing utilization with polling or redundant work.
+- In parallel, a separate agent addresses the inherited ARM64 return contract as
+  second priority, and another develops independent Calculated rendering as third.
+  Neither unfinished secondary track must delay a validated multicore candidate;
+  keep unready changes isolated from the release. No Calculated device tests until
+  its implementation is ready to provide meaningful independent rendering.
+- Test Native and Combo once each per build, with the existing cold-cache/File 1,
+  Vulkan 2x, 100% limiter, temporal graphics and power/temperature conditions.
+  Root remains sole device operator. Collect CPU/thread activity to verify actual
+  worker use. Preserve saves, private artifacts, attribution and release gates.
+- After the two builds, report results and perform architecture plus separate
+  cleanliness/purpose-comment audits. If multicore changes cause a performance
+  drop or major new graphical faults, additional correction builds are authorized
+  after that progress summary. Otherwise stop for owner discussion. This replaces
+  the completed .33/.34 pause; it does not waive correctness or qualify .2.0.
+
+
 <!-- CodexAstraLocal: The owner's October 8 follow-up resumes two builds and requires real rendering-route isolation for Calculated tests. -->
 - Complete the next two candidate builds after .32 (.33 and .34), their device
   tests, then summarize results and perform systematic architecture and separate

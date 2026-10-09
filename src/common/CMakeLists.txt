@@ -99,6 +99,7 @@ add_library(citra_common STATIC EXCLUDE_FROM_ALL
     threadsafe_queue.h
     timer.cpp
     timer.h
+    uberhar_parallel_work.h # CodexAstraLocal: Joined, affinity-sized CPU shader workers.
     unique_function.h
     vector_math.h
     web_util.cpp

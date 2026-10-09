@@ -661,6 +661,22 @@ System::ResultStatus System::Init(Frontend::EmuWindow& emu_window,
     return ResultStatus::Success;
 }
 
+// CodexAstraLocal: Serial guest-core execution does not exclude DSP/RPC writers
+// or asynchronous IPC bodies such as directory reads. Pending jobs stay counted
+// until owner-thread completion; no new guest job starts inside the joined draw.
+bool System::HasConcurrentGuestMemoryWriters() const {
+    if (!dsp_core || dsp_core->MayWriteMemoryConcurrently() || !kernel ||
+        kernel->AreAsyncOperationsPending()) {
+        return true;
+    }
+#ifdef ENABLE_SCRIPTING
+    if (rpc_server) {
+        return true;
+    }
+#endif
+    return false;
+}
+
 VideoCore::GPU& System::GPU() {
     return *gpu;
 }

@@ -195,12 +195,19 @@ jobs:
           fi
 
       - name: Install build tools
+        # CodexAstraLocal: Execute the production ARM64 return/ABI contract under
+        # QEMU using the same NDK as the app before any candidate can be packaged.
         run: |
           sudo apt-get update
-          sudo apt-get install -y ccache ninja-build
+          sudo apt-get install -y ccache ninja-build qemu-user
           "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" \
             "platforms;android-35" "build-tools;35.0.0" \
             "ndk;27.3.13750724" "cmake;3.30.3"
+
+      - name: Execute ARM64 shader return contract
+        run: |
+          export ANDROID_NDK_HOME="$ANDROID_SDK_ROOT/ndk/27.3.13750724"
+          python3 tools/uberhar/test_shader_a64_return.py
 
       - name: Build Android ARM64
         working-directory: src/android
@@ -303,6 +310,20 @@ jobs:
         with:
           name: uberhar-build-log-${{ github.run_number }}
           path: uberhar-build.log
+          if-no-files-found: ignore
+          retention-days: 14
+
+      # CodexAstraLocal: Preserve synthetic execution/failure-control evidence
+      # even when the ARM contract gate stops a candidate before app packaging.
+      - name: Upload ARM64 shader contract evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: uberhar-arm64-shader-proof-${{ github.run_number }}
+          path: |
+            build/uberhar-probe/shader-a64-return/**/provenance.json
+            build/uberhar-probe/shader-a64-return/**/*.log
+            build/uberhar-probe/shader-a64-return/**/*.jsonl
           if-no-files-found: ignore
           retention-days: 14
 

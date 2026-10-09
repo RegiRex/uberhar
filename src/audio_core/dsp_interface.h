@@ -36,6 +36,12 @@ public:
     DspInterface& operator=(const DspInterface&) = delete;
     DspInterface& operator=(DspInterface&&) = delete;
 
+    // CodexAstraLocal: Unknown DSP engines cannot promise immutable guest memory
+    // during joined vertex work; concrete owner-thread engines opt in explicitly.
+    virtual bool MayWriteMemoryConcurrently() const {
+        return true;
+    }
+
     /**
      * Reads data from one of three DSP registers
      * @note this function blocks until the data is available

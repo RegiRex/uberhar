@@ -429,6 +429,11 @@ private:
     PrimitiveAssembler primitive_assembler;
     CommandList cmd_list;
     std::unique_ptr<ShaderEngine> shader_engine;
+    // CodexAstraLocal: Draw-synchronous CPU workers and bounded host certificates
+    // never enter guest save state; their borrowed jobs finish before each draw returns.
+    struct ParallelVertexState;
+    std::unique_ptr<ParallelVertexState> parallel_vertices;
+    bool parallel_allocation_failed{};
     // AstraEH: Window snapshots are host-only diagnostics and never enter save states.
     std::chrono::steady_clock::time_point virtual_window_start{};
     u64 virtual_vertex_invocations{}, virtual_vertex_hits{}, virtual_last_ns{},

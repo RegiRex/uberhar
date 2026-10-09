@@ -1,6 +1,42 @@
 <!-- AstraEH: Attribution index for the Uberhar implementation, tests, packaging and documentation. -->
 # Uberhar code map
 
+<!-- CodexAstraLocal: Map the multicore candidate's producers, consumers and
+correctness guards without crediting prototype Calculated work as shipped code. -->
+## 0.1.35 candidate — ordered multicore CPU vertices
+
+- `common/uberhar_parallel_work.h` owns sleeping workers, affinity-sized useful
+  participation, synchronous borrowed-job lifetime and complete supported host
+  floating controls/status. `pica/uberhar_vertex_parallel_batch.h` plans exact
+  FIFO misses in bounded chunks and consumes each result in original assembly
+  order. Actual miss populations below 256 remain owner-only.
+- `pica/uberhar_parallel_vertex.h` proves per-invocation state independence for
+  bounded acyclic shaders. `PicaCore` caches exact proofs, gates worker access to
+  prepared no-GS Native/Combo inputs and reports actual work/refusals. Unproved
+  paths retain full serial rendering. `ShaderSetup` revisions invalidate host
+  bindings after uploads and save-state loading without changing save formats.
+- `shader_jit.{h,cpp}` retains exact compiled-source snapshots and compares
+  collision buckets; two live revision bindings avoid repeated full comparisons.
+  `shader_jit_a64_compiler.cpp` replaces stack-relative CALL-boundary lookup with
+  a preserved register, keeping helper arithmetic and frame sizes unchanged.
+- `System::HasConcurrentGuestMemoryWriters` consumes actual DSP engine, scripting
+  server and pending asynchronous-job state. DSP interface/HLE/LLE getters describe
+  constructed engine behavior; this prevents immutable-buffer assumptions from
+  being inferred merely from settings or pinned allocations.
+- `test_parallel_work`, `test_parallel_batch`, `test_parallel_vertex`,
+  `test_parallel_cache` and `test_shader_jit_identity` exercise actual pool,
+  transport, JIT/interpreter, assembly and source-invalidation behavior with
+  independent oracles and deliberately broken controls. The NDK/QEMU
+  `test_shader_a64_return` gate executes the ARM64 return/ABI contract and actual
+  concurrent shared-JIT work before Android packaging. Workflow logs retain
+  synthetic evidence independently of signing and APK validation.
+- `test_parallel_memory` exercises the actual runtime query/getter/counter bodies
+  with modeled engine/job shells, including the completed-worker interval before
+  the owner delivers its result. It does not execute a DSP or scripting server.
+
+The separate Calculated triangle prototype remains private experimental work;
+it is not included in the .35 production candidate or counted as title coverage.
+
 <!-- CodexAstraLocal: Bind the two-build review and benchmark compiler correction to released .34 without changing emulator behavior in this documentation checkpoint. -->
 ## 0.1.34 review and benchmark correction
 

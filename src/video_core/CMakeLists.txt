@@ -35,6 +35,9 @@ add_library(video_core STATIC EXCLUDE_FROM_ALL
     pica/uberhar_vertex_cache.h
     pica/uberhar_vertex_output.h # AstraEH: Prepared native output and bounded CPU samples.
     pica/uberhar_vertex_plan_cache.h # AstraPro: Value-only Native mapping reuse.
+    # CodexAstraLocal: Certify independent invocations and preserve FIFO/assembly order across workers.
+    pica/uberhar_parallel_vertex.h
+    pica/uberhar_vertex_parallel_batch.h
     # CodexAstraLocal: Default-off finite owner-CPU/contiguous-loop observation.
     pica/uberhar_vertex_timing.h
     pica/uberhar_vertex_timing.cpp

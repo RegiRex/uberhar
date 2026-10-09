@@ -1,5 +1,40 @@
 # Architecture review ledger
 
+<!-- CodexAstraLocal: Record candidate reviews without prematurely advancing the released/tested anchor. -->
+The .35 multicore candidate has completed an independent architecture review and
+separate code-cleanliness/purpose review. The executed ARM64 return repair,
+exact JIT ownership/copy fix and actual concurrent-memory-writer guards also
+received independent review. Local native, host and NDK/QEMU checks pass, with
+the documented source-stability rerun. Remote release/package gates and Thor
+Native/Combo tests remain pending; .34 is still the released/tested audit anchor.
+The latest owner instruction permits further builds for meaningful multicore
+progress while retaining regular reports and reviews.
+
+
+<!-- CodexAstraLocal: The owner's latest October 9 follow-up removes the hard two-build limit for the primary multicore upgrade. -->
+- Continue beyond .35/.36 when needed to demonstrate meaningful use of available
+  CPU cores, improved throughput and no new division-of-work stalls, ordering or
+  buffering faults. Use evidence and engineering judgment for a resumable stopping
+  point. The earlier two-build boundary is superseded, while periodic progress
+  summaries and independent architecture/cleanliness reviews remain required.
+- Treat the suggested 70–100% aggregate CPU use as an aspiration, not a correctness
+  or performance definition: serial dependencies, synchronization and GPU work can
+  limit speed earlier. Report actual per-thread/core work, normal speed and stalls;
+  do not consume cycles merely to increase utilization. Root alone operates Thor.
+
+
+<!-- CodexAstraLocal: Record the owner's new multicore-first batch without changing completed .34 evidence. -->
+**Current: .35/.36 development resumed.** Priorities: portable multicore Native/Combo
+CPU execution, ARM64 return correctness, independent Calculated rendering. Root
+owns integration and exclusive device operations; parallel agents own shader
+independence analysis, ARM64 repair and Calculated implementation. Existing .34
+release remains installed; no new candidate is built or qualified yet. Test one
+Native and Combo opening per build; Calculated testing waits for meaningful
+implementation. After two builds complete results and separate audits; additional
+regression repairs are authorized after the summary. Historical stop text below
+is superseded by this owner instruction, not erased.
+
+
 <!-- CodexAstraLocal: Close the owner-requested two-successor audit earlier than the standing three-build cadence and record the explicit development stop. -->
 **Current batch status:** released .33 and .34 completed their required gates,
 compatible installations, single strict diagnostics and single Native/Combo Dark
