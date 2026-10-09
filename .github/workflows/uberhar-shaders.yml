@@ -113,3 +113,20 @@ jobs:
         env:
           LIBGL_ALWAYS_SOFTWARE: '1'
         run: /tmp/uberhar-test-env/bin/python tools/uberhar/test_compute_benchmark.py --render --require-vulkan --reuse-build
+
+      # CodexAstraLocal: Host compiler failures must retain the actual captured
+      # transport/assembly stderr, including when a control stops the probe.
+      - name: Upload CPU coordination contract evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: uberhar-host-coordination-proof-${{ github.run_number }}
+          path: |
+            build/uberhar-probe/parallel-transport/**/provenance.json
+            build/uberhar-probe/parallel-transport/**/*.stdout
+            build/uberhar-probe/parallel-transport/**/*.stderr
+            build/uberhar-probe/parallel-assembly/**/provenance.json
+            build/uberhar-probe/parallel-assembly/**/*.stdout
+            build/uberhar-probe/parallel-assembly/**/*.stderr
+          if-no-files-found: ignore
+          retention-days: 14

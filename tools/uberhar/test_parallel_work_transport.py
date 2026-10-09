@@ -14,6 +14,7 @@ from pathlib import Path
 import resource
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 
@@ -85,6 +86,15 @@ def main():
         proof['commands'].append({'name':name, 'argv':[str(x) for x in argv],
                                   'exit':process.returncode, 'seconds':time.monotonic()-started})
         save()
+        # CodexAstraLocal: CI must expose the first compiler diagnostic when a
+        # child fails; keep the console excerpt bounded and retain every byte.
+        if process.returncode != expected:
+            excerpt = process.stderr[:16384]
+            print(f'{name}: exit {process.returncode}, expected {expected}; '
+                  f'stderr excerpt {len(excerpt)}/{len(process.stderr)} bytes '
+                  f'(full: {out/(name+".stderr")})', file=sys.stderr)
+            if excerpt:
+                print(excerpt.decode('utf-8', errors='replace'), file=sys.stderr)
         require(process.returncode == expected, name+': unexpected exit; see retained stderr')
         if stdout is not None:
             require(process.stdout == stdout, name+': unexpected result')
@@ -92,17 +102,13 @@ def main():
             require(process.stderr == stderr, name+': unexpected diagnostic')
         return process
 
-    def build(name, text, source, before=None):
+    def build(name, text, source):
         directory = out/name
         (directory/'common').mkdir(parents=True)
         shadow = directory/'common/uberhar_parallel_work.h'
         shadow.write_text(text)
         argv = [str(compiler), '-std=c++20', '-O2', '-pthread', *flags,
                 '-I'+str(directory), '-I'+str(repo/'src')]
-        if before is not None:
-            prefix = directory/'before.h'
-            prefix.write_text(before)
-            argv += ['-include', str(prefix)]
         binary = directory/'fixture'
         argv += [str(source), '-o', str(binary)]
         command(name+'-compile', argv, stderr=None)
@@ -112,8 +118,8 @@ def main():
 
     raw = header.read_text()
     # CodexAstraLocal: Preserve all actual pool tests while selecting the CV
-    # branch, wrapping the generation, or removing only the syscall macro after
-    # the system header guard. This qualifies the compile fallback as well.
+    # branch, wrapping the generation, or hiding the syscall macro only after
+    # the pool's includes. A forced prefix also hid it from libstdc++ itself.
     variants = {
         'actual':raw,
         'cv':replace_once(raw, 'const bool use_futex{ParallelFutexWord::Available()};',
@@ -121,13 +127,15 @@ def main():
         'wrapped':replace_once(replace_once(raw, 'ParallelFutexWord generation;',
                                            'ParallelFutexWord generation{0xfffffffeU};'),
                                'std::uint32_t observed = 0;', 'std::uint32_t observed = 0xfffffffeU;'),
-        'no_sys_futex':raw,
+        'no_sys_futex':replace_once(raw, '\nnamespace Common::Uberhar {\n',
+            '\n// CodexAstraLocal: Simulate the pool compile fallback after standard\n'
+            '// headers have parsed their own platform-specific syscall paths.\n'
+            '#undef SYS_futex\n\nnamespace Common::Uberhar {\n'),
     }
     expected_pool = (b'parallel work PASS: 738 jobs; exact-once output, 1/2/6/8/12/17 '
                      b'participants, FP state, failure drain\n')
     for name, text in variants.items():
-        prefix = '#include <sys/syscall.h>\n#undef SYS_futex\n' if name == 'no_sys_futex' else None
-        child = build(name, text, regression, prefix)
+        child = build(name, text, regression)
         command(name+'-run', child, stdout=expected_pool, timeout=60)
 
     # CodexAstraLocal: The copied source preserves every owner/worker branch.
