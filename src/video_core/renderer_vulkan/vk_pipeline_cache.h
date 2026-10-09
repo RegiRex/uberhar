@@ -85,7 +85,7 @@ public:
                      const VideoCore::DiskResourceLoadCallback& callback = {});
 
     // CodexAstraLocal: A draw-local generation token carries selection lifetime
-    // across stream mapping; the post-draw stamp includes an intervening Flush.
+    // through actual enqueue; the post-draw stamp covers recorded GPU use.
     using CpuFragmentToken = ReadyCpuBank::Token;
     void CompleteReadyCpuDraw(CpuFragmentToken token);
     void RetireReadyCpuAfterWorkerDrain();

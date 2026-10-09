@@ -31,6 +31,34 @@ class ManifestValidationTest(unittest.TestCase):
     def test_standalone_release_is_accepted(self):
         self.assertEqual(validate(self.root, "0.0.2"), [])
 
+    # CodexAstraLocal: Current packaging requires profiling without allowing a
+    # debuggable build; historical manifests still use the original contract.
+    def test_requested_shell_profiling_requires_enabled_merged_flag(self):
+        with self.assertRaisesRegex(ValueError, "shell profiling"):
+            validate(self.root, "0.0.2", require_shell_profiling=True)
+        profile = ET.SubElement(self.app, "profileable", {ANDROID + "shell": "true"})
+        self.assertEqual(validate(self.root, "0.0.2", require_shell_profiling=True), [])
+        for field in ["shell", "enabled"]:
+            # CodexAstraLocal: Reject unresolved/resource values as well as
+            # explicit false; exercise both known-true decoded spellings.
+            for value in ["false", "0", "", "unknown", "@bool/profile_enabled"]:
+                with self.subTest(field=field, value=value):
+                    profile.set(ANDROID + field, value)
+                    with self.assertRaisesRegex(ValueError, "shell profiling"):
+                        validate(self.root, "0.0.2", require_shell_profiling=True)
+            for value in ["true", "1"]:
+                profile.set(ANDROID + field, value)
+                self.assertEqual(validate(self.root, "0.0.2", require_shell_profiling=True), [])
+        # CodexAstraLocal: Conflicting duplicate declarations must not pass by
+        # selecting the first flag, even when both individual flags are true.
+        duplicate = ET.SubElement(self.app, "profileable", {ANDROID + "shell": "true"})
+        with self.assertRaisesRegex(ValueError, "shell profiling"):
+            validate(self.root, "0.0.2", require_shell_profiling=True)
+        self.app.remove(duplicate)
+        self.app.set(ANDROID + "debuggable", "true")
+        with self.assertRaisesRegex(ValueError, "non-debuggable"):
+            validate(self.root, "0.0.2", require_shell_profiling=True)
+
     def test_test_only_and_debug_and_split_flags_are_rejected(self):
         for flag in ["testOnly", "debuggable", "isSplitRequired"]:
             with self.subTest(flag=flag):

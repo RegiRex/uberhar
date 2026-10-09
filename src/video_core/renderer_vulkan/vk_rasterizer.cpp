@@ -1077,6 +1077,19 @@ bool RasterizerVulkan::Draw(bool accelerate, bool is_indexed) {
     SyncAndUploadLUTsLF();
     UploadUniforms(accelerate);
 
+    // CodexAstraLocal: Map may submit the current tick while waiting for ring reuse.
+    // Reserve CPU storage before query/pass/pipeline setup, then commit below at
+    // the final draw tick; no other geometry Map intervenes on this CPU path.
+    const u32 vertex_count = accelerate ? 0 : static_cast<u32>(vertex_batch.size());
+    const u32 vertex_size = vertex_count * sizeof(HardwareVertex);
+    u8* vertex_data{};
+    u32 vertex_offset{};
+    if (!accelerate) {
+        const auto [buffer, offset, _] = stream_buffer.Map(vertex_size, sizeof(HardwareVertex));
+        vertex_data = buffer;
+        vertex_offset = offset;
+    }
+
     const auto draw_rect = fb_helper.DrawRect();
     // Configure viewport and scissor
     const auto viewport = fb_helper.Viewport();
@@ -1093,7 +1106,8 @@ bool RasterizerVulkan::Draw(bool accelerate, bool is_indexed) {
     // Queries must be reset outside a render pass; only measured test routes split it.
     if (compute_rect && compute_packet)
         timing_slot = compute_rect->ReserveSample(false, compute_packet->PixelCount());
-    // CodexAstraLocal: Preserve the selected owner across any stream-map Flush.
+    // CodexAstraLocal: Carry the selected optional owner through to its actual
+    // post-draw stamp; selecting a handle does not establish a queued draw.
     PipelineCache::CpuFragmentToken cpu_fragment_use{};
     const bool prebound = timing_slot >= 0;
     if (prebound) {
@@ -1149,19 +1163,17 @@ bool RasterizerVulkan::Draw(bool accelerate, bool is_indexed) {
             pipeline_cache.BindPipeline(pipeline_info, true, cpu_bridge.ready, true, nullptr,
                                         &software_layout, &cpu_fragment_use);
 
-        const u32 vertex_count = static_cast<u32>(vertex_batch.size());
-        const u32 vertex_size = vertex_count * sizeof(HardwareVertex);
-        const auto [buffer, offset, _] = stream_buffer.Map(vertex_size, sizeof(HardwareVertex));
-
-        std::memcpy(buffer, vertex_batch.data(), vertex_size);
+        // CodexAstraLocal: A pass change may have submitted since reservation.
+        // Keep the original bytes and stamp their allocation after final binding.
+        std::memcpy(vertex_data, vertex_batch.data(), vertex_size);
         stream_buffer.Commit(vertex_size);
 
-        scheduler.Record([this, offset = offset, vertex_count](vk::CommandBuffer cmdbuf) {
+        scheduler.Record([this, offset = vertex_offset, vertex_count](vk::CommandBuffer cmdbuf) {
             cmdbuf.bindVertexBuffers(0, stream_buffer.Handle(), offset);
             cmdbuf.draw(vertex_count, 1, 0, 0);
         });
-        // CodexAstraLocal: Stamp after actual draw enqueue; selection alone can
-        // precede a stream wait that advances the submission tick.
+        // CodexAstraLocal: Stamp after actual draw enqueue so optional pipeline
+        // ownership covers recorded GPU use, beyond the earlier selection.
         if (cpu_fragment_use) pipeline_cache.CompleteReadyCpuDraw(cpu_fragment_use);
     }
 

@@ -2,7 +2,7 @@
 """AstraEH: Check the final decoded APK manifest for known install/conflict risks."""
 
 from pathlib import Path
-import sys
+import argparse  # CodexAstraLocal: Explicit new-build profiling contract; old manifests remain readable.
 import xml.etree.ElementTree as ET
 
 ANDROID = "{http://schemas.android.com/apk/res/android}"
@@ -20,7 +20,7 @@ PERMISSIONS = {
 }
 
 
-def validate(root, version):
+def validate(root, version, *, require_shell_profiling=False):
     def require(condition, message):
         if not condition:
             raise ValueError(message)
@@ -43,6 +43,17 @@ def validate(root, version):
     require(app is not None, "Missing application")
     require(not enabled(app, "testOnly"), "testOnly blocks normal Android installation")
     require(not enabled(app, "debuggable"), "Published APK must use the non-debuggable release build")
+    # CodexAstraLocal: New CPU experiments need actual optimized-release sampling.
+    # Require the merged flavor flag only when requested by current packaging;
+    # historical APK inspection retains the existing installation contract.
+    if require_shell_profiling:
+        profiles = app.findall("profileable")
+        # CodexAstraLocal: A resolved true value proves shell access; unknown or
+        # resource-valued booleans must not silently satisfy the packaging gate.
+        require(len(profiles) == 1 and
+                profiles[0].get(ANDROID + "shell") in {"true", "1"} and
+                profiles[0].get(ANDROID + "enabled", "true") in {"true", "1"},
+                "Missing enabled shell profiling")
     require(not enabled(app, "isSplitRequired"), "APK requires unavailable splits")
     require(enabled(app, "extractNativeLibs", True), "Native library extraction is required for driver loading")
     require(app.get(ANDROID + "name") == "org.citra.citra_emu.CitraApplication", "Wrong application entry point")
@@ -74,10 +85,20 @@ def validate(root, version):
 
 
 if __name__ == "__main__":
+    # CodexAstraLocal: A named opt-in keeps older two-argument validation callers
+    # compatible while CI binds profiling readiness to the actual merged APK.
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("manifest", type=Path)
+    parser.add_argument("version")
+    parser.add_argument("--require-shell-profiling", action="store_true")
+    args = parser.parse_args()
     try:
-        permissions = validate(ET.parse(Path(sys.argv[1])).getroot(), sys.argv[2])
+        permissions = validate(ET.parse(args.manifest).getroot(), args.version,
+                               require_shell_profiling=args.require_shell_profiling)
     except (ValueError, ET.ParseError) as error:
         raise SystemExit(str(error))
     print("PASS: standalone non-test-only release APK; identity, SDK, entry point and authorities checked")
     print("PASS: permissions match the reviewed upstream/AndroidX set")
+    if args.require_shell_profiling:
+        print("PASS: optimized release enables explicit system-shell profiling")
     print("\n".join(permissions))

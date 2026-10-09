@@ -1129,8 +1129,8 @@ GraphicsPipeline* PipelineCache::PrepareReadyCpuFragment(
     return nullptr;
 }
 
-// CodexAstraLocal: A stream-buffer Map can Flush after binding. Only this actual
-// post-enqueue tick plus the earlier bind tick protect the full recorded use.
+// CodexAstraLocal: Preserve both the selection tick and actual post-enqueue tick
+// so optional ownership covers the recorded bind and draw, not selection alone.
 void PipelineCache::CompleteReadyCpuDraw(CpuFragmentToken token) {
     if (ready_cpu_bank && token) ready_cpu_bank->DrawQueued(token, scheduler.CurrentTick());
 }

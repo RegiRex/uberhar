@@ -1,9 +1,49 @@
 <!-- AstraEH: Attribution index for the Uberhar implementation, tests, packaging and documentation. -->
 # Uberhar code map
 
+<!-- CodexAstraLocal: Attribute the unreleased register-preparation reduction and its actual inherited-layout consumer tests. -->
+## 0.1.38 candidate — preparation, order and explicit profiling
+
+- `PipelineRegs` reads the requested format, element-count or loader-component
+  field directly from its little-endian packed word, replacing twelve-element
+  temporary arrays. Byte copies preserve representation without a new union
+  alias; compile-time word-size checks guard the copied extent. The valid index
+  domain, one-based element count and padding identifiers remain unchanged.
+- `test_vertex_register_decode.{cpp,py}` compares the actual loader against its
+  inherited array decoders using synthetic aligned memory. It covers every
+  nibble value/position, randomized reserved bits, duplicate mappings, defaults,
+  absent attributes, padding, overflow-component logging and live memory changes.
+  Exact initialized descriptors and loaded values must match across 8,192 layouts
+  and 24,576 loads; three broken field decoders must fail semantic checks.
+- `build_probe.sh` runs the host contract. The existing ARM64 observable-vertex
+  workflow step runs it with the app NDK and QEMU. Both workflows retain source
+  digests, compiler diagnostics and compared synthetic binary outputs on failure.
+  These gates contain no performance workload or private game data.
+- Private compiler inspection and bounded Thor constructor probes support this
+  small preparation change. Neither instruction count nor synthetic timings
+  establish a complete-title gain, heavier multicore use or 99% normal speed.
+
+- `RasterizerVulkan::Draw` reserves CPU geometry before final sample,
+  render-pass and pipeline setup, but copies/commits after final binding so its
+  watch protects the actual draw tick. This removes a reproduced conditional
+  command-order gap without repeating pipeline selection or changing draw bytes.
+  Optional fragment completion retains its actual post-enqueue stamp. Other
+  cached-buffer and accelerated/presentation lifetime obligations remain separate.
+- `test_vulkan_stream_order.{cpp,py}` runs extracted allocation, submission,
+  render-pass, sample and draw seams against recording endpoints. Unique payloads,
+  tick changes, optional owner counts and late-Map/early-Commit failures guard the
+  CPU correction; this host gate is not a real Vulkan-driver or title test.
+- `src/android/app/src/uberhar/AndroidManifest.xml` enables explicit Android shell
+  profiling only for the Uberhar flavor. No capture starts by itself and release
+  optimization/non-debuggable checks remain. `validate_manifest.py` optionally
+  requires this merged flag for current packaging while accepting historical
+  manifests under its original contract. Existing native symbols are retained.
+- The plain version value advances to .38. No new worker transport, participant
+  context reuse, arithmetic change or Calculated prototype is included.
+
 <!-- CodexAstraLocal: Map .37 coordination/assembly reductions and bounded
 measurement to actual consumers, retained fallbacks and correctness gates. -->
-## 0.1.37 candidate — cheaper ordered CPU batches
+## 0.1.37 delivered — cheaper ordered CPU batches
 
 - `common/uberhar_parallel_work.h` selects aligned compiler-atomic futex words on
   supported Linux/Android, with the inherited condition-variable path otherwise.

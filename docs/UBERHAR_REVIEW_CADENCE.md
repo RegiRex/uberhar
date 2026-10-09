@@ -1,16 +1,21 @@
 # Architecture review ledger
 
-<!-- CodexAstraLocal: Count .36 only after gated delivery and its two completed
-controls; this focused implementation/device review is not a new full anchor. -->
-Released **.36** is the **second successful successor** to the full .34 audit.
-Its gates, compatible installation, single Native/Combo controls and independent
-numerical/temporal reviews are complete. The [test review](UBERHAR_TEST_REVIEW_0.1.36.md)
-records broad parallel admission but unmet CPU/speed goals and bounded visual
-findings. Next full architecture/correctness/performance review plus a separate
-cleanliness/purpose-comment audit is due after .37, or earlier for contradictory
-evidence. The current dispatch candidate remains unpublished. Older checkpoints
-below retain their historical status; none restores an expired two-build stop.
+<!-- CodexAstraLocal: Close the third-successor review against actual delivered source and reset only the successful-build cadence. -->
+The new full-review anchor is **released .37**, source
+`f6e0d88842ff8204e112a7368035e4565848146d`, with **zero successful successors**.
+The separate [architecture](UBERHAR_ARCHITECTURE_0.1.37.md),
+[cleanliness](UBERHAR_CLEANLINESS_0.1.37.md) and [test](UBERHAR_TEST_REVIEW_0.1.37.md)
+reviews close .35–.37: exact delivery, 27 gates, compatible installation and one
+cold Native/Combo control per build. The failed first .37 workflow is retained
+and does not count as another successor. Documentation closure is not a build.
 
+Native remains far below 99% and its moon-event count crosses the investigation
+threshold. The bounded Native cutoff, interrupted first Combo CPU capture,
+unobserved scenes and lack of causal performance comparison remain explicit.
+Private follow-up controls do not qualify delivered title behavior. Continue
+useful CPU work with focused independent reviews before release and another full
+review after three successful successors, or earlier for contradictory evidence.
+Historical stop/anchor text below does not override this current checkpoint.
 
 <!-- CodexAstraLocal: Count the delivered .35 successor while preserving
 independent code reviews and the measured shortfall as separate evidence. -->

@@ -88,6 +88,10 @@ python3 tools/uberhar/test_download_recovery.py
 # CodexAstraUlt: Verify real resource reuse/failed-allocation cleanup and event-only memory counters.
 python3 tools/uberhar/test_resource_pool_reuse.py
 python3 tools/uberhar/test_stream_buffer_ownership.py
+# CodexAstraLocal: A CPU upload wait must precede final pass/pipeline setup,
+# while Commit retains the final draw tick. Recording controls require both
+# late-Map and early-Commit defects to fail; this is not Vulkan/pixel execution.
+python3 tools/uberhar/test_vulkan_stream_order.py
 c++ -std=c++20 -O2 -pthread -Isrc tools/uberhar/test_memory_diagnostics.cpp \
   -o build/uberhar-probe/test-memory-diagnostics
 timeout 30s build/uberhar-probe/test-memory-diagnostics
@@ -235,6 +239,9 @@ build/uberhar-probe/test-vertex-input
 # interpreter/JIT carry, FIFO/output/assembly and exact once-per-draw usage counts.
 # This synthetic gate requires both semantic and actual-source failing controls.
 python3 tools/uberhar/test_vertex_input_recipes.py --mutants
+# CodexAstraLocal: Packed register reads must preserve inherited loader layouts
+# and live input bytes, including defaults, padding and malformed component counts.
+python3 tools/uberhar/test_vertex_register_decode.py
 
 # AstraPro: Optional GPU eligibility, real winding/assembly and framebuffer ownership must be exact.
 c++ -std=c++20 -O2 -DFMT_HEADER_ONLY -DXXH_INLINE_ALL \

@@ -5,6 +5,7 @@
 #pragma once
 
 #include <array>
+#include <cstring> // CodexAstraLocal: Endian-aware packed-field copies.
 #include "common/assert.h"
 #include "common/bit_field.h"
 #include "common/common_funcs.h"
@@ -78,16 +79,29 @@ struct PipelineRegs {
         };
 
         VertexAttributeFormat GetFormat(std::size_t n) const {
-            VertexAttributeFormat formats[] = {format0, format1, format2,  format3,
-                                               format4, format5, format6,  format7,
-                                               format8, format9, format10, format11};
-            return formats[n];
+            // CodexAstraLocal: Decode only the requested packed field. Preserve
+            // little-endian storage and valid-index semantics without a 12-entry array.
+            static_assert(sizeof(format0) == sizeof(u32_le) && sizeof(format8) == sizeof(u32_le));
+            u32_le packed;
+            if (n < 8) {
+                std::memcpy(&packed, &format0, sizeof(packed));
+            } else {
+                std::memcpy(&packed, &format8, sizeof(packed));
+            }
+            return static_cast<VertexAttributeFormat>((static_cast<u32>(packed) >> ((n % 8) * 4)) & 3U);
         }
 
         u32 GetNumElements(std::size_t n) const {
-            u32 sizes[] = {size0, size1, size2, size3, size4,  size5,
-                           size6, size7, size8, size9, size10, size11};
-            return sizes[n] + 1;
+            // CodexAstraLocal: Read the encoded two-bit size directly; the
+            // inherited element-count bias remains exactly one.
+            static_assert(sizeof(size0) == sizeof(u32_le) && sizeof(size8) == sizeof(u32_le));
+            u32_le packed;
+            if (n < 8) {
+                std::memcpy(&packed, &size0, sizeof(packed));
+            } else {
+                std::memcpy(&packed, &size8, sizeof(packed));
+            }
+            return ((static_cast<u32>(packed) >> ((n % 8) * 4 + 2)) & 3U) + 1;
         }
 
         u32 GetElementSizeInBytes(std::size_t n) const {
@@ -138,9 +152,16 @@ struct PipelineRegs {
             };
 
             u32 GetComponent(std::size_t n) const {
-                u32 components[] = {comp0, comp1, comp2, comp3, comp4,  comp5,
-                                    comp6, comp7, comp8, comp9, comp10, comp11};
-                return components[n];
+                // CodexAstraLocal: Select one component nibble while retaining
+                // the original 0..11 caller domain and padding identifiers 12..15.
+                static_assert(sizeof(comp0) == sizeof(u32_le) && sizeof(comp8) == sizeof(u32_le));
+                u32_le packed;
+                if (n < 8) {
+                    std::memcpy(&packed, &comp0, sizeof(packed));
+                } else {
+                    std::memcpy(&packed, &comp8, sizeof(packed));
+                }
+                return (static_cast<u32>(packed) >> ((n % 8) * 4)) & 15U;
             }
         } attribute_loaders[12];
     } vertex_attributes;

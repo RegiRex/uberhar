@@ -116,6 +116,10 @@ jobs:
 
       # CodexAstraLocal: Host compiler failures must retain the actual captured
       # transport/assembly stderr, including when a control stops the probe.
+      # CodexAstraLocal: Preserve host decoder failures and exact input/output
+      # digests alongside the other prerequisite CPU contracts.
+      # CodexAstraLocal: Retain source-derived stream-order compile and mutation
+      # evidence so a CI-only command-order failure remains inspectable.
       - name: Upload CPU coordination contract evidence
         if: always()
         uses: actions/upload-artifact@v7
@@ -128,5 +132,12 @@ jobs:
             build/uberhar-probe/parallel-assembly/**/provenance.json
             build/uberhar-probe/parallel-assembly/**/*.stdout
             build/uberhar-probe/parallel-assembly/**/*.stderr
+            build/uberhar-probe/vertex-register-decode/**/provenance.json
+            build/uberhar-probe/vertex-register-decode/**/*.stdout
+            build/uberhar-probe/vertex-register-decode/**/*.stderr
+            build/uberhar-probe/vertex-register-decode/**/*.output.bin
+            build/uberhar-probe/vulkan-stream-order/**/provenance.json
+            build/uberhar-probe/vulkan-stream-order/**/*.stdout
+            build/uberhar-probe/vulkan-stream-order/**/*.stderr
           if-no-files-found: ignore
           retention-days: 14
