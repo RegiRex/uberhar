@@ -58,10 +58,18 @@ jobs:
       # lighting-fog output when a clean later draw outlives its allocation tick.
       - name: Execute Vulkan cached buffer lifetime
         run: |
+          # CodexAstraLocal: Mesa packages use either the current unsuffixed
+          # Lavapipe manifest or the older architecture-suffixed filename.
+          # Require an installed software ICD instead of skipping the gate.
+          uberhar_lvp_icd=/usr/share/vulkan/icd.d/lvp_icd.json
+          if [ ! -r "$uberhar_lvp_icd" ]; then
+            uberhar_lvp_icd=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+          fi
+          test -r "$uberhar_lvp_icd"
           python3 tools/uberhar/test_cached_buffer_lifetime_vulkan.py \
             --glslang "$(command -v glslangValidator)" \
             --spirv-val "$(command -v spirv-val)" \
-            --icd /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+            --icd "$uberhar_lvp_icd"
       - name: Validate Vulkan fragment modules
         # AstraEH: Both user-selectable frontend optimizer modes must preserve
         # valid Vulkan modules and the compact TEV loop's no-unroll hint.
