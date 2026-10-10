@@ -1,6 +1,16 @@
 <!-- CodexAstraLocal: Reconcile concrete architecture proposals with their executed evidence, retaining useful negative results and identifying work that has never received a hardware test. -->
 # Architecture experiment ledger through 0.1.40
 
+<!-- CodexAstraLocal: Latest executed outcomes supersede the historical proposal status below without discarding that history. -->
+## Update through .42 and the .43 candidate
+
+| Track | Actual new evidence | Remaining limit |
+| --- | --- | --- |
+| Cached buffer last-use protection | Shipped .41; owner visually accepts Dark Moon 2x/4x with timings on. | Unmatched manual comparison; no isolated causal speed claim. |
+| Native/Combo redundant queue barriers | Shipped and title-tested .42; multiple packets and six participants observed, Native 24,374 auxiliary packets in interior reports. | Native mean69.061%, Combo64.865%; pool CPU share small and99% target unmet. |
+| Android CPU Software | Shipped .42, attempted on Thor; startup stops before game submissions on invalid LCD span. | No gameplay qualification. .43 scanout fix under development. |
+| Independent Calculated | Integrated .43 candidate compiles; actual connected Vulkan owners pass retained output, persistent state/clipping and12 resource cases. | Not yet released or tested on Thor; explicit unsupported states and synchronous costs remain. |
+
 **The hypotheses have not all been tested.** Several changes shipped and were
 exercised on Thor; several correct private implementations have only host cost
 evidence; others remain source designs. In particular, cached uniform/LUT

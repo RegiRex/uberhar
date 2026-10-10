@@ -1380,6 +1380,27 @@ void PicaCore::SubmitImmediate(u32 value) {
 void PicaCore::DrawImmediate() {
     // CodexAstraLocal: Immediate assembly consumes the same persistent state.
     ReconcileDeferredVertices();
+    // CodexAstraLocal: Each immediate input starts its own compute ShaderUnit
+    // lifetime, but shares the actual PICA primitive tail with array draws.
+    // Only original command attributes cross this entry; no CPU shader runs.
+    if (Settings::RequiresComputeOnly(Settings::values.uberhar_test_mode.GetValue())) {
+        if (debug_context || regs.internal.pipeline.use_gs != PipelineRegs::UseGS::No ||
+            primitive_assembler.GetTopology() != regs.internal.pipeline.triangle_topology)
+            throw VideoCore::ShaderRecoveryError(
+                "Calculated immediate input requires a matching topology without guest geometry");
+        if (Core::System::GetInstance().HasConcurrentGuestMemoryWriters())
+            throw VideoCore::ShaderRecoveryError(
+                "Calculated immediate snapshot requires no concurrent guest memory writer");
+        if (immediate.reset_geometry_pipeline) geometry_pipeline.Reconfigure();
+        const auto before = primitive_assembler.ExportComputeState();
+        ComputeAssemblyResult completed;
+        if (!rasterizer->DrawComputeBatch(false, before, completed, &immediate.input_vertex) ||
+            !primitive_assembler.CommitComputeState(completed))
+            throw VideoCore::ShaderRecoveryError("Calculated immediate backend/state unavailable");
+        immediate.reset_geometry_pipeline = false;
+        immediate.current_attribute = 0;
+        return;
+    }
     // Compile the vertex shader.
     shader_engine->SetupBatch(vs_setup, regs.internal.vs.main_offset);
 
@@ -1475,6 +1496,29 @@ void PicaCore::DrawArrays(bool is_indexed) {
     // Add vertices to the delay generator.
     delay_generator.AddVertices(regs.internal.pipeline.num_vertices,
                                 regs.internal.pipeline.triangle_topology);
+
+    // CodexAstraLocal: Independent compute owns the whole original-input draw.
+    // Persistent List/Strip/Fan/Shader state is snapshotted and committed only
+    // after whole-batch success. No refusal reaches LoadVertices or Native.
+    if (Settings::RequiresComputeOnly(Settings::values.uberhar_test_mode.GetValue())) {
+        ReconcileDeferredVertices();
+        const auto topology = primitive_assembler.GetTopology();
+        if (debug_context || regs.internal.pipeline.use_gs != PipelineRegs::UseGS::No ||
+            topology != regs.internal.pipeline.triangle_topology)
+            throw VideoCore::ShaderRecoveryError(
+                "Calculated requires a matching persistent topology without guest geometry");
+        if (Core::System::GetInstance().HasConcurrentGuestMemoryWriters())
+            throw VideoCore::ShaderRecoveryError(
+                "Calculated original input snapshot requires no concurrent guest memory writer");
+        if (!regs.internal.pipeline.num_vertices) return;
+        geometry_pipeline.Reconfigure();
+        const auto before = primitive_assembler.ExportComputeState();
+        ComputeAssemblyResult completed;
+        if (!rasterizer->DrawComputeBatch(is_indexed, before, completed) ||
+            !primitive_assembler.CommitComputeState(completed))
+            throw VideoCore::ShaderRecoveryError("Calculated original-input backend unavailable");
+        return;
+    }
 
     // AstraPro: Combo can promote complete no-GS lists to already-ready GPU
     // vertices. A false return still executes the full CPU batch below. Never

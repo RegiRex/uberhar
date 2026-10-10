@@ -49,6 +49,9 @@ add_library(video_core STATIC EXCLUDE_FROM_ALL
     pica/output_vertex.h
     pica/primitive_assembly.cpp
     pica/primitive_assembly.h
+    # CodexAstraLocal: Value-owned semantic tails cross the compute boundary;
+    # the existing serialized PICA assembler remains the only persistent owner.
+    pica/compute_assembly.h
     pica/regs_external.h
     pica/regs_framebuffer.h
     pica/regs_internal.cpp
@@ -90,6 +93,10 @@ add_library(video_core STATIC EXCLUDE_FROM_ALL
     shader/debug_data.h
     shader/generator/glsl_fs_shader_gen.cpp
     shader/generator/glsl_fs_shader_gen.h
+    # CodexAstraLocal: Independent original-input compute translation reuses
+    # the production guest decompiler; it is not a graphics vertex fallback.
+    shader/generator/glsl_compute_vertex_shader_gen.cpp
+    shader/generator/glsl_compute_vertex_shader_gen.h
     shader/generator/glsl_shader_decompiler.cpp
     shader/generator/glsl_shader_decompiler.h
     shader/generator/glsl_shader_gen.cpp
@@ -198,6 +205,15 @@ if (ENABLE_VULKAN)
         # AstraEH: Startup-compiled compute subset and measured automatic routing.
         renderer_vulkan/vk_compute_rect.cpp
         renderer_vulkan/vk_compute_rect.h
+        # CodexAstraLocal: Original guest shading, ordered compute fragments and
+        # native-format transfers share the existing Vulkan resource ownership.
+        renderer_vulkan/vk_compute_raster.cpp
+        renderer_vulkan/vk_compute_raster.h
+        renderer_vulkan/uberhar_compute_raster_shader.h
+        renderer_vulkan/uberhar_compute_target_format.h
+        renderer_vulkan/uberhar_compute_shadow.h
+        renderer_vulkan/vk_compute_vertex.cpp
+        renderer_vulkan/vk_compute_vertex.h
         # CodexAstraLocal: Default-off fixed scratch comparison shares actual
         # compute commands but owns its request, pipelines, queries and readbacks.
         renderer_vulkan/uberhar_compute_benchmark.h

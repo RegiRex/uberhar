@@ -297,9 +297,9 @@
     <string name="uberhar_test_native">Virtual PICA: native rasterization</string>
     <!-- CodexAstraLocal: Native retains CPU vertices and can now select ready static texture-combiner shaders; pending work still renders through the complete generic path. -->
     <string name="uberhar_test_native_description">Prototype: uses CPU shader translation with generic or ready texture-combiner fragment shaders. First-use CPU and GPU compilation can still pause. Restart the game after changing.</string>
-    <!-- CodexAstraLocal: The owner requires isolated Calculated testing; make disabled recovery and incomplete output visible before selecting this mode. -->
-    <string name="uberhar_test_compute">Virtual PICA: Calculated (isolated test)</string>
-    <string name="uberhar_test_compute_description">Test only: Native rendering fallback is disabled. Only supported rectangles render; games can appear incomplete or blank. Coverage is recorded in the log. Restart the game after changing.</string>
+    <!-- CodexAstraLocal: Calculated now renders guest triangles independently; disclose experimental support and terminal failures before selection. -->
+    <string name="uberhar_test_compute">Virtual PICA: Calculated (experimental)</string>
+    <string name="uberhar_test_compute_description">Experimental Vulkan compute rendering with no Native fallback. Unsupported graphics stop emulation and record an error. Performance and game compatibility are still under evaluation. Restart the game after changing.</string>
     <string name="uberhar_test_auto">Virtual PICA: automatic combination</string>
     <!-- AstraPro: Combo now opts into ready-only GPU vertices; not full compute. -->
     <!-- CodexAstraLocal: Describe the added CPU-vertex fragment tier without claiming Native remains generic-only or promising a measured speedup. -->
@@ -1177,6 +1177,7 @@
     <string name="log_export_older">Older log</string>
     <string name="log_session_storage_warning">A log write or flush failed. Existing text logs may still be available. Export important logs before deleting files or clearing app data.</string>
     <string name="uberhar_renderer_stopped">Rendering stopped</string>
-    <string name="uberhar_renderer_stopped_description">Uberhar could not obtain a working shader and stopped this game. Export the current text log to help investigate the failure. Additional evidence may be saved in log/crashes after restarting Uberhar.</string>
+    <!-- CodexAstraLocal: Shader recovery also carries Software framebuffer and Calculated resource errors; describe the shared failure without misidentifying its cause. -->
+    <string name="uberhar_renderer_stopped_description">Uberhar encountered a rendering error and stopped this game. Export the current text log to help investigate the failure. Additional evidence may be saved in log/crashes after restarting Uberhar.</string>
     <!-- AstraEH: Keep incident evidence off the ordinary current/previous/older log list. -->
 </resources>

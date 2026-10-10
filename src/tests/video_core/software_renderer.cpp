@@ -89,6 +89,19 @@ TEST_CASE("Software LCD capture bounds rotation formats and eyes", "[software]")
         for (u32 i = 0; i < order.size(); ++i)
             CHECK(std::memcmp(captured.pixels.data() + i * 4, colors[order[i]].AsArray(), 4) == 0);
         CHECK_THROWS_AS(SwRenderer::CaptureScreen(fb, fill, std::span<const u8>{input}.first(input.size()-1)), VideoCore::ShaderRecoveryError);
+        // CodexAstraLocal: Format/stride are independent guest register writes.
+        // A wider width register must use the same bounded visible row as the
+        // accelerated displays, preserving rotation without reading the next row.
+        std::vector<u8> compact(6 * bpp);
+        for (u32 row = 0; row < 3; ++row)
+            std::memcpy(compact.data() + row * 2 * bpp, input.data() + row * fb.stride, 2 * bpp);
+        fb.width.Assign(3); fb.stride = 2 * bpp;
+        const auto narrow = SwRenderer::CaptureScreen(fb, fill, compact);
+        CHECK(narrow.width == 2); CHECK(narrow.height == 3);
+        CHECK(narrow.pixels == captured.pixels);
+        CHECK_THROWS_AS(SwRenderer::CaptureScreen(fb, fill, std::span<const u8>{compact}.first(compact.size()-1)), VideoCore::ShaderRecoveryError);
+        CHECK_THROWS_AS(SwRenderer::CaptureScreen(fb, fill, {}), VideoCore::ShaderRecoveryError);
+        fb.width.Assign(2);
     }
     fb.address_left1 = 8; fb.address_left2 = 16; fb.address_right1 = 24; fb.address_right2 = 32;
     CHECK(SwRenderer::ScreenAddress(fb, false) == 8); CHECK(SwRenderer::ScreenAddress(fb, true) == 24);
@@ -97,8 +110,49 @@ TEST_CASE("Software LCD capture bounds rotation formats and eyes", "[software]")
     fb.address_right1 = 0;
     CHECK(SwRenderer::ScreenAddress(fb, true) == 16);
     fill.is_enabled.Assign(1); fill.color_r.Assign(17); fill.color_g.Assign(34); fill.color_b.Assign(51);
+    fb.format = 7; fb.stride = 0;
     CHECK(SwRenderer::CaptureScreen(fb, fill, {}).pixels == std::vector<u8>{17,34,51,255});
 }
+
+#ifndef UBERHAR_SOFTWARE_HELPER_PROBE
+TEST_CASE("Software LCD startup register transitions", "[software][software-startup]") {
+    // CodexAstraLocal: Exercise actual PICA boot registers and physical VRAM,
+    // followed by separate format/stride writes before the first guest draw.
+    // This is a source-defined startup transition, not a claimed Thor register dump.
+    Core::System system;
+    Memory::MemorySystem memory{system};
+    Pica::PicaCore pica{memory,{}};
+    for (u32 buffer = 0; buffer < 2; ++buffer) {
+        for (u32 screen = 0; screen < 3; ++screen) {
+            auto& fb = pica.regs.framebuffer_config[screen == 2 ? 1 : 0];
+            fb.active_fb = buffer;
+            const auto ref = memory.GetPhysicalRef(SwRenderer::ScreenAddress(fb, screen == 1));
+            REQUIRE(ref.GetPtr() != nullptr);
+            const auto capture = [&](const Pica::ColorFill& fill = {}) {
+                return SwRenderer::CaptureScreen(fb, fill, {ref.GetPtr(), ref.GetSize()});
+            };
+            fb.color_format.Assign(Pica::PixelFormat::RGB8); fb.stride = 720;
+            auto image = capture();
+            CHECK(image.width == 240); CHECK(image.height == (screen == 2 ? 320 : 400));
+            CHECK(image.pixels.size() == static_cast<std::size_t>(image.width) * image.height * 4);
+            // A format change can arrive before its stride update. Both existing
+            // accelerated displays use min(width, stride / bytes_per_pixel).
+            fb.color_format.Assign(Pica::PixelFormat::RGBA8);
+            image = capture();
+            CHECK(image.width == 180); CHECK(image.height == (screen == 2 ? 320 : 400));
+            fb.stride = 960;
+            image = capture();
+            CHECK(image.width == 240);
+            // Empty visible rectangles require no memory. Once nonempty again,
+            // unmapped storage still fails with the actual dimensions and span.
+            fb.stride = 0;
+            CHECK(capture().pixels.empty());
+            fb.stride = 960;
+            CHECK_THROWS_AS(SwRenderer::CaptureScreen(fb, {}, {}), VideoCore::ShaderRecoveryError);
+        }
+    }
+}
+#endif
 
 TEST_CASE("Software ordinary mip filters and signed border taps", "[software]") {
     auto config = Sampler(32, 2);

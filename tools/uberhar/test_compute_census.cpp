@@ -17,6 +17,9 @@
 #include "video_core/renderer_vulkan/uberhar_compute_rect.h"
 #include "video_core/renderer_vulkan/uberhar_compute_census.h"
 #include "policy.inc"
+#include "video_core/pica/compute_assembly.h"
+#include "video_core/pica/output_vertex.h"
+#include "video_core/shader_recovery_error.h"
 
 struct LogEntry { Common::Log::Delivery delivery; std::string text; };
 std::vector<LogEntry> logs;
@@ -173,6 +176,51 @@ struct Fixture {
     }
 };
 #include "strict_report.inc"
+
+// CodexAstraLocal: Only GPU execution/resources are recording endpoints here.
+// The actual DrawComputeBatch body decides ownership, whole-batch commit,
+// terminal propagation and counters; the real Vulkan owner check is separate.
+struct CaptureEndpoint { unsigned calls{}; bool fail{}; };
+struct CapturedInput {};
+template<class Flush>
+CapturedInput CaptureComputeVertexInput(CaptureEndpoint& memory, int, bool, bool,
+    const Pica::ComputeAssemblyState&, Flush&& flush, const Pica::AttributeBuffer*) {
+    ++memory.calls;
+    if(memory.fail) throw VideoCore::ShaderRecoveryError("capture refusal");
+    flush(0x1000,16); return {};
+}
+struct ComputeVertexProducer {
+    struct Batch { unsigned count; Pica::ComputeAssemblyResult assembly; };
+    unsigned count{6}, calls{}, marks{}; bool fail{};
+    Batch Produce(const CapturedInput&, bool) {
+        ++calls;
+        if(fail) throw VideoCore::ShaderRecoveryError("producer refusal");
+        Batch out{count,{}};out.assembly.state.words[0]=91;out.assembly.written_mask=1;return out;
+    }
+    void MarkRasterUse(){++marks;}
+};
+struct StrictFixture {
+    bool strict_compute{true},compute_raster{true},accurate_mul{true};
+    ComputeVertexProducer producer;
+    ComputeVertexProducer* compute_vertices{&producer};
+    CaptureEndpoint memory;int pica{};
+    std::vector<HardwareVertex> vertex_batch;
+    struct {unsigned flushes{};void FlushRegion(PAddr,u32){++flushes;}}res_cache;
+    struct {unsigned ended{};void EndRendering(){++ended;}}renderpass_cache;
+    struct {struct Profile {unsigned vk_disable_spirv_optimizer{1};};Profile ShaderProfile(){return {};}}pipeline_cache;
+#include "strict_stats.inc"
+    StrictComputeStats strict_compute_stats;
+    unsigned raster_calls{};bool consumer_failure{};
+    bool Draw(bool,bool,std::nullptr_t,const ComputeVertexProducer::Batch*) {
+        if(consumer_failure)throw VideoCore::ShaderRecoveryError("consumer refusal");
+        ++raster_calls;return true;
+    }
+    bool DrawComputeBatch(bool,const Pica::ComputeAssemblyState&,Pica::ComputeAssemblyResult&,
+                          const Pica::AttributeBuffer* = nullptr);
+    void ReportStrictCompute() const;
+};
+#include "strict_batch.inc"
+#include "strict_owner_report.inc"
 } // namespace Vulkan
 
 // CodexAstraLocal: Build every exact joint reason mask independently from
@@ -402,11 +450,11 @@ void TestEffectiveAdmission() {
         om.alpha_blending.factor_dest_a.Assign(FB::BlendFactor::OneMinusSourceAlpha);
         return f;
     };
-    for (M mode : {M::Custom, M::Native, M::Compute, M::Automatic, M::ComboGeneric}) {
+    for (M mode : {M::Custom, M::Native, M::Automatic, M::ComboGeneric}) {
         Fixture f = expanded(); f.compute_rect = &f.owned;
         f.owned.mode = mode; f.strict_compute = Settings::RequiresComputeOnly(mode);
         f.owned.selected = true;
-        const bool enabled = mode == M::Compute || mode == M::Automatic || mode == M::ComboGeneric;
+        const bool enabled = mode == M::Automatic || mode == M::ComboGeneric;
         Check(ComputeRectStateRejections(f.regs) == 1026, "expanded fixture retains exact raw mask");
         Check(f.Route() == enabled && f.owned.compute_draws == enabled &&
               f.owned.native_draws == !enabled, "expanded state selects complete draw");
@@ -455,71 +503,85 @@ void TestEffectiveAdmission() {
     }
 }
 
-// CodexAstraLocal: Unsupported strict work is consumed before any graphics
-// sentinel, never retries, never invalidates pixels, and is not useful compute.
-// The same failures in other modes retain their original complete-draw route.
+// CodexAstraLocal: Preserve the former ordinary fallback cases, while the new
+// independent owner must stop on errors, publish state only after its consumer,
+// and count valid zero-emission work without pretending it rasterized pixels.
 void TestStrictIsolation() {
     using namespace Vulkan;
     using M = Settings::UberharTestMode;
-    for (M mode : {M::Custom, M::Native, M::Compute, M::Automatic, M::ComboGeneric}) {
-        for (unsigned failure = 0; failure < 7; ++failure) {
-            Fixture f{mode}; f.regs = Registers(0); f.vertex_batch = Vertices(6);
-            f.owned.selected = true;
-            if (failure == 0) f.regs = Registers(4);
-            if (failure == 1) f.target.color_id = 0;
-            if (failure == 2) f.vertex_batch[0].position.w = 0;
-            if (failure == 3) f.owned.selected = false;
-            if (failure == 4) f.compute_rect = nullptr;
-            if (failure == 5) f.target.handle = false;
-            if (failure == 6) f.res_cache.surface.traits.storage_support = false;
-            const bool consumed = f.Route();
-            if (mode != M::Compute) {
-                Check(consumed == (failure == 5) && f.graphics_fallthrough == (failure != 5),
-                      "other modes retain graphics fallback and early no-target behavior");
-                Check(f.res_cache.cancellations == 0 && f.vertex_batch.size() == 6 &&
-                      f.strict_compute_stats.attempts == 0,
-                      "other modes retain batch ownership and no strict counters");
-                continue;
-            }
-            Check(consumed && f.graphics_fallthrough == 0,
-                  "strict rejected draw is consumed before graphics");
-            Check(f.res_cache.cancellations == 1, "strict omitted draw has no pixel ownership");
-            Check(f.vertex_batch.empty(), "strict omitted draw consumes vertex batch");
-            const auto& c = f.strict_compute_stats;
-            Check(c.attempts == 1 && c.computed == 0 && c.Omitted() == 1 &&
-                  c.state == (failure == 0) && c.format == (failure == 1 || failure == 6) &&
-                  c.geometry == (failure == 2) && c.not_ready == (failure == 3) &&
-                  c.no_renderer == (failure == 4) && c.no_target == (failure == 5),
-                  "strict reason partition includes unavailable owner and no target");
-            Check(f.owned.native_draws == 0 && f.owned.compute_draws == 0 &&
-                  f.owned.considered == (failure != 4 && failure != 5),
-                  "strict omission is not native or compute coverage");
-            logs.clear(); f.ReportStrictCompute();
-            const auto report = Parse(logs.at(0).text);
-            Check(report.at("incomplete_output") == "true" && report.at("zero_compute_work") == "true" &&
-                  report.at("conservation") == "true" && report.at("graphics_fallback") == "disabled" &&
-                  Number(report, "omitted") == 1, "strict report rejects incomplete performance evidence");
+    for (M mode : {M::Custom, M::Native, M::Automatic, M::ComboGeneric}) {
+        for (unsigned failure=0;failure<7;++failure) {
+            Fixture f{mode};f.regs=Registers(0);f.vertex_batch=Vertices(6);f.owned.selected=true;
+            if(failure==0)f.regs=Registers(4);
+            if(failure==1)f.target.color_id=0;
+            if(failure==2)f.vertex_batch[0].position.w=0;
+            if(failure==3)f.owned.selected=false;
+            if(failure==4)f.compute_rect=nullptr;
+            if(failure==5)f.target.handle=false;
+            if(failure==6)f.res_cache.surface.traits.storage_support=false;
+            Check(f.Route()==(failure==5)&&f.graphics_fallthrough==(failure!=5),
+                  "other modes retain graphics fallback and early no-target behavior");
+            Check(!f.res_cache.cancellations&&f.vertex_batch.size()==6&&!f.strict_compute_stats.attempts,
+                  "other modes retain batch ownership and no strict counters");
         }
     }
-    Fixture success{M::Compute}; success.regs = Registers(0); success.vertex_batch = Vertices(6);
-    success.owned.selected = true;
-    Check(success.Route() && success.strict_compute_stats.computed == 1 &&
-          success.strict_compute_stats.Omitted() == 0 && success.owned.compute_draws == 1 &&
-          success.owned.native_draws == 0 && success.res_cache.cancellations == 0 &&
-          success.graphics_fallthrough == 0 && success.vertex_batch.empty(),
-          "strict supported packet retains complete compute operation and invalidation");
-    Fixture empty{M::Compute}; empty.EmptyBatch();
-    Check(empty.strict_compute_stats.empty_batches == 1 && !empty.strict_compute_stats.attempts &&
-          !empty.nonempty_calls, "empty batches are outside strict draw attempts");
-    empty.vertex_batch = Vertices(3); empty.EmptyBatch();
-    Check(empty.nonempty_calls == 1 && empty.strict_compute_stats.empty_batches == 1,
-          "nonempty assembly is not mislabeled empty");
-    Fixture accelerated{M::Compute}; accelerated.accelerate = true;
-    accelerated.vertex_batch = Vertices(6);
-    Check(!accelerated.Route() && accelerated.sync_calls == 0 && accelerated.graphics_fallthrough == 0 &&
-          accelerated.strict_compute_stats.attempts == 0 && accelerated.vertex_batch.size() == 6,
-          "unexpected hardware entry requests unchanged CPU vertex preparation only");
+    for(unsigned unavailable=0;unavailable<3;++unavailable) {
+        StrictFixture f;
+        if(unavailable==0)f.strict_compute=false;
+        if(unavailable==1)f.compute_raster=false;
+        if(unavailable==2)f.compute_vertices=nullptr;
+        Pica::ComputeAssemblyResult completed{};completed.state.words[0]=0xdead;
+        Check(!f.DrawComputeBatch(false,{},completed)&&!f.memory.calls&&!f.strict_compute_stats.attempts&&
+              completed.state.words[0]==0xdead,"unavailable compute owner cannot consume a draw");
+    }
+    for(bool immediate:{false,true})for(unsigned population:{0U,6U}) {
+        StrictFixture f;f.producer.count=population;
+        Pica::AttributeBuffer attributes{};Pica::ComputeAssemblyResult completed{};
+        Check(f.DrawComputeBatch(false,{},completed,immediate?&attributes:nullptr),"strict batch succeeds");
+        Check(f.raster_calls==unsigned(population!=0)&&f.producer.marks==unsigned(population!=0),
+              "strict complete batch records one raster");
+        Check(f.memory.calls==1&&f.producer.calls==1&&f.res_cache.flushes==1&&completed.state.words[0]==91,
+              "strict original input and final state pass through once");
+        const auto& c=f.strict_compute_stats;
+        Check(c.attempts==1&&c.computed==1&&c.rasterized==unsigned(population!=0)&&
+              c.empty_batches==unsigned(population==0)&&!c.terminal_failures,"strict successful population partition");
+        logs.clear();f.ReportStrictCompute();const auto report=Parse(logs.at(0).text);
+        Check(Number(report,"schema")==2&&report.at("conservation")=="true"&&
+              report.at("vertex_policy")=="original_input_compute"&&report.at("graphics_fallback")=="disabled"&&
+              Number(report,"computed")==1&&Number(report,"rasterized")==unsigned(population!=0),
+              "strict report binds original input and actual raster scope");
+    }
+    for(unsigned failure=0;failure<4;++failure) {
+        StrictFixture f;
+        if(failure==0)f.vertex_batch=Vertices(1);
+        if(failure==1)f.memory.fail=true;
+        if(failure==2)f.producer.fail=true;
+        if(failure==3)f.consumer_failure=true;
+        Pica::ComputeAssemblyResult completed{};completed.state.words[0]=0xdead;
+        bool threw{};
+        try{(void)f.DrawComputeBatch(false,{},completed);}catch(const VideoCore::ShaderRecoveryError&){threw=true;}
+        Check(threw&&!f.raster_calls&&!f.producer.marks&&completed.state.words[0]==0xdead,
+              "strict failure preserves uncommitted state");
+        logs.clear();f.ReportStrictCompute();const auto report=Parse(logs.at(0).text);
+        Check(Number(report,"attempts")==1&&Number(report,"terminal_failures")==1&&
+              Number(report,"computed")==0&&report.at("conservation")=="true"&&
+              report.at("zero_compute_work")=="true","strict failure report conserves actual calls");
+    }
+    for(bool nonempty:{false,true}) {
+        Fixture f{M::Compute};if(nonempty)f.vertex_batch=Vertices(3);
+        bool threw{};try{f.EmptyBatch();}catch(const VideoCore::ShaderRecoveryError&){threw=true;}
+        Check(threw&&!f.nonempty_calls,"strict CPU-prepared entry is terminal");
+    }
+    Fixture accelerated{M::Compute};accelerated.accelerate=true;accelerated.vertex_batch=Vertices(6);
+    bool threw{};try{(void)accelerated.Route();}catch(const VideoCore::ShaderRecoveryError&){threw=true;}
+    Check(threw&&!accelerated.sync_calls&&!accelerated.graphics_fallthrough&&accelerated.vertex_batch.size()==6,
+          "strict hardware entry is terminal");
+    Fixture missing{M::Compute};missing.target.handle=false;missing.vertex_batch=Vertices(6);
+    threw=false;try{(void)missing.Route();}catch(const VideoCore::ShaderRecoveryError&){threw=true;}
+    Check(threw&&missing.res_cache.cancellations==1&&missing.strict_compute_stats.no_target==1&&
+          !missing.graphics_fallthrough&&missing.vertex_batch.size()==6,"strict missing target is terminal without consuming CPU batch");
 }
+
 int main() {
     try { TestBins(); TestAdmission(); TestReports(); TestEffectiveAdmission(); TestStrictIsolation(); TestDeferredAdmission(); std::printf("PASS checks=%u bank_bytes=%zu\n", checks, sizeof(Vulkan::ComputeStateCensus)); }
     catch (const std::exception& error) { std::fprintf(stderr,"FAILED: %s\n",error.what()); return 1; }

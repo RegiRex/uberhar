@@ -3,6 +3,8 @@
 // Refer to the license.txt file included.
 
 #include <limits> // AstraPro: Reject wraparound before speculative memory reads.
+// CodexAstraLocal: Bound compute viewport arithmetic before resource mutation.
+#include <cmath>
 #include "common/alignment.h"
 #include "common/literals.h"
 #include "common/logging/log.h"
@@ -20,9 +22,11 @@
 #include "video_core/renderer_vulkan/renderer_vulkan.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_rasterizer.h"
+#include "video_core/renderer_vulkan/uberhar_compute_target_format.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/pica/uberhar_cpu_draw_queue.h" // CodexAstraLocal: Owned CPU completion tickets.
 #include "video_core/texture/texture_decode.h"
+#include "video_core/shader/generator/glsl_fs_shader_gen.h"
 
 namespace Vulkan {
 
@@ -86,7 +90,14 @@ RasterizerVulkan::RasterizerVulkan(Memory::MemorySystem& memory, Pica::PicaCore&
       async_shaders{Settings::values.async_shader_compilation.GetValue()} {
 
     // AstraEH: All test modes share cached CPU vertex/geometry processing.
-    if (Settings::values.uberhar_test_mode.GetValue() != Settings::UberharTestMode::Custom) {
+    // CodexAstraLocal: The independent Calculated entry below replaces that
+    // historical shared vertex path; other presets keep their existing owners.
+    if (strict_compute) {
+        // CodexAstraLocal: The Calculated consumer uses real cache
+        // resources and the shared evaluator; it never selects rectangle recovery.
+        compute_raster = std::make_unique<ComputeRasterizer>(instance, scheduler, update_queue);
+        compute_vertices = std::make_unique<ComputeVertexProducer>(instance, scheduler, update_queue);
+    } else if (Settings::values.uberhar_test_mode.GetValue() != Settings::UberharTestMode::Custom) {
         compute_rect = std::make_unique<ComputeRectRenderer>(instance, scheduler, update_queue);
     }
     vertex_buffers.fill(stream_buffer.Handle());
@@ -188,7 +199,7 @@ RasterizerVulkan::~RasterizerVulkan() {
                  ready_vertex_output_rejections, ready_vertex_output_writes.Size(),
                  ready_vertex_output_writes.Hits(), ready_vertex_output_writes.Scans());
     }
-    if (compute_rect || compute_benchmark) {
+    if (compute_rect || compute_raster || compute_benchmark) {
         // AstraEH: Queued compute/timestamp commands must finish before their owners die.
         scheduler.Finish();
         // CodexAstraLocal: Reuse this drain; an unfinished private request is
@@ -725,7 +736,7 @@ bool RasterizerVulkan::AccelerateDrawBatchReady(bool is_indexed) {
 }
 
 bool RasterizerVulkan::AccelerateDrawBatch(bool is_indexed) {
-    // CodexAstraLocal: Strict Calculated still prepares vertices on the CPU;
+    // CodexAstraLocal: Original-input compute has its own mandatory entry;
     // a changed hardware setting cannot enter a guest graphics draw instead.
     if (strict_compute)
         return false;
@@ -921,6 +932,8 @@ bool RasterizerVulkan::DrawDeferredVertices(const std::shared_ptr<Pica::CpuDrawP
         throw VideoCore::ShaderRecoveryError{};
     pipeline_info.state.rasterization.topology.Assign(Pica::PipelineRegs::TriangleTopology::List);
     pipeline_info.state.vertex_layout = software_layout;
+    // CodexAstraLocal: PrepareDeferredVertices already rejects Calculated;
+    // every admitted CPU packet retains the existing graphics shader interface.
     pipeline_cache.UseTrivialVertexShader();
     pipeline_cache.UseTrivialGeometryShader();
     return Draw(false, false, packet);
@@ -933,11 +946,11 @@ void RasterizerVulkan::DrainDeferredCommands() {
 }
 
 void RasterizerVulkan::DrawTriangles() {
+    // CodexAstraLocal: A CPU-prepared batch is never an independent Calculated
+    // substitute. Original-input dispatch must use DrawComputeBatch instead.
+    if (strict_compute)
+        throw VideoCore::ShaderRecoveryError("Calculated received CPU-prepared guest vertices");
     if (vertex_batch.empty()) {
-        // CodexAstraLocal: Empty assembly is distinct from an unsupported draw
-        // and contributes no useful compute or graphics coverage.
-        if (strict_compute)
-            ++strict_compute_stats.empty_batches;
         // AstraEH: Invalid/empty CPU output must not leave a prepared handle latched.
         cpu_bridge = {};
         return;
@@ -962,15 +975,51 @@ void RasterizerVulkan::DrawTriangles() {
     cpu_bridge = {};
 }
 
+// CodexAstraLocal: Snapshot original memory with live cache visibility, execute
+// guest shading/assembly/clipping in compute, then use real target resources.
+// Only touched semantic slots and state cross back; the raster stream stays GPU-owned.
+bool RasterizerVulkan::DrawComputeBatch(bool is_indexed,
+                                      const Pica::ComputeAssemblyState& assembly,
+                                      Pica::ComputeAssemblyResult& completed,
+                                      const Pica::AttributeBuffer* immediate) {
+    if (!strict_compute || !compute_raster || !compute_vertices) return false;
+    // CodexAstraLocal: Count each original-input call once, including producer
+    // failure and successful state-only batches. No per-vertex instrumentation.
+    ++strict_compute_stats.attempts;
+    try {
+        if (!vertex_batch.empty() || !assembly.Valid())
+            throw VideoCore::ShaderRecoveryError("Calculated original-input ownership is inconsistent");
+        const auto input = CaptureComputeVertexInput(memory, pica, is_indexed, accurate_mul, assembly,
+            [this](PAddr address, u32 bytes) { res_cache.FlushRegion(address, bytes); }, immediate);
+        renderpass_cache.EndRendering();
+        const auto batch = compute_vertices->Produce(input,
+            pipeline_cache.ShaderProfile().vk_disable_spirv_optimizer != 0);
+        // CodexAstraLocal: Fully clipped or partial-primitive batches execute
+        // guest work and return valid persistent state without demanding targets.
+        if (batch.count) {
+            Draw(false, false, {}, &batch);
+            compute_vertices->MarkRasterUse();
+            ++strict_compute_stats.rasterized;
+        } else {
+            ++strict_compute_stats.empty_batches;
+        }
+        completed = batch.assembly;
+        ++strict_compute_stats.computed;
+        return true;
+    } catch (...) {
+        ++strict_compute_stats.terminal_failures;
+        throw;
+    }
+}
+
 bool RasterizerVulkan::Draw(bool accelerate, bool is_indexed,
-                          const std::shared_ptr<Pica::CpuDrawPacket>& deferred) {
+                          const std::shared_ptr<Pica::CpuDrawPacket>& deferred,
+                          const ComputeVertexProducer::Batch* computed) {
     MICROPROFILE_SCOPE(Vulkan_Drawing);
-    // CodexAstraLocal: Reject an unexpected hardware entry before preparation;
-    // the caller then performs the unchanged CPU vertex/assembly path once.
+    // CodexAstraLocal: An unexpected hardware entry cannot turn an independent
+    // compute draw into CPU or graphics recovery, even if a new caller is added.
     if (strict_compute && accelerate)
-        return false;
-    if (strict_compute)
-        ++strict_compute_stats.attempts;
+        throw VideoCore::ShaderRecoveryError("Calculated received a graphics acceleration request");
     SyncDrawState();
 
     const bool shadow_rendering = regs.framebuffer.IsShadowRendering();
@@ -1002,7 +1051,9 @@ bool RasterizerVulkan::Draw(bool accelerate, bool is_indexed,
         if (strict_compute) {
             ++strict_compute_stats.no_target;
             fb_helper.CancelInvalidation();
-            vertex_batch.clear();
+            // CodexAstraLocal: Missing targets terminate the independent draw;
+            // they cannot be reported as successfully rendered guest work.
+            throw VideoCore::ShaderRecoveryError("Calculated draw has no supported framebuffer");
         }
         return true;
     }
@@ -1010,11 +1061,124 @@ bool RasterizerVulkan::Draw(bool accelerate, bool is_indexed,
     pipeline_info.state.attachments.color = framebuffer->Format(SurfaceType::Color);
     pipeline_info.state.attachments.depth = framebuffer->Format(SurfaceType::Depth);
 
+    // CodexAstraLocal: The independent GPU producer has completed the whole
+    // guest draw and standard/custom clipping before this
+    // resource consumer; CPU HardwareVertex uploads cannot enter this branch.
+    if (strict_compute) {
+        const auto stop = [&](const char* reason) -> void {
+            fb_helper.CancelInvalidation();
+            // CodexAstraLocal: A terminal, actionable error is distinct from
+            // removable test logging and from a successful omitted draw.
+            LOG_ERROR(Render_Vulkan, "Calculated integration stopped: {}", reason);
+            throw VideoCore::ShaderRecoveryError(reason);
+        };
+        if (!compute_raster || deferred || !computed || !computed->count || computed->count % 3)
+            stop("complete independent compute triangle stream required");
+        const Pica::Shader::FSConfig fragment_config{regs};
+        const auto& profile = pipeline_cache.ShaderProfile();
+        if (Pica::Shader::Generator::GLSL::CheckComputeFragmentSupport(fragment_config,
+                user_config, profile) !=
+            Pica::Shader::Generator::GLSL::ComputeFragmentSupport::Ready)
+            stop("fragment configuration outside callable compute support");
+        auto* color = framebuffer->color_id ? &res_cache.GetSurface(framebuffer->color_id) : nullptr;
+        auto* depth = framebuffer->depth_id ? &res_cache.GetSurface(framebuffer->depth_id) : nullptr;
+        if (!color && !depth)
+            stop("no attachment available to the compute consumer");
+        const auto extent = color ? color->RealExtent() : depth->RealExtent();
+        // CodexAstraLocal: Formats use actual native cache bytes, including
+        // packed color and float-depth fallbacks. Attachment identity is
+        // checked before any descriptor or transfer can publish a draw.
+        if (color && (framebuffer->color_level != 0 || !color->traits.transfer_support ||
+            !ComputeTargetFormat::Describe(color->pixel_format, color->traits.native) ||
+            color->Image() != framebuffer->Images()[0]))
+            stop("color attachment requires a supported same-image level-zero native format");
+        if (shadow_rendering && (!color || color->traits.native != vk::Format::eR8G8B8A8Unorm ||
+                                 !color->traits.storage_support))
+            stop("shadow target requires mutable RGBA8/R32 storage");
+        if (depth && (framebuffer->depth_level != 0 || !depth->traits.transfer_support ||
+            !ComputeTargetFormat::Describe(depth->pixel_format, depth->traits.native) ||
+            depth->Image() != framebuffer->Images()[1] ||
+            depth->RealExtent().width != extent.width || depth->RealExtent().height != extent.height))
+            stop("depth attachment requires a supported matching level-zero native format");
+        const auto viewport = fb_helper.Viewport();
+        const auto rect = fb_helper.DrawRect();
+        const auto subpixel = instance.GetPhysicalDevice().getProperties().limits.subPixelPrecisionBits;
+        if (subpixel == 0 || subpixel > 8 || viewport.width <= 0 || viewport.height <= 0 ||
+            std::abs(s64{viewport.x}) + viewport.width > (1 << 20) ||
+            std::abs(s64{viewport.y}) + viewport.height > (1 << 20))
+            stop("viewport/subpixel range exceeds the wide-edge contract");
+        ComputeRasterPush push{};
+        push.extent = {extent.width, extent.height, computed->count, subpixel};
+        push.viewport = {static_cast<float>(viewport.x), static_cast<float>(viewport.y),
+                         static_cast<float>(viewport.width), static_cast<float>(viewport.height)};
+        push.rectangle = {static_cast<s32>(rect.left), static_cast<s32>(rect.bottom),
+                           static_cast<s32>(rect.right), static_cast<s32>(rect.top)};
+        const auto& merger = regs.framebuffer.output_merger;
+        const bool writes = regs.framebuffer.framebuffer.allow_depth_stencil_write != 0;
+        const bool stencil = depth && regs.framebuffer.HasStencil();
+        const u32 flags = (depth ? 1u : 0u) |
+            (depth && (merger.depth_test_enable || merger.depth_write_enable) ? 2u : 0u) |
+            (depth && writes && merger.depth_write_enable ? 4u : 0u) | (stencil ? 8u : 0u) |
+            (stencil && merger.stencil_test.enable ? 16u : 0u) |
+            (merger.alphablend_enable ? 32u : 0u) | (color ? 64u : 0u);
+        push.merger = {regs.framebuffer.framebuffer.allow_color_write ?
+                          (merger.depth_color_mask >> 8) & 15u : 0u,
+                        merger.depth_test_enable ? static_cast<u32>(merger.depth_test_func.Value()) : 1u,
+                        flags, static_cast<u32>(merger.logic_op.Value())};
+        const auto& st = merger.stencil_test;
+        push.stencil = {static_cast<u32>(st.func.Value()), st.reference_value,
+                         static_cast<u32>(st.input_mask) |
+                             ((writes ? static_cast<u32>(st.write_mask) : 0u) << 8),
+                         static_cast<u32>(st.action_stencil_fail.Value()) |
+                             (static_cast<u32>(st.action_depth_fail.Value()) << 8) |
+                             (static_cast<u32>(st.action_depth_pass.Value()) << 16)};
+        const auto& blend = merger.alpha_blending;
+        if (!shadow_rendering && (static_cast<u32>(blend.blend_equation_rgb.Value()) > 4 ||
+            static_cast<u32>(blend.blend_equation_a.Value()) > 4 ||
+            static_cast<u32>(blend.factor_source_rgb.Value()) > 14 ||
+            static_cast<u32>(blend.factor_dest_rgb.Value()) > 14 ||
+            static_cast<u32>(blend.factor_source_a.Value()) > 14 ||
+            static_cast<u32>(blend.factor_dest_a.Value()) > 14))
+            stop("reserved blend operation or factor unsupported");
+        push.blend = {static_cast<u32>(blend.blend_equation_rgb.Value()),
+                       static_cast<u32>(blend.blend_equation_a.Value()),
+                       static_cast<u32>(blend.factor_source_rgb.Value()) |
+                           (static_cast<u32>(blend.factor_dest_rgb.Value()) << 4) |
+                           (static_cast<u32>(blend.factor_source_a.Value()) << 8) |
+                           (static_cast<u32>(blend.factor_dest_a.Value()) << 12), merger.blend_const.raw};
+        push.geometry = {static_cast<u32>(regs.rasterizer.cull_mode.Value()),
+                          regs.framebuffer.framebuffer.IsFlipped() ? 1u : 0u, 0, 0};
+        const auto [x1, y2, x2, y1] = fb_helper.Scissor();
+        fs_data.scissor_x1 = x1; fs_data.scissor_y1 = y1;
+        fs_data.scissor_x2 = x2; fs_data.scissor_y2 = y2;
+        fs_data_dirty = true;
+        try {
+            ComputeRasterizer::TextureBindings textures;
+            SyncTextureUnits(framebuffer, &textures);
+            SyncAndUploadLUTs();
+            SyncAndUploadLUTsLF();
+            renderpass_cache.EndRendering();
+            auto& null_surface = res_cache.GetSurface(VideoCore::NULL_SURFACE_ID);
+            compute_raster->DrawGpu(color, depth, null_surface.StorageView(), push,
+                fragment_config, user_config, profile, fs_data, textures,
+                {*texture_lf_view, *texture_rg_view, *texture_rgba_view}, computed->vertices);
+            // CodexAstraLocal: Resource setup/Map can submit earlier work. Stamp
+            // reused LUT ranges only after the actual final compute enqueue.
+            texture_buffer.MarkDrawUse();
+            texture_lf_buffer.MarkDrawUse();
+        } catch (...) {
+            fb_helper.CancelInvalidation();
+            throw;
+        }
+        vertex_batch.clear();
+        return true;
+    }
+
     // AstraEH: Admit a complete compute operation before texture/fragment setup.
     // Unsupported draws retain the native route, and the framebuffer helper still
     // publishes correct cache invalidation for either route when this scope exits.
-    // CodexAstraLocal: The explicit strict preset replaces that recovery with a
-    // counted omission below; successful compute keeps normal invalidation.
+    // CodexAstraLocal: Independent Calculated has already returned or thrown;
+    // this inherited optional rectangle selection belongs only to other modes.
     std::optional<ComputeRectPacket> compute_packet;
     int timing_slot = -1;
     if (compute_rect && !accelerate) {
@@ -1032,13 +1196,9 @@ bool RasterizerVulkan::Draw(bool accelerate, bool is_indexed,
                                   deferred ? deferred->VertexCount() : vertex_batch.size());
         if (!compute_state) {
             ++compute_rect->unsupported;
-            if (strict_compute)
-                ++strict_compute_stats.state;
         } else if (!framebuffer->color_id || framebuffer->color_level != 0 ||
                    framebuffer->Format(SurfaceType::Color) != VideoCore::PixelFormat::RGBA8) {
             ++compute_rect->format_rejected;
-            if (strict_compute)
-                ++strict_compute_stats.format;
         } else {
             auto& surface = res_cache.GetSurface(framebuffer->color_id);
             const auto viewport = fb_helper.Viewport();
@@ -1046,8 +1206,6 @@ bool RasterizerVulkan::Draw(bool accelerate, bool is_indexed,
             if (surface.traits.native != vk::Format::eR8G8B8A8Unorm ||
                 !surface.traits.storage_support || surface.Image() != framebuffer->Images()[0]) {
                 ++compute_rect->format_rejected;
-                if (strict_compute)
-                    ++strict_compute_stats.format;
             } else {
                 compute_packet =
                     MakeComputeRectPrepared(regs, vertices,
@@ -1057,39 +1215,19 @@ bool RasterizerVulkan::Draw(bool accelerate, bool is_indexed,
                                     compute_state);
                 if (!compute_packet) {
                     ++compute_rect->geometry_rejected;
-                    if (strict_compute)
-                        ++strict_compute_stats.geometry;
                 } else if (compute_rect->Choose(*compute_packet)) {
                     renderpass_cache.EndRendering();
                     timing_slot = compute_rect->ReserveSample(true, compute_packet->PixelCount());
                     compute_rect->BeginSample(timing_slot);
                     compute_rect->Draw(surface, *compute_packet);
                     compute_rect->EndSample(timing_slot);
-                    if (strict_compute)
-                        ++strict_compute_stats.computed;
                     vertex_batch.clear();
                     return true;
-                } else if (strict_compute) {
-                    ++strict_compute_stats.not_ready;
                 }
             }
         }
-        // CodexAstraLocal: An intentional isolation omission is neither a
-        // native draw nor a compute dispatch. Other modes retain their route.
-        if (!strict_compute)
-            ++compute_rect->native_draws;
+        ++compute_rect->native_draws;
     }
-    // CodexAstraLocal: This owner-independent terminal gate precedes every
-    // texture/fragment preparation, upload and guest graphics bind/draw below.
-    // Return consumed, not failed, so the caller cannot retry a graphics route.
-    if (strict_compute) {
-        if (!compute_rect)
-            ++strict_compute_stats.no_renderer;
-        fb_helper.CancelInvalidation();
-        vertex_batch.clear();
-        return true;
-    }
-
     // Update scissor uniforms
     const auto [scissor_x1, scissor_y2, scissor_x2, scissor_y1] = fb_helper.Scissor();
     if (fs_data.scissor_x1 != scissor_x1 || fs_data.scissor_x2 != scissor_x2 ||
@@ -1274,56 +1412,93 @@ bool RasterizerVulkan::Draw(bool accelerate, bool is_indexed,
     return succeeded;
 }
 
-// CodexAstraLocal: Fixed lifetime totals distinguish real compute work from
-// unsupported omissions. This is coverage after shared CPU vertices, not proof
-// of independent compute vertex execution or eligibility of incomplete scenes.
+// CodexAstraLocal: One bounded lifetime record describes actual original-input
+// calls. A completed producer with no emitted primitives is valid state work;
+// an unsupported state is a terminal failure, never a successful omitted draw.
 void RasterizerVulkan::ReportStrictCompute() const {
     if (!strict_compute)
         return;
     const auto& counts = strict_compute_stats;
-    const u64 omitted = counts.Omitted();
-    // CodexAstraLocal Log Line: One bounded final isolation record; no per-draw
+    // CodexAstraLocal Log Line: One permanent bounded lifetime record; no per-draw
     // logging and no synthetic benchmark work in these guest counters.
     LOG_INFO(Render_Vulkan,
-             "Uberhar strict calculated totals: schema=1 attempts={} computed={} omitted={} "
-             "empty_batches={} no_target={} no_renderer={} unsupported_state={} "
-             "rejected_format={} rejected_geometry={} not_ready={} conservation={} "
-             "incomplete_output={} zero_compute_work={} graphics_fallback=disabled "
-             "vertex_policy=shared_cpu scope=guest_draws_after_cpu_vertices "
-             "work_status=commands_recorded",
-             counts.attempts, counts.computed, omitted, counts.empty_batches, counts.no_target,
-             counts.no_renderer, counts.state, counts.format, counts.geometry, counts.not_ready,
-             counts.attempts == counts.computed + omitted, omitted != 0, counts.computed == 0);
+             "Uberhar strict calculated totals: schema=2 attempts={} computed={} rasterized={} "
+             "empty_batches={} no_target={} terminal_failures={} conservation={} "
+             "zero_compute_work={} graphics_fallback=disabled vertex_policy=original_input_compute "
+             "scope=rasterizer_original_input_calls work_status=commands_recorded "
+             "producer_completion=synchronous",
+             counts.attempts, counts.computed, counts.rasterized, counts.empty_batches,
+             counts.no_target, counts.terminal_failures,
+             counts.attempts == counts.computed + counts.terminal_failures &&
+                 counts.computed == counts.rasterized + counts.empty_batches,
+             counts.computed == 0);
 }
 
-void RasterizerVulkan::SyncTextureUnits(const Framebuffer* framebuffer) {
+vk::ImageView RasterizerVulkan::ComputeTextureView(Surface& surface,
+                                                  const Framebuffer* framebuffer, bool shadow) {
+    // CodexAstraLocal: Integer shadow PCF must read the exact packed R32
+    // representation. A float RGBA feedback view is not a valid substitute.
+    if (shadow && (surface.traits.native != vk::Format::eR8G8B8A8Unorm ||
+                   !surface.traits.storage_support))
+        throw VideoCore::ShaderRecoveryError("Calculated shadow texture lacks an R32 view");
+    surface.is_compute = true;
+    const auto view_type = shadow ? ViewType::Storage :
+        (surface.Aspect() & vk::ImageAspectFlagBits::eStencil) ? ViewType::Depth : ViewType::Sample;
+    const bool feedback = surface.Image() == framebuffer->Images()[0] ||
+                          surface.Image() == framebuffer->Images()[1];
+    return feedback ? surface.CopyImageView(view_type, true) : surface.ImageView(view_type);
+}
+
+void RasterizerVulkan::SyncTextureUnits(const Framebuffer* framebuffer,
+                                       ComputeRasterizer::TextureBindings* compute_bindings) {
     using TextureType = Pica::TexturingRegs::TextureConfig::TextureType;
 
     const auto pica_textures = regs.texturing.GetTextures();
-    const bool use_cube_heap =
-        pica_textures[0].enabled && pica_textures[0].config.type == TextureType::ShadowCube;
-    const auto texture_set = pipeline_cache.Acquire(use_cube_heap ? DescriptorHeapType::Texture
-                                                                  : DescriptorHeapType::Texture);
+    // CodexAstraLocal: Cache preparation may submit while making a texture
+    // readable. Compute captures handles first and stamps its own descriptors
+    // only after every potentially flushing preparation/reservation completes.
+    const auto texture_set = compute_bindings ? vk::DescriptorSet{} :
+        pipeline_cache.Acquire(DescriptorHeapType::Texture);
+    const auto bind = [&](u32 index, vk::ImageView view, vk::Sampler sampler) {
+        if (compute_bindings)
+            (*compute_bindings)[index] = {sampler, view, vk::ImageLayout::eGeneral};
+        else
+            update_queue.AddImageSampler(texture_set, index, 0, view, sampler);
+    };
 
     for (u32 texture_index = 0; texture_index < pica_textures.size(); ++texture_index) {
         const auto& texture = pica_textures[texture_index];
 
         // If the texture unit is disabled bind a null surface to it
         if (!texture.enabled) {
+            // CodexAstraLocal: Disabled typed unit zero still needs descriptors
+            // compatible with its generated sampler declaration. Shadow cube
+            // is six integer 2D images, not a floating cube image.
+            if (compute_bindings) {
+                const bool shadow = texture_index == 0 &&
+                    (texture.config.type == TextureType::Shadow2D ||
+                     texture.config.type == TextureType::ShadowCube);
+                const auto id = texture_index == 0 && texture.config.type == TextureType::TextureCube ?
+                    VideoCore::NULL_SURFACE_CUBE_ID : VideoCore::NULL_SURFACE_ID;
+                auto& surface = res_cache.GetSurface(id);
+                const auto& sampler = res_cache.GetSampler(id);
+                bind(texture_index, shadow ? surface.StorageView() : surface.ImageView(), sampler.Handle());
+                if (texture_index == 0)
+                    for (u32 face = 1; face < 6; ++face) (*compute_bindings)[face + 2] = (*compute_bindings)[0];
+                continue;
+            }
             switch (texture.config.type.Value()) {
             case TextureType::TextureCube:
             case TextureType::ShadowCube: {
                 Surface& null_surface = res_cache.GetSurface(VideoCore::NULL_SURFACE_CUBE_ID);
                 const Sampler& null_sampler = res_cache.GetSampler(VideoCore::NULL_SURFACE_CUBE_ID);
-                update_queue.AddImageSampler(texture_set, texture_index, 0,
-                                             null_surface.ImageView(), null_sampler.Handle());
+                bind(texture_index, null_surface.ImageView(), null_sampler.Handle());
                 break;
             }
             default: {
                 Surface& null_surface = res_cache.GetSurface(VideoCore::NULL_SURFACE_ID);
                 const Sampler& null_sampler = res_cache.GetSampler(VideoCore::NULL_SURFACE_ID);
-                update_queue.AddImageSampler(texture_set, texture_index, 0,
-                                             null_surface.ImageView(), null_sampler.Handle());
+                bind(texture_index, null_surface.ImageView(), null_sampler.Handle());
                 break;
             }
             }
@@ -1337,16 +1512,16 @@ void RasterizerVulkan::SyncTextureUnits(const Framebuffer* framebuffer) {
                 Surface& surface = res_cache.GetTextureSurface(texture);
                 Sampler& sampler = res_cache.GetSampler(texture.config);
                 surface.flags |= VideoCore::SurfaceFlagBits::ShadowSource;
-                update_queue.AddImageSampler(texture_set, texture_index, 0, surface.StorageView(),
-                                             sampler.Handle());
+                bind(texture_index, compute_bindings ? ComputeTextureView(surface, framebuffer, true) :
+                                                       surface.StorageView(), sampler.Handle());
                 continue;
             }
             case TextureType::ShadowCube: {
-                BindShadowCube(texture, texture_set);
+                BindShadowCube(texture, texture_set, framebuffer, compute_bindings);
                 continue;
             }
             case TextureType::TextureCube: {
-                BindTextureCube(texture, texture_set);
+                BindTextureCube(texture, texture_set, framebuffer, compute_bindings);
                 continue;
             }
             default:
@@ -1357,11 +1532,16 @@ void RasterizerVulkan::SyncTextureUnits(const Framebuffer* framebuffer) {
         // Bind the texture provided by the rasterizer cache
         Surface& surface = res_cache.GetTextureSurface(texture);
         Sampler& sampler = res_cache.GetSampler(texture.config);
+        if (compute_bindings) {
+            bind(texture_index, ComputeTextureView(surface, framebuffer, false), sampler.Handle());
+            continue;
+        }
         const vk::ImageView color_view = framebuffer->ImageView(SurfaceType::Color);
-        const bool is_feedback_loop = color_view == surface.FramebufferView();
+        const auto sampled_view = surface.FramebufferView();
+        const bool is_feedback_loop = color_view == sampled_view;
         const vk::ImageView texture_view =
             is_feedback_loop ? surface.CopyImageView() : surface.ImageView();
-        update_queue.AddImageSampler(texture_set, texture_index, 0, texture_view, sampler.Handle());
+        bind(texture_index, texture_view, sampler.Handle());
     }
 }
 
@@ -1394,7 +1574,8 @@ void RasterizerVulkan::SyncUtilityTextures(const Framebuffer* framebuffer) {
 }
 
 void RasterizerVulkan::BindShadowCube(const Pica::TexturingRegs::FullTextureConfig& texture,
-                                      vk::DescriptorSet texture_set) {
+                                      vk::DescriptorSet texture_set, const Framebuffer* framebuffer,
+                                      ComputeRasterizer::TextureBindings* compute_bindings) {
     using CubeFace = Pica::TexturingRegs::CubeFace;
     auto info = Pica::Texture::TextureInfo::FromPicaRegister(texture.config, texture.format);
     constexpr std::array faces = {
@@ -1411,13 +1592,19 @@ void RasterizerVulkan::BindShadowCube(const Pica::TexturingRegs::FullTextureConf
         const VideoCore::SurfaceId surface_id = res_cache.GetTextureSurface(info);
         Surface& surface = res_cache.GetSurface(surface_id);
         surface.flags |= VideoCore::SurfaceFlagBits::ShadowSource;
-        update_queue.AddImageSampler(texture_set, 0, binding, surface.StorageView(),
-                                     sampler.Handle());
+        if (compute_bindings) {
+            const u32 slot = binding == 0 ? 0 : binding + 2;
+            (*compute_bindings)[slot] = {sampler.Handle(),
+                ComputeTextureView(surface, framebuffer, true), vk::ImageLayout::eGeneral};
+        } else {
+            update_queue.AddImageSampler(texture_set, 0, binding, surface.StorageView(), sampler.Handle());
+        }
     }
 }
 
 void RasterizerVulkan::BindTextureCube(const Pica::TexturingRegs::FullTextureConfig& texture,
-                                       vk::DescriptorSet texture_set) {
+                                       vk::DescriptorSet texture_set, const Framebuffer* framebuffer,
+                                       ComputeRasterizer::TextureBindings* compute_bindings) {
     using CubeFace = Pica::TexturingRegs::CubeFace;
     const VideoCore::TextureCubeConfig config = {
         .px = regs.texturing.GetCubePhysicalAddress(CubeFace::PositiveX),
@@ -1433,7 +1620,15 @@ void RasterizerVulkan::BindTextureCube(const Pica::TexturingRegs::FullTextureCon
 
     Surface& surface = res_cache.GetTextureCube(config);
     Sampler& sampler = res_cache.GetSampler(texture.config);
-    update_queue.AddImageSampler(texture_set, 0, 0, surface.ImageView(), sampler.Handle());
+    if (compute_bindings) {
+        // CodexAstraLocal: A samplerCube cannot consume the non-layered host
+        // fallback image; refuse that device capability before recording work.
+        if (surface.handles[surface.current].layers != 6)
+            throw VideoCore::ShaderRecoveryError("Calculated cube texture requires six native layers");
+        (*compute_bindings)[0] = {sampler.Handle(), ComputeTextureView(surface, framebuffer, false),
+                                  vk::ImageLayout::eGeneral};
+    } else
+        update_queue.AddImageSampler(texture_set, 0, 0, surface.ImageView(), sampler.Handle());
 }
 
 void RasterizerVulkan::FlushAll() {

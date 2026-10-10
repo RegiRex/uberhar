@@ -1,5 +1,20 @@
 # Architecture review ledger
 
+<!-- CodexAstraLocal: Record the new source review without counting a pending release or untested device candidate as a completed audit cycle. -->
+**Current checkpoint: .43 source review complete; gated build pending.**
+Released .41 and .42 are the two successful successors to the .40 full-review
+anchor. The [review of .43](UBERHAR_REVIEW_0.1.43.md) records independent
+architecture and code-cleanliness findings for Calculated integration and the
+Software startup correction, alongside the retained .42 queue review and
+[device results](UBERHAR_TEST_REVIEW_0.1.42.md). This is a scoped source review;
+it does not claim another line-by-line audit of the entire inherited codebase.
+Close the third-successor review after .43 delivery and the owner's independent
+device comparison. Pending CI and unavailable hardware results do not advance
+the full-review anchor. The owner's latest scope authorizes .43 publication and
+leaves .42 installed for comparison; historical stopping rules below are stale.
+
+## Earlier .40 review checkpoint
+
 <!-- CodexAstraLocal: Close .38–.40 after independent source, numerical and chart reviews; the next-build pause does not erase completed audit coverage. -->
 **Current full-review anchor: released 0.1.40**, source
 `7bc71c5c9c7e10a39558084392330faa884889ba`, with **zero successful successors**.

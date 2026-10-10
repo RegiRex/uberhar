@@ -222,7 +222,10 @@ public:
     }
 
     /// Returns a copy of the upscaled image handle, used for feedback loops.
-    vk::ImageView CopyImageView() noexcept;
+    // CodexAstraLocal: Compute feedback needs the original typed view after a
+    // full-aspect snapshot, including R32 shadow and depth sampling views.
+    vk::ImageView CopyImageView(ViewType view_type = ViewType::Sample,
+                               bool compute = false) noexcept;
 
     /// Returns the framebuffer view of the surface image
     vk::ImageView FramebufferView() noexcept {
@@ -288,6 +291,9 @@ public:
     vk::UniqueImageView storage_view;
     bool is_framebuffer{};
     bool is_storage{};
+    // CodexAstraLocal: Sampling is also a compute access. Cache transfers must
+    // not infer its pipeline stage solely from storage-image writes.
+    bool is_compute{};
 };
 
 class Framebuffer : public VideoCore::FramebufferParams {

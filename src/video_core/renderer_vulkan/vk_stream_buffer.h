@@ -100,6 +100,12 @@ public:
         return buffer;
     }
 
+    // CodexAstraLocal: Calculated validates complete bridge uploads against the
+    // actual allocation after the inherited reduced-size allocation retries.
+    u64 Capacity() const noexcept {
+        return stream_buffer_size;
+    }
+
 private:
     struct Watch {
         u64 tick{};

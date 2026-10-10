@@ -1,6 +1,50 @@
 <!-- AstraEH: Attribution index for the Uberhar implementation, tests, packaging and documentation. -->
 # Uberhar code map
 
+<!-- CodexAstraLocal: Map the independent rendering path and its actual consumers, keeping CPU Software distinct from GPU compute. -->
+## 0.1.43 candidate — independent Calculated and Software startup correction
+
+- `pica_core.cpp`, `rasterizer_interface.h` and `compute_assembly.h` capture
+  original guest draw inputs before CPU vertex execution. Persistent primitive
+  assembly commits only after successful admission; unsupported work is terminal.
+- `glsl_compute_vertex_shader_gen.*` and `vk_compute_vertex.*` translate guest
+  vertex programs and execute them on Vulkan compute. No Native/CPU guest-vertex
+  fallback qualifies as Calculated work.
+- `vk_compute_raster.*`, `uberhar_compute_raster_shader.h` and the target-format
+  and shadow helpers perform clipping, ordered triangle/pixel processing and
+  checked output conversion. `glsl_fs_shader_gen.*` shares production texture,
+  TEV, lighting, fog, alpha and procedural formulas with graphics rendering.
+- `vk_rasterizer.*`, `vk_texture_runtime.*` and `vk_stream_buffer.h` connect
+  actual resource ownership, typed feedback snapshots, barriers and final-use
+  ticks. The old optional rectangle route remains separate for other modes.
+- `test_compute_census.*` and `test_cached_buffer_draw_use.cpp` check the changed
+  strict-mode success/failure accounting and terminal no-target behavior while
+  retaining other modes' contracts. The actual Vulkan-owner qualification is
+  retained privately; no guest programs or title artifacts enter this release.
+- `sw_frame.cpp` clamps LCD visible width to complete pixels within the stride,
+  matching the existing backends. `renderer_software.cpp` adds framebuffer
+  context only on terminal errors. `software_renderer.cpp` checks real startup
+  registers and format-before-stride transitions. Nonempty unmapped reads still
+  fail; empty scanout uses the configured background.
+- Android strings distinguish experimental Calculated rendering from Native
+  fallback and describe general rendering errors accurately. The version data
+  advances to .43. No new continuous or removable testing logger is introduced.
+
+<!-- CodexAstraLocal: Document the preceding delivered changes and their measured limits. -->
+## 0.1.42 delivered — CPU Software and deferred draw queue
+
+- Android graphics settings and the Software presenter expose CPU rasterization
+  at 1x with one, two or automatic rendering participants. The host GPU presents
+  the finished image; it does not perform Software guest fragment processing.
+- Software sampling/capture and raster-worker ownership retain ordered aliases
+  and bounded frame storage. Recreated renderers remap active attachments.
+- Deferred CPU draw queues preserve independent complete packets across
+  redundant topology/restart writes while retaining real dependency boundaries.
+  Thor now records auxiliary packets, but their measured CPU share is small.
+- See the [.42 release](releases/0.1.42.md) and
+  [device review](UBERHAR_TEST_REVIEW_0.1.42.md). Software's .42 startup failure
+  prevents a gameplay-speed claim; .43 contains the correction above.
+
 <!-- CodexAstraLocal: Tie cached shader bytes to their final draw consumer,
 including clean reuse, without changing the shader or draw-route algorithms. -->
 ## 0.1.41 candidate — cached Vulkan buffer lifetime

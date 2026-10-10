@@ -85,21 +85,43 @@ def main():
     assert admission.count('ComputeRectStateRejections(regs)') == 1
     assert 'RejectState' not in admission
     draw = block(rasterizer, 'bool RasterizerVulkan::Draw(')
-    # CodexAstraLocal: Execute the actual complete pre-graphics Draw prefix,
-    # including no-target exits and the owner-independent strict terminal gate.
-    # A recording fallthrough sentinel replaces only the unchanged graphics tail;
-    # ordering checks forbid moving guest graphics work before that boundary.
+    # CodexAstraLocal: Independent Calculated no longer uses this optional
+    # rectangle census. Keep the exact ordinary/no-target/acceleration prefix;
+    # replace only the separate GPU consumer with a refusing recording endpoint.
+    # Its actual original-input caller, counters and terminal entry guards are
+    # executed below; actual GPU resources are a separate owner qualification.
     boundary = draw.index('    // Update scissor uniforms')
     prefix = draw[draw.index('{') + 1:boundary]
+    consumer = block(draw, 'if (strict_compute) {\n        const auto stop')
+    assert prefix.count(consumer) == 1
+    assert consumer.index('DrawGpu(') < consumer.index('return true;')
+    prefix = prefix.replace(consumer, 'if (strict_compute) throw VideoCore::ShaderRecoveryError("separate compute consumer");')
     assert admission in prefix
     for call in ('SyncTextureUnits(', 'SyncUtilityTextures(', 'UseFragmentShader(',
                  'UploadUniforms(', 'BindPipeline(', 'stream_buffer.Map(', 'cmdbuf.draw('):
         assert call not in prefix and call in draw[boundary:], call
+    batch = block(rasterizer, 'bool RasterizerVulkan::DrawComputeBatch(').replace('RasterizerVulkan::', 'StrictFixture::')
+    assert batch.index('CaptureComputeVertexInput(') < batch.index('->Produce(') < batch.index('Draw(false, false, {}, &batch)')
+    assert batch.index('Draw(false, false, {}, &batch)') < batch.index('completed = batch.assembly')
+    # Original entry refusal must precede CPU shading/loading and cannot silently
+    # consume an unavailable backend. This binds the mandatory PICA interception.
+    pica_path = root / 'src/video_core/pica/pica_core.cpp'
+    inputs[str(pica_path)] = hashlib.sha256(pica_path.read_bytes()).hexdigest()
+    pica = pica_path.read_text()
+    for signature, later in [('void PicaCore::DrawArrays(', 'LoadVertices('),
+                              ('void PicaCore::DrawImmediate(', 'shader_engine->SetupBatch(')]:
+        entry = block(pica, signature)
+        strict = block(entry, 'if (Settings::RequiresComputeOnly(')
+        assert strict.index('DrawComputeBatch(') < strict.index('CommitComputeState(')
+        assert 'throw VideoCore::ShaderRecoveryError' in strict and strict.rfind('return;') > strict.index('DrawComputeBatch(')
+        assert entry.index(strict) < entry.index(later)
     strict_stats = block(rasterizer_header, 'struct StrictComputeStats') + ';'
     strict_report = block(rasterizer, 'void RasterizerVulkan::ReportStrictCompute() const')
     strict_report = strict_report.replace('RasterizerVulkan::', 'Fixture::')
     triangles = block(rasterizer, 'void RasterizerVulkan::DrawTriangles()')
-    empty = block(triangles, 'if (vertex_batch.empty())')
+    cpu_guard = re.search(r'if \(strict_compute\)\s*throw VideoCore::ShaderRecoveryError\("Calculated received CPU-prepared guest vertices"\);', triangles).group()
+    empty = cpu_guard + '\n' + block(triangles, 'if (vertex_batch.empty())')
+    assert triangles.index(cpu_guard) < triangles.index('if (vertex_batch.empty())')
     accelerated = block(rasterizer, 'bool RasterizerVulkan::AccelerateDrawBatch(bool is_indexed)')
     assert accelerated.index('if (strict_compute)') < accelerated.index('AnalyzeVertexArray(')
     assert 'Settings::RequiresComputeOnly(Settings::values.uberhar_test_mode.GetValue())' in rasterizer
@@ -147,13 +169,14 @@ def main():
             ('raw-as-effective', helper, prefix, observe, report.replace('effective_admitted, effective_rejected, considered, unsupported,', 'snapshot.admitted_draws, snapshot.rejected, considered, unsupported,'), 'raw and effective admission differ'),
             ('missing-raw-total', helper, prefix, observe.replace('ComputeStateCensus::Add(raw_unsupported, 1, census_overflow);', '(void)raw_unsupported;'), report, 'first interval retains preceding draws'),
             ('raw-route-rejection', helper, prefix.replace('if (!compute_state)', 'if (compute_state.raw_rejections != 0)'), observe, report, 'expanded state selects complete draw'),
-            # CodexAstraLocal: Fail actual strict-route behavior, not a mirrored
-            # policy model. Graphics reachability, retries and ownership each
-            # have a separate negative control, including absent compute owner.
-            ('strict-graphics-fallthrough', helper, prefix.replace('if (strict_compute) {\n        if (!compute_rect)', 'if (false) {\n        if (!compute_rect)'), observe, report, 'strict rejected draw is consumed before graphics'),
-            ('strict-false-retry', helper, prefix.replace('vertex_batch.clear();\n        return true;', 'vertex_batch.clear();\n        return false;'), observe, report, 'strict rejected draw is consumed before graphics'),
-            ('strict-false-invalidation', helper, prefix.replace('fb_helper.CancelInvalidation();', '(void)fb_helper;'), observe, report, 'strict omitted draw has no pixel ownership'),
-            ('strict-stale-batch', helper, prefix.replace('vertex_batch.clear();\n        return true;', '(void)vertex_batch;\n        return true;'), observe, report, 'strict omitted draw consumes vertex batch'),
+            # CodexAstraLocal: Strict work now terminates on unsupported state.
+            # Challenge the executed original-input owner/counter/commit contract
+            # instead of retaining tests for the removed successful omissions.
+            ('strict-missing-raster', helper, prefix, observe, report, 'strict complete batch records one raster'),
+            ('strict-early-commit', helper, prefix, observe, report, 'strict failure preserves uncommitted state'),
+            ('strict-missing-failure-count', helper, prefix, observe, report, 'strict failure report conserves actual calls'),
+            ('strict-cpu-prepared-entry', helper, prefix, observe, report, 'strict CPU-prepared entry is terminal'),
+            ('strict-hardware-retry', helper, prefix.replace('throw VideoCore::ShaderRecoveryError("Calculated received a graphics acceleration request");', 'return false;'), observe, report, 'strict hardware entry is terminal'),
             # CodexAstraLocal: Keep the new packet denominator/raw mask and its
             # prerequisite separate; each defect must reach a behavioral check.
             ('deferred-empty-count', helper, prefix.replace(observation, 'ObserveState(compute_state.raw_rejections, vertex_batch.size())'), observe, report, 'deferred census counts packet vertices exactly once'),
@@ -162,6 +185,15 @@ def main():
         ]
         preflight_defects['deferred-unsafe-preflight'] = preflight.replace('if (!(raw & ~expandable))', 'if (false)')
         assert preflight_defects['deferred-unsafe-preflight'] != preflight
+    # CodexAstraLocal: Defects alter exact extracted production statements;
+    # model endpoints remain identical, and an unchanged defect is a gate error.
+    batch_defects = {
+        'strict-missing-raster': batch.replace('Draw(false, false, {}, &batch);', '(void)batch;'),
+        'strict-early-commit': batch.replace('        completed = batch.assembly;\n', '').replace(
+            '        if (batch.count) {', '        completed = batch.assembly;\n        if (batch.count) {'),
+        'strict-missing-failure-count': batch.replace('++strict_compute_stats.terminal_failures;', '(void)strict_compute_stats;'),
+    }
+    assert all(value != batch for value in batch_defects.values())
     cases = []
     for name, census_source, route, observation_source, report_source, expected in variants:
         target = out / name
@@ -171,7 +203,7 @@ def main():
         # CodexAstraLocal: A shadow-source run must compile its prepared-state
         # helper, not silently fall back to the checkout's older classifier API.
         (include / 'uberhar_compute_rect.h').write_text(rectangle)
-        for filename, body in [('observe.inc', observation_source), ('members.inc', members), ('report.inc', report_source), ('admission.inc', route), ('deferred_preflight.inc', preflight_defects.get(name, preflight)), ('policy.inc', policy), ('strict_stats.inc', strict_stats), ('strict_report.inc', strict_report), ('empty.inc', empty)]:
+        for filename, body in [('observe.inc', observation_source), ('members.inc', members), ('report.inc', report_source), ('admission.inc', route), ('deferred_preflight.inc', preflight_defects.get(name, preflight)), ('policy.inc', policy), ('strict_stats.inc', strict_stats), ('strict_report.inc', strict_report), ('empty.inc', empty.replace(cpu_guard, '') if name == 'strict-cpu-prepared-entry' else empty), ('strict_batch.inc', batch_defects.get(name, batch)), ('strict_owner_report.inc', strict_report.replace('Fixture::', 'StrictFixture::'))]:
             (target / filename).write_text(body + '\n')
         command = [os.environ.get('CXX', 'c++'), '-std=c++20', '-O2', '-DFMT_HEADER_ONLY',
                    '-I' + str(target), '-I' + str(root / 'src'),
@@ -189,7 +221,7 @@ def main():
         if not passed:
             raise RuntimeError(f'case {name} failed: {ran.stdout}')
     result = {'author': 'CodexAstraLocal', 'inputs': inputs, 'cases': cases,
-              'scope': 'Real helper/classifier/geometry, complete Draw prefix before graphics, deferred preflight and extracted reports/empty branch; recording resource/log/packet-metadata endpoints. No CPU executor, Vulkan or device performance proof.'}
+              'scope': 'Real helper/classifier/geometry, optional rectangle Draw prefix with explicit refusal adapter for the separate compute consumer, actual original-input batch body, schema2 report and CPU-prepared/acceleration guards; deferred preflight and recording resource/producer/log/packet endpoints. PICA interception source-bound. No CPU executor, Vulkan, guest capture or device performance proof.'}
     (out / 'provenance.json').write_text(json.dumps(result, indent=2) + '\n')
     print(json.dumps({'pass': True, 'cases': [(c['name'], c['output']) for c in cases], 'provenance': str(out / 'provenance.json')}, indent=2))
 

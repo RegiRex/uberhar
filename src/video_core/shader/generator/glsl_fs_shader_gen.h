@@ -85,12 +85,27 @@ static_assert(sizeof(StaticTevPlan) == 100);
 static_assert(offsetof(StaticTevPlan, buffer_mask) == 96);
 StaticTevPlan MakeStaticTevPlan(const DynamicTevState& state);
 
+// CodexAstraLocal: Calculated shares production fragment arithmetic but supplies
+// interpolants/quad gradients and owns the ordered output merger itself. Refuse
+// unsupported domains before compilation; an absent evaluator is never fallback.
+enum class ComputeFragmentSupport {
+    Ready,
+    NonVulkan,
+    TextureType,
+    ProceduralTexture,
+    GasFog,
+    CustomShader,
+};
+ComputeFragmentSupport CheckComputeFragmentSupport(const FSConfig& config, const UserConfig& user,
+                                                   const Profile& profile);
+
 class FragmentModule {
 public:
     // AstraEH: Existing callers stay specialized; Vulkan fallback callers opt into dynamic TEV.
     explicit FragmentModule(const FSConfig& config, const UserConfig& user, const Profile& profile,
                             bool dynamic_tev = false,
-                            std::optional<StaticTevPlan> static_tev = std::nullopt);
+                            std::optional<StaticTevPlan> static_tev = std::nullopt,
+                            bool compute_evaluator = false);
     ~FragmentModule();
 
     /// Emits GLSL source corresponding to the provided pica fragment configuration
@@ -165,6 +180,9 @@ private:
 
     void DefineExtensions();
     void DefineInterface();
+    // CodexAstraLocal: Compute has explicit invocation-local varyings instead of
+    // graphics inputs; functions below consume the same names and formulas.
+    void DefineComputeInterface();
     void DefineBindingsVK();
     void DefineBindingsGL();
     void DefineHelpers();
@@ -182,6 +200,9 @@ private:
         dynamic_tev{}; // AstraEH: Select runtime TEV instructions instead of baked stage constants.
     // CodexAstraLocal: The optional compiler owns its plan beyond the submitting draw.
     std::optional<StaticTevPlan> static_tev;
+    // CodexAstraLocal: Select an explicit callable compute interface; graphics
+    // callers keep the original entry point and output-merger behavior.
+    bool compute_evaluator{};
     bool use_blend_fallback{};
     bool use_fragment_shader_interlock{};
     bool use_fragment_shader_barycentric{};
@@ -200,5 +221,22 @@ std::string GenerateFragmentShader(const FSConfig& config, const UserConfig& use
 // family/profile/interface key. Only TEV is static; all other dynamic state stays live.
 std::string GenerateStaticTevFragmentShader(const FSConfig& family, const UserConfig& user,
                                           const Profile& profile, const StaticTevPlan& plan);
+
+// CodexAstraLocal: Returns a library, not a dispatch entry point. The consumer
+// appends its ordered raster kernel and calls UberharEvaluateFragment with
+// perspective-correct varyings, Vulkan window Z/reciprocal W, and derivatives
+// formed from the same primitive at the surrounding 2x2 pixel-quad centers.
+// CodexAstraLocal: The texture0_dx0/dx1/dy0/dy1 fields additionally carry exact
+// perspective-correct (u,v,texture0_w) helper coordinates, before texture
+// projection or cube-face selection. Shadow output returns unrounded TEV color
+// so the ordered merger can truncate its green component like WriteShadow.
+// CodexAstraLocal: proctex_dx0/dx1/dy0/dy1 are the selected procedural UV's
+// original vec2 helper values. The evaluator applies abs before differencing;
+// LUT resources remain in the production set-0 bindings 4/5.
+// Descriptor sets 0/1 retain the production FS uniform/LUT/sampler ABI. Color,
+// depth/stencil, blend and logic operations are committed only by the consumer.
+std::optional<std::string> GenerateComputeFragmentEvaluator(const FSConfig& config,
+                                                           const UserConfig& user,
+                                                           const Profile& profile);
 
 } // namespace Pica::Shader::Generator::GLSL

@@ -9,9 +9,12 @@
 #include <memory> // CodexAstraLocal: Deferred CPU packets retain their owned results.
 #include <span>   // CodexAstraLocal: Stateless, preallocated hardware conversion.
 #include "common/common_types.h"
+#include "video_core/pica/output_vertex.h" // CodexAstraLocal: Original immediate attributes.
 
 namespace Pica {
 struct OutputVertex;
+struct ComputeAssemblyState;
+struct ComputeAssemblyResult;
 class CpuDrawPacket; // CodexAstraLocal: Forward declaration avoids renderer/queue coupling.
 }
 
@@ -52,6 +55,13 @@ public:
 
     /// Draw the current batch of triangles
     virtual void DrawTriangles() = 0;
+
+    // CodexAstraLocal: Strict independent compute enters before CPU guest
+    // shading. A successful producer returns the next persistent assembly state;
+    // unsupported backends return false and the strict caller terminates.
+    virtual bool DrawComputeBatch(bool, const Pica::ComputeAssemblyState&,
+                                  Pica::ComputeAssemblyResult&,
+                                  const Pica::AttributeBuffer* = nullptr) { return false; }
 
     // CodexAstraLocal: Opt-in has no renderer side effects. Unknown backends
     // retain synchronous rendering. An admitted packet is independently running

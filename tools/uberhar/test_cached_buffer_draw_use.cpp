@@ -45,6 +45,9 @@ struct Packet {
  const std::vector<u8>& HardwareBytes()const{return bytes;}
  u32 VertexCount()const{return vertices.size();}
 };
+// CodexAstraLocal: The production terminal type is represented only at this
+// standalone recorder boundary; no application/log dependencies are linked.
+namespace VideoCore {struct ShaderRecoveryError : std::runtime_error {using std::runtime_error::runtime_error;};}
 struct Framebuffer {bool valid{};u64 Handle()const{return valid;}};
 struct FramebufferHelper {mutable unsigned canceled{};void CancelInvalidation()const{++canceled;}};
 
@@ -110,10 +113,12 @@ int main(){
    }
   for(bool packet:{false,true})for(bool strict:{false,true}){
    RasterizerVulkan r;r.strict_compute=strict;
-   Require(r.NoTarget(packet),"original no-target return");
+   bool returned{},terminal{};
+   try{returned=r.NoTarget(packet);}catch(const VideoCore::ShaderRecoveryError&){terminal=true;}
+   Require(strict?terminal&&!returned:returned&&!terminal,"no-target strict terminal or ordinary return");
    Require(r.scheduler.draws==0&&r.uniform_buffer.stamps==0&&r.texture_buffer.stamps==0&&r.texture_lf_buffer.stamps==0,
            "no-target queues no cached use");
-   Require(r.vertex_batch.size()==(packet&&!strict?3:0),"no-target retained packet behavior");
+   Require(r.vertex_batch.size()==(packet?3:0),"no-target retained packet bytes are not cleared on terminal failure");
    ++cases;
   }
   std::cout<<"PASS draw-use cases="<<cases<<" checks="<<checks<<'\n';

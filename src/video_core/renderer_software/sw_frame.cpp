@@ -1,6 +1,7 @@
 // Copyright 2026 Uberhar contributors
 // Licensed under GPLv2 or any later version. Refer to license.txt.
 #include "video_core/renderer_software/sw_frame.h"
+#include <algorithm>
 #include <cstring>
 #include <limits>
 #include "common/color.h"
@@ -20,21 +21,33 @@ ScreenInfo CaptureScreen(const Pica::FramebufferConfig& framebuffer,
         return {1, 1, {static_cast<u8>(color_fill.color_r), static_cast<u8>(color_fill.color_g),
                        static_cast<u8>(color_fill.color_b), 255}};
     }
-    const u32 width = framebuffer.width;
     const u32 height = framebuffer.height;
-    if (width == 0 || height == 0) return {};
+    if (framebuffer.width == 0 || height == 0) return {};
     if (static_cast<u32>(framebuffer.color_format.Value()) > static_cast<u32>(Pica::PixelFormat::RGBA4)) {
-        throw VideoCore::ShaderRecoveryError{"CPU Software: invalid LCD pixel format"};
+        const auto message = fmt::format("CPU Software: invalid LCD pixel format {:#x}",
+                                         framebuffer.format);
+        throw VideoCore::ShaderRecoveryError{message.c_str()};
     }
     const u32 bpp = Pica::BytesPerPixel(framebuffer.color_format);
+    // CodexAstraLocal: Match GL/Vulkan AccelerateDisplay's visible row extent.
+    // Guest LCD format/stride writes can temporarily describe fewer pixels than
+    // the width register; only complete pixels within each row are scanned out.
+    const u32 width = std::min(framebuffer.width.Value(), framebuffer.stride / bpp);
+    if (width == 0) return {};
     const u64 row_bytes = static_cast<u64>(width) * bpp;
     const u64 required = static_cast<u64>(height - 1) * framebuffer.stride + row_bytes;
     const u64 output_bytes = static_cast<u64>(width) * height * 4;
     // CodexAstraLocal: Validate the visible final row before reading; stride
     // padding must never become visible pixels or an unchecked host overread.
-    if (framebuffer.stride < row_bytes || required > memory.size() ||
-        output_bytes > std::numeric_limits<std::size_t>::max()) {
-        throw VideoCore::ShaderRecoveryError{"CPU Software: invalid LCD framebuffer span"};
+    if (required > memory.size() || output_bytes > std::numeric_limits<std::size_t>::max()) {
+        // CodexAstraLocal: Terminal errors retain the actual register/span tuple;
+        // a short or unmapped nonempty scanout is never replaced by a blank frame.
+        const auto message = fmt::format(
+            "CPU Software: invalid LCD framebuffer span (size={}x{} visible_width={} stride={} "
+            "format={:#x} required={} mapped={})",
+            framebuffer.width.Value(), height, width, framebuffer.stride, framebuffer.format,
+            required, memory.size());
+        throw VideoCore::ShaderRecoveryError{message.c_str()};
     }
     ScreenInfo screen{width, height, std::vector<u8>(static_cast<std::size_t>(output_bytes))};
     for (u32 y = 0; y < width; ++y) {

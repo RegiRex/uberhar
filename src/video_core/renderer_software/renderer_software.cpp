@@ -81,7 +81,15 @@ void RendererSoftware::PrepareRenderTarget() {
         // right-eye pair is configured; valid right-eye pairs remain distinct.
         const PAddr address = ScreenAddress(fb, i == 1);
         const auto ref = color_fill.is_enabled ? MemoryRef{} : memory.GetPhysicalRef(address);
-        frame->screens[i] = CaptureScreen(fb, color_fill, {ref.GetPtr(), ref.GetSize()});
+        try {
+            frame->screens[i] = CaptureScreen(fb, color_fill, {ref.GetPtr(), ref.GetSize()});
+        } catch (const VideoCore::ShaderRecoveryError& error) {
+            // CodexAstraLocal: Identify the failed eye/address on the existing
+            // terminal error path without adding per-frame diagnostic work.
+            const auto message = fmt::format("{} (screen={} address={:#010x} active={:#x})",
+                                             error.what(), i, address, fb.active_fb);
+            throw VideoCore::ShaderRecoveryError{message.c_str()};
+        }
     }
     std::scoped_lock lock{frame_mutex};
     published_frame = std::move(frame);

@@ -1,4 +1,47 @@
-# Uberhar progress — 0.1.41 released; CPU Software delivery in development
+# Uberhar progress — 0.1.42 tested; 0.1.43 integration
+
+<!-- CodexAstraLocal: Preserve measured release behavior separately from planned fixes and device qualification. -->
+**0.1.42 is released, verified and installed.** Source
+`ea73d7d4747abc7b3586c933a6ebdf8fbf5884f9` passed all 29 required release checks;
+APK checksum, signing compatibility and installed bytes match. One cold Dark Moon
+opening per Native/Combo mode completed with normal exits, Vulkan 2x, normal
+100% limiter and simulated GPU timings enabled. File 1 and the title shader cache
+were reset for each opening.
+
+Native averaged 69.061% across 48 complete five-second windows, best 92.931%
+and slowest 53.536%; Combo averaged 64.865% across 47 windows, best 93.699% and
+slowest 40.852%. App CPU averaged 2.013 and 1.909 logical-core equivalents.
+GPU readings inside the slowest windows were 98.50% and 95.35% at 680 MHz.
+These are device-wide samples with opaque accumulation periods, not isolated
+per-draw attribution. Different opening durations prevent a causal version/mode
+speedup claim. Neither run meets the sustained 99% goal. Private charts retain
+per-core CPU, thread groups, memory and power/temperature context; DDR bandwidth
+and measured watts remain unavailable.
+
+The .42 queue change now exercises real auxiliary packets: Native's interior
+reports contain 24,374 auxiliary packets, with cumulative maxima of 12 packets
+per wave and six participants. The observed pool CPU share remains small;
+parallel scheduling success alone does not establish a throughput improvement.
+
+CPU Software .42 stops during startup with `invalid LCD framebuffer span`,
+before any game submission. No Software gameplay speed is available. The
+unresponsive error dialog required an app-only restart; app data and the
+protected original save state were preserved. A bounded scanout correction is
+implemented and passes focused host checks for .43. .42 remains installed in Native mode for the owner's
+independent comparison.
+
+<!-- CodexAstraLocal: The independent implementation now has connected execution evidence; hardware and full-title support remain separate acceptance steps. -->
+Calculated is integrated into the .43 candidate without Native fallback.
+A consistent native build and consolidated actual Vulkan owner check pass:
+original guest input, complete retained vertex/color/depth output, persistent
+assembly and clipping, and 12 target-format/shadow/feedback/procedural-resource
+cases. Explicit unsupported states still stop emulation. These host checks do
+not establish Thor performance or whole-game compatibility. Final cleanup,
+Software correction and the affected legacy checks pass. The reviewed .43
+candidate is ready for the existing gated release; publication is pending.
+The owner will test .42 and .43 independently; do not automatically replace .42.
+
+## Earlier 0.1.41 milestone
 
 <!-- CodexAstraLocal: Record actual release verification and the owner's subsequent
 authorization; older stopping boundaries are historical. -->

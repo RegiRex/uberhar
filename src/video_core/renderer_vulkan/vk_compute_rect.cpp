@@ -27,8 +27,8 @@ void ComputeRectRenderer::Initialize(vk::PipelineCache cache) {
     const auto family = physical.getQueueFamilyProperties()[instance.GetGraphicsQueueFamilyIndex()];
     if (!(family.queueFlags & vk::QueueFlagBits::eCompute)) {
         // AstraEH Log Line: One capability rejection.
-        // CodexAstraLocal Log Line: Caller policy determines omission versus
-        // recovery; strict Calculated never replaces this with a graphics draw.
+        // CodexAstraLocal Log Line: Optional rectangle routing retains graphics
+        // rendering on rejection; independent Calculated does not create this owner.
         LOG_WARNING(Render_Vulkan, "Uberhar compute unavailable: graphics queue lacks compute");
         return;
     }

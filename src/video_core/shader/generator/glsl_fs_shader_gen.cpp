@@ -76,6 +76,45 @@ bool SupportsDynamicTev(const FSConfig& config, const UserConfig& user) {
     return CheckDynamicTevSupport(config, user) == DynamicTevSupport::Ready;
 }
 
+// CodexAstraLocal: This is a capability boundary, not a pixel-coverage estimate.
+// Sampling reuses actual typed samplers and caller-provided quad coordinates;
+// the ordered merger separately owns shadow writes. Reserved procedural state,
+// gas and custom-shader domains remain refusals, never approximations or fallback.
+ComputeFragmentSupport CheckComputeFragmentSupport(const FSConfig& config, const UserConfig& user,
+                                                   const Profile& profile) {
+    if (!profile.is_vulkan)
+        return ComputeFragmentSupport::NonVulkan;
+    switch (config.texture.texture0_type) {
+    case TextureType::Texture2D:
+    case TextureType::Projection2D:
+    case TextureType::TextureCube:
+    case TextureType::Shadow2D:
+    case TextureType::ShadowCube:
+    case TextureType::Disabled:
+        break;
+    default:
+        return ComputeFragmentSupport::TextureType;
+    }
+    if (config.proctex.enable) {
+        // CodexAstraLocal: Reuse every defined production procedural operation,
+        // but refuse reserved selectors/empty tables before its logged default
+        // branches could silently substitute a different texture calculation.
+        const auto& proc = config.proctex;
+        if (proc.coord >= 3 || proc.u_clamp > ProcTexClamp::Pulse ||
+            proc.v_clamp > ProcTexClamp::Pulse || proc.u_shift > ProcTexShift::Even ||
+            proc.v_shift > ProcTexShift::Even || proc.color_combiner > ProcTexCombiner::RMax ||
+            (proc.separate_alpha && proc.alpha_combiner > ProcTexCombiner::RMax) ||
+            proc.lut_filter > ProcTexFilter::LinearMipmapLinear || proc.lut_width <= 0 ||
+            proc.lut_width > 255 || proc.lod_min > std::min<u16>(7, proc.lod_max))
+            return ComputeFragmentSupport::ProceduralTexture;
+    }
+    if (config.texture.fog_mode == TexturingRegs::FogMode::Gas)
+        return ComputeFragmentSupport::GasFog;
+    if (!user.IsCacheable())
+        return ComputeFragmentSupport::CustomShader;
+    return ComputeFragmentSupport::Ready;
+}
+
 enum class Semantic : u32 {
     Position,
     Color,
@@ -355,14 +394,19 @@ StaticTevPlan MakeStaticTevPlan(const DynamicTevState& state) {
 
 FragmentModule::FragmentModule(const FSConfig& config_, const UserConfig& user_,
                                const Profile& profile_, bool dynamic_tev_,
-                               std::optional<StaticTevPlan> static_tev_)
+                               std::optional<StaticTevPlan> static_tev_, bool compute_evaluator_)
     : config{config_}, user{user_}, profile{profile_}, dynamic_tev{dynamic_tev_},
-      static_tev{std::move(static_tev_)} {
+      static_tev{std::move(static_tev_)}, compute_evaluator{compute_evaluator_} {
     // AstraEH: The interpreter uses Vulkan push constants; OpenGL retains specialized generation.
     ASSERT(!dynamic_tev || profile.is_vulkan);
     // CodexAstraLocal: The partial tier retains the dynamic interface and accepts
     // only the six-stage bound produced by the existing preparation routine.
     ASSERT(!static_tev || (dynamic_tev && ((static_tev->buffer_mask >> 8) & 7U) <= 6));
+    // CodexAstraLocal: Keep the first compute evaluator on exact full FSConfig
+    // identity; dynamic-family admission/canonicalization is a separate policy.
+    ASSERT(!compute_evaluator ||
+           (!dynamic_tev && CheckComputeFragmentSupport(config, user, profile) ==
+                                ComputeFragmentSupport::Ready));
     config.ApplyProfile(profile_);
     out.reserve(RESERVE_SIZE);
     DefineExtensions();
@@ -393,8 +437,39 @@ FragmentModule::~FragmentModule() = default;
 std::string FragmentModule::Generate() {
     // We round the interpolated primary color to the nearest 1/255th
     // This maintains the PICA's 8 bits of precision
+    if (compute_evaluator) {
+        // CodexAstraLocal: Only invocation-local values are assigned. A rejected
+        // alpha/scissor result cannot write an attachment or publish partial output.
+        out += R"(
+bool UberharEvaluateFragment(UberharFragmentInput attributes,
+                             out vec4 evaluated_color, out float evaluated_depth) {
+primary_color = attributes.primary_color;
+texcoord0 = attributes.texcoord0;
+texcoord1 = attributes.texcoord1;
+texcoord2 = attributes.texcoord2;
+texcoord0_w = attributes.texcoord0_w;
+normquat = attributes.normquat;
+view = attributes.view;
+uber_fragment_coord = attributes.fragment_coord;
+for (int i = 0; i < 3; ++i) {
+    uber_texcoord_dx[i] = attributes.texcoord_dx[i];
+    uber_texcoord_dy[i] = attributes.texcoord_dy[i];
+}
+uber_texture0_dx0 = attributes.texture0_dx0;
+uber_texture0_dx1 = attributes.texture0_dx1;
+uber_texture0_dy0 = attributes.texture0_dy0;
+uber_texture0_dy1 = attributes.texture0_dy1;
+uber_proctex_dx0 = attributes.proctex_dx0;
+uber_proctex_dx1 = attributes.proctex_dx1;
+uber_proctex_dy0 = attributes.proctex_dy0;
+uber_proctex_dy1 = attributes.proctex_dy1;
+evaluated_color = vec4(0.0);
+evaluated_depth = 0.0;
+)";
+    } else {
+        out += "\nvoid main() {";
+    }
     out += R"(
-void main() {
 vec4 rounded_primary_color = byteround(primary_color);
 vec4 primary_fragment_color = vec4(0.0);
 vec4 secondary_fragment_color = vec4(0.0);
@@ -402,7 +477,7 @@ vec4 secondary_fragment_color = vec4(0.0);
 
     // Do not do any sort of processing if it's obvious we're not going to pass the alpha test
     if (!dynamic_tev && config.framebuffer.alpha_test_func == FramebufferRegs::CompareFunc::Never) {
-        out += "discard; }";
+        out += compute_evaluator ? "return false; }" : "discard; }";
         return out;
     }
 
@@ -461,7 +536,18 @@ vec4 secondary_fragment_color = vec4(0.0);
             break;
         }
 
-    if (config.framebuffer.shadow_rendering) {
+    if (compute_evaluator) {
+        // CodexAstraLocal: The ordered compute merger performs all destination
+        // operations exactly once. Do not also emit graphics blend/logic emulation.
+        out += "evaluated_depth = depth;\n";
+        // CodexAstraLocal: WriteShadow truncates unrounded final TEV green.
+        // Applying ordinary color byteround first changes packed shade values.
+        out += config.framebuffer.shadow_rendering
+                   ? "evaluated_color = combiner_output;\n"
+                   : "evaluated_color = byteround(combiner_output);\n";
+        out += "return true;\n}";
+        return out;
+    } else if (config.framebuffer.shadow_rendering) {
         WriteShadow();
     } else {
         out += "gl_FragDepth = depth;\n";
@@ -485,17 +571,18 @@ void FragmentModule::WriteDepth() {
     // original range of [-1, 0]. If the depth range is [0, 1], so all we need to do is
     // un-negate the value to range [-1, 0]. Once we have z_over_w, we can do our own transformation
     // according to PICA specification.
+    const std::string_view coord = compute_evaluator ? "uber_fragment_coord" : "gl_FragCoord";
     if (profile.has_minus_one_to_one_range) {
-        out += "float z_over_w = -2.0 * gl_FragCoord.z + 1.0;\n";
+        out += fmt::format("float z_over_w = -2.0 * {}.z + 1.0;\n", coord);
     } else {
-        out += "float z_over_w = -gl_FragCoord.z;\n";
+        out += fmt::format("float z_over_w = -{}.z;\n", coord);
     }
     out += "float depth = z_over_w * depth_scale + depth_offset;\n";
     if (dynamic_tev) {
         // AstraEH: Keep the same arithmetic/order as the specialized depth conversion.
         out += "if ((uber_tev.framebuffer & 32u) != 0u) depth /= gl_FragCoord.w;\n";
     } else if (config.framebuffer.depthmap_enable == RasterizerRegs::DepthBuffering::WBuffering) {
-        out += "depth /= gl_FragCoord.w;\n";
+        out += fmt::format("depth /= {}.w;\n", coord);
     }
 }
 
@@ -522,10 +609,12 @@ if (uber_scissor != 0u) {
     if (scissor_mode == RasterizerRegs::ScissorMode::Include) {
         out += '!';
     }
-    out += "(gl_FragCoord.x >= float(scissor_x1) && "
-           "gl_FragCoord.y >= float(scissor_y1) && "
-           "gl_FragCoord.x < float(scissor_x2) && "
-           "gl_FragCoord.y < float(scissor_y2))) discard;\n";
+    const std::string_view coord = compute_evaluator ? "uber_fragment_coord" : "gl_FragCoord";
+    out += fmt::format("({0}.x >= float(scissor_x1) && "
+                       "{0}.y >= float(scissor_y1) && "
+                       "{0}.x < float(scissor_x2) && "
+                       "{0}.y < float(scissor_y2))) {1};\n",
+                       coord, compute_evaluator ? "return false" : "discard");
 }
 
 std::string FragmentModule::GetSource(Pica::TexturingRegs::TevStageConfig::Source source,
@@ -747,7 +836,8 @@ case 7u: if (uber_alpha <  alphatest_ref) discard; break;
             break;
         }
     };
-    out += fmt::format("if ({}) discard;\n", get_cond());
+    out += fmt::format("if ({}) {};\n", get_cond(),
+                       compute_evaluator ? "return false" : "discard");
 }
 
 void FragmentModule::WriteTevStage(u32 index) {
@@ -1810,7 +1900,16 @@ float ProcTexNoiseCoef(vec2 x) {
     // f(x, y) <= m_u + m_v + m_w
     // (See OpenGL 4.6 spec, 8.14.1 - Scale Factor and Level-of-Detail)
     // Note: this is different from the one normal 2D textures use.
-    out += "vec2 duv = max(abs(dFdx(uv)), abs(dFdy(uv)));\n";
+    if (compute_evaluator) {
+        // CodexAstraLocal: Production differentiates abs(UV), not raw UV. Use
+        // the selected coordinate's actual helper values so zero crossings
+        // survive; a center value plus its raw derivative cannot reconstruct
+        // the same rounded endpoints. Noise/clamp/shift still follow this LOD.
+        out += "vec2 duv = max(abs(abs(uber_proctex_dx1) - abs(uber_proctex_dx0)), "
+               "abs(abs(uber_proctex_dy1) - abs(uber_proctex_dy0)));\n";
+    } else {
+        out += "vec2 duv = max(abs(dFdx(uv)), abs(dFdy(uv)));\n";
+    }
     // unlike normal texture, the bias is inside the log2
     out += fmt::format("float lod = log2(abs(float({}) * proctex_bias) * (duv.x + duv.y));\n",
                        config.proctex.lut_width);
@@ -1858,9 +1957,15 @@ float ProcTexNoiseCoef(vec2 x) {
     case ProcTexFilter::NearestMipmapLinear:
     case ProcTexFilter::LinearMipmapLinear:
         out += "int lod_i = int(lod);\n"
-               "float lod_f = fract(lod);\n"
-               "vec4 final_color = mix(SampleProcTexColor(lut_coord, lod_i), "
-               "SampleProcTexColor(lut_coord, lod_i + 1), lod_f);\n";
+               "float lod_f = fract(lod);\n";
+        // CodexAstraLocal: At clamped LOD 7 the next level has zero weight, but
+        // evaluating it still indexes past the eight production offsets. Keep
+        // compute's endpoint defined without altering the graphics generator.
+        out += compute_evaluator
+                   ? "vec4 final_color = mix(SampleProcTexColor(lut_coord, lod_i), "
+                     "SampleProcTexColor(lut_coord, min(lod_i + 1, 7)), lod_f);\n"
+                   : "vec4 final_color = mix(SampleProcTexColor(lut_coord, lod_i), "
+                     "SampleProcTexColor(lut_coord, lod_i + 1), lod_f);\n";
         break;
     }
 
@@ -1877,6 +1982,10 @@ float ProcTexNoiseCoef(vec2 x) {
 }
 
 void FragmentModule::DefineExtensions() {
+    // CodexAstraLocal: Compute obtains interpolation/order from its pixel owner;
+    // graphics barycentric, interlock and framebuffer-fetch extensions do not apply.
+    if (compute_evaluator)
+        return;
     // AstraEH: glslang lowers this language hint to core SPIR-V DontUnroll.
     // It does not require Android to expose an OpenGL or Vulkan extension.
     if (dynamic_tev) {
@@ -1938,6 +2047,10 @@ void FragmentModule::DefineExtensions() {
 }
 
 void FragmentModule::DefineInterface() {
+    if (compute_evaluator) {
+        DefineComputeInterface();
+        return;
+    }
     const auto define_input = [&](std::string_view var, Semantic location) {
         if (profile.has_separable_shaders) {
             out += fmt::format("layout (location = {}) ", location);
@@ -1960,6 +2073,42 @@ void FragmentModule::DefineInterface() {
 
     // Output attributes
     out += "layout (location = 0) out vec4 color;\n\n";
+}
+
+void FragmentModule::DefineComputeInterface() {
+    // CodexAstraLocal: Globals are private to one compute invocation, so the
+    // unchanged production helper functions can consume explicit raster inputs.
+    out += R"(
+struct UberharFragmentInput {
+    vec4 primary_color;
+    vec2 texcoord0;
+    vec2 texcoord1;
+    vec2 texcoord2;
+    float texcoord0_w;
+    vec4 normquat;
+    vec3 view;
+    vec4 fragment_coord;
+    vec2 texcoord_dx[3];
+    vec2 texcoord_dy[3];
+    vec3 texture0_dx0;
+    vec3 texture0_dx1;
+    vec3 texture0_dy0;
+    vec3 texture0_dy1;
+    vec2 proctex_dx0;
+    vec2 proctex_dx1;
+    vec2 proctex_dy0;
+    vec2 proctex_dy1;
+};
+vec4 primary_color;
+vec2 texcoord0, texcoord1, texcoord2;
+float texcoord0_w;
+vec4 normquat;
+vec3 view;
+vec4 uber_fragment_coord;
+vec2 uber_texcoord_dx[3], uber_texcoord_dy[3];
+vec3 uber_texture0_dx0, uber_texture0_dx1, uber_texture0_dy0, uber_texture0_dy1;
+vec2 uber_proctex_dx0, uber_proctex_dx1, uber_proctex_dy0, uber_proctex_dy1;
+)";
 }
 
 void FragmentModule::DefineBindingsVK() {
@@ -1990,7 +2139,9 @@ void FragmentModule::DefineBindingsVK() {
     }
 
     // Utility textures
-    if (config.framebuffer.shadow_rendering) {
+    // CodexAstraLocal: The compute consumer owns set 2 and ordered stores;
+    // declaring the graphics shadow image here would alias its vertex binding.
+    if (config.framebuffer.shadow_rendering && !compute_evaluator) {
         out += "layout(set = 2, binding = 0, r32ui) uniform uimage2D shadow_buffer;\n\n";
     }
     if (user.use_custom_normal) {
@@ -2056,12 +2207,25 @@ vec3 byteround(vec3 x) {
 vec4 byteround(vec4 x) {
     return round(x * 255.0) * (1.0 / 255.0);
 }
-
+)";
+    if (compute_evaluator) {
+        // CodexAstraLocal: The raster owner evaluates helper coordinates even
+        // outside triangle coverage; no derivative is inferred from active lanes.
+        out += R"(
+float getLod(vec2 dx, vec2 dy) {
+    vec2 d = max(abs(dx), abs(dy));
+    return log2(max(d.x, d.y));
+}
+)";
+    } else {
+        out += R"(
 float getLod(vec2 coord) {
     vec2 d = max(abs(dFdx(coord)), abs(dFdy(coord)));
     return log2(max(d.x, d.y));
 }
-
+)";
+    }
+    out += R"(
 uvec2 DecodeShadow(uint pixel) {
     return uvec2(pixel >> 8, pixel & 0xFFu);
 }
@@ -2142,7 +2306,9 @@ bool AreQuaternionsOpposite(vec4 qa, vec4 qb) {
 }
 
 void FragmentModule::DefineShadowHelpers() {
-    if (config.framebuffer.shadow_rendering) {
+    // CodexAstraLocal: Compute uses its independently checked ordered-pixel
+    // helper. Retain these graphics-only update functions for graphics output.
+    if (config.framebuffer.shadow_rendering && !compute_evaluator) {
         out += R"(
 uint EncodeShadow(uvec2 pixel) {
     return (pixel.x << 8) | pixel.y;
@@ -2444,6 +2610,57 @@ void FragmentModule::DefineTexUnitSampler(u32 texture_unit) {
         }
     }
 
+    if (compute_evaluator && texture_unit < 3) {
+        // CodexAstraLocal: Implicit derivatives do not exist in this compute
+        // evaluator. Project each helper coordinate before differencing, as
+        // textureProjGrad requires; cube gradients remain direction-space and
+        // the sampler performs its ordinary face/LOD transformation. Preserve
+        // the inherited unprojected border checks and absence of manual bias.
+        if (texture_unit == 0) {
+            switch (config.texture.texture0_type) {
+            case TextureType::Projection2D:
+                out += R"(
+vec2 projected_dx0 = uber_texture0_dx0.xy / uber_texture0_dx0.z;
+vec2 projected_dx1 = uber_texture0_dx1.xy / uber_texture0_dx1.z;
+vec2 projected_dy0 = uber_texture0_dy0.xy / uber_texture0_dy0.z;
+vec2 projected_dy1 = uber_texture0_dy1.xy / uber_texture0_dy1.z;
+return textureProjGrad(tex0, vec3(texcoord0, texcoord0_w),
+                       projected_dx1 - projected_dx0, projected_dy1 - projected_dy0);
+}
+)";
+                return;
+            case TextureType::TextureCube:
+                out += R"(
+return textureGrad(tex0, vec3(texcoord0, texcoord0_w),
+                   uber_texture0_dx1 - uber_texture0_dx0,
+                   uber_texture0_dy1 - uber_texture0_dy0);
+}
+)";
+                return;
+            case TextureType::Shadow2D:
+                // CodexAstraLocal: Typed shadow taps use production explicit
+                // level-zero depth comparisons and PCF, with no color sampler.
+                out += "return shadowTexture(texcoord0, texcoord0_w);\n}";
+                return;
+            case TextureType::ShadowCube:
+                out += "return shadowTextureCube(texcoord0, texcoord0_w);\n}";
+                return;
+            default:
+                break;
+            }
+        }
+        // CodexAstraLocal: Preserve production explicit-LOD 2D sampling, with
+        // actual normalized-UV quad derivatives supplied by the ordered rasterizer.
+        const u32 coord = texture_unit == 2 && config.texture.texture2_use_coord1 ? 1 : texture_unit;
+        out += fmt::format(
+            "vec2 extent = vec2(textureSize(tex{0}, 0));\n"
+            "return textureLod(tex{0}, texcoord{1}, "
+            "getLod(uber_texcoord_dx[{1}] * extent, uber_texcoord_dy[{1}] * extent) "
+            "+ tex_lod_bias[{0}]);\n}}\n",
+            texture_unit, coord);
+        return;
+    }
+
     switch (texture_unit) {
     case 0:
         switch (config.texture.texture0_type) {
@@ -2512,6 +2729,16 @@ std::string GenerateStaticTevFragmentShader(const FSConfig& family, const UserCo
                                           const Profile& profile, const StaticTevPlan& plan) {
     FragmentModule module{family, user, profile, true, plan};
     return module.Generate();
+}
+
+std::optional<std::string> GenerateComputeFragmentEvaluator(const FSConfig& config,
+                                                           const UserConfig& user,
+                                                           const Profile& profile) {
+    // CodexAstraLocal: Unsupported state is returned to the strict compute owner;
+    // this API never constructs a graphics shader or selects a fallback path.
+    if (CheckComputeFragmentSupport(config, user, profile) != ComputeFragmentSupport::Ready)
+        return std::nullopt;
+    return FragmentModule{config, user, profile, false, std::nullopt, true}.Generate();
 }
 
 } // namespace Pica::Shader::Generator::GLSL

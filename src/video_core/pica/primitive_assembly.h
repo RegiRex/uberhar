@@ -5,6 +5,7 @@
 #pragma once
 
 #include <array>
+#include <cstring> // CodexAstraLocal: Copy only live/touched compute semantic slots.
 #include <functional>
 #include <type_traits> // CodexAstraLocal: Enforce the immutable borrowed getter contract.
 #include <boost/serialization/access.hpp>
@@ -12,6 +13,7 @@
 #include "common/assert.h"     // AstraEH: Enforce the accelerated-batch entry contract.
 #include "common/scope_exit.h" // AstraEH: Restore assembly state on every exit path.
 #include "video_core/pica/output_vertex.h"
+#include "video_core/pica/compute_assembly.h"
 #include "video_core/pica/regs_pipeline.h"
 
 namespace Pica {
@@ -97,6 +99,34 @@ struct PrimitiveAssembler {
         ASSERT((topology == PipelineRegs::TriangleTopology::List ||
                 topology == PipelineRegs::TriangleTopology::Shader) && IsEmpty() && !winding);
         buffer = last_pair;
+    }
+
+    // CodexAstraLocal: Preserve this serialized owner across compute draws and
+    // immediate vertices. Do not read unused slots, and commit only after whole
+    // producer success and successful renderer admission of every emitted triangle.
+    ComputeAssemblyState ExportComputeState() const {
+        ComputeAssemblyState state{};
+        state.topology = static_cast<u32>(topology);
+        state.index = static_cast<u32>(buffer_index);
+        state.ready = strip_ready;
+        state.winding = winding;
+        ASSERT(state.Valid());
+        for (u32 slot = 0; slot < 2; ++slot)
+            if (state.LiveMask() & (1U << slot))
+                std::memcpy(state.words.data() + slot * 24, &buffer[slot], sizeof(OutputVertex));
+        return state;
+    }
+    bool CommitComputeState(const ComputeAssemblyResult& completed) {
+        const auto& state = completed.state;
+        if (!state.Valid() || state.topology != static_cast<u32>(topology) ||
+            completed.written_mask > 3) return false;
+        for (u32 slot = 0; slot < 2; ++slot)
+            if (completed.written_mask & (1U << slot))
+                std::memcpy(&buffer[slot], state.words.data() + slot * 24, sizeof(OutputVertex));
+        buffer_index = static_cast<int>(state.index);
+        strip_ready = state.ready;
+        winding = state.winding;
+        return true;
     }
 
     // AstraEH: An accelerated host draw assembles its own primitives and leaves
