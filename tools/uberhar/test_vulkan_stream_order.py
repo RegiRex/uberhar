@@ -141,7 +141,9 @@ def main():
             (output/(name+'.stdout')).write_bytes(result.stdout);(output/(name+'.stderr')).write_bytes(result.stderr)
             proof['variants'].append({'name':name,'returncode':result.returncode})
             if error:need(result.returncode==1 and result.stderr==error,'Unexpected defect result: '+name)
-            else:need(result.returncode==0 and result.stdout.endswith(b'PASS cases=36 checks=1144\n'),'Candidate population/result')
+            # CodexAstraLocal: Each actual CPU draw also checks the new final-tick
+            # cached-buffer hook; all original geometry/order cases are retained.
+            else:need(result.returncode==0 and result.stdout.endswith(b'PASS cases=36 checks=1252\n'),'Candidate population/result')
             print(name+': PASS',flush=True)
         proof['passed']=True
     finally:

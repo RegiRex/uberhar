@@ -1,16 +1,74 @@
-# Uberhar progress — 0.1.40 candidate; 0.1.39 installed
+# Uberhar progress — 0.1.41 correction in validation; pause after its build
 
-<!-- CodexAstraLocal: The owner extends this finite batch through .40; its new
-fragment tier does not replace the unmet portable CPU throughput objective. -->
-**0.1.40 is a candidate; 0.1.39 is released and installed.** The next candidate
-adds bounded static prepared TEV with runtime lighting for CPU vertex draws in
-Native and full Combo. Native is no longer generic-fragment-only; Combo retains
-ready full-specialized priority and continued full promotion. Generic rendering
-remains complete while optional entries are missing, pending, failed or capped.
-No additional guest vertices move to the GPU. Finite generator, cache and worker
-controls passed; integrated publication and target .40 results remain pending.
-See the [candidate notes](releases/0.1.40.md) for ownership and budgets.
+<!-- CodexAstraLocal: The next build contains a real cached-buffer ownership fix; its delivery is the owner's latest stopping boundary. -->
+**0.1.41 is a local candidate, not yet released.** It extends cached uniform and
+LUT lifetime through the final consuming draw, then waits before wrap reuses
+those bytes. Focused defect controls and actual host Vulkan rendered-output
+tests pass; final review and release gates remain pending. This is not a measured
+Thor speedup or an established explanation of Dark Moon's visual faults.
 
+The owner requests a pause after this next gated build/publication. Save the
+handoff and pause all agents at that boundary, before installation or title tests.
+The installed build remains .40. On owner resume, the planned controls are one
+cold Native and one cold Combo opening at Vulkan 2x, normal 100%, GPU timings ON.
+The [experiment ledger](UBERHAR_EXPERIMENT_LEDGER_0.1.40.md) separates actual
+hardware tests from host-only experiments and untested proposals.
+
+## Completed .40 tests
+
+<!-- CodexAstraLocal: Record actual delivery and the owner-requested timing controls without treating a settings experiment as another release. -->
+**0.1.40 is released and installed.** Source
+`7bc71c5c9c7e10a39558084392330faa884889ba` passed all 28 required release steps.
+Installed bytes match the qualified APK and compatible signing identity. The
+static prepared TEV tier actually renders CPU-vertex draws in Native and Combo;
+Combo also continues using ready full specialization. No additional guest
+vertex work moved to the GPU. Source and separate cleanliness reviews passed.
+
+The existing **Settings → Debug → Simulate 3DS GPU Timings** toggle works in
+Native and Combo and is not overridden by Calculated's preset. It delays guest
+GPU-completion interrupts; no .41 UI change is necessary. The .41 correction
+above addresses a separate cached-buffer ownership obligation.
+
+Three cold Dark Moon controls have observed normal exits: Native off averaged
+38.771% (slowest26.345%), Combo off33.564% (slowest18.879%), and Native on68.598%
+(slowest57.046%). All use Vulkan2x and normal100%, with File1 reset and empty
+application shader caches. Whole-app CPU averages1.919,1.679 and2.031 logical
+cores respectively, including the workers. Scene weighting and actual worker
+allowances differ; the mean ratios are not exact causal speedups.
+
+The fourth Combo-on run was interrupted by a credit limit. Its finite monitor
+stopped after300s; later teardown is recorded but root did not observe the exit
+input. Its independently reviewed bounded sample averaged 66.361%, with a slowest
+window of 38.256% and 2.050 app logical-core equivalents. It is not a matched
+complete opening. No replacement game run was performed. See the
+[test review](UBERHAR_TEST_REVIEW_0.1.40.md) for all four scopes.
+
+Native-on's opening moon clip has56 events across78 decoded frames, maximum3;
+this crosses the owner's investigation thresholds. Native-off has4 isolated
+moon events across its two moon clips and7 isolated early ghost events. Combo-off
+has0 counted events in its two actual clips, with later phases unobserved. Faster
+scene progression does not qualify correct graphics or sustained99% speed.
+
+The deferred CPU packet queue remains coordinator-only, one packet per wave,
+with no observed auxiliary fan-out. Existing same-draw workers are useful but
+the portable multicore objective remains unmet. Future architecture must review
+guest pacing, resource lifetime/visibility and slot reuse alongside useful CPU
+work distribution; the recorded artifacts do not yet establish their cause.
+Measured DDR bandwidth remains unavailable, with no clock/pressure proxy.
+
+The owner stopped automated visual review and will judge noticeable artifacts.
+Native-on ghost and Combo-on temporal reviews remain unfinished. Architect and
+Developer/Engineer are now separate roles; the Calculated agent works solely on
+its independent private prototype. Complete Calculated title rendering remains
+unqualified. The owner now authorizes implementing concrete architectural corrections and
+testing them on hardware, superseding the earlier pause. The next build must
+contain a potential issue fix, with a clear experiment and outcome. A proposal
+ledger separates untested, host-tested, hardware-tested and shipped work. The
+subsequent next-build pause at the top of this document is the current boundary.
+
+## Historical 0.1.39 results
+
+<!-- CodexAstraLocal: Retain earlier observations without labeling them as the currently installed version. -->
 One cold Native and one cold Combo .39 Dark Moon opening have completed at Vulkan
 2x and the normal 100% limiter. The independently reviewed primary means are
 30.476% and 28.763%, with p05 window speeds 17.586% and 17.246%. Slowest/best windows

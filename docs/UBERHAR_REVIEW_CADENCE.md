@@ -1,5 +1,24 @@
 # Architecture review ledger
 
+<!-- CodexAstraLocal: Close .38–.40 after independent source, numerical and chart reviews; the next-build pause does not erase completed audit coverage. -->
+**Current full-review anchor: released 0.1.40**, source
+`7bc71c5c9c7e10a39558084392330faa884889ba`, with **zero successful successors**.
+The [architecture review](UBERHAR_ARCHITECTURE_0.1.40.md), separate
+[cleanliness review](UBERHAR_CLEANLINESS_0.1.40.md) and
+[test review](UBERHAR_TEST_REVIEW_0.1.40.md) close the three successful releases
+.38–.40. Independent numerical and chart reviews are complete, retaining the
+limited fourth timing observation and the owner's stopped visual-review scope.
+All 28 .40 release gates passed. Unmet throughput/graphics goals remain open;
+completed documentation and private experiments do not count as another build.
+
+The owner now requests a pause after the **next completed gated build/release**.
+Finish the real .41 correction and its checks, checkpoint, then pause all agents
+before installation or hardware tests. The next full audit is due after three
+successful successors to .40, or earlier if regressions justify it. Historical
+checkpoints below do not override this anchor or the newest stopping boundary.
+
+## Historical checkpoints
+
 <!-- CodexAstraLocal: The latest owner-defined boundary applies even before the
 next full three-successor review; candidate preparation does not advance cadence. -->
 **Current batch:** .39 is released and its single cold Native/Combo controls are

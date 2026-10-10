@@ -45,13 +45,23 @@ jobs:
         # parser/preamble, rather than relying only on separately adapted CLI shaders.
         run: git submodule update --init --depth 1 externals/fmt externals/xxHash externals/boost externals/nihstro externals/vulkan-headers externals/microprofile externals/xbyak externals/libretro-common/libretro-common externals/glslang
       - name: Install validation tools
+        # CodexAstraLocal: The cached-buffer lifetime gate submits real Vulkan
+        # draws through an explicitly selected software ICD and real fences.
         run: |
           sudo apt-get update
-          sudo apt-get install -y glslang-tools spirv-tools libegl1-mesa-dev libgl1-mesa-dri
+          sudo apt-get install -y glslang-tools spirv-tools libegl1-mesa-dev libgl1-mesa-dri libvulkan1 mesa-vulkan-drivers
           python3 -m venv /tmp/uberhar-test-env
           /tmp/uberhar-test-env/bin/pip install moderngl==5.12.0 glcontext==3.0.0
       - name: Compile production generator and emit cases
         run: bash tools/uberhar/build_probe.sh
+      # CodexAstraLocal: Keep the old gates and require exact UBO/proctex/
+      # lighting-fog output when a clean later draw outlives its allocation tick.
+      - name: Execute Vulkan cached buffer lifetime
+        run: |
+          python3 tools/uberhar/test_cached_buffer_lifetime_vulkan.py \
+            --glslang "$(command -v glslangValidator)" \
+            --spirv-val "$(command -v spirv-val)" \
+            --icd /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
       - name: Validate Vulkan fragment modules
         # AstraEH: Both user-selectable frontend optimizer modes must preserve
         # valid Vulkan modules and the compact TEV loop's no-unroll hint.
@@ -134,6 +144,8 @@ jobs:
       # provenance for both legacy and static-tier controls, including failure.
       # CodexAstraLocal: Keep the compiler-policy fixture and exact assertion
       # diagnostics when optional-lane or frontend controls reject a candidate.
+      # CodexAstraLocal: Retain cached-ring source, synthetic payloads, real
+      # Vulkan modules and specific defect diagnostics, including failed gates.
       - name: Upload CPU coordination contract evidence
         if: always()
         uses: actions/upload-artifact@v7
@@ -153,6 +165,9 @@ jobs:
             build/uberhar-probe/vulkan-stream-order/**/provenance.json
             build/uberhar-probe/vulkan-stream-order/**/*.stdout
             build/uberhar-probe/vulkan-stream-order/**/*.stderr
+            build/uberhar-probe/cached-buffer-lifetime/**
+            build/uberhar-probe/cached-buffer-draw-use/**
+            build/uberhar-probe/cached-buffer-lifetime-vulkan/**
             build/uberhar-probe/shader-jit-lease/**/provenance.json
             build/uberhar-probe/shader-jit-lease/**/*.stdout
             build/uberhar-probe/shader-jit-lease/**/*.stderr

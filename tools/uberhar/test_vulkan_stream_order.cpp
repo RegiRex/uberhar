@@ -362,6 +362,9 @@ public:
     std::optional<std::size_t> invalidation_mark;
     u64 wait_bound{};
     u64 mapping_generation{};
+    // CodexAstraLocal: Actual Map now has an opt-in cached-range fence;
+    // this geometry-only fixture leaves it unmarked, preserving its old scope.
+    u64 last_draw_use_tick{};
     std::shared_ptr<Allocation> allocation;
 
     StreamBuffer(const Instance&, Scheduler&, u32);
@@ -439,6 +442,10 @@ struct Raster {
     Common::Rectangle<u32> draw_rect{0, 32, 32, 0};
     u32 pipeline_info{}, software_layout{};
     struct { void* ready{}; } cpu_bridge;
+    // CodexAstraLocal: Witness the real CPU-tail hook at its final tick. The
+    // separate cached-buffer gate executes the three actual ring stamps/reads.
+    u64 cached_use_tick{};
+    void MarkCachedShaderBuffersUsed() { cached_use_tick = scheduler.CurrentTick(); }
 
     // CodexAstraLocal: The original sample call sites execute below, while
     // this owner only records their ticks and does not allocate a GPU query.
@@ -493,6 +500,7 @@ struct Raster {
         Require(stream_buffer.current_watch_cursor != 0, "draw allocation recorded");
         Require(stream_buffer.current_watches[stream_buffer.current_watch_cursor - 1].tick ==
                     scheduler.CurrentTick(), "geometry watch stamped at final draw tick");
+        Require(cached_use_tick == scheduler.CurrentTick(), "cached buffers stamped at final draw tick");
         vertex_batch.clear();
     }
 };

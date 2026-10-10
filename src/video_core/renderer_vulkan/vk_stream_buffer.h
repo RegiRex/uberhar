@@ -80,6 +80,11 @@ public:
     /// Ensures that "size" bytes of memory are available to the GPU, potentially recording a copy.
     void Commit(u32 size);
 
+    // CodexAstraLocal: Cached shader ranges can be consumed without a new
+    // Commit. The owner calls this after the actual draw enqueue, at its final
+    // tick, so wrap cannot overwrite bytes still referenced by that draw.
+    void MarkDrawUse() noexcept;
+
     // CodexAstraLocal: Admission must happen before Map. The normal owner Map
     // reserves the range; seal it after final pipeline binding at the draw tick.
     // Noncoherent/download buffers retain synchronous Commit and are not admitted.
@@ -137,6 +142,10 @@ private:
     // CodexAstraLocal: Saturation permanently closes deferred admission instead
     // of allowing a stale reservation to become current after integer wrap.
     u64 mapping_generation{};
+
+    // CodexAstraLocal: A conservative last-consumer fence protects every cached
+    // range in this ring generation. Unmarked geometry/upload rings are unchanged.
+    u64 last_draw_use_tick{};
 
     std::vector<Watch> current_watches;           ///< Watches recorded in the current iteration.
     std::size_t current_watch_cursor{};           ///< Count of watches, reset on invalidation.

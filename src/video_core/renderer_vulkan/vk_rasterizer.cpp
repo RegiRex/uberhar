@@ -845,11 +845,18 @@ bool RasterizerVulkan::AccelerateDrawBatchInternal(bool is_indexed) {
                     draw(cmdbuf);
                     evidence.Recorded();
                 });
+                // CodexAstraLocal: Capture publication is still a real draw;
+                // stamp only after its final bind/index preparation and enqueue.
+                MarkCachedShaderBuffersUsed();
                 return true;
             }
         }
     }
     scheduler.Record(draw);
+
+    // CodexAstraLocal: A rejected/pending pipeline returned above without a
+    // draw. Only this actual enqueue extends cached shader-buffer lifetime.
+    MarkCachedShaderBuffersUsed();
 
     return true;
 }
@@ -1248,6 +1255,9 @@ bool RasterizerVulkan::Draw(bool accelerate, bool is_indexed,
                 cmdbuf.draw(vertex_count, 1, 0, 0);
             });
         }
+        // CodexAstraLocal: Ordinary and deferred CPU draws both consumed the
+        // cached ranges at this final tick, after pass/bind/geometry flushes.
+        MarkCachedShaderBuffersUsed();
         // CodexAstraLocal: Stamp after actual draw enqueue so optional pipeline
         // ownership covers recorded GPU use, beyond the earlier selection.
         if (cpu_fragment_use) pipeline_cache.CompleteReadyCpuDraw(cpu_fragment_use);
@@ -1681,6 +1691,15 @@ void RasterizerVulkan::UploadUniforms(bool accelerate_draw) {
     }
 
     uniform_buffer.Commit(used_bytes);
+}
+
+// CodexAstraLocal: These three rings retain clean offsets between draws. Their
+// own wrap paths invalidate and refresh every cached block before its next use;
+// geometry and staging buffers continue to use their existing per-upload watches.
+void RasterizerVulkan::MarkCachedShaderBuffersUsed() {
+    uniform_buffer.MarkDrawUse();
+    texture_buffer.MarkDrawUse();
+    texture_lf_buffer.MarkDrawUse();
 }
 
 void RasterizerVulkan::SwitchDiskResources(u64 title_id) {

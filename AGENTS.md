@@ -1,5 +1,55 @@
 # Uberhar development instructions
 
+<!-- CodexAstraLocal: The owner's newest boundary is completion of the next build, before installation or further title tests. -->
+- Complete the next real candidate's source review and gated build/publication,
+  then save a resumable handoff and pause all agents, including architecture and
+  Calculated work. Do not install or test that candidate on the Thor until the
+  owner resumes. This supersedes the earlier open-ended fix/test continuation.
+
+<!-- CodexAstraLocal: The owner replaces the proposal-only stopping point with implementation and hardware falsification of concrete fixes. -->
+- Do not publish builds that lack a potential issue fix. Select concrete,
+  promising architectural proposals, implement them with their correctness
+  checks, and test their effects on hardware. A hypothesis is an experiment
+  candidate, not a reason to defer implementation indefinitely.
+- Maintain a proposal ledger distinguishing untested ideas, host-only tests,
+  device fixtures, shipped title tests, rejected results and remaining work.
+  Verify earlier architectural proposals against actual code and evidence;
+  never imply that discussion, local validation or a release alone proves the
+  proposed performance effect on hardware.
+- Continue from the .40 report into the next real correction and gated hardware
+  experiment. This supersedes the earlier proposal-only/non-architecture pause.
+  Preserve separate Architect, Developer/Engineer and Calculated roles, root-only
+  device operation, exact rendering and existing release/signing gates.
+
+<!-- CodexAstraLocal: The owner's latest role change ends automated temporal review and separates architecture from implementation. -->
+- The owner now assesses noticeable moon flashes and ghost corruption. Stop
+  frame-by-frame visual analysis; retain completed findings and explicitly mark
+  unfinished coverage without completing it or rerunning games for that purpose.
+- Keep Architect and Developer/Engineer as distinct roles. The Architect designs
+  the coordinated CPU/GPU system and its correctness requirements; the Developer
+  implements and validates designs and may help produce requested charts.
+- The Calculated agent works exclusively on the independent Calculated prototype,
+  without Native fallback or competing visual-review assignments. Preserve finite
+  correctness gates and distinguish private experiments from integrated releases.
+- Finish the current .40 numerical report and charts without waiting for further
+  visual qualification. Root remains the sole device operator; this role change
+  does not itself request a .41 build or waive the existing publication gates.
+
+<!-- CodexAstraLocal: The owner's later timing comparison expands the .40 test matrix without requesting a new build for an already available toggle. -->
+- Complete four cold .40 Dark Moon openings: Native and Combo with simulated
+  3DS GPU timings off, then each mode with timings on. Reset File 1 and delete
+  the title's Vulkan shader cache for each run; keep Vulkan 2x and normal speed.
+  Retain actual effective settings, scene progression and temporal graphics,
+  alongside speed, CPU/GPU/memory and unavailable bandwidth limits.
+- The existing Settings > Debug > Simulate 3DS GPU Timings switch is not
+  overridden by the Native, Calculated or Combo presets. A .41 toggle change
+  is only needed if actual operation contradicts this verified source behavior.
+- Resume private independent Calculated development during the test batch,
+  preempting it for necessary visual review. Inform the architecture agents of
+  all four results, provide the summary, charts and analysis, then pause work
+  outside architecture unless a separately qualified .41 candidate is ready.
+  Do not manufacture another release merely to avoid the reporting boundary.
+
 <!-- CodexAstraLocal: The owner's later October 9 direction extends the boundary through .40 and coordinates manual .39 tests without transferring device ownership to agents. -->
 - Complete 0.1.39 Dark Moon Native/Combo cold tests and report their charts, then
   continue through 0.1.40 and its consolidated tests. The owner may test FEA and

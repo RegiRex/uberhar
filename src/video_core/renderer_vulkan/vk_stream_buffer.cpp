@@ -202,6 +202,13 @@ std::tuple<u8*, u32, bool> StreamBuffer::Map(u32 size, u64 alignment) {
 
     bool invalidate{false};
     if (offset + size > stream_buffer_size) {
+        // CodexAstraLocal: Clean UBO/LUT offsets may have outlived their upload
+        // watches. Complete their last actual draw before exposing reused bytes;
+        // non-wrapping maps keep the original per-range waiting behavior.
+        if (last_draw_use_tick) {
+            scheduler.Wait(last_draw_use_tick);
+            last_draw_use_tick = 0;
+        }
         // The buffer would overflow, save the amount of used watches and reset the state.
         invalidate = true;
         invalidation_mark = current_watch_cursor;
@@ -252,6 +259,12 @@ void StreamBuffer::Commit(u32 size) {
     auto& watch = current_watches[current_watch_cursor++];
     watch.upper_bound = offset;
     watch.tick = scheduler.CurrentTick();
+}
+
+// CodexAstraLocal: Called only by the owner after a real draw is queued. This
+// records lifetime without copying data, adding a watch or waiting per draw.
+void StreamBuffer::MarkDrawUse() noexcept {
+    last_draw_use_tick = scheduler.CurrentTick();
 }
 
 // CodexAstraLocal: Coherence is an observed allocation property, not a device

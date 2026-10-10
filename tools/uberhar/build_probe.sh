@@ -100,6 +100,11 @@ python3 tools/uberhar/test_stream_buffer_ownership.py
 # while Commit retains the final draw tick. Recording controls require both
 # late-Map and early-Commit defects to fail; this is not Vulkan/pixel execution.
 python3 tools/uberhar/test_vulkan_stream_order.py
+# CodexAstraLocal: Cached UBO/LUT consumers extend allocation lifetime even
+# without a dirty upload. Exercise actual ring/refresh and draw-enqueue bodies;
+# the separate Vulkan step checks distinct GPU payloads with real fences.
+python3 tools/uberhar/test_cached_buffer_lifetime.py
+python3 tools/uberhar/test_cached_buffer_draw_use.py
 # CodexAstraLocal: Deferred no-target returns retain original complete hardware
 # bytes and ordered concatenation; this host gate performs no Vulkan/device work.
 python3 tools/uberhar/test_deferred_vertex_retention.py

@@ -1,6 +1,38 @@
 <!-- AstraEH: Attribution index for the Uberhar implementation, tests, packaging and documentation. -->
 # Uberhar code map
 
+<!-- CodexAstraLocal: Tie cached shader bytes to their final draw consumer,
+including clean reuse, without changing the shader or draw-route algorithms. -->
+## 0.1.41 candidate — cached Vulkan buffer lifetime
+
+- `vk_stream_buffer.{h,cpp}` records an owner-only last draw-use tick. A ring
+  wrap waits through that tick before exposing reused writable bytes, then keeps
+  the existing allocation watches and invalidation behavior. Non-wrapping maps
+  add no wait. Geometry and other rings that are never marked retain their prior
+  behavior.
+- `vk_rasterizer.{h,cpp}` marks the uniform, procedural-texture LUT and
+  lighting/fog LUT rings after each actual accelerated or CPU/deferred draw
+  enqueue. The stamp follows pass/pipeline/index setup, so a setup flush cannot
+  leave it on an earlier tick. Pending and no-target returns do not stamp a draw.
+  Existing wrap invalidation refreshes every cached block in its own ring.
+- `test_cached_buffer_lifetime.{cpp,py}` executes extracted production ring and
+  upload methods with real PICA state against a controlled scheduler. It checks
+  clean reuse, final ticks, non-wrap behavior and complete invalidation refresh;
+  six defects must expose the intended byte mismatch.
+- `test_cached_buffer_draw_use.{cpp,py}` executes the actual accelerated method
+  and no-target block against controlled endpoints. It distinguishes successful
+  pending returns from actual enqueue, and challenges both enqueue sites and
+  premature marking. `test_vulkan_stream_order.{cpp,py}` retains its earlier
+  controls and checks the final CPU/deferred draw stamp.
+- `test_cached_buffer_lifetime_vulkan.{cpp,py}` renders distinct integer UBO,
+  procedural-texture and lighting/fog values through real Vulkan submissions and
+  fences. It uses the production ring methods with a controlled command-owner
+  seam; it is not full emulator execution or a Thor performance measurement.
+- `build_probe.sh` requires both host gates. `uberhar-shaders.yml` adds the real
+  Vulkan gate and retains its source, modules, results and failure evidence while
+  preserving every existing gate. The conservative whole-ring fence may wait
+  more than precise range tracking; hardware effect remains untested.
+
 <!-- CodexAstraLocal: Map prepared TEV ownership, optional admission and actual
 consumers without presenting a CPU-vertex route as new GPU vertex offload. -->
 ## 0.1.40 candidate — static prepared TEV, dynamic lighting

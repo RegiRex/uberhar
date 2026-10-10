@@ -108,6 +108,10 @@ private:
     /// Upload the uniform blocks to the uniform buffer object
     void UploadUniforms(bool accelerate_draw);
 
+    // CodexAstraLocal: Retain clean cached UBO/LUT ranges through the final
+    // consuming draw tick, independently of whether this draw uploaded them.
+    void MarkCachedShaderBuffersUsed();
+
     /// Generic draw function for DrawTriangles and AccelerateDrawBatch
     // CodexAstraLocal: Deferred CPU output changes only geometry readiness;
     // live draw state and every resource decision stay on the current owner.
