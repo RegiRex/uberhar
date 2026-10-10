@@ -137,8 +137,13 @@ option(ENABLE_OPENAL "Enables the OpenAL audio backend" ON)
 
 CMAKE_DEPENDENT_OPTION(ENABLE_LIBUSB "Enable libusb for GameCube Adapter support" ON "NOT IOS" OFF)
 
-CMAKE_DEPENDENT_OPTION(ENABLE_SOFTWARE_RENDERER "Enables the software renderer" ON "NOT ANDROID" OFF)
+# CodexAstraLocal: Android now presents completed CPU-rendered frames through
+# its existing EGL window; the guest rasterizer itself does not require a GPU.
+option(ENABLE_SOFTWARE_RENDERER "Enables the software renderer" ON)
 CMAKE_DEPENDENT_OPTION(ENABLE_OPENGL "Enables the OpenGL renderer" ${DEFAULT_ENABLE_OPENGL} "NOT APPLE" OFF)
+if (ANDROID AND ENABLE_SOFTWARE_RENDERER AND NOT ENABLE_OPENGL)
+    message(FATAL_ERROR "Android CPU Software presentation requires ENABLE_OPENGL")
+endif()
 # NetBSD doesn't support Vulkan yet, remove this check when it does.
 CMAKE_DEPENDENT_OPTION(ENABLE_VULKAN "Enables the Vulkan renderer" ON "NOT (BSD MATCHES \"NetBSD\")" OFF)
 

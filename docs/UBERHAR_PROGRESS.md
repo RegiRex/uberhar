@@ -1,16 +1,30 @@
-# Uberhar progress — 0.1.41 correction in validation; pause after its build
+# Uberhar progress — 0.1.41 released; CPU Software delivery in development
 
-<!-- CodexAstraLocal: The next build contains a real cached-buffer ownership fix; its delivery is the owner's latest stopping boundary. -->
-**0.1.41 is a local candidate, not yet released.** It extends cached uniform and
-LUT lifetime through the final consuming draw, then waits before wrap reuses
-those bytes. Focused defect controls and actual host Vulkan rendered-output
-tests pass; final review and release gates remain pending. This is not a measured
-Thor speedup or an established explanation of Dark Moon's visual faults.
+<!-- CodexAstraLocal: Record actual release verification and the owner's subsequent
+authorization; older stopping boundaries are historical. -->
+**0.1.41 is released and verified.** Source
+`ea20992a947facff00ac3b0b0f71f141da0dd16f` passed all 29 required release checks.
+APK checksum, source/tag binding, native symbols and signing compatibility with
+installed .40 are verified. The first run failed because Ubuntu changed the
+Lavapipe manifest filename; a workflow-only correction supports both filenames.
+<!-- CodexAstraLocal: Owner feedback is title evidence with a distinct scope;
+do not turn an unmatched manual run into a measured causal speedup. -->
+The owner tested .41 in Dark Moon and reports acceptable graphics and visibly
+better performance: 4x felt better than the earlier 2x experience, and 2x ran
+well. Retained logs confirm Combo at Vulkan 2x and a Native session that changed
+between 2x and 4x, with simulated GPU timings enabled. These are manual tests,
+not a controlled comparison or a demonstrated sustained 99% result. The owner
+observed only one or two brief flashes and prioritizes further frame-rate work.
 
-The owner requests a pause after this next gated build/publication. Save the
-handoff and pause all agents at that boundary, before installation or title tests.
-The installed build remains .40. On owner resume, the planned controls are one
-cold Native and one cold Combo opening at Vulkan 2x, normal 100%, GPU timings ON.
+The owner has resumed implementation and authorized the next feature build:
+selectable CPU Software graphics at 1x on Android, with one/two/automatic CPU
+rendering participants and presentation-only GPU use. Native/Combo also receive
+a targeted queue improvement across redundant topology/restart writes.
+Calculated integration progresses independently and must not delay delivery of
+the usable Software experiment. The owner has installed .41; its exact APK
+identity and the existing signing/save-preservation requirements still apply.
+Root alone operates the Thor; completed or waiting agents stop until reassigned.
+Consolidated hardware tests and a self-contained session report remain required.
 The [experiment ledger](UBERHAR_EXPERIMENT_LEDGER_0.1.40.md) separates actual
 hardware tests from host-only experiments and untested proposals.
 

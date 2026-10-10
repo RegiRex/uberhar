@@ -51,6 +51,8 @@ def main():
     parser.add_argument('--a64', action='store_true')
     parser.add_argument('--compiler', type=Path)
     parser.add_argument('--qemu', type=Path)
+    # CodexAstraLocal: Local changed-behavior check; CI retains the full gate.
+    parser.add_argument('--reset-only', action='store_true')
     args = parser.parse_args()
     root = args.root.resolve()
     source_root = (args.source_root or root / 'src').resolve()
@@ -61,7 +63,8 @@ def main():
     source.mkdir()
     fixture_source = Path(__file__).with_suffix('.cpp').resolve()
     logical = ['video_core/pica/uberhar_cpu_draw_queue.h', 'video_core/pica/uberhar_cpu_draw_queue.cpp',
-               'video_core/pica/uberhar_parallel_vertex.h']
+               'video_core/pica/uberhar_parallel_vertex.h',
+               'video_core/pica/primitive_assembly.h']
     inputs = [Path(__file__).resolve(), fixture_source,
               root / 'tools/uberhar/test_parallel_vertex_observable_cases.h',
               root / 'src/video_core/rasterizer_accelerated.cpp']
@@ -72,6 +75,45 @@ def main():
         shutil.copy(original, target); inputs.append(original)
     shutil.copy(fixture_source, source / 'fixture.cpp')
     shutil.copy(root / 'tools/uberhar/test_parallel_vertex_observable_cases.h', source)
+    # CodexAstraLocal: Exercise the actual owner reset sites and reconciliation,
+    # without booting an unrelated guest system. Only the pre-drain worker gate
+    # is injected, so a broken blocking branch produces an immediate diagnostic.
+    pica_path = source_root / 'video_core/pica/pica_core.cpp'
+    inputs.append(pica_path)
+    pica = pica_path.read_text()
+    def reset_branch(register, next_register):
+        start = pica.index('    case PICA_REG_INDEX(pipeline.' + register + '):')
+        end = pica.index('    case PICA_REG_INDEX(pipeline.' + next_register + '):', start)
+        branch = pica[start:end].split('\n', 1)[1]
+        return change(branch, '        break;', '')
+    topology = reset_branch('triangle_topology', 'restart_primitive')
+    restart = reset_branch('restart_primitive', 'vs_default_attributes_setup.index')
+    reconcile = body(pica, 'void PicaCore::ReconcileDeferredVertices()').replace('PicaCore::', 'ResetOwner::')
+    reconcile = change(reconcile, '    state.executor.Drain();', '    Gate(true);\n    state.executor.Drain();')
+    owner = '''// CodexAstraLocal: Source-extracted owner operations, real queue and assembler.
+struct ResetOwner {
+    struct DeferredState {
+        CpuDrawExecutor executor{4, 64, 8 * 1024 * 1024, Start};
+        std::vector<std::shared_ptr<CpuDrawPacket>> pending;
+        std::size_t reconciled{};
+        u64 synchronous_boundaries{}, completed{}, inputs{}, invocations{}, hits{};
+        u64 deferred_topology_resets{}, deferred_primitive_resets{};
+    };
+    std::unique_ptr<DeferredState> deferred_vertices = std::make_unique<DeferredState>();
+    PrimitiveAssembler primitive_assembler;
+    struct { struct { struct { PipelineRegs::TriangleTopology triangle_topology; } pipeline; } internal; } regs;
+    void ReconcileDeferredVertices();
+    void Topology(PipelineRegs::TriangleTopology next) {
+        regs.internal.pipeline.triangle_topology = next;
+''' + topology + '''
+    }
+    void Restart() {
+''' + restart + '''
+    }
+};
+''' + reconcile + '\n'
+    owner_path = source / 'actual_reset_owner.h'
+    owner_path.write_text(owner)
     # CodexAstraLocal: Extract exact real writer/converter bodies. Only fixture
     # type visibility and the receiver name differ; no pixel/vertex oracle model.
     renderer = (root / 'src/video_core/rasterizer_accelerated.cpp').read_text()
@@ -199,6 +241,8 @@ inline struct { Setting uberhar_test_mode; } values;
         ('stale_work_bound',instrumented,change(header,'    if (work) *work = {};',
             '    if (work) {}'),'work','refusal reused stale work'),
     ]
+    if args.reset_only:
+        variants = [('positive', instrumented, header, 'resets', None)]
     try:
         common = [compile_one(p,p.stem) for p in actual]
         fixture = compile_one(source / 'fixture.cpp','fixture')
@@ -217,7 +261,8 @@ inline struct { Setting uberhar_test_mode; } values;
             run(name+'-link',flags+[selected_fixture,queue,*common,*link_flags,'-o',binary])
             result = json.loads(run(name+'-run',[*prefix,binary,selected],0 if expected is None else 1).stdout)
             if expected is None:
-                if result.get('passed') is not True or result.get('comparisons',0) < (1024 if args.a64 else 512):
+                minimum = 4 if args.reset_only else (1024 if args.a64 else 512)
+                if result.get('passed') is not True or result.get('comparisons',0) < minimum:
                     raise RuntimeError('Incomplete positive population')
                 proof['result'] = result
             elif result.get('passed') is not False or result.get('error') != expected:
@@ -225,9 +270,37 @@ inline struct { Setting uberhar_test_mode; } values;
             proof['variants'].append({'name':name,'source_sha256':sha(cpp),'header_sha256':sha(header_path),
                                       'binary_sha256':sha(binary),'result':result})
             print(name+': '+str(result),flush=True)
+        # CodexAstraLocal: Two targeted controls prove the new regression detects
+        # a restored redundant drain and failure to retain the serialized tail.
+        header_path.write_text(header)
+        queue_cpp = out / 'reset-queue.cpp'; queue_cpp.write_text(instrumented)
+        queue_obj = compile_one(queue_cpp, 'reset-queue')
+        controls = [
+            ('redundant_reset_drain', change(owner, '    void Restart() {',
+                '    void Restart() {\n        ReconcileDeferredVertices();'),
+                'redundant reset drained packets'),
+            ('missing_reset_pair', change(owner,
+                '        primitive_assembler.AdoptCompletedTriangleTail(result.last_pair);', ''),
+                'reset saved pair differs'),
+        ]
+        for name, mutated_owner, expected in controls:
+            owner_path.write_text(mutated_owner)
+            (out / (name + '-owner.h')).write_text(mutated_owner)
+            fixture_obj = compile_one(source / 'fixture.cpp', name + '-fixture')
+            binary = out / name
+            run(name + '-link', flags + [fixture_obj, queue_obj, *common, *link_flags, '-o', binary])
+            result = json.loads(run(name + '-run', [*prefix, binary, 'resets'], 1).stdout)
+            if result.get('passed') is not False or result.get('error') != expected:
+                raise RuntimeError('Wrong reset negative-control failure: ' + str(result))
+            proof['variants'].append({'name': name, 'owner_sha256': sha(owner_path),
+                                     'binary_sha256': sha(binary), 'result': result})
+            print(name + ': ' + str(result), flush=True)
         proof['passed'] = True
     finally:
         header_path.write_text(header)
+        owner_path.write_text(owner)
+        if str(owner_path.resolve()) in proof['dependencies']:
+            proof['dependencies'][str(owner_path.resolve())] = sha(owner_path)
         # CodexAstraLocal: Header mutants are retained separately in the variant
         # hashes/commands; the final dependency record binds the restored baseline.
         if str(header_path.resolve()) in proof['dependencies']:
@@ -238,7 +311,7 @@ inline struct { Setting uberhar_test_mode; } values;
         save()
     if not proof['sources_stable'] or not proof['dependencies_stable']:
         raise RuntimeError('Source drift during queue gate')
-    print(json.dumps({'out':str(out),'passed':True,'result':proof['result'],'defects':len(variants)-1}))
+    print(json.dumps({'out':str(out),'passed':True,'result':proof['result'],'defects':len(proof['variants'])-1}))
 
 
 if __name__ == '__main__':

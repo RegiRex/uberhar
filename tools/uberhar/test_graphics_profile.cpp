@@ -20,6 +20,8 @@ int main() {
     static_assert(static_cast<u32>(UberharTestMode::Compute) == 2);
     static_assert(static_cast<u32>(UberharTestMode::Automatic) == 3);
     static_assert(static_cast<u32>(UberharTestMode::ComboGeneric) == 4);
+    // CodexAstraLocal: Software is appended; existing saved choices never move.
+    static_assert(static_cast<u32>(UberharTestMode::Software) == 5);
     for (auto mode :
          {UberharTestMode::Native, UberharTestMode::Compute, UberharTestMode::Automatic,
           UberharTestMode::ComboGeneric}) { // CodexAstraUlt: Exercise every supported preset.
@@ -63,6 +65,30 @@ int main() {
                   !CanSelect(true, false, 7, 8) && CanSelect(true, false, 7, 7),
               "ready GPU selection bypasses completion/failure/identity");
     }
+    // CodexAstraLocal: Switching from GPU presets to Software must not leave an
+    // accelerated renderer or stale high resolution active, nor enable compute.
+    values.uberhar_test_mode = UberharTestMode::Software;
+    values.graphics_api = GraphicsAPI::Vulkan;
+    values.resolution_factor = 4;
+    values.use_cpu_jit = false;
+    values.simulate_3ds_gpu_timings = true;
+    values.software_renderer_workers = 2;
+    values.use_disk_shader_cache = true;
+    ApplyUberharTestProfile();
+    Check(values.graphics_api.GetValue() == GraphicsAPI::Software &&
+              values.resolution_factor.GetValue() == 1 && !values.use_hw_shader.GetValue() &&
+              values.use_shader_jit.GetValue() && !values.use_disk_shader_cache.GetValue(),
+          "software retained GPU graphics or stale high resolution");
+    Check(!values.use_cpu_jit.GetValue(), "software changed guest CPU execution choice");
+    Check(values.simulate_3ds_gpu_timings.GetValue() &&
+              values.software_renderer_workers.GetValue() == 2,
+          "software changed guest timing or selected worker budget");
+    Check(IsUberharTestProfile(UberharTestMode::Software) &&
+              !UsesReadyGpuVertices(UberharTestMode::Software) &&
+              !AllowsComputeRendering(UberharTestMode::Software) &&
+              !RequiresComputeOnly(UberharTestMode::Software) &&
+              !AllowsStaticCpuTev(UberharTestMode::Software),
+          "software gained accelerated graphics capabilities");
     // AstraEH: Config::ReadValues reloads original INI values before applying a
     // mode.
     values.uberhar_test_mode = UberharTestMode::Custom;
@@ -84,6 +110,6 @@ int main() {
                   !RequiresComputeOnly(mode),
               "invalid/custom mode gained preset capabilities");
     }
-    std::puts("PASS: four native profiles, stable IDs, independent route matrix, ready guards, "
+    std::puts("PASS: four GPU profiles plus CPU Software, stable IDs, independent route matrix, ready guards, "
               "preserved resolution/custom values and invalid-mode handling");
 }

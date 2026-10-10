@@ -29,6 +29,8 @@ object SettingKeys {
     external fun steps_per_hour(): String
     external fun apply_region_free_patch(): String
     external fun graphics_api(): String
+    // CodexAstraLocal: Shared persisted CPU raster participant budget.
+    external fun software_renderer_workers(): String
     external fun use_gles(): String
     external fun renderer_debug(): String
     external fun spirv_shader_gen(): String

@@ -5,6 +5,8 @@
 #pragma once
 
 #include <vector>
+#include <atomic> // CodexAstraLocal: Transfer presentation errors to the core thread.
+#include <mutex> // CodexAstraLocal: Optional Software surface lifecycle exclusion.
 
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
@@ -20,8 +22,9 @@ struct ANativeWindow;
 class EmuWindow_Android_OpenGL : public EmuWindow_Android {
 public:
     EmuWindow_Android_OpenGL(Core::System& system, ANativeWindow* surface, bool is_secondary,
-                             EGLContext* sharedContext = NULL);
-    ~EmuWindow_Android_OpenGL() override = default;
+                             EGLContext* sharedContext = nullptr,
+                             std::recursive_mutex* lifecycle_mutex = nullptr);
+    ~EmuWindow_Android_OpenGL() override;
 
     void TryPresenting() override;
     void StopPresenting() override;
@@ -36,7 +39,12 @@ private:
 
 private:
     Core::System& system;
-    EGLConfig egl_config;
+    // CodexAstraLocal: Both Software windows borrow the same frontend lock;
+    // only the primary owns the shared presentation context and EGL display.
+    std::recursive_mutex* lifecycle_mutex{};
+    bool owns_context{true};
+    std::atomic<bool> presentation_failed{};
+    EGLConfig egl_config{};
     EGLSurface egl_surface{};
     EGLContext egl_context{};
     EGLDisplay egl_display{};

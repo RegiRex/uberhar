@@ -956,6 +956,12 @@ class SettingsFragmentPresenter(private val fragmentView: SettingsFragmentView) 
         val mode = UberharTestMode.from(IntSetting.UBERHAR_TEST_MODE.int)
         sl.add(HeaderSetting(R.string.uberhar_test_modes))
         val modes = listOf(
+            // CodexAstraLocal: Explicit CPU raster mode shares existing controls/lifecycle.
+            Triple(
+                UberharTestMode.SOFTWARE,
+                R.string.uberhar_test_software,
+                R.string.uberhar_test_software_description
+            ),
             Triple(
                 UberharTestMode.NATIVE,
                 R.string.uberhar_test_native,
@@ -981,6 +987,17 @@ class SettingsFragmentPresenter(private val fragmentView: SettingsFragmentView) 
             val setting = UberharTestModeSwitch(IntSetting.UBERHAR_TEST_MODE, choice)
             sl.add(SwitchSetting(setting, title, description, setting.key))
         }
+        // CodexAstraLocal: A Software worker budget remains editable while the
+        // effective renderer/1x settings are locked; it takes effect on restart.
+        sl.add(SingleChoiceSetting(
+            IntSetting.SOFTWARE_RENDERER_WORKERS,
+            R.string.software_renderer_workers,
+            R.string.software_renderer_workers_description,
+            R.array.softwareWorkerNames,
+            R.array.softwareWorkerValues,
+            IntSetting.SOFTWARE_RENDERER_WORKERS.key,
+            IntSetting.SOFTWARE_RENDERER_WORKERS.defaultValue
+        ))
         val customStart = sl.size
         sl.apply {
             add(HeaderSetting(R.string.renderer))
@@ -1293,7 +1310,8 @@ class SettingsFragmentPresenter(private val fragmentView: SettingsFragmentView) 
         // values of the session profile without overwriting the user's custom settings.
         if (mode != UberharTestMode.CUSTOM) {
             for (item in sl.subList(customStart, sl.size)) {
-                if (item.setting == IntSetting.RESOLUTION_FACTOR ||
+                if ((item.setting == IntSetting.RESOLUTION_FACTOR &&
+                     mode != UberharTestMode.SOFTWARE) ||
                     item.setting == BooleanSetting.USE_INTEGER_SCALING ||
                     item.type == SettingsItem.TYPE_HEADER
                 ) continue

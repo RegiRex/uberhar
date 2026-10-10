@@ -29,6 +29,8 @@ foreach(KEY IN ITEMS
     "steps_per_hour"
     "apply_region_free_patch"
     "graphics_api"
+    # CodexAstraLocal: CPU raster participants, not physical core assignments.
+    "software_renderer_workers"
     "physical_device"
     "use_gles"
     "renderer_debug"

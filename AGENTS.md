@@ -1,5 +1,111 @@
 # Uberhar development instructions
 
+<!-- CodexAstraLocal: Owner requests separate .42/.43 comparisons after completion. -->
+- Keep .42 as the independent Native/Combo plus CPU Software candidate. Once
+  remaining integration and focused validation are complete, build .43 through
+  the existing gates. The owner will test both versions independently; leave
+  qualified .42 installed for that sequence and do not automatically install
+  .43 or require a downgrade/data wipe. Preserve both qualified release assets.
+
+<!-- CodexAstraLocal: Owner extends the active cycle to all four delivery tracks. -->
+- Complete Native/Combo queue improvement, CPU Software, independent Calculated,
+  and release/device delivery this cycle. Continue Calculated after the main
+  Software candidate is tested; do not pause merely because that build finishes.
+  Keep Software delivery independent, then integrate/build/test Calculated when
+  usable without Native fallback. Finished agents stop unless a concrete,
+  nonoverlapping reassignment can accelerate a remaining track. Preserve the
+  one-owner device rule, finite checks and end-of-session status report.
+
+<!-- CodexAstraLocal: Owner approves execution of the three-track plan; this current authorization supersedes all historical pause/report-only boundaries below. -->
+- ACTIVE: implement targeted Native/Combo queue improvements and useful CPU
+  parallelism, integrate Calculated, and deliver a selectable Android CPU
+  Software renderer as the next feature build's required deliverable after .41.
+  Continue implementation, relevant checks, gated fork release and root-only Thor
+  testing until that deliverable is tested/reported or a genuine blocker occurs.
+- Software target: meaningful Dark Moon opening at 1x using CPU guest graphics,
+  existing JIT/HLE/audio/timing, Android presentation/input/normal exit, no silent
+  Native fallback or skipped unsupported draws. Address relevant filtering gaps.
+  Presentation-only GPU use is permitted and must be explicit. Calculated's
+  unfinished work stays isolated and must not block this feature build.
+- Hardware floor: Retroid Pocket Duo eight heterogeneous cores/8 GB; Thor Max
+  is primary test device, Odin3/newer flagship hardware are scaling targets.
+  Balance estimated independent work using actual available CPU capacity.
+  Dependent work uses explicit ordered queues/dependencies, not assumed physical
+  core order. Retain inexpensive restricted-capacity handling on supported hosts.
+  CPU Software worker budget supports one/two/automatic without fixed core IDs.
+- Architect reviews/designs; root implements/integrates Native/Combo and alone
+  operates device; software developer owns Android/CPU renderer; Calculated
+  developer owns independent compute integration. Coordinate shared file edits.
+- Agents stop when their assigned work finishes. Root may redirect only for
+  concrete useful support. An agent waiting for automation reports job handle,
+  outputs and completion condition and yields; root notifies completion.
+  Do not repeat passed tests absent changed behavior, failure or concrete concern.
+- Adjacent CodexAstraLocal purpose comments remain required. Removable runtime
+  test logs use CodexAstraLocal TEST-ONLY LOG plus their removal condition.
+  Preserve original reports/private evidence and all existing signing/data rules.
+- CodexAstraLocal: End every work session with the owner's usual self-contained
+  status update: changes, validation, build/device state, remaining issues,
+  next steps and any decision or approval actually pending.
+
+<!-- CodexAstraLocal: This bounded review is now complete; the owner requested a report and then a wait for their response. -->
+- PAUSED after the CPU/MMJ/translation report. All agents and local development,
+  builds, tests, delivery checks and device operations wait for owner response.
+  Existing corrected .41 CI may finish independently; do not actively poll it.
+  Resume from candidate041-retry-01, not the failed original candidate041 pin.
+
+<!-- CodexAstraLocal: The owner resumes a bounded architecture/delivery session and requires inactive agents to yield rather than spend resources waiting. -->
+- Current authorized session: root and Architect compare MMJ presentation,
+  synchronization and host threading against Uberhar; Calculated developer may
+  advance integrated independent rendering; final agent analyzes CPU-only 3DS
+  system emulation versus translation before any implementation. Root completes
+  existing .41 delivery. Stop all work after the requested report pending reply.
+- Before starting an automated process, notify root of its purpose, command/job
+  identifier, output location and completion condition. Once started, report its
+  handle and end the agent turn if waiting on it; do not poll or start filler work.
+  Root alone checks completion as needed and explicitly resumes the agent.
+- Proactively identify incorrect assumptions, unmentioned existing solutions,
+  blind spots and implementation tradeoffs. Bring findings to root/owner before
+  building duplicate systems. Architecture claims need source comparisons;
+  useful complete-frame speed, not thread count or manufactured load, is success.
+- Preserve CodexAstraLocal purpose comments. Mark temporary test-only runtime
+  logging with `CodexAstraLocal TEST-ONLY LOG` and its removal condition; retain
+  production error handling distinctly. Do not perform a blanket code audit now.
+- No new APU implementation, device installation, gameplay test or new release
+  is authorized by this bounded analysis/delivery session. Older pause and
+  open-ended continuation text below is historical for this session.
+
+<!-- CodexAstraLocal: The owner makes personal budget and usable device delivery central constraints; these directions govern the next explicitly resumed session. -->
+- Development remains PAUSED. The owner's October 10 discussion does not resume
+  agents, builds, tests or CI monitoring.
+- Treat budget as a first-class constraint. Prefer the smallest useful team;
+  additional agents need distinct deliverables that shorten the path to usable
+  hardware results. Do not repeat passed checks without changed code, a failure
+  or a specific unresolved defect. Do not spend agent work merely awaiting CI.
+- Before optimizing a persistent title problem, proactively inspect upstream
+  compatibility notes, settings, issues and other emulator implementations.
+  Explain relevant options without waiting for the owner to discover them.
+  Compare effective settings and complete output; do not assume rendering cost
+  is the cause of a timing/scheduling problem.
+- The owner states the original pre-0.1.0 request was CPU emulation of the 3DS GPU.
+  Retain this as original intent. Current Native is CPU vertex processing plus
+  GPU graphics rasterization/fragments; Calculated uses GPU Vulkan compute.
+  These implementation facts must be explained and reconciled with that intent,
+  not silently presented as full CPU GPU-emulation fulfillment.
+- For Calculated, prioritize a complete integrated rendering path that can be
+  meaningfully tested on Thor, with Native fallback disabled, actionable bounded
+  runtime/error logs and CodexAstraLocal purpose comments. Consolidate validation
+  at the integrated candidate, then fix observed failures and retest affected
+  behavior. Do not substitute prolonged isolated prototype proofs for delivery.
+- Report build/check completion separately from usable hardware functionality.
+  Device acceptance is part of feature completion and the agreed beta milestone.
+  Automatic checks cannot establish whole-game functionality on their own.
+
+<!-- CodexAstraLocal: The owner now requires an immediate pause due time and credit use; this supersedes the build-completion boundary below. -->
+- PAUSED. Do not poll CI, verify delivery, operate the device, implement changes,
+  run experiments or continue any agent until the owner explicitly resumes.
+  The submitted .41 GitHub workflow may finish independently. On resume, inspect
+  that existing run and the private ACTIVE_STATE checkpoint before new work.
+
 <!-- CodexAstraLocal: The owner's newest boundary is completion of the next build, before installation or further title tests. -->
 - Complete the next real candidate's source review and gated build/publication,
   then save a resumable handoff and pause all agents, including architecture and

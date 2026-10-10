@@ -43,6 +43,9 @@ struct PicaCore::DeferredVertexState {
     u64 submitted{};
     u64 completed{}, inputs{}, invocations{}, hits{}, capacity_drains{}, synchronous_boundaries{};
     u64 capture_submit_ns{}, capture_submit_max_ns{};
+    // CodexAstraLocal TEST-ONLY LOG: Remove these diagnostic counters after the
+    // redundant-reset experiment is qualified; they do not schedule any work.
+    u64 deferred_topology_resets{}, deferred_primitive_resets{};
     explicit DeferredVertexState(unsigned processors)
         : executor{processors, PacketLimit, 8 * 1024 * 1024,
                    +[] { Common::SetCurrentThreadName("PICA draw pool"); }} {
@@ -257,7 +260,8 @@ void PicaCore::ReportVirtualVertices(const char* kind, std::chrono::steady_clock
     if (deferred_vertices) {
         const auto& deferred = *deferred_vertices;
         const auto statistics = deferred.executor.GetStatistics();
-        // CodexAstraLocal Log Line: Reuse ordinary bounded progress/final reports.
+        // CodexAstraLocal TEST-ONLY LOG: Remove reset counters after the queue
+        // experiment is qualified. Reuse bounded progress/final reports.
         // Owner capture/submit wall is not total CPU work or GPU execution time.
         LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
             "Uberhar deferred CPU draws {}: schema=1 completed={} inputs={} invocations={} "
@@ -265,6 +269,7 @@ void PicaCore::ReportVirtualVertices(const char* kind, std::chrono::steady_clock
             "coordinator_packets={} auxiliary_packets={} resident_packets={} resident_bytes={} "
             "capacity_drains={} boundaries={} capture_attempts={} refused={} work_refused={} "
             "capture_submit_ms={:.3f} capture_submit_max_ms={:.3f} "
+            "deferred_topology_resets={} deferred_primitive_resets={} "
             "scope=complete_list_or_shader_no_gs min_misses=96 max_vertices=255 min_arithmetic=35 "
             "max_copy_bytes_per_miss=70 timing=owner_capture_submit_not_frame_time",
             kind, deferred.completed, deferred.inputs, deferred.invocations, deferred.hits,
@@ -272,7 +277,9 @@ void PicaCore::ReportVirtualVertices(const char* kind, std::chrono::steady_clock
             statistics.maximum_wave, statistics.peak_threads, statistics.coordinator_packets,
             statistics.auxiliary_packets, statistics.resident_packets, statistics.resident_bytes,
             deferred.capacity_drains, deferred.synchronous_boundaries, statistics.captures,
-            statistics.refused, statistics.work_refused, deferred.capture_submit_ns / 1e6, deferred.capture_submit_max_ns / 1e6);
+            statistics.refused, statistics.work_refused, deferred.capture_submit_ns / 1e6,
+            deferred.capture_submit_max_ns / 1e6, deferred.deferred_topology_resets,
+            deferred.deferred_primitive_resets);
     }
     // AstraPro: Existing five-second/final reporting gate. Periodic
     // samples can alias recurring draw patterns; never extrapolate a GPU budget.
@@ -939,14 +946,25 @@ void PicaCore::HandleSpecialReg(u32 id, u32 value, bool& stop_requested) {
         break;
 
     case PICA_REG_INDEX(pipeline.triangle_topology):
-        // CodexAstraLocal: Persistent buffers must match before topology changes.
-        ReconcileDeferredVertices();
+        // CodexAstraLocal: The register is already written; compare the incoming
+        // value with the assembler's old topology. Keep complete packets queued
+        // only across a logical no-op; every actual topology change still joins.
+        if (!primitive_assembler.CanResetDeferredTriangles(regs.internal.pipeline.triangle_topology)) {
+            ReconcileDeferredVertices();
+        } else if (deferred_vertices && !deferred_vertices->pending.empty()) {
+            ++deferred_vertices->deferred_topology_resets;
+        }
         primitive_assembler.Reconfigure(regs.internal.pipeline.triangle_topology);
         break;
 
     case PICA_REG_INDEX(pipeline.restart_primitive):
-        // CodexAstraLocal: Reset preserves serialized buffer values; finish first.
-        ReconcileDeferredVertices();
+        // CodexAstraLocal: Reset retains buffer[], and pending complete packets
+        // retain its latest pair. Real observers still reconcile before reading.
+        if (!primitive_assembler.CanResetDeferredTriangles(primitive_assembler.GetTopology())) {
+            ReconcileDeferredVertices();
+        } else if (deferred_vertices && !deferred_vertices->pending.empty()) {
+            ++deferred_vertices->deferred_primitive_resets;
+        }
         primitive_assembler.Reset();
         break;
 

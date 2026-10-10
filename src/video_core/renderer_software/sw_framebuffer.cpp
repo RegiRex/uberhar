@@ -42,16 +42,23 @@ Framebuffer::Framebuffer(Memory::MemorySystem& memory_, const Pica::FramebufferR
 Framebuffer::~Framebuffer() = default;
 
 void Framebuffer::Bind() {
-    PAddr addr = regs.framebuffer.GetColorBufferPhysicalAddress();
-    if (color_addr != addr) [[unlikely]] {
+    // CodexAstraLocal: Depth-only and color-only draws may omit the other
+    // attachment. Only bind storage actually consumed by this triangle.
+    const bool shadow = regs.output_merger.fragment_operation_mode == FramebufferRegs::FragmentOperationMode::Shadow;
+    const bool uses_color = shadow || regs.framebuffer.allow_color_write != 0;
+    const bool uses_depth = !shadow && (regs.output_merger.depth_test_enable ||
+        (regs.output_merger.stencil_test.enable && regs.framebuffer.depth_format == FramebufferRegs::DepthFormat::D24S8) ||
+        (regs.framebuffer.allow_depth_stencil_write && regs.output_merger.depth_write_enable));
+    PAddr addr = uses_color ? regs.framebuffer.GetColorBufferPhysicalAddress() : 0;
+    if (color_addr != addr || (uses_color && !color_buffer)) [[unlikely]] {
         color_addr = addr;
-        color_buffer = memory.GetPhysicalPointer(color_addr);
+        color_buffer = uses_color ? memory.GetPhysicalPointer(color_addr) : nullptr;
     }
 
-    addr = regs.framebuffer.GetDepthBufferPhysicalAddress();
-    if (depth_addr != addr) [[unlikely]] {
+    addr = uses_depth ? regs.framebuffer.GetDepthBufferPhysicalAddress() : 0;
+    if (depth_addr != addr || (uses_depth && !depth_buffer)) [[unlikely]] {
         depth_addr = addr;
-        depth_buffer = memory.GetPhysicalPointer(depth_addr);
+        depth_buffer = uses_depth ? memory.GetPhysicalPointer(depth_addr) : nullptr;
     }
 }
 

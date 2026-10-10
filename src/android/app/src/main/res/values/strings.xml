@@ -278,6 +278,14 @@
     <!-- Graphics settings strings -->
     <string name="renderer">Renderer</string>
     <string name="graphics_api">Graphics API</string>
+    <!-- CodexAstraLocal: Distinguish CPU guest graphics from presentation-only GPU use. -->
+    <string name="uberhar_test_software">CPU Software</string>
+    <string name="uberhar_test_software_description">Render guest graphics on the CPU at 1×. The GPU only displays completed frames. Keeps CPU emulation, audio and GPU timing settings. Requires a game restart.</string>
+    <string name="software_renderer_workers">CPU Software workers</string>
+    <string name="software_renderer_workers_description">Total CPU rendering participants, limited to available processors. Applies only to CPU Software after a game restart.</string>
+    <string name="software_workers_auto">Automatic</string>
+    <string name="software_workers_one">1 participant</string>
+    <string name="software_workers_two">2 participants</string>
     <string name="spirv_shader_gen">Enable SPIR-V shader generation</string>
     <string name="spirv_shader_gen_description">Emits the fragment shader used to emulate PICA using SPIR-V instead of GLSL</string>
     <string name="disable_spirv_optimizer">Disable SPIR-V Optimizer</string>

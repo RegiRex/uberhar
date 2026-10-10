@@ -94,8 +94,12 @@ static const char* android_config_default_file_content = (BOOST_HANA_STRING(R"(
 
 [Renderer]
 # Whether to render using OpenGL
-# 1: OpenGL ES, 2: Vulkan (default)
+# CodexAstraLocal: 0: CPU Software (1x, GPU presentation only), 1: OpenGL ES, 2: Vulkan.
 )") DECLARE_KEY(graphics_api) BOOST_HANA_STRING(R"(
+
+# CodexAstraLocal: Total CPU raster participants including caller; clamped to allowed CPUs.
+# 0: Automatic (default), 1: One, 2: Two. Requires a game restart.
+)") DECLARE_KEY(software_renderer_workers) BOOST_HANA_STRING(R"(
 
 # Whether to compile shaders on multiple worker threads (Vulkan only)
 # 0: Off, 1: On (default)
@@ -111,6 +115,7 @@ static const char* android_config_default_file_content = (BOOST_HANA_STRING(R"(
 
 # AstraEH: 0=custom, 1=virtual native, 2=compute prototype, 3=automatic prototype.
 # CodexAstraUlt: 4=Combo with generic fragments; keeps Combo vertices and compute selection.
+# CodexAstraLocal: 5=CPU Software at 1x; GPU use is presentation only.
 # Requires a game restart. Custom graphics settings are preserved.
 )") DECLARE_KEY(uberhar_test_mode) BOOST_HANA_STRING(R"(
 

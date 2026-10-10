@@ -126,6 +126,12 @@ if (ENABLE_SOFTWARE_RENDERER)
     target_sources(video_core PRIVATE
         renderer_software/renderer_software.cpp
         renderer_software/renderer_software.h
+        # CodexAstraLocal: Checked owned LCD capture is shared by both frontends.
+        renderer_software/sw_frame.cpp
+        renderer_software/sw_frame.h
+        # CodexAstraLocal: Checked mip/filter/PCF sampling is CPU guest graphics.
+        renderer_software/sw_sampler.cpp
+        renderer_software/sw_sampler.h
         renderer_software/sw_clipper.cpp
         renderer_software/sw_clipper.h
         renderer_software/sw_framebuffer.cpp
@@ -139,6 +145,13 @@ if (ENABLE_SOFTWARE_RENDERER)
         renderer_software/sw_texturing.cpp
         renderer_software/sw_texturing.h
     )
+    if (ANDROID)
+        # CodexAstraLocal: GLES only displays the completed CPU frame.
+        target_sources(video_core PRIVATE
+            renderer_software/sw_presenter_gl.cpp
+            renderer_software/sw_presenter_gl.h
+        )
+    endif()
 endif()
 if (ENABLE_OPENGL)
     target_sources(video_core PRIVATE

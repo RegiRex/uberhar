@@ -290,7 +290,8 @@ void PerfStats::LogUberharSettings(const char* event) {
     const auto mode = values.uberhar_test_mode.GetValue();
     const auto api = Settings::GetWorkingGraphicsAPI();
     // CodexAstraUlt: Append the persisted diagnostic mode without relabeling older log modes.
-    const std::array mode_names{"Custom", "Native", "Compute", "Automatic", "ComboGeneric"};
+    // CodexAstraLocal: Identify explicit CPU graphics in ordinary run evidence.
+    const std::array mode_names{"Custom", "Native", "Compute", "Automatic", "ComboGeneric", "Software"};
     const std::array api_names{"Software", "OpenGL", "Vulkan"};
     const auto mode_index = static_cast<std::size_t>(mode);
     const auto api_index = static_cast<std::size_t>(api);

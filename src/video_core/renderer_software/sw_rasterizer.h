@@ -5,11 +5,12 @@
 #pragma once
 
 #include <span>
-#include "common/thread_worker.h"
+#include "common/uberhar_parallel_work.h" // CodexAstraLocal: Bounded owner-participating CPU rows.
 #include "video_core/pica/regs_texturing.h"
 #include "video_core/rasterizer_interface.h"
 #include "video_core/renderer_software/sw_clipper.h"
 #include "video_core/renderer_software/sw_framebuffer.h"
+#include "video_core/renderer_software/sw_sampler.h"
 
 namespace Pica {
 struct RegsInternal;
@@ -34,6 +35,24 @@ public:
     void ClearAll(bool flush) override {}
 
 private:
+    // CodexAstraLocal: Regression inspects actual admission/pool ownership
+    // without adding renderer counters or a public runtime diagnostics API.
+    friend struct SoftwareRendererTestAccess;
+    // CodexAstraLocal: Texture descriptors retain checked guest ranges only
+    // until the synchronous triangle join. No framebuffer snapshot changes
+    // feedback semantics; aliases are traversed on the owner in original order.
+    struct PreparedTexture {
+        TextureLayout layout;
+        std::array<std::span<const u8>, 6> faces{};
+        std::array<PAddr, 6> addresses{};
+        u32 face_count{};
+    };
+    struct TextureCoordinates {
+        std::array<Common::Vec2<f24>, 3> uv;
+        f24 w;
+    };
+    bool PrepareTextures(std::span<const Pica::TexturingRegs::FullTextureConfig, 3> textures,
+                         std::array<PreparedTexture, 3>& prepared) const;
     /// Computes the screen coordinates of the provided vertex.
     void MakeScreenCoords(Vertex& vtx);
 
@@ -44,7 +63,9 @@ private:
     /// Returns the texture color of the currently processed pixel.
     std::array<Common::Vec4<u8>, 4> TextureColor(
         std::span<const Common::Vec2<f24>, 3> uv,
-        std::span<const Pica::TexturingRegs::FullTextureConfig, 3> textures, f24 tc0_w) const;
+        std::span<const Pica::TexturingRegs::FullTextureConfig, 3> textures, f24 tc0_w,
+        const std::array<PreparedTexture, 3>& prepared,
+        const std::array<TextureCoordinates, 4>& quad, u32 lane) const;
 
     /// Returns the final pixel color with blending or logic ops applied.
     Common::Vec4<u8> PixelColor(u16 x, u16 y, Common::Vec4<u8> combiner_output) const;
@@ -69,8 +90,9 @@ private:
     Memory::MemorySystem& memory;
     Pica::PicaCore& pica;
     Pica::RegsInternal& regs;
-    std::size_t num_sw_threads;
-    Common::ThreadWorker sw_workers;
+    // CodexAstraLocal: One/two/Auto counts the calling owner, not extra workers.
+    // Persistent workers borrow only this triangle and join before it returns.
+    Common::Uberhar::ParallelWork sw_workers;
     Framebuffer fb;
 };
 

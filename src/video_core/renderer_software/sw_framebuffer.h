@@ -50,9 +50,11 @@ public:
 private:
     Memory::MemorySystem& memory;
     const Pica::FramebufferRegs& regs;
-    PAddr color_addr;
+    // CodexAstraLocal: A newly created renderer has no mapped attachment. Its
+    // cached address must not inherit a prior renderer's stack contents.
+    PAddr color_addr{};
     u8* color_buffer{};
-    PAddr depth_addr;
+    PAddr depth_addr{};
     u8* depth_buffer{};
 };
 

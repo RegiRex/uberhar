@@ -33,6 +33,8 @@ enum class UberharTestMode : u32 {
     Compute = 2,
     Automatic = 3,
     ComboGeneric = 4,
+    // CodexAstraLocal: Append CPU graphics without changing persisted older modes.
+    Software = 5,
 };
 
 enum class InitClock : u32 {
@@ -537,6 +539,10 @@ struct Values {
 #endif
         GraphicsAPI::Software, GraphicsAPI::Vulkan, Keys::graphics_api};
     // clang-format on
+    // CodexAstraLocal: 0=automatic, 1/2=total CPU raster participants including
+    // the caller. The renderer clamps this restart-only budget to allowed CPUs.
+    SwitchableSetting<u32, true> software_renderer_workers{0, 0, 2,
+                                                          Keys::software_renderer_workers};
     SwitchableSetting<u32> physical_device{0, Keys::physical_device};
     Setting<bool> use_gles{false, Keys::use_gles};
     Setting<bool> renderer_debug{false, Keys::renderer_debug};

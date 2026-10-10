@@ -306,11 +306,26 @@
     </integer-array>
 
     <string-array name="graphicsApiNames">
+        <!-- CodexAstraLocal: CPU rendering is selectable independently of the GPU APIs. -->
+        <item>@string/uberhar_test_software</item>
         <item>@string/opengles</item>
         <item>@string/vulkan</item>
     </string-array>
 
     <integer-array name="graphicsApiValues">
+        <item>0</item>
+        <item>1</item>
+        <item>2</item>
+    </integer-array>
+
+    <!-- CodexAstraLocal: Values are total CPU raster participants, not core IDs. -->
+    <string-array name="softwareWorkerNames">
+        <item>@string/software_workers_auto</item>
+        <item>@string/software_workers_one</item>
+        <item>@string/software_workers_two</item>
+    </string-array>
+    <integer-array name="softwareWorkerValues">
+        <item>0</item>
         <item>1</item>
         <item>2</item>
     </integer-array>

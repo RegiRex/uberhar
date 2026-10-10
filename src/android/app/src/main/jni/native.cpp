@@ -99,6 +99,9 @@ std::unique_ptr<PlayTime::PlayTimeManager> play_time_manager;
 jlong ptm_current_title_id = std::numeric_limits<jlong>::max(); // Arbitrary default value
 
 std::atomic<bool> stop_run{true};
+// CodexAstraLocal: Track the booted frontend, not editable settings, when
+// excluding Software presentation/stop callbacks from window destruction.
+std::atomic<bool> software_frontend{false};
 std::atomic<bool> pause_emulation{false};
 
 std::mutex paused_mutex;
@@ -184,10 +187,14 @@ static void TryShutdown() {
     system.Shutdown();
     system.EjectCartridge();
 
+    // CodexAstraLocal: The Software secondary borrows the primary EGL display
+    // and presentation context; destroy its own surface/core context first.
+    if (software_frontend.load(std::memory_order_acquire)) secondary_window.reset();
     window.reset();
     if (secondary_window) {
         secondary_window.reset();
     }
+    software_frontend.store(false, std::memory_order_release);
 
     InputManager::Shutdown();
     MicroProfileShutdown();
@@ -248,15 +255,40 @@ static Core::System::ResultStatus RunCitra(const std::string& filepath) {
         }
     });
 
+    // CodexAstraLocal: Resolve persisted/per-title profiles before constructing
+    // the frontend context; CPU Software needs EGL even after a prior Vulkan run.
+    // Forces a config reload on game boot, if the user changed settings in the UI
+    Config{};
+    // Replace with game-specific settings
+    u64 program_id{};
+    FileUtil::SetCurrentRomPath(filepath);
+    auto app_loader = Loader::GetLoader(filepath);
+    if (app_loader) {
+        app_loader->ReadProgramId(program_id);
+        system.RegisterAppLoaderEarly(app_loader);
+    }
+    system.ApplySettings();
+    Settings::LogSettings();
+
     const auto graphics_api = Settings::GetWorkingGraphicsAPI();
+    software_frontend.store(graphics_api == Settings::GraphicsAPI::Software,
+                            std::memory_order_release);
     EGLContext* shared_context;
+    try {
     switch (graphics_api) {
 #ifdef ENABLE_OPENGL
+    // CodexAstraLocal: CPU PICA output uses the existing EGL surface/context
+    // lifecycle only for its final screen copy, never OpenGL guest rendering.
+#ifdef ENABLE_SOFTWARE_RENDERER
+    case Settings::GraphicsAPI::Software:
+#endif
     case Settings::GraphicsAPI::OpenGL:
-        window = std::make_unique<EmuWindow_Android_OpenGL>(system, s_surface, false);
+        window = std::make_unique<EmuWindow_Android_OpenGL>(system, s_surface, false, nullptr,
+            software_frontend.load() ? &surface_mutex : nullptr);
         shared_context = window->GetEGLContext();
         secondary_window = std::make_unique<EmuWindow_Android_OpenGL>(system, s_secondary_surface,
-                                                                      true, shared_context);
+                                                                      true, shared_context,
+                                                                      software_frontend.load() ? &surface_mutex : nullptr);
         break;
 #endif
 #ifdef ENABLE_VULKAN
@@ -287,18 +319,18 @@ static Core::System::ResultStatus RunCitra(const std::string& filepath) {
         break;
     }
 
-    // Forces a config reload on game boot, if the user changed settings in the UI
-    Config{};
-    // Replace with game-specific settings
-    u64 program_id{};
-    FileUtil::SetCurrentRomPath(filepath);
-    auto app_loader = Loader::GetLoader(filepath);
-    if (app_loader) {
-        app_loader->ReadProgramId(program_id);
-        system.RegisterAppLoaderEarly(app_loader);
+    } catch (const VideoCore::ShaderRecoveryError& error) {
+        // CodexAstraLocal: Software presentation can fail before system.Load's
+        // contained renderer boundary. Release partial windows without fallback.
+        secondary_window.reset();
+        window.reset();
+        software_frontend.store(false, std::memory_order_release);
+        stop_run = true;
+        Common::UberharActivity::SetStartup(false);
+        LOG_CRITICAL(Frontend, "CPU Software frontend initialization failed: {}", error.what());
+        system.SetStatus(Core::System::ResultStatus::ErrorRendererRecovery, error.what());
+        return Core::System::ResultStatus::ErrorRendererRecovery;
     }
-    system.ApplySettings();
-    Settings::LogSettings();
 
     Camera::RegisterFactory("image", std::make_unique<Camera::StillImage::Factory>());
 
@@ -323,10 +355,17 @@ static Core::System::ResultStatus RunCitra(const std::string& filepath) {
 
     InputManager::Init();
 
-    window->MakeCurrent();
-
-    const Core::System::ResultStatus load_result{
-        system.Load(*window, filepath, secondary_window.get())};
+    // CodexAstraLocal: A strict Software pbuffer bind can fail before Load;
+    // carry that through the same normal frontend cleanup as a failed Load.
+    Core::System::ResultStatus load_result;
+    try {
+        window->MakeCurrent();
+        load_result = system.Load(*window, filepath, secondary_window.get());
+    } catch (const VideoCore::ShaderRecoveryError& error) {
+        LOG_CRITICAL(Frontend, "Renderer startup failed: {}", error.what());
+        system.SetStatus(Core::System::ResultStatus::ErrorRendererRecovery, error.what());
+        load_result = Core::System::ResultStatus::ErrorRendererRecovery;
+    }
 
     // At this point, the surface has already been used, so the mutex can be unlocked.
     surface_lock.unlock();
@@ -551,6 +590,11 @@ void Java_org_citra_citra_1emu_NativeLibrary_secondarySurfaceDestroyed(
         s_secondary_surface = nullptr;
     }
 
+    // CodexAstraLocal: A detached optional Software surface must stop being
+    // presented even though its shared core context remains alive.
+    if (software_frontend.load(std::memory_order_acquire) && secondary_window)
+        secondary_window->OnSurfaceChanged(nullptr);
+
     LOG_INFO(Frontend, "Secondary Surface Destroyed");
 }
 
@@ -569,6 +613,11 @@ void Java_org_citra_citra_1emu_NativeLibrary_surfaceDestroyed([[maybe_unused]] J
 
 void Java_org_citra_citra_1emu_NativeLibrary_doFrame([[maybe_unused]] JNIEnv* env,
                                                      [[maybe_unused]] jobject obj) {
+    // CodexAstraLocal: Software owns a CPU frame publication plus shared GL
+    // presentation resources. Exclude its UI callback from surface/renderer
+    // teardown, including the boot interval before a backend is published.
+    // This short frontend lock never spans CPU rasterization or a worker join.
+    std::scoped_lock lifecycle_lock{surface_mutex};
     if (stop_run || pause_emulation) {
         return;
     }
@@ -597,6 +646,8 @@ void Java_org_citra_citra_1emu_NativeLibrary_notifyOrientationChange([[maybe_unu
 void Java_org_citra_citra_1emu_NativeLibrary_updateFramebuffer([[maybe_unused]] JNIEnv* env,
                                                                [[maybe_unused]] jobject obj,
                                                                jboolean is_portrait_mode) {
+    // CodexAstraLocal: Layout and window lifetime share Software's UI boundary.
+    std::scoped_lock lifecycle_lock{surface_mutex};
     auto& system = Core::System::GetInstance();
     if (system.IsPoweredOn()) {
         system.GPU().Renderer().UpdateCurrentFramebufferLayout(is_portrait_mode);
@@ -606,6 +657,8 @@ void Java_org_citra_citra_1emu_NativeLibrary_updateFramebuffer([[maybe_unused]] 
 void Java_org_citra_citra_1emu_NativeLibrary_swapScreens([[maybe_unused]] JNIEnv* env,
                                                          [[maybe_unused]] jobject obj,
                                                          jboolean swap_screens, jint rotation) {
+    // CodexAstraLocal: Do not mutate a Software layout during presentation/reset.
+    std::scoped_lock lifecycle_lock{surface_mutex};
     Settings::values.swap_screen = swap_screens;
     auto& system = Core::System::GetInstance();
     if (system.IsPoweredOn()) {
@@ -920,6 +973,9 @@ void Java_org_citra_citra_1emu_NativeLibrary_pauseEmulation([[maybe_unused]] JNI
 
 void Java_org_citra_citra_1emu_NativeLibrary_stopEmulation([[maybe_unused]] JNIEnv* env,
                                                            [[maybe_unused]] jobject obj) {
+    // CodexAstraLocal: Keep both frontend windows alive through StopPresenting
+    // before the emulation thread can observe stop_run and destroy them.
+    std::scoped_lock lifecycle_lock{surface_mutex};
     if (stop_run.exchange(true)) {
         // stop_run was already true
         return;

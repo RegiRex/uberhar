@@ -24,6 +24,12 @@ add_executable(tests
 
 create_target_directory_groups(tests)
 
+# CodexAstraLocal: Exercise actual CPU graphics capture/filtering and triangle
+# participants only when that backend is built; no independent renderer oracle.
+if (ENABLE_SOFTWARE_RENDERER)
+    target_sources(tests PRIVATE video_core/software_renderer.cpp)
+endif()
+
 if (BSD STREQUAL "NetBSD")
     include(DisablePaxMprotect)
     disable_pax_mprotect(tests)

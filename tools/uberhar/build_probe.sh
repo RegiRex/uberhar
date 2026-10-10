@@ -84,6 +84,9 @@ python3 tools/uberhar/test_compute_census.py
 # CodexAstraLocal: Strict isolation must also reject unavailable backends through
 # the existing terminal frontend path instead of silently selecting graphics.
 python3 tools/uberhar/test_strict_compute_backend.py
+# CodexAstraLocal: Exercise CPU Software framebuffer capture and production
+# sampling through the same cases as native tests before publishing Android.
+python3 tools/uberhar/test_software_renderer.py
 # CodexAstraLocal: Prove new masked/endpoint admission with original CPU vertices
 # and immutable command capture; shader CI separately executes the pixel fixtures.
 python3 tools/uberhar/test_compute_rect_pixels.py

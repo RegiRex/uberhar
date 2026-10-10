@@ -43,7 +43,9 @@ jobs:
         # CodexAstraLocal: The mixed-depth regression executes the production x64 JIT.
         # CodexAstraLocal: The scratch regression executes the pinned runtime GLSL
         # parser/preamble, rather than relying only on separately adapted CLI shaders.
-        run: git submodule update --init --depth 1 externals/fmt externals/xxHash externals/boost externals/nihstro externals/vulkan-headers externals/microprofile externals/xbyak externals/libretro-common/libretro-common externals/glslang
+        # CodexAstraLocal: CPU Software's small helper gate shares the pinned
+        # Catch fixture with native tests without building the full guest core.
+        run: git submodule update --init --depth 1 externals/fmt externals/xxHash externals/boost externals/nihstro externals/vulkan-headers externals/microprofile externals/xbyak externals/libretro-common/libretro-common externals/glslang externals/catch2
       - name: Install validation tools
         # CodexAstraLocal: The cached-buffer lifetime gate submits real Vulkan
         # draws through an explicitly selected software ICD and real fences.
@@ -154,6 +156,7 @@ jobs:
       # diagnostics when optional-lane or frontend controls reject a candidate.
       # CodexAstraLocal: Retain cached-ring source, synthetic payloads, real
       # Vulkan modules and specific defect diagnostics, including failed gates.
+      # CodexAstraLocal: Retain bounded Software checks, including failures.
       - name: Upload CPU coordination contract evidence
         if: always()
         uses: actions/upload-artifact@v7
@@ -176,6 +179,10 @@ jobs:
             build/uberhar-probe/cached-buffer-lifetime/**
             build/uberhar-probe/cached-buffer-draw-use/**
             build/uberhar-probe/cached-buffer-lifetime-vulkan/**
+            build/uberhar-probe/software-renderer/**/provenance.json
+            build/uberhar-probe/software-renderer/**/results.xml
+            build/uberhar-probe/software-renderer/**/*.stdout
+            build/uberhar-probe/software-renderer/**/*.stderr
             build/uberhar-probe/shader-jit-lease/**/provenance.json
             build/uberhar-probe/shader-jit-lease/**/*.stdout
             build/uberhar-probe/shader-jit-lease/**/*.stderr

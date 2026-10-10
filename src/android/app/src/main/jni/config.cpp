@@ -143,6 +143,8 @@ void Config::ReadValues() {
     Settings::values.shaders_accurate_mul =
         android_config->GetBoolean("Renderer", "shaders_accurate_mul", false);
     ReadSetting("Renderer", Settings::values.graphics_api);
+    // CodexAstraLocal: Reload the persisted restart-only CPU raster budget.
+    ReadSetting("Renderer", Settings::values.software_renderer_workers);
     ReadSetting("Renderer", Settings::values.async_presentation);
     ReadSetting("Renderer", Settings::values.async_shader_compilation);
     // AstraEH: Load the same opt-in flags exposed in Android's Graphics settings.

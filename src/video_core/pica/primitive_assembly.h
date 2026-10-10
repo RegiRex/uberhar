@@ -80,6 +80,16 @@ struct PrimitiveAssembler {
         return topology;
     }
 
+    // CodexAstraLocal: Reset/Reconfigure preserve buffer[] and are logical no-ops
+    // for an empty, unwound complete-triangle stream with unchanged topology.
+    // Its deferred packets still own the exact saved pair until reconciliation.
+    bool CanResetDeferredTriangles(PipelineRegs::TriangleTopology next) const {
+        return next == topology &&
+               (topology == PipelineRegs::TriangleTopology::List ||
+                topology == PipelineRegs::TriangleTopology::Shader) &&
+               IsEmpty() && !winding;
+    }
+
     // CodexAstraLocal: A completed deferred List/Shader draw has emitted every
     // triangle in order. Reconcile its exact serialized trailing pair on the
     // owner without replaying all vertices or emitting the draw a second time.

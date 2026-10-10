@@ -51,7 +51,8 @@ namespace Pica { struct PicaCore {}; }
 namespace Core { struct System; }
 namespace Settings {
 enum class GraphicsAPI { Software, OpenGL, Vulkan, Unknown };
-enum class UberharTestMode { Custom, Native, Compute, Automatic, ComboGeneric };
+// CodexAstraLocal: Include CPU Software in the real factory isolation matrix.
+enum class UberharTestMode { Custom, Native, Compute, Automatic, ComboGeneric, Software };
 template<class T> struct Setting { T value{}; T GetValue() const {return value;} };
 inline struct Values {
     Setting<GraphicsAPI> graphics_api;
@@ -213,17 +214,19 @@ int main() {
         using namespace Settings;
         auto& system=Core::System::GetInstance();
         Pica::PicaCore pica;
-        for(unsigned mode=0;mode<5;++mode) for(unsigned api=0;api<4;++api) {
+        // CodexAstraLocal: Both explicitly isolated methods refuse another backend.
+        for(unsigned mode=0;mode<6;++mode) for(unsigned api=0;api<4;++api) {
             values.uberhar_test_mode.value=static_cast<UberharTestMode>(mode);
             values.graphics_api.value=static_cast<GraphicsAPI>(api);
             constructed=0; bool refused=false;
             try {auto renderer=VideoCore::CreateRenderer(system.window,nullptr,pica,system);}
             catch(const VideoCore::ShaderRecoveryError& error) {
                 refused=true;
-                Check(std::string{error.what()}.find("fallback is disabled")!=std::string::npos,
+                Check(std::string{error.what()}.find(mode==2 ? "fallback is disabled" : "CPU Software")!=std::string::npos,
                       "strict refusal lost purpose");
             }
-            const bool must_refuse=mode==2 && !(HAS_VULKAN && api==2);
+            const bool must_refuse=(mode==2 && !(HAS_VULKAN && api==2)) ||
+                (mode==5 && !(HAS_SOFTWARE && api==0)) || (api==0 && !HAS_SOFTWARE);
             Check(refused==must_refuse,"strict backend route changed");
             Check(constructed==(must_refuse?0U:1U),"substitute constructed on refusal");
             if(!refused) {
@@ -384,6 +387,9 @@ def main():
         '#pragma once\n#define LOG_CRITICAL(...) ((void)0)\n#define LOG_ERROR(...) ((void)0)\n'
         '#define LOG_INFO(...) ((void)0)\n')
     strict = block(factory, "if (Settings::values.uberhar_test_mode.GetValue() == Settings::UberharTestMode::Compute)")
+    # CodexAstraLocal: Removing Software isolation must be detected independently
+    # of compile-time backend absence and the inherited Calculated isolation.
+    software_strict = block(factory, "if (Settings::values.uberhar_test_mode.GetValue() == Settings::UberharTestMode::Software &&")
     # CodexAstraLocal: Deleting each new critical gate must fail actual executed
     # boundaries, not merely a source-string assertion. Compile four backend
     # configurations; modeled endpoints do not execute JNI, Qt events or Vulkan.
@@ -392,7 +398,10 @@ def main():
         ("vulkan", factory, source, (1, 0, 0), True),
         ("gl", factory, source, (0, 1, 0), True),
         ("software", factory, source, (0, 0, 1), True),
-        ("removed-factory-guard", factory.replace(strict, ""), source, (1, 1, 0), False),
+        # CodexAstraLocal: Android can now contain all three available backends.
+        ("all-backends", factory, source, (1, 1, 1), True),
+        ("removed-factory-guard", factory.replace(strict, ""), source, (1, 1, 1), False),
+        ("removed-software-guard", factory.replace(software_strict, ""), source, (1, 1, 1), False),
         ("false-init-success", factory, source.replace(
             "return ResultStatus::ErrorRendererRecovery;", "return ResultStatus::Success;"), (1, 1, 0), False),
         ("ignored-restore-status", factory, source.replace(
@@ -417,6 +426,7 @@ def main():
     # unrelated earlier failure cannot be mistaken for a working regression test.
     failures = {
         "removed-factory-guard": "strict backend route changed",
+        "removed-software-guard": "strict backend route changed",
         "false-init-success": "constructor refusal did not return terminal status",
         "ignored-restore-status": "restore continued without a renderer",
         "live-failed-frontend": "context callback retained failed session",
@@ -455,7 +465,10 @@ def main():
     (out / "provenance.json").write_text(json.dumps({"author": "CodexAstraLocal",
         "source_sha256": hashes, "cases": results,
         "scope": "Actual factory and extracted exception boundaries; modeled constructors/frontend endpoints"}, indent=2)+"\n")
-    print("PASS strict backend: four compiled-backend matrices and eleven required failure controls; " + str(out))
+    # CodexAstraLocal: Report the executed matrix rather than a stale hard-coded count.
+    passed = sum(case[4] for case in cases)
+    print(f"PASS strict backend: {passed} compiled-backend matrices and "
+          f"{len(cases) - passed} required failure controls; {out}")
 
 
 if __name__ == "__main__":

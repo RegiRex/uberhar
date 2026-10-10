@@ -91,6 +91,9 @@ void LogSettings() {
     log_setting("Controller_UseArticController", values.use_artic_base_controller.GetValue());
     log_setting("Renderer_UseGLES", values.use_gles.GetValue());
     log_setting("Renderer_GraphicsAPI", GetGraphicsAPIName(values.graphics_api.GetValue()));
+    // CodexAstraLocal: Record the requested CPU budget separately from the
+    // renderer's startup report of the process-allowed effective participants.
+    log_setting("Renderer_SoftwareWorkers", values.software_renderer_workers.GetValue());
     log_setting("Renderer_AsyncShaders", values.async_shader_compilation.GetValue());
     // AstraEH: Include experimental mode in logs so device reports can be compared.
     // AstraEH Log Line: Capture the master experiment switch.
@@ -217,6 +220,7 @@ void RestoreGlobalState(bool is_powered_on) {
 
     // Renderer
     values.graphics_api.SetGlobal(true);
+    values.software_renderer_workers.SetGlobal(true); // CodexAstraLocal: Restore global CPU budget.
     values.physical_device.SetGlobal(true);
     values.spirv_shader_gen.SetGlobal(true);
     values.async_shader_compilation.SetGlobal(true);
@@ -268,7 +272,9 @@ void RestoreGlobalState(bool is_powered_on) {
 Settings::GraphicsAPI GetWorkingGraphicsAPI() {
     auto graphics_api = Settings::values.graphics_api.GetValue();
 #if defined(ANDROID) && !defined(HAVE_LIBRETRO)
-    if (AndroidUtils::IsUsingAngleForOpenGL()) {
+    // CodexAstraLocal: ANGLE preference must not turn explicit CPU graphics
+    // into a Vulkan PICA renderer; its EGL use is presentation only.
+    if (graphics_api != GraphicsAPI::Software && AndroidUtils::IsUsingAngleForOpenGL()) {
         graphics_api = Settings::GraphicsAPI::Vulkan;
     }
 #endif

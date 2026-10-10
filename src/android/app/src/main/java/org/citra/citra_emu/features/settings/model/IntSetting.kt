@@ -18,6 +18,8 @@ enum class IntSetting(
     CAMERA_OUTER_LEFT_FLIP(SettingKeys.camera_outer_left_flip(), Settings.SECTION_CAMERA, 0),
     CAMERA_OUTER_RIGHT_FLIP(SettingKeys.camera_outer_right_flip(), Settings.SECTION_CAMERA, 0),
     GRAPHICS_API(SettingKeys.graphics_api(), Settings.SECTION_RENDERER, 2),
+    // CodexAstraLocal: Restart-only total participants, 0=Auto, 1/2=explicit budgets.
+    SOFTWARE_RENDERER_WORKERS(SettingKeys.software_renderer_workers(), Settings.SECTION_RENDERER, 0),
     // AstraEH: A game restart is required before switching renderer implementations.
     UBERHAR_TEST_MODE(SettingKeys.uberhar_test_mode(), Settings.SECTION_RENDERER, 0),
     RESOLUTION_FACTOR(SettingKeys.resolution_factor(), Settings.SECTION_RENDERER, 1),
@@ -89,6 +91,8 @@ enum class IntSetting(
             EMULATED_REGION,
             INIT_CLOCK,
             GRAPHICS_API,
+            // CodexAstraLocal: A renderer lifetime owns its selected sleeping pool.
+            SOFTWARE_RENDERER_WORKERS,
             UBERHAR_TEST_MODE,
             AUDIO_INPUT_TYPE
         )

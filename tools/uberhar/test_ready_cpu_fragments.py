@@ -98,7 +98,8 @@ public:
 '''
 SETTINGS = r'''#pragma once
 namespace Settings {
-enum class UberharTestMode {Custom, Native, Compute, Automatic, ComboGeneric};
+// CodexAstraLocal: Match appended production Software ID without changing old IDs.
+enum class UberharTestMode {Custom, Native, Compute, Automatic, ComboGeneric, Software};
 struct Mode {
     UberharTestMode value{UberharTestMode::Automatic};
     auto GetValue() const { return value; }

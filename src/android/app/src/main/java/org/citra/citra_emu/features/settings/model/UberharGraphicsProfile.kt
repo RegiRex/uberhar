@@ -10,7 +10,20 @@ import org.citra.citra_emu.features.settings.model.view.SettingsItem
 object UberharGraphicsProfile {
     // CodexAstraUlt: Replace AstraEH's mode-independent forced-TEV display, which showed
     // true even for full Combo. Read the selected profile without modifying saved settings.
-    private fun booleans(mode: UberharTestMode) = mapOf(
+    // CodexAstraLocal: Display only actual Software overrides; preserve saved
+    // timing/presentation choices instead of displaying Vulkan's forced values.
+    private fun booleans(mode: UberharTestMode) = if (mode == UberharTestMode.SOFTWARE) mapOf(
+        BooleanSetting.UBERHAR_HYBRID_TEV to false,
+        BooleanSetting.UBERHAR_FORCE_TEV to false,
+        BooleanSetting.UBERHAR_CPU_VERTEX_BRIDGE to false,
+        BooleanSetting.SHADERS_ACCURATE_MUL to true,
+        BooleanSetting.DISK_SHADER_CACHE to false,
+        BooleanSetting.DISABLE_RIGHT_EYE_RENDER to false,
+        BooleanSetting.SWAP_EYES_3D to false,
+        BooleanSetting.DUMP_TEXTURES to false,
+        BooleanSetting.CUSTOM_TEXTURES to false,
+        BooleanSetting.USE_SKIP_DUPLICATE_FRAMES to false
+    ) else mapOf(
         BooleanSetting.SPIRV_SHADER_GEN to true,
         BooleanSetting.DISABLE_SPIRV_OPTIMIZER to true,
         BooleanSetting.ASYNC_SHADERS to false,
@@ -27,7 +40,16 @@ object UberharGraphicsProfile {
         BooleanSetting.ASYNC_CUSTOM_LOADING to true,
         BooleanSetting.USE_SKIP_DUPLICATE_FRAMES to false
     )
-    private val integers get() = mapOf(
+    // CodexAstraLocal: Software renders the guest framebuffer at exactly 1x.
+    private fun integers(mode: UberharTestMode) = if (mode == UberharTestMode.SOFTWARE) mapOf(
+        IntSetting.GRAPHICS_API to 0,
+        IntSetting.RESOLUTION_FACTOR to 1,
+        IntSetting.TEXTURE_FILTER to 0,
+        IntSetting.TEXTURE_SAMPLING to 0,
+        IntSetting.RENDER_3D_WHICH_DISPLAY to 0,
+        IntSetting.STEREOSCOPIC_3D_MODE to 0,
+        IntSetting.STEREOSCOPIC_3D_DEPTH to 0
+    ) else mapOf(
         IntSetting.GRAPHICS_API to 2,
         IntSetting.TEXTURE_FILTER to 0,
         IntSetting.TEXTURE_SAMPLING to 0,
@@ -48,7 +70,7 @@ object UberharGraphicsProfile {
                     override val isRuntimeEditable = false
                 }
             }
-            is IntSetting -> integers[original]?.let { effective ->
+            is IntSetting -> integers(mode)[original]?.let { effective ->
                 item.setting = object : AbstractIntSetting by original {
                     override var int: Int
                         get() = effective

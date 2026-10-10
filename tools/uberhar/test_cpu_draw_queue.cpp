@@ -78,6 +78,10 @@ bool gate_open{true};
 void Start() { std::unique_lock lock{gate_mutex}; gate_cv.wait(lock, [] { return gate_open; }); }
 void Gate(bool open) { { std::lock_guard lock{gate_mutex}; gate_open = open; } gate_cv.notify_all(); }
 
+// CodexAstraLocal: Generated from the real PICA reset branches/reconciliation;
+// only owner services unrelated to these operations are replaced by the fixture.
+#include "actual_reset_owner.h"
+
 // CodexAstraLocal: The driver injects these calls only into a copied CPP. They
 // force the otherwise rare terminal boundaries without replacing JIT execution.
 namespace PacketProbe {
@@ -288,6 +292,117 @@ void Normal(const std::vector<CarryChallenge::Case>& programs) {
     }
 }
 
+// CodexAstraLocal: Inspect the fields the real save-state archive consumes,
+// including the retained pair even when no triangle is partially assembled.
+struct AssemblySnapshot {
+    std::vector<u8> bytes;
+    template <typename T> AssemblySnapshot& operator&(T& value) {
+        const auto* begin = reinterpret_cast<const u8*>(&value);
+        bytes.insert(bytes.end(), begin, begin + sizeof(value));
+        return *this;
+    }
+};
+std::vector<u8> SavedAssembly(PrimitiveAssembler& assembler) {
+    AssemblySnapshot saved;
+    boost::serialization::access::serialize(saved, assembler, 0);
+    return saved.bytes;
+}
+
+// CodexAstraLocal: Keep A blocked across the actual redundant register writes,
+// enqueue independent B, then check ordered bytes/counts and the saved tail.
+// A test-only pre-drain hook releases workers on a deliberately broken branch,
+// so restoring unconditional drains fails directly instead of hanging a test.
+void Resets(const std::vector<CarryChallenge::Case>& programs) {
+    Shader::JitEngine engine; ShaderSetup setup;
+    const auto lease = Lease(engine, setup, programs[0]);
+    for (auto topology : {PipelineRegs::TriangleTopology::List,
+                          PipelineRegs::TriangleTopology::Shader}) {
+        Gate(false);
+        ResetOwner owner;
+        struct ReleaseGate { ~ReleaseGate() { Gate(true); } } release_gate;
+        owner.primitive_assembler.Reconfigure(topology);
+        auto& state = *owner.deferred_vertices;
+        std::array<Expected, 2> expected;
+        std::array<std::shared_ptr<CpuDrawPacket>, 2> packets;
+        for (u32 n = 0; n < 2; ++n) {
+            Live live{lease, programs[0], 126, n + 3, true};
+            live.topology = topology;
+            expected[n] = Serial(live);
+            packets[n] = state.executor.Capture(live.source, VideoCore::ActualWriter);
+            Need(packets[n] && state.executor.Submit(packets[n]), "reset packet publication");
+            state.pending.push_back(packets[n]);
+            if (n == 0) {
+                owner.Topology(topology);
+                owner.Restart();
+                Need(state.synchronous_boundaries == 0, "redundant reset drained packets");
+                Need(state.executor.GetStatistics().completed == 0, "reset worker gate escaped");
+            }
+            live.Mutate();
+        }
+        owner.ReconcileDeferredVertices();
+        Need(state.deferred_topology_resets == 1 && state.deferred_primitive_resets == 1,
+             "reset evidence counters");
+        for (u32 n = 0; n < 2; ++n) {
+            const auto bytes = packets[n]->HardwareBytes();
+            Need(bytes.size() == expected[n].hardware.size() &&
+                 !std::memcmp(bytes.data(), expected[n].hardware.data(), bytes.size()),
+                 "reset ordered hardware differs");
+            ++comparisons;
+        }
+        PrimitiveAssembler serial{topology};
+        for (const auto& result : expected) {
+            // The original scalar serial oracle supplied this exact final pair.
+            serial.AdoptCompletedTriangleTail(result.pair);
+            serial.Reset();
+        }
+        Need(SavedAssembly(owner.primitive_assembler) == SavedAssembly(serial),
+             "reset saved pair differs");
+        Need(state.completed == 2 && state.inputs == 252 &&
+             state.invocations == expected[0].counts.invocations + expected[1].counts.invocations &&
+             state.hits == expected[0].counts.hits + expected[1].counts.hits,
+             "reset owner counts differ");
+        owner.ReconcileDeferredVertices();
+        Need(state.completed == 2 && state.synchronous_boundaries == 1, "reset duplicate prefix");
+
+        // CodexAstraLocal: Changed topology must adopt before Reconfigure, and
+        // strip/fan, partial triangles and pending winding cannot use the bypass.
+        auto ticket = state.executor.Capture(Live{lease, programs[0], 126, 7, true}.source,
+                                             VideoCore::ActualWriter);
+        Need(ticket && state.executor.Submit(ticket), "topology boundary packet");
+        state.pending.push_back(ticket);
+        const auto next = topology == PipelineRegs::TriangleTopology::List
+                              ? PipelineRegs::TriangleTopology::Shader
+                              : PipelineRegs::TriangleTopology::List;
+        owner.Topology(next);
+        Need(state.synchronous_boundaries == 2 && state.pending.empty(), "changed topology did not drain");
+        PrimitiveAssembler partial{topology};
+        partial.SubmitVertex(expected[0].pair[0], [](const auto&, const auto&, const auto&) {});
+        Need(!partial.CanResetDeferredTriangles(topology), "partial reset admitted");
+        partial.Reset(); partial.SetWinding();
+        Need(!partial.CanResetDeferredTriangles(topology), "winding reset admitted");
+        for (auto strip : {PipelineRegs::TriangleTopology::Strip, PipelineRegs::TriangleTopology::Fan})
+            Need(!PrimitiveAssembler{strip}.CanResetDeferredTriangles(strip), "strip/fan reset admitted");
+    }
+    // Packet failure must remain terminal after a redundant reset; retrying a
+    // real boundary must neither recount a successful prefix nor leave borrowers.
+    Gate(false); ResetOwner owner;
+    struct ReleaseGate { ~ReleaseGate() { Gate(true); } } release_gate;
+    auto& state = *owner.deferred_vertices;
+    Live live{lease, programs[0], 126, 9, true};
+    auto ticket = state.executor.Capture(live.source, VideoCore::ActualWriter);
+    Need(ticket && state.executor.Submit(ticket), "failed reset packet");
+    state.pending.push_back(ticket);
+    PacketProbe::fail_packet = true;
+    owner.Restart();
+    for (int retry = 0; retry < 2; ++retry) {
+        bool failed{};
+        try { owner.ReconcileDeferredVertices(); }
+        catch (const VideoCore::ShaderRecoveryError&) { failed = true; }
+        Need(failed && state.completed == 0 && state.reconciled == 0, "reset failure lost terminal state");
+    }
+    Need(state.executor.GetStatistics().completed == 1, "reset failure borrower not drained");
+}
+
 // CodexAstraLocal: Credit includes unpublished and renderer-held packets;
 // malformed/effect refusals must not be mistaken for a need to drain commands.
 void Boundaries(const std::vector<CarryChallenge::Case>& programs) {
@@ -456,6 +571,7 @@ int main(int argc, char** argv) try {
     if (selected == "all" || selected == "bounds") Boundaries(programs);
     if (selected == "all" || selected == "failures") Failures(programs);
     if (selected == "all" || selected == "work") WorkFloor(programs);
+    if (selected == "all" || selected == "resets") Resets(programs);
     original.Apply();
     std::cout << Json{{"passed", true}, {"checks", checks}, {"comparisons", comparisons},
         {"programs", programs.size()}, {"fp_modes", ModeCount},

@@ -41,7 +41,8 @@ constexpr bool RequiresComputeOnly(UberharTestMode mode) {
 }
 
 constexpr bool IsUberharTestProfile(UberharTestMode mode) {
-    return mode == UberharTestMode::Native || AllowsComputeRendering(mode);
+    return mode == UberharTestMode::Software || mode == UberharTestMode::Native ||
+           AllowsComputeRendering(mode);
 }
 
 // AstraEH: Apply ONLY after the frontend has reloaded the user's saved settings.
@@ -53,6 +54,31 @@ inline void ApplyUberharTestProfile() {
     // preserving invalid-value recovery while accepting the appended diagnostic preset.
     if (!IsUberharTestProfile(mode)) {
         values.uberhar_test_mode = UberharTestMode::Custom;
+        return;
+    }
+    // CodexAstraLocal: CPU graphics is an explicit 1x implementation, not a
+    // Native/Calculated fallback. Keep guest CPU, audio and completion timing
+    // choices intact while disabling hardware guest graphics and shortcuts.
+    if (mode == UberharTestMode::Software) {
+        values.graphics_api = GraphicsAPI::Software;
+        values.resolution_factor = 1;
+        values.use_hw_shader = false;
+        values.use_shader_jit = true;
+        values.shaders_accurate_mul = true;
+        values.uberhar_hybrid_tev = false;
+        values.uberhar_force_tev = false;
+        values.uberhar_cpu_vertex_bridge = false;
+        values.use_disk_shader_cache = false;
+        values.texture_filter = TextureFilter::NoFilter;
+        values.texture_sampling = TextureSampling::GameControlled;
+        values.render_3d = StereoRenderOption::Off;
+        values.factor_3d = 0;
+        values.render_3d_which_display = StereoWhichDisplay::None;
+        values.disable_right_eye_render = false;
+        values.swap_eyes_3d = false;
+        values.dump_textures = false;
+        values.custom_textures = false;
+        values.use_skip_duplicate_frames = false;
         return;
     }
     values.graphics_api = GraphicsAPI::Vulkan;

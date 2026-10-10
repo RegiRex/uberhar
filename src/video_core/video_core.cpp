@@ -27,6 +27,12 @@ std::unique_ptr<RendererBase> CreateRenderer(Frontend::EmuWindow& emu_window,
                                              Frontend::EmuWindow* secondary_window,
                                              Pica::PicaCore& pica, Core::System& system) {
     const auto graphics_api = Settings::GetWorkingGraphicsAPI();
+    // CodexAstraLocal: An explicit CPU Software profile must fail closed when
+    // stale/invalid effective settings point elsewhere; no substitute PICA path.
+    if (Settings::values.uberhar_test_mode.GetValue() == Settings::UberharTestMode::Software &&
+        graphics_api != Settings::GraphicsAPI::Software) {
+        throw ShaderRecoveryError{"CPU Software mode requires the Software backend; fallback is disabled"};
+    }
     // CodexAstraLocal: Calculated isolation cannot silently select OpenGL or
     // software when Vulkan is unavailable. Other profiles retain the existing
     // backend resolver and default behavior; initial-load callers contain this
@@ -45,7 +51,14 @@ std::unique_ptr<RendererBase> CreateRenderer(Frontend::EmuWindow& emu_window,
     switch (graphics_api) {
 #ifdef ENABLE_SOFTWARE_RENDERER
     case Settings::GraphicsAPI::Software:
-        return std::make_unique<SwRenderer::RendererSoftware>(system, pica, emu_window);
+        // CodexAstraLocal: Both Android displays consume completed CPU frames;
+        // no accelerated PICA rasterizer is constructed for this selection.
+        return std::make_unique<SwRenderer::RendererSoftware>(system, pica, emu_window,
+                                                             secondary_window);
+#else
+    case Settings::GraphicsAPI::Software:
+        // CodexAstraLocal: A disabled build cannot silently change CPU graphics.
+        throw ShaderRecoveryError{"CPU Software renderer is unavailable in this build"};
 #endif
 #ifdef ENABLE_VULKAN
     case Settings::GraphicsAPI::Vulkan:
@@ -70,7 +83,8 @@ std::unique_ptr<RendererBase> CreateRenderer(Frontend::EmuWindow& emu_window,
 #elif ENABLE_VULKAN
         return std::make_unique<Vulkan::RendererVulkan>(system, pica, emu_window, secondary_window);
 #elif ENABLE_SOFTWARE_RENDERER
-        return std::make_unique<SwRenderer::RendererSoftware>(system, pica, emu_window);
+        return std::make_unique<SwRenderer::RendererSoftware>(system, pica, emu_window,
+                                                             secondary_window);
 #else
 // TODO: Add a null renderer backend for this, perhaps.
 #error "At least one renderer must be enabled."
