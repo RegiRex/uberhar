@@ -12,9 +12,12 @@ Every push to a `claude/**` branch runs the **Uberhar Claude test APK** workflow
 
 1. Open the repository's **Actions** tab and pick the newest run of
    *Uberhar Claude test APK* for this branch.
-2. When the `android` job is green, download the **uberhar-claude-apk** artifact
-   at the bottom of the run page. GitHub delivers artifacts as a zip; unzip it to get
-   `uberhar-claude-<version>-<run>-arm64.apk`.
+2. When the run is green, use the **Download the Uberhar Claude APK** link at the
+   top of the run page, or the `uberhar-claude-<version>-<run>-arm64.apk` artifact
+   at the bottom. It downloads the APK file itself; there is nothing to unzip.
+   Downloads need a GitHub sign-in in the browser and expire after 30 days.
+   The checksum, signature and source commit are in the separate
+   `uberhar-claude-apk-details` artifact.
 3. Install it on the phone. It is a separate app called **Uberhar Claude**
    (`org.uberhar.uberhar_emu.claude`), so it sits next to Uberhar and never
    replaces it, its signing key or its data.

@@ -164,6 +164,7 @@ jobs:
             assembleUberharClaude 2>&1 | tee "$GITHUB_WORKSPACE/claude-build.log"
 
       - name: Validate package
+        id: package
         run: |
           set -euo pipefail
           mkdir -p artifacts
@@ -182,21 +183,32 @@ jobs:
           "$ANDROID_SDK_ROOT/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK" > artifacts/signature.txt
           (cd artifacts && sha256sum "$(basename "$APK")" > apk-sha256.txt)
           git rev-parse HEAD > artifacts/source-commit.txt
+          echo "apk=$APK" >> "$GITHUB_OUTPUT"
           {
             echo "### Uberhar Claude test APK"
             echo ""
             echo "Commit \`$(git rev-parse --short=9 HEAD)\`, version \`${{ steps.version.outputs.value }}-claude.${{ github.run_number }}\`."
-            echo "Download the **uberhar-claude-apk** artifact below, unzip it and install the APK."
+            echo "Download the \`.apk\` artifact below and install it; no unzipping is needed."
             echo "It installs next to Uberhar as a separate app and never replaces it."
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # Claude: Upload the APK alone and unzipped so the download is the .apk
+      # itself. With archive: false the artifact is named after the file.
       - name: Upload APK
         id: upload_apk
         uses: actions/upload-artifact@v7
         with:
-          name: uberhar-claude-apk
+          path: ${{ steps.package.outputs.apk }}
+          archive: false
+          if-no-files-found: error
+          retention-days: 30
+
+      # Claude: Checksum, badging, signature and commit evidence, kept zipped.
+      - name: Upload APK details
+        uses: actions/upload-artifact@v7
+        with:
+          name: uberhar-claude-apk-details
           path: |
-            artifacts/*.apk
             artifacts/apk-sha256.txt
             artifacts/package.txt
             artifacts/signature.txt
@@ -211,7 +223,7 @@ jobs:
         run: |
           {
             echo ""
-            echo "**[Download the Uberhar Claude APK]($ARTIFACT_URL)** (a zip containing the APK)."
+            echo "**[Download the Uberhar Claude APK]($ARTIFACT_URL)** (the APK file itself)."
             echo "Use it only when the shaders, native-tests and android jobs of this run are all green."
           } >> "$GITHUB_STEP_SUMMARY"
 
