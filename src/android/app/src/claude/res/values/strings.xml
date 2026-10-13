@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Claude: Side-by-side test build label and data-folder guidance. Build-type
+         resources override the uberhar flavor, so the beta's own strings are untouched. -->
+    <string name="app_name" translatable="false">Uberhar Claude</string>
+    <string name="select_citra_user_folder">Select a separate Uberhar Claude data folder</string>
+    <string name="select_citra_user_folder_description">Create an empty folder named UberharClaude for this test build. Keep it separate from your Uberhar and Azahar folders, and copy saves into it only after setup.</string>
+</resources>

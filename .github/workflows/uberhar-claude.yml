@@ -1,0 +1,230 @@
+# Claude: Build a side-by-side "Uberhar Claude" ARM64 test APK from claude/* branches.
+# It never publishes a release, never pushes, and never runs for uberhar/hybrid-shaders.
+# The APK installs under org.uberhar.uberhar_emu.claude, so the owner's existing
+# Uberhar install, its signing key and its data folder are never touched.
+name: Uberhar Claude test APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['claude/**']
+
+permissions:
+  contents: read
+
+concurrency:
+  # Claude: Only the newest push on a claude branch matters for device testing.
+  group: uberhar-claude-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Claude: Reuse the repository's existing shader/pixel correctness gate unchanged.
+  shaders:
+    if: startsWith(github.ref, 'refs/heads/claude/')
+    uses: ./.github/workflows/uberhar-shaders.yml
+    with:
+      checkout_ref: ${{ github.sha }}
+
+  # Claude: Compile the full emulator core natively and run its C++ test suite.
+  native-tests:
+    if: startsWith(github.ref, 'refs/heads/claude/')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          submodules: recursive
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ccache ninja-build
+      - name: Restore compiler cache
+        uses: actions/cache/restore@v5
+        with:
+          path: ~/.cache/ccache
+          key: uberhar-claude-native-v1-${{ github.run_id }}
+          restore-keys: |
+            uberhar-claude-native-v1-
+      - name: Configure
+        run: |
+          cmake -S . -B build/native -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DENABLE_QT=OFF -DENABLE_SDL2=OFF -DENABLE_TESTS=ON -DENABLE_ROOM=OFF \
+            -DENABLE_WEB_SERVICE=OFF -DENABLE_SCRIPTING=OFF -DENABLE_CUBEB=OFF \
+            -DENABLE_OPENAL=OFF -DENABLE_LIBUSB=OFF -DENABLE_OPENGL=OFF \
+            -DENABLE_VULKAN=ON -DENABLE_SOFTWARE_RENDERER=ON -DENABLE_LTO=OFF
+      - name: Build
+        run: ninja -C build/native -j4
+      - name: Run C++ tests
+        run: ctest --test-dir build/native --output-on-failure -j4
+      - name: Save compiler cache
+        if: always()
+        uses: actions/cache/save@v5
+        with:
+          path: ~/.cache/ccache
+          key: uberhar-claude-native-v1-${{ github.run_id }}
+
+  android:
+    if: startsWith(github.ref, 'refs/heads/claude/')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Read version
+        id: version
+        run: |
+          UBERHAR_VERSION="$(cat UBERHAR_VERSION)"
+          [[ "$UBERHAR_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          echo "value=$UBERHAR_VERSION" >> "$GITHUB_OUTPUT"
+          echo "short_sha=$(git rev-parse --short=9 HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache compilation dependencies
+        uses: actions/cache/restore@v5
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            ~/.cache/ccache
+          key: uberhar-claude-android-v1-${{ github.run_id }}
+          restore-keys: |
+            uberhar-claude-android-v1-
+
+      # Claude: A branch-scoped test key, separate from the owner's approved
+      # development key. If the cache is ever evicted a new key is generated and
+      # the run says so: the previous Uberhar Claude build must then be uninstalled.
+      - name: Restore Claude signing key
+        id: key
+        uses: actions/cache/restore@v5
+        with:
+          path: ~/.android/claude.keystore
+          key: uberhar-claude-signing-v1
+
+      - name: Prepare Claude signing key
+        if: steps.key.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p "$HOME/.android"
+          "$JAVA_HOME_17_X64/bin/keytool" -genkeypair -noprompt \
+            -keystore "$HOME/.android/claude.keystore" -storepass android \
+            -alias claudetest -keypass android -keyalg RSA -keysize 2048 \
+            -validity 10000 -dname "CN=Uberhar Claude Test,O=Uberhar,C=US"
+          echo '::warning title=New Uberhar Claude signing key::A new test signing key was generated. Uninstall any earlier Uberhar Claude build before installing this one. Uberhar itself is unaffected.'
+
+      - name: Save Claude signing key
+        if: steps.key.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: ~/.android/claude.keystore
+          key: uberhar-claude-signing-v1
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ccache ninja-build qemu-user
+          "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" \
+            "platforms;android-35" "build-tools;35.0.0" \
+            "ndk;27.3.13750724" "cmake;3.30.3"
+
+      # Claude: Keep the repository's existing ARM64 contracts as required gates.
+      - name: Execute ARM64 contracts
+        run: |
+          export ANDROID_NDK_HOME="$ANDROID_SDK_ROOT/ndk/27.3.13750724"
+          CXX="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/clang++"
+          QEMU="$(command -v qemu-aarch64)"
+          python3 tools/uberhar/test_shader_a64_return.py
+          python3 tools/uberhar/test_parallel_work_transport.py --compiler "$CXX" --qemu "$QEMU"
+          python3 tools/uberhar/test_shader_a64_writeback.py
+          python3 tools/uberhar/test_guest_a64_fpsr.py
+          python3 tools/uberhar/test_parallel_vertex_observable.py
+          python3 tools/uberhar/test_vertex_register_decode.py --compiler "$CXX" --qemu "$QEMU"
+          python3 tools/uberhar/test_shader_jit_lease.py --a64 --compiler "$CXX" --qemu "$QEMU"
+          python3 tools/uberhar/test_cpu_draw_queue.py --a64 --compiler "$CXX" --qemu "$QEMU"
+
+      - name: Build Android ARM64
+        working-directory: src/android
+        run: |
+          set -o pipefail
+          export JAVA_HOME="$JAVA_HOME_17_X64"
+          export PATH="$JAVA_HOME/bin:$PATH"
+          export NDK_CCACHE="$(command -v ccache)"
+          export ANDROID_KEYSTORE_FILE="$HOME/.android/claude.keystore"
+          export ANDROID_KEYSTORE_PASS=android
+          export ANDROID_KEY_ALIAS=claudetest
+          bash ./gradlew --no-daemon --max-workers=2 \
+            -PuberharArm64Only=true \
+            -Pandroid.injected.testOnly=false \
+            -PclaudeBuild=${{ github.run_number }} \
+            assembleUberharClaude 2>&1 | tee "$GITHUB_WORKSPACE/claude-build.log"
+
+      - name: Validate package
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          python3 tools/uberhar/validate_apk.py src/android/app/build/outputs/apk/uberhar/claude artifacts
+          SOURCE_APK="$(find artifacts -name 'uberhar-*-arm64.apk' -print -quit)"
+          APK="artifacts/uberhar-claude-${{ steps.version.outputs.value }}-${{ github.run_number }}-arm64.apk"
+          mv "$SOURCE_APK" "$APK"
+          "$ANDROID_SDK_ROOT/build-tools/35.0.0/aapt" dump badging "$APK" > artifacts/package.txt
+          grep "package: name='org.uberhar.uberhar_emu.claude'" artifacts/package.txt
+          grep -F "application-label:'Uberhar Claude'" artifacts/package.txt
+          if grep -q '^testOnly=' artifacts/package.txt; then
+            echo '::error::Refusing a test-only APK: normal Android installation would fail' >&2
+            exit 1
+          fi
+          "$ANDROID_SDK_ROOT/build-tools/35.0.0/zipalign" -c -P 16 -v 4 "$APK" > artifacts/alignment.txt
+          "$ANDROID_SDK_ROOT/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK" > artifacts/signature.txt
+          (cd artifacts && sha256sum "$(basename "$APK")" > apk-sha256.txt)
+          git rev-parse HEAD > artifacts/source-commit.txt
+          {
+            echo "### Uberhar Claude test APK"
+            echo ""
+            echo "Commit \`$(git rev-parse --short=9 HEAD)\`, version \`${{ steps.version.outputs.value }}-claude.${{ github.run_number }}\`."
+            echo "Download the **uberhar-claude-apk** artifact below, unzip it and install the APK."
+            echo "It installs next to Uberhar as a separate app and never replaces it."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: uberhar-claude-apk
+          path: |
+            artifacts/*.apk
+            artifacts/apk-sha256.txt
+            artifacts/package.txt
+            artifacts/signature.txt
+            artifacts/source-commit.txt
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload native symbols
+        if: success()
+        uses: actions/upload-artifact@v7
+        with:
+          name: uberhar-claude-native-symbols
+          path: src/android/app/build/outputs/native-debug-symbols/uberharClaude/native-debug-symbols.zip
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: uberhar-claude-build-log
+          path: claude-build.log
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Save compilation cache
+        if: always()
+        uses: actions/cache/save@v5
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            ~/.cache/ccache
+          key: uberhar-claude-android-v1-${{ github.run_id }}

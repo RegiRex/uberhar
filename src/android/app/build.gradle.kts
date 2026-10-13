@@ -25,6 +25,8 @@ val autoVersion = (((System.currentTimeMillis() / 1000) - 1451606400) / 10).toIn
 val uberharVersion = rootProject.file("../../UBERHAR_VERSION").readText().trim()
 require(uberharVersion.matches(Regex("[0-9]+\\.[0-9]+\\.[0-9]+")))
 // AstraEH: Constrain both compilation and bundled JNI libraries for the Thor alpha.
+// Claude: CI run number appended to the side-by-side build's version name.
+val claudeBuildNumber = providers.gradleProperty("claudeBuild").orNull
 val abiFilter = if (providers.gradleProperty("uberharArm64Only").orNull == "true") {
     listOf("arm64-v8a")
 } else {
@@ -166,6 +168,16 @@ android {
                 checkReleaseBuilds = false // Ditto
                 // ^- The name of this property is misleading, this doesn't actually disable linting for the `release` build.
             }
+        }
+
+        // Claude: Side-by-side test builds from claude/* branches. Inherit the
+        // optimized release configuration, but install under a separate app ID
+        // and label so the owner's existing Uberhar install and data stay untouched.
+        register("claude") {
+            initWith(getByName("release"))
+            applicationIdSuffix = ".claude"
+            versionNameSuffix = "-claude" + (claudeBuildNumber?.let { ".$it" } ?: "")
+            matchingFallbacks += listOf("release")
         }
 
         // Signed by debug key disallowing distribution on Play Store.
