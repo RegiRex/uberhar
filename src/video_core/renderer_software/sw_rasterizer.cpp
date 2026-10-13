@@ -5,6 +5,7 @@
 #include <boost/container/static_vector.hpp>
 #include <bit> // CodexAstraLocal: Exceptional diagnostics preserve float operand bits.
 #include <limits>
+#include <optional> // Claude: Standalone triangles own their TEV decode.
 #include "common/logging/log.h"
 #include "common/microprofile.h"
 #include "common/quaternion.h"
@@ -72,6 +73,68 @@ struct Vertex : Pica::OutputVertex {
         Vertex ret = v0;
         ret.Lerp(factor, v1);
         return ret;
+    }
+};
+
+// CodexAstraLocal: Decode immutable TEV registers once per triangle. Workers
+// borrow only this bounded value-owned plan until their existing full join;
+// no shader compilation, cross-draw cache or guest-memory snapshot is involved.
+struct PreparedTevConfig {
+    using Config = TexturingRegs::TevStageConfig;
+    struct Stage {
+        std::array<Config::Source, 3> color_sources, alpha_sources;
+        std::array<Config::ColorModifier, 3> color_modifiers;
+        std::array<Config::AlphaModifier, 3> alpha_modifiers;
+        Common::Vec4<u8> constant;
+        Config::Operation color_op, alpha_op;
+        u32 color_count, alpha_count, color_multiplier, alpha_multiplier;
+        bool update_color, update_alpha;
+    };
+    std::array<Stage, 6> stages;
+    Common::Vec4<u8> initial_buffer;
+    FragmentDemand demand;
+
+    PreparedTevConfig(const TexturingRegs& texturing, const Pica::LightingRegs& lighting) {
+        const auto config = texturing.GetTevStages();
+        demand = GetFragmentDemand(config, lighting);
+        const auto& buffer = texturing.tev_combiner_buffer_color;
+        initial_buffer = {static_cast<u8>(buffer.r.Value()), static_cast<u8>(buffer.g.Value()),
+                          static_cast<u8>(buffer.b.Value()), static_cast<u8>(buffer.a.Value())};
+        for (u32 i = 0; i < stages.size(); ++i) {
+            const auto& source = config[i];
+            auto& stage = stages[i];
+            stage.color_sources = {source.color_source1, source.color_source2, source.color_source3};
+            stage.alpha_sources = {source.alpha_source1, source.alpha_source2, source.alpha_source3};
+            // CodexAstraLocal: Only Software's first two RGB inputs remap
+            // Previous at stage0. Alpha keeps the inherited initial-zero source.
+            if (i == 0) {
+                for (u32 input = 0; input < 2; ++input) {
+                    if (stage.color_sources[input] == Config::Source::Previous) {
+                        stage.color_sources[input] = source.color_source3;
+                    }
+                }
+            }
+            stage.color_modifiers = {source.color_modifier1, source.color_modifier2,
+                                     source.color_modifier3};
+            stage.alpha_modifiers = {source.alpha_modifier1, source.alpha_modifier2,
+                                     source.alpha_modifier3};
+            stage.constant = {static_cast<u8>(source.const_r.Value()),
+                              static_cast<u8>(source.const_g.Value()),
+                              static_cast<u8>(source.const_b.Value()),
+                              static_cast<u8>(source.const_a.Value())};
+            stage.color_op = source.color_op;
+            stage.alpha_op = source.alpha_op;
+            stage.color_count = TevOperandCount(stage.color_op);
+            stage.alpha_count = stage.color_op == Config::Operation::Dot3_RGBA
+                                    ? 0
+                                    : TevOperandCount(stage.alpha_op);
+            stage.color_multiplier = source.GetColorMultiplier();
+            stage.alpha_multiplier = source.GetAlphaMultiplier();
+            stage.update_color =
+                texturing.tev_combiner_buffer_input.TevStageUpdatesCombinerBufferColor(i);
+            stage.update_alpha =
+                texturing.tev_combiner_buffer_input.TevStageUpdatesCombinerBufferAlpha(i);
+        }
     }
 };
 
@@ -207,10 +270,10 @@ void RasterizerSoftware::DrawTriangles() {
     // overlap the attachments (feedback) or its storage is odd, keep exact
     // serial order; a range error is left for the first triangle that samples.
     std::array<PreparedTexture, 3> prepared;
+    const PreparedTevConfig tev{regs.texturing, regs.lighting};
     bool parallel = false;
     try {
-        parallel = PrepareTextures(regs.texturing.GetTextures(), prepared,
-                                   TextureDemandMask(regs.texturing.GetTevStages(), regs.lighting));
+        parallel = PrepareTextures(regs.texturing.GetTextures(), prepared, tev.demand.textures);
     } catch (const VideoCore::ShaderRecoveryError&) {
         parallel = false;
     }
@@ -230,7 +293,7 @@ void RasterizerSoftware::DrawTriangles() {
         for (u32 band = first; band < last; ++band) {
             const RowWindow window{static_cast<u16>((band * BandRows) << 4),
                                    static_cast<u16>(std::min(height, (band + 1) * BandRows) << 4),
-                                   &prepared};
+                                   &prepared, &tev};
             for (std::size_t i = 0; i < triangles; ++i)
                 ProcessTriangle(batch[3 * i], batch[3 * i + 1], batch[3 * i + 2], false, &window);
         }
@@ -500,11 +563,15 @@ void RasterizerSoftware::ProcessTriangle(const Vertex& v0, const Vertex& v1, con
     const auto w_inverse = Common::MakeVec(v0.pos.w, v1.pos.w, v2.pos.w);
 
     const auto textures = regs.texturing.GetTextures();
-    const auto tev_stages = regs.texturing.GetTevStages();
+    // Claude: Band workers reuse the draw's decode; registers are fixed for the draw.
+    std::optional<PreparedTevConfig> own_tev;
+    if (!window)
+        own_tev.emplace(regs.texturing, regs.lighting);
+    const PreparedTevConfig& tev = window ? *window->tev : *own_tev;
     // CodexAstraLocal: Use the same immutable demand for range mapping, covered
     // interpolation, helper interpolation and sampling. A fixed LOD cannot
     // consume quad derivatives, while another unit may still need its own.
-    const u32 demand_mask = TextureDemandMask(tev_stages, regs.lighting);
+    const u32 demand_mask = tev.demand.textures;
     u32 coordinate_mask = 0, footprint_mask = 0, helper_coordinate_mask = 0;
     bool needs_w = false, helper_needs_w = false;
     for (u32 i = 0; i < 3; ++i) {
@@ -565,6 +632,12 @@ void RasterizerSoftware::ProcessTriangle(const Vertex& v0, const Vertex& v1, con
     if (!window)
         fb.Bind(); // Claude: Band draws bind once on the owner before workers start.
 
+    // CodexAstraLocal: Registers cannot advance before the joined triangle
+    // returns. Decode depth constants once; keep each pixel's arithmetic order.
+    const float depth_scale = f24::FromRaw(regs.rasterizer.viewport_depth_range).ToFloat32();
+    const float depth_offset = f24::FromRaw(regs.rasterizer.viewport_depth_near_plane).ToFloat32();
+    const bool w_buffer = regs.rasterizer.depthmap_enable == RasterizerRegs::DepthBuffering::WBuffering;
+
     // CodexAstraLocal: The owner and sleeping workers steal disjoint small row
     // groups. Preserve the inherited pixel-center traversal inside each group;
     // no per-scanline heap task or extra owner wait thread is needed.
@@ -612,15 +685,10 @@ void RasterizerSoftware::ProcessTriangle(const Vertex& v0, const Vertex& v1, con
 
                 // Not fully accurate. About 3 bits in precision are missing.
                 // Z-Buffer (z / w * scale + offset)
-                const float depth_scale =
-                    f24::FromRaw(regs.rasterizer.viewport_depth_range).ToFloat32();
-                const float depth_offset =
-                    f24::FromRaw(regs.rasterizer.viewport_depth_near_plane).ToFloat32();
                 float depth = interpolated_z_over_w * depth_scale + depth_offset;
 
                 // Potentially switch to W-Buffer
-                if (regs.rasterizer.depthmap_enable ==
-                    Pica::RasterizerRegs::DepthBuffering::WBuffering) {
+                if (w_buffer) {
                     // W-Buffer (z * scale + w * offset = (z / w * scale + offset) * w)
                     depth *= interpolated_w_inverse.ToFloat32() * wsum;
                 }
@@ -653,24 +721,30 @@ void RasterizerSoftware::ProcessTriangle(const Vertex& v0, const Vertex& v1, con
                     return interpolated_attr_over_w * interpolated_w_inverse;
                 };
 
-                const Common::Vec4<u8> primary_color{
-                    static_cast<u8>(
-                        round(get_interpolated_attribute(v0.color.r(), v1.color.r(), v2.color.r())
-                                  .ToFloat32() *
-                              255)),
-                    static_cast<u8>(
-                        round(get_interpolated_attribute(v0.color.g(), v1.color.g(), v2.color.g())
-                                  .ToFloat32() *
-                              255)),
-                    static_cast<u8>(
-                        round(get_interpolated_attribute(v0.color.b(), v1.color.b(), v2.color.b())
-                                  .ToFloat32() *
-                              255)),
-                    static_cast<u8>(
-                        round(get_interpolated_attribute(v0.color.a(), v1.color.a(), v2.color.a())
-                                  .ToFloat32() *
-                              255)),
-                };
+                // CodexAstraLocal: A value absent from every executed TEV
+                // operand needs no interpolation/conversion. Demanded values
+                // retain the exact dot, reciprocal and rounding operations.
+                Common::Vec4<u8> primary_color{};
+                if (tev.demand.primary_color) {
+                    primary_color = {
+                        static_cast<u8>(
+                            round(get_interpolated_attribute(v0.color.r(), v1.color.r(), v2.color.r())
+                                      .ToFloat32() *
+                                  255)),
+                        static_cast<u8>(
+                            round(get_interpolated_attribute(v0.color.g(), v1.color.g(), v2.color.g())
+                                      .ToFloat32() *
+                                  255)),
+                        static_cast<u8>(
+                            round(get_interpolated_attribute(v0.color.b(), v1.color.b(), v2.color.b())
+                                      .ToFloat32() *
+                                  255)),
+                        static_cast<u8>(
+                            round(get_interpolated_attribute(v0.color.a(), v1.color.a(), v2.color.a())
+                                      .ToFloat32() *
+                                  255)),
+                    };
+                }
 
                 std::array<Common::Vec2<f24>, 3> uv{};
                 if (coordinate_mask & 1U) {
@@ -703,7 +777,7 @@ void RasterizerSoftware::ProcessTriangle(const Vertex& v0, const Vertex& v1, con
                 Common::Vec4<u8> primary_fragment_color = {0, 0, 0, 0};
                 Common::Vec4<u8> secondary_fragment_color = {0, 0, 0, 0};
 
-                if (!regs.lighting.disable) {
+                if (tev.demand.lighting) {
                     const auto normquat =
                         Common::Quaternion<f32>{
                             {get_interpolated_attribute(v0.quat.x, v1.quat.x, v2.quat.x)
@@ -728,7 +802,7 @@ void RasterizerSoftware::ProcessTriangle(const Vertex& v0, const Vertex& v1, con
 
                 // Write the TEV stages.
                 auto combiner_output =
-                    WriteTevConfig(texture_color, tev_stages, primary_color, primary_fragment_color,
+                    WriteTevConfig(texture_color, tev, primary_color, primary_fragment_color,
                                    secondary_fragment_color);
 
                 const auto& output_merger = regs.framebuffer.output_merger;
@@ -1086,7 +1160,7 @@ Common::Vec4<u8> RasterizerSoftware::PixelColor(u16 x, u16 y,
 
 Common::Vec4<u8> RasterizerSoftware::WriteTevConfig(
     std::span<const Common::Vec4<u8>, 4> texture_color,
-    std::span<const Pica::TexturingRegs::TevStageConfig, 6> tev_stages,
+    const PreparedTevConfig& tev,
     Common::Vec4<u8> primary_color, Common::Vec4<u8> primary_fragment_color,
     Common::Vec4<u8> secondary_fragment_color) {
     /**
@@ -1099,15 +1173,9 @@ Common::Vec4<u8> RasterizerSoftware::WriteTevConfig(
      **/
     Common::Vec4<u8> combiner_output = {0, 0, 0, 0};
     Common::Vec4<u8> combiner_buffer = {0, 0, 0, 0};
-    Common::Vec4<u8> next_combiner_buffer =
-        Common::MakeVec(regs.texturing.tev_combiner_buffer_color.r.Value(),
-                        regs.texturing.tev_combiner_buffer_color.g.Value(),
-                        regs.texturing.tev_combiner_buffer_color.b.Value(),
-                        regs.texturing.tev_combiner_buffer_color.a.Value())
-            .Cast<u8>();
+    Common::Vec4<u8> next_combiner_buffer = tev.initial_buffer;
 
-    for (u32 tev_stage_index = 0; tev_stage_index < tev_stages.size(); ++tev_stage_index) {
-        const auto& tev_stage = tev_stages[tev_stage_index];
+    for (const auto& tev_stage : tev.stages) {
         using Source = TexturingRegs::TevStageConfig::Source;
 
         auto get_source = [&](Source source) -> Common::Vec4<u8> {
@@ -1129,9 +1197,7 @@ Common::Vec4<u8> RasterizerSoftware::WriteTevConfig(
             case Source::PreviousBuffer:
                 return combiner_buffer;
             case Source::Constant:
-                return Common::MakeVec(tev_stage.const_r.Value(), tev_stage.const_g.Value(),
-                                       tev_stage.const_b.Value(), tev_stage.const_a.Value())
-                    .Cast<u8>();
+                return tev_stage.constant;
             case Source::Previous:
                 return combiner_output;
             default:
@@ -1148,17 +1214,14 @@ Common::Vec4<u8> RasterizerSoftware::WriteTevConfig(
          *       combiner_output.rgb(), but instead store it in a temporary variable until
          *       alpha combining has been done.
          **/
-        const auto source1 = tev_stage_index == 0 && tev_stage.color_source1 == Source::Previous
-                                 ? tev_stage.color_source3.Value()
-                                 : tev_stage.color_source1.Value();
-        const auto source2 = tev_stage_index == 0 && tev_stage.color_source2 == Source::Previous
-                                 ? tev_stage.color_source3.Value()
-                                 : tev_stage.color_source2.Value();
-        const std::array<Common::Vec3<u8>, 3> color_result = {
-            GetColorModifier(tev_stage.color_modifier1, get_source(source1)),
-            GetColorModifier(tev_stage.color_modifier2, get_source(source2)),
-            GetColorModifier(tev_stage.color_modifier3, get_source(tev_stage.color_source3)),
-        };
+        // CodexAstraLocal: Resolve only the operation's consumed operands.
+        // The shared arity also governs sampling/lighting admission; the
+        // existing combiner functions and per-stage quantization stay intact.
+        std::array<Common::Vec3<u8>, 3> color_result{};
+        for (u32 input = 0; input < tev_stage.color_count; ++input) {
+            color_result[input] = GetColorModifier(tev_stage.color_modifiers[input],
+                                                  get_source(tev_stage.color_sources[input]));
+        }
         const Common::Vec3<u8> color_output = ColorCombine(tev_stage.color_op, color_result);
 
         u8 alpha_output;
@@ -1167,30 +1230,28 @@ Common::Vec4<u8> RasterizerSoftware::WriteTevConfig(
             alpha_output = color_output.x;
         } else {
             // alpha combiner
-            const std::array<u8, 3> alpha_result = {{
-                GetAlphaModifier(tev_stage.alpha_modifier1, get_source(tev_stage.alpha_source1)),
-                GetAlphaModifier(tev_stage.alpha_modifier2, get_source(tev_stage.alpha_source2)),
-                GetAlphaModifier(tev_stage.alpha_modifier3, get_source(tev_stage.alpha_source3)),
-            }};
+            std::array<u8, 3> alpha_result{};
+            for (u32 input = 0; input < tev_stage.alpha_count; ++input) {
+                alpha_result[input] = GetAlphaModifier(tev_stage.alpha_modifiers[input],
+                                                      get_source(tev_stage.alpha_sources[input]));
+            }
             alpha_output = AlphaCombine(tev_stage.alpha_op, alpha_result);
         }
 
-        combiner_output[0] = std::min(255U, color_output.r() * tev_stage.GetColorMultiplier());
-        combiner_output[1] = std::min(255U, color_output.g() * tev_stage.GetColorMultiplier());
-        combiner_output[2] = std::min(255U, color_output.b() * tev_stage.GetColorMultiplier());
-        combiner_output[3] = std::min(255U, alpha_output * tev_stage.GetAlphaMultiplier());
+        combiner_output[0] = std::min(255U, color_output.r() * tev_stage.color_multiplier);
+        combiner_output[1] = std::min(255U, color_output.g() * tev_stage.color_multiplier);
+        combiner_output[2] = std::min(255U, color_output.b() * tev_stage.color_multiplier);
+        combiner_output[3] = std::min(255U, alpha_output * tev_stage.alpha_multiplier);
 
         combiner_buffer = next_combiner_buffer;
 
-        if (regs.texturing.tev_combiner_buffer_input.TevStageUpdatesCombinerBufferColor(
-                tev_stage_index)) {
+        if (tev_stage.update_color) {
             next_combiner_buffer.r() = combiner_output.r();
             next_combiner_buffer.g() = combiner_output.g();
             next_combiner_buffer.b() = combiner_output.b();
         }
 
-        if (regs.texturing.tev_combiner_buffer_input.TevStageUpdatesCombinerBufferAlpha(
-                tev_stage_index)) {
+        if (tev_stage.update_alpha) {
             next_combiner_buffer.a() = combiner_output.a();
         }
     }

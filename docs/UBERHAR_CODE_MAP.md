@@ -1,6 +1,28 @@
 <!-- AstraEH: Attribution index for the Uberhar implementation, tests, packaging and documentation. -->
 # Uberhar code map
 
+<!-- CodexAstraLocal: Bind .46 work removal and error ownership to real consumers, with no claim of measured target speed. -->
+## 0.1.46 candidate — demand-driven rendering preparation
+
+- `vk_pipeline_cache.*` decodes one original fragment configuration, defers
+  transport until generic/static/possible-alternative consumption, and preserves
+  queued command snapshots. `uberhar_dynamic_tev_preparation.h` reuses only pure
+  bytes under exact configuration/profile equality, with title reset.
+- `test_ready_cpu_fragments.py`, `static_tev_cache_fixture.h` and
+  `test_static_tev_cache.cpp` execute real route bodies and the pure producer to
+  challenge skipped full transport, partial lookup, changed inputs/profiles,
+  GPU-to-CPU retries, late fallback and drained reset. Driver endpoints remain modeled.
+- `sw_rasterizer.*`, `sw_texture_demand.h` and `sw_lighting.cpp` share a bounded
+  triangle-owned combiner/depth plan, consumed-input demand and exact repeated
+  normalization results. Existing row-worker joins, feedback and quantization remain.
+- `glsl_compute_vertex_shader_gen.cpp` reconstructs original failure operands at
+  one terminal epilogue. `uberhar_compute_pipeline.h`, `vk_compute_vertex.cpp`
+  and `vk_compute_raster.cpp` normalize creation errors for all four compute
+  roles, retaining first-incident modules locally without successful-draw I/O.
+- All new purpose comments use `CodexAstraLocal`; temporary evidence includes
+  `TEST-ONLY LOG` and removal conditions. Plain version data remains comment-free.
+  No worker-count increase, CPU placement default change or new GPU offload is added.
+
 <!-- CodexAstraLocal: Map the independent rendering path and its actual consumers, keeping CPU Software distinct from GPU compute. -->
 ## 0.1.43 candidate — independent Calculated and Software startup correction
 

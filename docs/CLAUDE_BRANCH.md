@@ -1,8 +1,9 @@
 # Uberhar Claude test branch
 
-This branch (`claude/wizardly-newton-14cvfa`) starts from Uberhar 0.1.45 and carries
-the changes from the never-skip audit and the multi-core plan. It never touches
-`uberhar/hybrid-shaders`.
+This branch (`claude/wizardly-newton-14cvfa`) carries the changes from the
+never-skip audit and the multi-core plan on top of Uberhar, currently merged up to
+0.1.46 from `uberhar/hybrid-shaders`. It only reads that branch and never pushes
+to it.
 
 ## Getting a test APK
 
@@ -106,14 +107,16 @@ GPU on required graphics. Turn it off in the renderer settings to compare.
 The CPU Software renderer used to split each triangle's rows across workers,
 one fork-join per triangle. Most 3DS triangles are small, so the wake-and-join
 cost was larger than the work: on a 4-core test host, 4,000 small triangles
-took 76 ms that way against 61 ms on one core.
+took 38 ms that way against 32 ms on one core (0.1.46 code; 76 ms against 61 ms
+on 0.1.45).
 
 Now a draw's triangles are queued and drawn together at the end of the draw.
 Each worker owns whole 8-row bands of the screen and draws every triangle in
 its original order inside them, so every pixel sees exactly the same sequence
-as before and no two workers touch the same pixel. The same draw takes 26–31 ms
-(`[.software-bench]` in the C++ tests). A test checks the output against the
-one-core path byte for byte.
+as before and no two workers touch the same pixel. The same draw takes 16 ms
+on 0.1.46 (26–31 ms on 0.1.45; `[.software-bench]` in the C++ tests). A test
+checks the output against the one-core path byte for byte. Band workers share
+the draw's texture preparation and 0.1.46's TEV decode instead of redoing them.
 
 A draw keeps the old immediate path when its vertex or index data could
 overlap its color or depth buffer (a later vertex might read pixels this draw

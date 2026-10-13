@@ -646,6 +646,9 @@ bool PipelineCache::BindPipeline(PipelineInfo& info, bool wait_built,
             if (!specialized_cpu) {
                 virtual_generic = true;
                 ++virtual_generic_draws;
+                // CodexAstraLocal: Generic census and the eventual draw read
+                // the same current snapshot, including a CPU retry after GPU refusal.
+                EnsureDynamicTevState();
                 // AstraEH: Draw-weighted coverage only, not fragment/pixel-weighted savings.
                 ++tev_loop_histogram[(tev_constants.buffer_mask >> 8) & 7U];
                 ++tev_active_histogram[std::popcount((tev_constants.buffer_mask >> 16) & 63U)];
@@ -713,6 +716,11 @@ bool PipelineCache::BindPipeline(PipelineInfo& info, bool wait_built,
     // AstraEH: Capture invalidation in enqueue order; utility/presentation writes
     // may execute after this thread has already prepared later draw constants.
     const bool constants_dirty = is_dirty || scheduler.IsStateDirty(StateFlags::FragmentConstants);
+    // CodexAstraLocal: An alternative can win later on the command worker, so
+    // capture valid transport even if the owner initially chose specialization.
+    // A full ready CPU/GPU fragment without alternatives consumes no TEV bytes.
+    if (using_fallback || static_tev_cpu || alternative)
+        EnsureDynamicTevState();
     // AstraEH: Copy TEV registers into the queued command; later draws may change them.
     scheduler.Record([this, is_dirty, constants_dirty, pipeline, using_fallback, static_tev_cpu, alternative,
                       draw_id = draw_requests, alternative_was_pending, constants = tev_constants,
@@ -1114,9 +1122,16 @@ GraphicsPipeline* PipelineCache::PrepareReadyCpuFragment(
             ? curr_disk_cache->UseReadyFragmentShader(*virtual_fs_config, tev_user, false)
             : Fragment{}, current_shaders, info};
         probe(full);
-        if (full.ready) return select(full);
-        // CodexAstraLocal: Canonical preparation and transport already belong to
-        // this draw. The key owns exactly the static plan, without another census.
+        if (full.ready) {
+            // CodexAstraLocal: A ready full program bypasses both partial-plan
+            // construction and generic transport preparation for this draw.
+            if (pending_tev_transport) ++tev_transport_bypassed_cpu;
+            return select(full);
+        }
+        // CodexAstraLocal: The canonical family already belongs to this draw.
+        // Materialize its original transport before keying the static plan;
+        // this does not repeat the family census or borrow a prior draw's plan.
+        EnsureDynamicTevState();
         const auto plan = GLSL::MakeStaticTevPlan(tev_constants);
         Candidate partial{true, curr_disk_cache->UseStaticTevFragmentShader(
             *prepared_cpu_family, plan, tev_user, false), current_shaders, info};
@@ -1390,11 +1405,20 @@ void PipelineCache::UseFragmentShader(const Pica::RegsInternal& regs,
     // CodexAstraLocal: A pure prepared entry is borrowed only within this draw;
     // unsupported/new draws cannot reuse a prior family or runtime plan.
     prepared_cpu_family = nullptr;
+    // CodexAstraLocal: A new draw or GPU-to-CPU retry starts a fresh transport
+    // obligation; it can never inherit a pending original config from its predecessor.
+    pending_tev_transport.reset();
+
+    // CodexAstraLocal: Decode guest fragment registers once for this draw. The
+    // generic family mutates its TEV fields below, so keep the original value
+    // for exact specialization/recovery instead of repeating all light, texture
+    // and combiner register decoding on the serial draw owner.
+    const FSConfig fragment_config{regs};
 
     // AstraEH: Capture runtime controls before canonicalization. Lighting/procedural
     // structure and typed cube resources remain specialized; LUT controls/source slots are runtime.
     if (hybrid_tev) {
-        tev_family_config.emplace(regs);
+        tev_family_config = fragment_config;
         // AstraEH: Unsupported draws cannot select a generic/CPU-bridge pipeline.
         // Do not decode 128 bytes of runtime TEV state that their specialized shader
         // will never consume. Every supported draw still takes its own full snapshot.
@@ -1403,9 +1427,12 @@ void PipelineCache::UseFragmentShader(const Pica::RegsInternal& regs,
         const bool need_transport = ReadyFragmentPolicy::NeedsDynamicTransport(
             tev_supported, preparing_ready_gpu,
             PreferReadySpecializedFragment(user));
+        // CodexAstraLocal: This gate establishes a possible transport consumer;
+        // a later ready full CPU fragment can still leave the obligation unused.
         if (need_transport) {
-            tev_constants = GLSL::MakeDynamicTevState(*tev_family_config, profile);
-            ++tev_transport_prepared;
+            // CodexAstraLocal: Preserve the exact original fields before family
+            // canonicalization. Defer their expansion until an actual consumer.
+            pending_tev_transport = fragment_config;
         } else if (tev_supported) {
             // AstraPro: This attempt can use only a ready specialized GPU FS or
             // return for a complete CPU draw. No generic consumer sees old data;
@@ -1424,17 +1451,27 @@ void PipelineCache::UseFragmentShader(const Pica::RegsInternal& regs,
     virtual_fs_config.reset();
     if (Settings::values.uberhar_test_mode.GetValue() != Settings::UberharTestMode::Custom &&
         hybrid_tev && tev_supported) {
-        virtual_fs_config.emplace(regs);
+        virtual_fs_config = fragment_config;
         current_shaders[ProgramType::FS] = nullptr;
         shader_hashes[ProgramType::FS] = 0;
         return;
     }
-    auto res = curr_disk_cache->UseFragmentShader(FSConfig{regs}, user);
+    auto res = curr_disk_cache->UseFragmentShader(fragment_config, user);
 
     if (res.has_value()) {
         current_shaders[ProgramType::FS] = (*res).second;
         shader_hashes[ProgramType::FS] = (*res).first;
     }
+}
+
+// CodexAstraLocal: Only the owner prepares these bytes. Reuse avoids repeated
+// stage/lighting decoding but never skips per-draw command snapshots, binding,
+// readiness checks or invalidation of the worker's last uploaded constants.
+void PipelineCache::EnsureDynamicTevState() {
+    if (!pending_tev_transport) return;
+    tev_constants = dynamic_tev_preparation.Get(*pending_tev_transport, profile);
+    pending_tev_transport.reset();
+    ++tev_transport_prepared;
 }
 
 // AstraEH: Build bounded, per-title fallback caches without changing transferable disk entries.
@@ -1786,6 +1823,10 @@ void PipelineCache::ClearTevFallbacks() {
     }
     tev_push_constants.Reset(); // AstraEH: Scheduler was drained above; no cross-title reuse.
     tev_preparation.Reset(); // AstraEH: Match census/title lifetime; retain no old observation.
+    // CodexAstraLocal: End the draw snapshot and pure transport key at the same
+    // drained title boundary; no shader handles or queued bytes are retained here.
+    pending_tev_transport.reset();
+    dynamic_tev_preparation.Reset();
     tev_prepare_hit_samples = tev_prepare_miss_samples = 0;
     tev_prepare_hit_ns = tev_prepare_miss_ns = 0;
     tev_census_capped = false;
@@ -1972,13 +2013,23 @@ void PipelineCache::ReportUberharStats(const char* kind) {
                  "Uberhar recovery reasons {}: schema=1 spirv_incompatible={} shadow2d={} "
                  "gas_fog={} custom_user={} light_count={} lighting_lut={} add_signed={} "
                  "generic_failed={} generic_unavailable={} disabled_or_other={} "
-                 "transport_prepared={} transport_skipped={} transport_bypassed_gpu={} weighting=draws exclusive=true",
+                 "transport_prepared={} transport_skipped={} transport_bypassed_gpu={} "
+                 "transport_bypassed_cpu={} weighting=draws exclusive=true "
+                 "exclusivity_scope=recovery_reasons transport_scope=preparation_attempts",
                  kind, virtual_recovery_reasons[1], virtual_recovery_reasons[2],
                  virtual_recovery_reasons[3], virtual_recovery_reasons[4],
                  virtual_recovery_reasons[5], virtual_recovery_reasons[6],
                  virtual_recovery_reasons[7], virtual_recovery_reasons[8],
                  virtual_recovery_reasons[9], virtual_recovery_reasons[10],
-                 tev_transport_prepared, tev_transport_skipped, tev_transport_bypassed_gpu);
+                 tev_transport_prepared, tev_transport_skipped, tev_transport_bypassed_gpu,
+                 tev_transport_bypassed_cpu);
+        // CodexAstraLocal TEST-ONLY LOG: Existing bounded report cadence counts
+        // actual reuse, not estimated speed. Remove after owner qualification of
+        // lazy transport and exact reuse; retain the production preparation path.
+        const auto& transport = dynamic_tev_preparation.Stats();
+        LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
+                 "Uberhar fragment preparation {}: schema=1 requests={} reuse={} builds={}",
+                 kind, transport.requests, transport.hits, transport.builds);
     }
     // AstraEH: Cumulative buckets at the existing cadence; build time and wait time overlap.
     if (hybrid_tev) {

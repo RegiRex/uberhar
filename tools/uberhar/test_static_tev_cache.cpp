@@ -256,11 +256,137 @@ void NativeAndFailureFallback() {
     }
 }
 
+// CodexAstraLocal: Compare all transport bytes with the original uncached
+// producer, and execute real new-draw preparation through generic/full/generic
+// transitions. Reuse must never hide a changed register/profile or queue state.
+void LazyTransportAndExactReuse() {
+    DynamicTevPreparation cache;
+    Profile profile{};
+    auto config = Config();
+    const auto check = [&](const FSConfig& next, const Profile& host) {
+        const auto expected = GLSL::MakeDynamicTevState(next, host);
+        const auto& actual = cache.Get(next, host);
+        Require(std::memcmp(&actual, &expected, sizeof(actual)) == 0,
+                "cached transport equals original producer bytes");
+    };
+    check(config, profile); check(config, profile);
+    Require(cache.Stats().builds == 1 && cache.Stats().hits == 1,
+            "identical complete input reuses transport");
+    // CodexAstraLocal: Challenge each owned input domain, including inactive
+    // values. Exact equality conservatively rebuilds even if bytes stay equal.
+    config.texture.tev_stages[0].sources_raw ^= 1; check(config, profile);
+    config.texture.tev_stages[1].modifiers_raw ^= 1; check(config, profile);
+    config.texture.tev_stages[2].ops_raw ^= 1; check(config, profile);
+    config.texture.tev_stages[3].scales_raw ^= 1; check(config, profile);
+    config.texture.combiner_buffer_input.Assign(17); check(config, profile);
+    config.texture.fog_flip.Assign(1); check(config, profile);
+    config.framebuffer.scissor_test_mode.Assign(Pica::RasterizerRegs::ScissorMode::Include);
+    check(config, profile);
+    config.lighting.lights[0].two_sided_diffuse.Assign(1); check(config, profile);
+    config.proctex.lut_width = 16; check(config, profile);
+    profile.has_custom_border_color = 1; check(config, profile);
+    profile.vk_format_traits[3].native_format = 17; check(config, profile);
+    Require(cache.Stats().builds == 12 && cache.Stats().hits == 1,
+            "every complete config/profile change invalidates exact reuse");
+    cache.Reset(); check(config, profile);
+    Require(cache.Stats().builds == 1 && cache.Stats().hits == 0,
+            "title reset cannot reuse old transport");
+
+    Pica::RegsInternal regs{};
+    regs.lighting.disable.Assign(1);
+    regs.framebuffer.output_merger.alphablend_enable.Assign(1);
+    const FSConfig original{regs};
+    PipelineCache p;
+    auto* full = Warm(p, false, original);
+    p.dynamic_tev_preparation.Reset();
+    const auto prepared_before = p.tev_transport_prepared;
+    auto info = Info(); const auto layout = SoftwareLayout();
+    PipelineCache::CpuFragmentToken token;
+    p.UseFragmentShader(regs, {}, false);
+    Require(p.pending_tev_transport.has_value(), "new draw defers transport");
+    Require(p.BindPipeline(info, true, nullptr, true, nullptr, &layout, &token) && token,
+            "full ready original draw binds");
+    Require(p.ready_cpu_bank->AllSlots()[token.slot].owner.get() == full &&
+            p.tev_transport_prepared == prepared_before &&
+            p.dynamic_tev_preparation.Stats().requests == 0 &&
+            p.tev_transport_bypassed_cpu == 1,
+            "full ready draw performs no generic transport preparation");
+    // CodexAstraLocal: A new original register value after full specialization
+    // must reach the queued generic draw, not the skipped draw's stale bytes.
+    regs.texturing.fog_flip.Assign(1);
+    p.UseFragmentShader(regs, {}, false);
+    Require(p.BindPipeline(info, true), "changed generic draw binds");
+    p.scheduler.WaitWorker();
+    const auto expected = GLSL::MakeDynamicTevState(FSConfig{regs}, p.profile);
+    Require(std::memcmp(p.scheduler.completed.back().constants.data(), &expected, 128) == 0,
+            "post-full generic command owns changed exact transport");
+    p.UseFragmentShader(regs, {}, false);
+    Require(p.BindPipeline(info, true), "same generic draw binds");
+    Require(p.dynamic_tev_preparation.Stats().builds == 1 &&
+            p.dynamic_tev_preparation.Stats().hits == 1,
+            "second actual draw reuses pure preparation only");
+    p.ClearTevFallbacks();
+    Require(!p.pending_tev_transport && p.dynamic_tev_preparation.Stats().requests == 0,
+            "actual drained reset clears pending draw and reuse evidence");
+
+    // CodexAstraLocal: A partial lookup itself consumes the prepared plan before
+    // final command capture. A manually prefilled fixture would hide this dependency.
+    PipelineCache partial;
+    const FSConfig partial_config{regs};
+    auto* partial_owner = Warm(partial, true, partial_config);
+    partial.tev_constants = {};
+    partial.UseFragmentShader(regs, {}, false);
+    auto partial_info = Info();
+    Require(partial.BindPipeline(partial_info, true, nullptr, true, nullptr, &layout, &token) &&
+            token && partial.ready_cpu_bank->AllSlots()[token.slot].owner.get() == partial_owner,
+            "actual partial lookup prepares current plan before selection");
+    partial.scheduler.WaitWorker();
+    const auto partial_bytes = GLSL::MakeDynamicTevState(partial_config, partial.profile);
+    Require(std::memcmp(partial.scheduler.completed.back().constants.data(), &partial_bytes, 128) == 0,
+            "actual partial draw owns current runtime bytes");
+
+    // CodexAstraLocal: Specialized-only GPU preparation bypasses transport;
+    // refusal followed by a CPU retry must reestablish it from current registers.
+    PipelineCache retry;
+    retry.UseFragmentShader(regs, {}, true);
+    Require(!retry.pending_tev_transport && retry.tev_transport_prepared == 0,
+            "specialized GPU preparation has no generic obligation");
+    regs.texturing.fog_flip.Assign(0);
+    retry.UseFragmentShader(regs, {}, false);
+    auto retry_info = Info();
+    Require(retry.BindPipeline(retry_info, true), "GPU refusal CPU retry binds complete draw");
+    retry.scheduler.WaitWorker();
+    const auto retry_bytes = GLSL::MakeDynamicTevState(FSConfig{regs}, retry.profile);
+    Require(std::memcmp(retry.scheduler.completed.back().constants.data(), &retry_bytes, 128) == 0,
+            "CPU retry captures its own original input epoch");
+
+    // CodexAstraLocal: Custom's generic alternative can win on the worker even
+    // when the owner selected specialization. Force that route with no virtual
+    // config, then mutate owner state before execution to challenge snapshotting.
+    PipelineCache alternative;
+    Settings::values.uberhar_test_mode.value = Settings::UberharTestMode::Custom;
+    alternative.force_tev = true;
+    alternative.UseFragmentShader(regs, {}, false);
+    Require(!alternative.virtual_fs_config && alternative.pending_tev_transport,
+            "custom alternative starts outside virtual-generic route");
+    auto alternative_info = Info();
+    Require(alternative.BindPipeline(alternative_info, true), "worker alternative draw binds");
+    const auto alternative_bytes = GLSL::MakeDynamicTevState(FSConfig{regs}, alternative.profile);
+    regs.texturing.fog_flip.Assign(1);
+    alternative.UseFragmentShader(regs, {}, false);
+    alternative.EnsureDynamicTevState();
+    alternative.scheduler.WaitWorker();
+    Require(std::memcmp(alternative.scheduler.completed.back().constants.data(), &alternative_bytes, 128) == 0,
+            "late generic winner retains original queued transport");
+    Settings::values.uberhar_test_mode.value = Settings::UberharTestMode::Automatic;
+}
+
 int main() {
     try {
         Probe::partial_tier=true;
         PromotionAndPriority(); ColdBridge(); PartitionPressure(); TerminalBudgetsKeepHits();
         PartialTransportAndIdentity(); FourRouteBindings(); NativeAndFailureFallback();
+        LazyTransportAndExactReuse();
         Require(Probe::optional_waits==0 && Probe::lifetime_errors==0,
                 "no optional wait or borrowed shader destruction");
         std::cout<<"PASS checks="<<Probe::checks<<" builds="<<Probe::pipeline_builds

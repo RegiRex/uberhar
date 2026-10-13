@@ -12,6 +12,7 @@
 #include "core/memory.h"
 #include "video_core/pica/pica_core.h"
 #include "video_core/pica/vertex_loader.h"
+#include "video_core/renderer_vulkan/uberhar_compute_pipeline.h"
 #include "video_core/renderer_vulkan/vk_compute_vertex.h"
 #include "video_core/renderer_vulkan/vk_descriptor_update_queue.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
@@ -248,11 +249,13 @@ struct ComputeVertexProducer::Impl {
         if (programs.size() == 32) programs.erase(programs.begin());
         Program p{input.program, input.swizzles, input.metadata[15], input.sanitize_mul,
                   disable_optimizer, {}, {}};
-        const auto device = instance.GetDevice();
-        p.module = device.createShaderModuleUnique({.codeSize = code.size() * 4, .pCode = code.data()});
-        p.pipeline = device.createComputePipelineUnique({},
-            {.stage{.stage = vk::ShaderStageFlagBits::eCompute, .module = *p.module, .pName = "main"},
-             .layout = *layout}).value;
+        // CodexAstraLocal: Preserve the exact module on rejection and contain
+        // its Vulkan error before returning through guest-generated code.
+        auto objects = CreateComputePipeline(instance, *layout, source, code, disable_optimizer,
+                                             ComputePipelineRole::GuestVertex,
+                                             reported_creation_failure);
+        p.module = std::move(objects.module);
+        p.pipeline = std::move(objects.pipeline);
         programs.push_back(std::move(p));
         return programs.back();
     }
@@ -380,6 +383,7 @@ struct ComputeVertexProducer::Impl {
     std::unique_ptr<Buffer> upload, vertices, readback;
     u64 last_use{};
     bool reported_clip_failure{};
+    bool reported_creation_failure{};
 };
 
 ComputeVertexProducer::ComputeVertexProducer(const Instance& instance, Scheduler& scheduler,

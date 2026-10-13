@@ -5,9 +5,10 @@
 #include <limits>
 #include <vector>
 #include "common/alignment.h"
-#include "video_core/renderer_vulkan/vk_compute_raster.h"
+#include "video_core/renderer_vulkan/uberhar_compute_pipeline.h"
 #include "video_core/renderer_vulkan/uberhar_compute_shadow.h"
 #include "video_core/renderer_vulkan/uberhar_compute_target_format.h"
+#include "video_core/renderer_vulkan/vk_compute_raster.h"
 #include "video_core/renderer_vulkan/vk_descriptor_update_queue.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_resource_pool.h"
@@ -114,24 +115,24 @@ struct ComputeRasterizer::Impl {
             scheduler.Wait(oldest->tick);
             programs.erase(oldest);
         }
-        const auto code = CompileGLSL("#version 450\n" + *evaluator +
-                                      std::string{ComputeTargetFormat::KernelFunctions} +
-                                      std::string{ComputeShadow::KernelFunctions} +
-                                      std::string{ComputeRasterKernel},
-                                      vk::ShaderStageFlagBits::eCompute, "",
-                                      profile.vk_disable_spirv_optimizer != 0);
+        const auto source = "#version 450\n" + *evaluator +
+                            std::string{ComputeTargetFormat::KernelFunctions} +
+                            std::string{ComputeShadow::KernelFunctions} +
+                            std::string{ComputeRasterKernel};
+        const auto code = CompileGLSL(source, vk::ShaderStageFlagBits::eCompute, "",
+                                     profile.vk_disable_spirv_optimizer != 0);
         if (code.empty())
             throw VideoCore::ShaderRecoveryError("Calculated compute module compilation failed");
         Program program{config, user, profile, {}, {}, 0};
-        const auto device = instance.GetDevice();
-        program.module = device.createShaderModuleUnique(
-            {.codeSize = code.size() * sizeof(u32), .pCode = code.data()});
         // CodexAstraLocal: This compute owner does not concurrently mutate
         // the legacy worker-owned driver cache; a private pipeline has no saved-
         // cache dependency and cannot cause graphics pipeline selection.
-        program.pipeline = device.createComputePipelineUnique({},
-            {.stage{.stage = vk::ShaderStageFlagBits::eCompute, .module = *program.module,
-                    .pName = "main"}, .layout = *layout}).value;
+        auto objects = CreateComputePipeline(
+            instance, *layout, source, code,
+            profile.vk_disable_spirv_optimizer != 0, ComputePipelineRole::Raster,
+            reported_creation_failure);
+        program.module = std::move(objects.module);
+        program.pipeline = std::move(objects.pipeline);
         programs.push_back(std::move(program));
         return programs.back();
     }
@@ -171,19 +172,23 @@ struct ComputeRasterizer::Impl {
         transfer_layout = instance.GetDevice().createPipelineLayoutUnique(
             {.setLayoutCount = 1, .pSetLayouts = &set_layout,
              .pushConstantRangeCount = 1, .pPushConstantRanges = &range});
-        const auto compile = [&](std::string_view source, vk::UniqueShaderModule& module,
+        const auto compile = [&](ComputePipelineRole role, std::string_view source,
+                                 vk::UniqueShaderModule& module,
                                  vk::UniquePipeline& pipeline) {
             const auto code = CompileGLSL(std::string{source}, stage, "", true);
             if (code.empty())
                 throw VideoCore::ShaderRecoveryError("Calculated target transfer compilation failed");
-            module = instance.GetDevice().createShaderModuleUnique(
-                {.codeSize = code.size() * sizeof(u32), .pCode = code.data()});
-            pipeline = instance.GetDevice().createComputePipelineUnique({},
-                {.stage{.stage = stage, .module = *module, .pName = "main"},
-                 .layout = *transfer_layout}).value;
+            // CodexAstraLocal: Transfer kernels have the same terminal contract
+            // as guest/raster kernels; tag their exact independent role.
+            auto objects = CreateComputePipeline(instance, *transfer_layout, source, code, true,
+                                                  role, reported_creation_failure);
+            module = std::move(objects.module);
+            pipeline = std::move(objects.pipeline);
         };
-        compile(ComputeTargetFormat::ExpandTransferKernel, expand_module, expand_pipeline);
-        compile(ComputeTargetFormat::PackTransferKernel, pack_module, pack_pipeline);
+        compile(ComputePipelineRole::Expand, ComputeTargetFormat::ExpandTransferKernel,
+                expand_module, expand_pipeline);
+        compile(ComputePipelineRole::Pack, ComputeTargetFormat::PackTransferKernel,
+                pack_module, pack_pipeline);
     }
 
     void Draw(Surface* color, Surface* depth, vk::ImageView inactive_color_view,
@@ -404,6 +409,7 @@ struct ComputeRasterizer::Impl {
     vk::UniquePipeline expand_pipeline, pack_pipeline;
     std::unique_ptr<Scratch> depth_scratch, color_scratch, transfer_scratch;
     std::vector<Program> programs;
+    bool reported_creation_failure{};
 };
 
 ComputeRasterizer::ComputeRasterizer(const Instance& instance, Scheduler& scheduler,

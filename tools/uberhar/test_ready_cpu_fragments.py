@@ -142,6 +142,7 @@ def main() -> None:
                       'void PipelineCache::RetireReadyCpuAfterWorkerDrain()',
                       'GraphicsPipeline* PipelineCache::PrepareReadyGpuVertex(',
                       'void PipelineCache::UseFragmentShader(',
+                      'void PipelineCache::EnsureDynamicTevState()',
                       'bool PipelineCache::BindPipeline(',
                       'void PipelineCache::ClearTevFallbacks()'):
         parts.append(function(cpp,signature))
@@ -163,6 +164,8 @@ def main() -> None:
     if key.count('namespace Vulkan {')!=1:raise ValueError('observation-key namespace changed')
     (out/'cpu_fragment_key.inc').write_text(key.split('namespace Vulkan {',1)[1].rsplit('} // namespace Vulkan',1)[0])
     read('src/video_core/renderer_vulkan/uberhar_adaptive_cpu_policy.h')
+    # CodexAstraLocal: Bind the newly consumed pure-cache implementation to this result.
+    read('src/video_core/renderer_vulkan/uberhar_dynamic_tev_preparation.h')
     ras=read('src/video_core/renderer_vulkan/vk_rasterizer.cpp')
     layout=function(ras,'void RasterizerVulkan::MakeSoftwareVertexLayout()')
     (out/'layout.inc').write_text(layout[layout.index('{')+1:-1])
@@ -217,7 +220,9 @@ def main() -> None:
         for name,old,new,expected in [
             ('no-full-promotion','if (partial.ready) {\n            if (allow_full) advance(full);',
              'if (partial.ready) {\n            if (false) advance(full);','CPU demand still promotes full while partial ready'),
-            ('partial-priority','if (full.ready) return select(full);','if (false) return select(full);','exact ready full wins priority'),
+            # CodexAstraLocal: Mutate the live condition while retaining the new
+            # lazy-transport body, so these controls still exercise real routing.
+            ('partial-priority','if (full.ready) {','if (false) {','exact ready full wins priority'),
             ('pending-full-blocks','return select(partial);',
              'if (!curr_disk_cache->OptionalFragmentPending() && !(warming_ready_vertex && !warming_ready_vertex->IsDone())) return select(partial);\n            return nullptr;',
              'partial remains complete during full advancement'),
@@ -225,8 +230,8 @@ def main() -> None:
             ('native-worker-gpu','!allow_ready_gpu_vertices || !ready_vertex_worker || !ReadyVertexShaders()',
              '!ready_vertex_worker || !ReadyVertexShaders()','Native CPU compiler does not admit GPU vertices'),
             ('partial-key-alias','!(entry.key.plan == plan) ||','false ||','exact partial key rejects same-hash aliases'),
-            ('shared-attempt-cap','if (full.ready) return select(full);',
-             'if (ready_cpu_bank->Attempts(0) < 64 && full.ready) return select(full);','full ready hit survives 64 full attempts')]:
+            ('shared-attempt-cap','if (full.ready) {',
+             'if (ready_cpu_bank->Attempts(0) < 64 && full.ready) {','full ready hit survives 64 full attempts')]:
             cases.append((name,replace_once(body,old,new),expected))
         for name,old,new,expected in [
             ('total-only-pressure','PartitionPressure();','false;','full partition pressure permits ninth full replacement'),
