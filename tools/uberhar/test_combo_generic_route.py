@@ -26,7 +26,9 @@ def main():
     bodies = '\n'.join(extract(source, signature) for signature in (
         'bool PipelineCache::PreferReadySpecializedFragment(',
         'bool PipelineCache::ReadyGpuFragmentPreflight(',
-        'void PipelineCache::UseFragmentShader('))
+        'void PipelineCache::UseFragmentShader(',
+        # Claude: 0.1.46 defers transport expansion to the first consumer.
+        'void PipelineCache::EnsureDynamicTevState('))
     # CodexAstraUlt: Supplement execution with integration checks that the same gate
     # reaches binding/preparation and both Combo modes allocate their optional worker.
     for signature in ('bool PipelineCache::BindPipeline(',
@@ -115,6 +117,12 @@ struct PipelineCache {
     bool tev_supported{};
     GLSL::DynamicTevSupport tev_support_reason{};
     std::optional<FSConfig> tev_family_config, virtual_fs_config;
+    // Claude: 0.1.46 keeps the original config until a generic consumer
+    // (BindPipeline or the generic census) asks for the transport bytes.
+    std::optional<FSConfig> pending_tev_transport;
+    struct { int Get(const FSConfig& config, int profile) { return GLSL::MakeDynamicTevState(config, profile); } }
+        dynamic_tev_preparation;
+    void EnsureDynamicTevState();
     // CodexAstraLocal: UseFragmentShader must clear this borrowed previous-draw
     // pointer before either supported generic setup or mandatory recovery.
     const FSConfig* prepared_cpu_family{};
@@ -168,12 +176,18 @@ int main() try {
             Check(!cache.prepared_cpu_family, "stale CPU family survived new fragment setup");
             Check(cache.virtual_fs_config && !cache.current_shaders[FS],
                   "covered setup lost generic recovery snapshot");
-            Check(cache.tev_transport_prepared == unsigned(!specialized),
+            // Claude: Setup alone prepares nothing; the bind consumer expands it.
+            Check(cache.tev_transport_prepared == 0 &&
+                      bool(cache.pending_tev_transport) == !specialized,
+                  "transport expanded before any consumer");
+            cache.EnsureDynamicTevState();
+            Check(cache.tev_transport_prepared == unsigned(!specialized) && !cache.pending_tev_transport,
                   "generic GPU route lacks complete dynamic transport");
             // CodexAstraUlt: A failed/pending GPU attempt re-enters this actual CPU setup;
             // it must retain the generic snapshot, rebuild transport and not enqueue specialization.
             const auto optional_before = disk.optional_calls;
             cache.UseFragmentShader(regs,user,false);
+            cache.EnsureDynamicTevState(); // Claude: The CPU draw's generic consumer.
             Check(cache.virtual_fs_config && cache.tev_constants == 128 &&
                   cache.tev_transport_prepared == unsigned(!specialized)+1 &&
                   disk.optional_calls == optional_before && disk.mandatory_calls == 0,
@@ -230,6 +244,7 @@ int main() try {
             const FSConfig previous{regs};
             native.prepared_cpu_family = &previous;
             native.UseFragmentShader(regs, user, false);
+            native.EnsureDynamicTevState(); // Claude: The generic consumer, if any.
             Check(!native.prepared_cpu_family, "Native setup retained a stale CPU family");
             Check(bool(native.virtual_fs_config) == supported &&
                   native.tev_transport_prepared == unsigned(supported) &&
