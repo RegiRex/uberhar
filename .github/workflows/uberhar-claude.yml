@@ -190,7 +190,9 @@ jobs:
             echo "It installs next to Uberhar as a separate app and never replaces it."
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - uses: actions/upload-artifact@v7
+      - name: Upload APK
+        id: upload_apk
+        uses: actions/upload-artifact@v7
         with:
           name: uberhar-claude-apk
           path: |
@@ -201,6 +203,17 @@ jobs:
             artifacts/source-commit.txt
           if-no-files-found: error
           retention-days: 30
+
+      # Claude: Put a direct download link at the top of the run page.
+      - name: Link APK download
+        env:
+          ARTIFACT_URL: ${{ steps.upload_apk.outputs.artifact-url }}
+        run: |
+          {
+            echo ""
+            echo "**[Download the Uberhar Claude APK]($ARTIFACT_URL)** (a zip containing the APK)."
+            echo "Use it only when the shaders, native-tests and android jobs of this run are all green."
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload native symbols
         if: success()
