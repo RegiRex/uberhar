@@ -31,12 +31,26 @@ def main():
     try:
         for name,defines in [('native',[]),('condition-variable',['-DPREFIX_FORCE_CV'])]:
             binary=out/name
+            includes=[]
+            if defines:
+                # CodexAstraLocal: Select the actual CV branch in a retained
+                # header shadow. Undefining SYS_futex before standard headers
+                # breaks GCC13's atomic waits even though the pool itself compiles.
+                original=(root/'src/common/uberhar_parallel_work.h').read_text()
+                before='const bool use_futex{ParallelFutexWord::Available()};'
+                if original.count(before)!=1:raise RuntimeError('CV selection seam changed')
+                shadow=out/'cv-include/common/uberhar_parallel_work.h'
+                shadow.parent.mkdir(parents=True)
+                shadow.write_text(original.replace(before,'const bool use_futex{false};'))
+                includes=['-I'+str(shadow.parent.parent)]
+                proof['cv_header_sha256']=hashlib.sha256(shadow.read_bytes()).hexdigest()
             cmd=['c++','-std=c++20','-O2','-DNDEBUG','-DFMT_HEADER_ONLY','-pthread',*defines,
-                 '-I'+str(out),'-Isrc','-Iexternals/fmt/include','-Iexternals/boost',
+                 *includes,'-I'+str(out),'-Isrc','-Iexternals/fmt/include','-Iexternals/boost',
                  '-Iexternals/nihstro/include','-Iexternals/xxHash',str(Path(__file__).with_suffix('.cpp')),
                  'src/video_core/pica/primitive_assembly.cpp','-o',str(binary)]
             compiled=subprocess.run(cmd,cwd=root,capture_output=True,timeout=90)
             (out/(name+'.compile.log')).write_bytes(compiled.stdout+compiled.stderr)
+            if compiled.returncode:print(compiled.stderr.decode(errors='replace')[:8192])
             compiled.check_returncode()
             ran=subprocess.run([str(binary)],cwd=root,capture_output=True,timeout=30)
             (out/(name+'.run.log')).write_bytes(ran.stdout+ran.stderr)

@@ -2,10 +2,6 @@
 // Licensed under GPLv2 or any later version; see license.txt.
 // CodexAstraLocal: Exercise actual batch/pool/assembler and extracted production
 // 88-byte append bodies with a forced late borrower, rollback and subsequent reuse.
-#ifdef PREFIX_FORCE_CV
-#include <sys/syscall.h>
-#undef SYS_futex
-#endif
 #include <condition_variable>
 #include <cfenv>
 #include <iostream>
@@ -132,6 +128,11 @@ void Case(PipelineRegs::TriangleTopology topology, bool indexed, bool fail, bool
 // CodexAstraLocal: No prepare/hook may execute when no worker can participate.
 void OwnerOnly() {
     Common::Uberhar::ParallelWork pool{1};u32 processed{};
+#ifdef PREFIX_FORCE_CV
+    // CodexAstraLocal: Verify the shadow header selects CV without hiding
+    // Linux syscall definitions from the host standard library.
+    Need(std::string_view{pool.WaitTransport()}=="condition_variable","CV not selected");
+#endif
     auto result=pool.RunWithOwnerHook(512,64,[&](u32 a,u32 b){processed+=b-a;},
         []()->bool{throw std::runtime_error("owner-only prepare");},
         []{throw std::runtime_error("owner-only hook");});
