@@ -79,7 +79,11 @@ public:
     vk::DescriptorSet Commit();
 
 private:
-    void AppendDescriptorPool();
+    // CodexAstraLocal: A fresh-pool retry carries bounded failure context to the
+    // owning renderer; no allocation failure may spin or publish a null set.
+    void AppendDescriptorPool(std::size_t retained_attempts = 0, bool fresh_pool = false);
+    [[noreturn]] void AllocationFailed(const char* operation, vk::Result result,
+                                      std::size_t retained_attempts, bool fresh_pool) const;
 
 private:
     // CodexAstraUlt: Publish allocation cardinality through the existing device owner.

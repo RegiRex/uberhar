@@ -6,12 +6,18 @@
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
 
+#include <algorithm>
+#include <array>
 #include <cstddef>
+#include <cstdio>
+#include <limits>
+#include <new>
 #include <optional>
 #include <unordered_map>
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_master_semaphore.h"
 #include "video_core/renderer_vulkan/vk_resource_pool.h"
+#include "video_core/shader_recovery_error.h"
 
 namespace Vulkan {
 
@@ -60,8 +66,21 @@ std::size_t ResourcePool::CommitResource() {
 
 std::size_t ResourcePool::ManageOverflow() {
     const std::size_t old_capacity = ticks.size();
-    ticks.resize(old_capacity + grow_step);
-    Allocate(old_capacity, old_capacity + grow_step);
+    // CodexAstraLocal: New fence slots are unpublished until their handles exist.
+    // A failed growth must leave the previous live ticks and search hint intact.
+    if (grow_step == 0 || grow_step > ticks.max_size() - old_capacity) {
+        throw VideoCore::ShaderRecoveryError{"Vulkan resource-pool capacity overflow"};
+    }
+    try {
+        ticks.resize(old_capacity + grow_step);
+        Allocate(old_capacity, old_capacity + grow_step);
+    } catch (const std::bad_alloc&) {
+        ticks.resize(old_capacity);
+        throw VideoCore::ShaderRecoveryError{"Vulkan resource-pool bookkeeping allocation failed"};
+    } catch (...) {
+        ticks.resize(old_capacity);
+        throw;
+    }
     return old_capacity;
 }
 
@@ -128,27 +147,47 @@ DescriptorHeap::DescriptorHeap(const Instance& instance, MasterSemaphore* master
                                std::span<const vk::DescriptorSetLayoutBinding> bindings,
                                u32 descriptor_heap_count_)
     : ResourcePool{master_semaphore, DESCRIPTOR_SET_BATCH}, instance{instance},
-      device{instance.GetDevice()},
-      descriptor_heap_count{descriptor_heap_count_ * DESCRIPTOR_MULTIPLIER} { // Increase pool size
-    // Create descriptor set layout.
+      device{instance.GetDevice()}, descriptor_heap_count{} {
+    // CodexAstraLocal: Every pool must fit the actual 64-set allocation, including
+    // each binding's array length. Preserve larger caller hints and reject all
+    // narrowing/overflow before creating any Vulkan object.
+    const u64 capacity = std::max<u64>(DESCRIPTOR_SET_BATCH,
+                                     u64{descriptor_heap_count_} * DESCRIPTOR_MULTIPLIER);
+    if (capacity > std::numeric_limits<u32>::max() ||
+        bindings.size() > std::numeric_limits<u32>::max()) {
+        throw VideoCore::ShaderRecoveryError{"Vulkan descriptor-pool set capacity overflow"};
+    }
+    descriptor_heap_count = static_cast<u32>(capacity);
+    try {
+        std::unordered_map<vk::DescriptorType, u64> descriptor_type_counts;
+        for (const auto& binding : bindings) {
+            auto& count = descriptor_type_counts[binding.descriptorType];
+            if (binding.descriptorCount > std::numeric_limits<u32>::max() / capacity - count) {
+                throw VideoCore::ShaderRecoveryError{
+                    "Vulkan descriptor-pool type/array capacity overflow"};
+            }
+            count += binding.descriptorCount;
+        }
+        for (const auto& [type, count] : descriptor_type_counts) {
+            if (count != 0) {
+                pool_sizes.push_back({type, static_cast<u32>(count * capacity)});
+            }
+        }
+    } catch (const std::bad_alloc&) {
+        throw VideoCore::ShaderRecoveryError{"Vulkan descriptor-pool budget allocation failed"};
+    }
+
     const vk::DescriptorSetLayoutCreateInfo layout_ci = {
         .bindingCount = static_cast<u32>(bindings.size()),
         .pBindings = bindings.data(),
     };
-    descriptor_set_layout = device.createDescriptorSetLayoutUnique(layout_ci);
+    try {
+        descriptor_set_layout = device.createDescriptorSetLayoutUnique(layout_ci);
+    } catch (const vk::SystemError& error) {
+        AllocationFailed("create-layout", static_cast<vk::Result>(error.code().value()), 0, false);
+    }
     if (instance.HasDebuggingToolAttached()) {
         SetObjectName(device, *descriptor_set_layout, "DescriptorSetLayout");
-    }
-
-    // Build descriptor set pool counts.
-    std::unordered_map<vk::DescriptorType, u16> descriptor_type_counts;
-    for (const auto& binding : bindings) {
-        descriptor_type_counts[binding.descriptorType] += binding.descriptorCount;
-    }
-    for (const auto& [type, count] : descriptor_type_counts) {
-        auto& pool_size = pool_sizes.emplace_back();
-        pool_size.descriptorCount = count * descriptor_heap_count;
-        pool_size.type = type;
     }
 
     // Create descriptor pool
@@ -171,40 +210,52 @@ DescriptorHeap::~DescriptorHeap() {
 
 void DescriptorHeap::Allocate(std::size_t begin, std::size_t end) {
     ASSERT(end - begin == DESCRIPTOR_SET_BATCH);
+    const std::size_t old_size = descriptor_sets.size();
+    const std::size_t retained_pools = pools.size();
     descriptor_sets.resize(end);
 
     std::array<vk::DescriptorSetLayout, DESCRIPTOR_SET_BATCH> layouts;
     layouts.fill(*descriptor_set_layout);
 
-    u32 current_pool = 0;
     vk::DescriptorSetAllocateInfo alloc_info = {
-        .descriptorPool = *pools[current_pool],
         .descriptorSetCount = DESCRIPTOR_SET_BATCH,
         .pSetLayouts = layouts.data(),
     };
 
-    // Attempt to allocate the descriptor set batch. If the pool has run out of space, use a new
-    // one.
-    while (true) {
-        const auto result =
-            device.allocateDescriptorSets(&alloc_info, descriptor_sets.data() + begin);
-        if (result == vk::Result::eSuccess) {
-            // CodexAstraUlt: Retained set capacity excludes unsuccessful resized slots.
-            allocated_descriptor_sets += DESCRIPTOR_SET_BATCH;
-            instance.RecordDescriptorSetAllocation(DESCRIPTOR_SET_BATCH);
-            break;
-        }
-        // eErrorFragmentedPool: pool has space but is too fragmented to allocate.
-        // MoltenVK on iOS/tvOS returns this more frequently than native Vulkan drivers.
-        if (result == vk::Result::eErrorOutOfPoolMemory ||
-            result == vk::Result::eErrorFragmentedPool) {
-            current_pool++;
-            if (current_pool == pools.size()) {
-                LOG_INFO(Render_Vulkan, "Run out of pools, creating new one!");
-                AppendDescriptorPool();
+    // CodexAstraLocal: Visit each retained pool once and at most one fresh pool.
+    // Only pool exhaustion/fragmentation permits recovery; other device failures
+    // terminate before publishing handles or repeatedly consuming mappings.
+    try {
+        for (std::size_t attempt = 0; attempt <= retained_pools; ++attempt) {
+            const bool fresh_pool = attempt == retained_pools;
+            if (fresh_pool) {
+                AppendDescriptorPool(retained_pools, true);
             }
-            alloc_info.descriptorPool = *pools[current_pool];
+            alloc_info.descriptorPool = *pools[attempt];
+            const auto result =
+                device.allocateDescriptorSets(&alloc_info, descriptor_sets.data() + begin);
+            if (result == vk::Result::eSuccess) {
+                // CodexAstraUlt: Retained set capacity excludes unsuccessful resized slots.
+                allocated_descriptor_sets += DESCRIPTOR_SET_BATCH;
+                instance.RecordDescriptorSetAllocation(DESCRIPTOR_SET_BATCH);
+                return;
+            }
+            if (fresh_pool || (result != vk::Result::eErrorOutOfPoolMemory &&
+                               result != vk::Result::eErrorFragmentedPool)) {
+                AllocationFailed("allocate-sets", result,
+                                 fresh_pool ? retained_pools : attempt + 1, fresh_pool);
+            }
         }
+    } catch (...) {
+        // CodexAstraLocal: Only this unpublished attempt's slots/new empty pool
+        // may be rolled back. Earlier pools and in-flight descriptor sets survive.
+        descriptor_sets.resize(old_size);
+        if (pools.size() > retained_pools) {
+            pools.back().reset();
+            pools.pop_back();
+            instance.RecordDescriptorPoolFree();
+        }
+        throw;
     }
 }
 
@@ -213,17 +264,54 @@ vk::DescriptorSet DescriptorHeap::Commit() {
     return descriptor_sets[index];
 }
 
-void DescriptorHeap::AppendDescriptorPool() {
+void DescriptorHeap::AppendDescriptorPool(std::size_t retained_attempts, bool fresh_pool) {
     const vk::DescriptorPoolCreateInfo pool_info = {
         .flags = vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet,
         .maxSets = descriptor_heap_count,
         .poolSizeCount = static_cast<u32>(pool_sizes.size()),
         .pPoolSizes = pool_sizes.data(),
     };
-    auto& pool = pools.emplace_back();
-    pool = device.createDescriptorPoolUnique(pool_info);
+    // CodexAstraLocal: Reserve bookkeeping first, then publish a successfully
+    // created unique owner. Failed creation never appends a null pool entry.
+    try {
+        pools.reserve(pools.size() + 1);
+    } catch (const std::bad_alloc&) {
+        throw VideoCore::ShaderRecoveryError{"Vulkan descriptor-pool owner allocation failed"};
+    }
+    vk::UniqueDescriptorPool pool;
+    try {
+        pool = device.createDescriptorPoolUnique(pool_info);
+    } catch (const vk::SystemError& error) {
+        AllocationFailed("create-pool", static_cast<vk::Result>(error.code().value()),
+                         retained_attempts, fresh_pool);
+    }
+    pools.emplace_back(std::move(pool));
     // CodexAstraUlt: Publish only after Vulkan returns an owned pool successfully.
     instance.RecordDescriptorPoolAllocation();
+}
+
+void DescriptorHeap::AllocationFailed(const char* operation, vk::Result result,
+                                      std::size_t retained_attempts, bool fresh_pool) const {
+    // CodexAstraLocal: One bounded permanent terminal reason includes the actual
+    // driver result and capacity contract. The renderer recovery owner logs it;
+    // there is no per-attempt log or success-path formatting/allocation here.
+    std::array<char, 1024> message{};
+    const int prefix = std::snprintf(
+        message.data(), message.size(),
+        "Vulkan descriptor %s failed: result=%d request_sets=%u pool_sets=%u "
+        "retained_attempts=%zu fresh_pool=%u type_budgets=",
+        operation, static_cast<int>(result), DESCRIPTOR_SET_BATCH, descriptor_heap_count,
+        retained_attempts, static_cast<unsigned>(fresh_pool));
+    std::size_t used = prefix > 0 ? std::min<std::size_t>(prefix, message.size() - 1) : 0;
+    for (const auto& size : pool_sizes) {
+        const int written = std::snprintf(message.data() + used, message.size() - used, "%d:%u,",
+                                          static_cast<int>(size.type), size.descriptorCount);
+        if (written <= 0 || static_cast<std::size_t>(written) >= message.size() - used) {
+            break;
+        }
+        used += written;
+    }
+    throw VideoCore::ShaderRecoveryError{message.data()};
 }
 
 } // namespace Vulkan

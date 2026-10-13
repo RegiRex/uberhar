@@ -436,6 +436,9 @@ private:
     PrimitiveAssembler primitive_assembler;
     CommandList cmd_list;
     std::unique_ptr<ShaderEngine> shader_engine;
+    // CodexAstraLocal: Placement is immutable for this PICA lifetime, does not
+    // alter guest save state, and never grants capabilities to another mode.
+    const bool cpu_vertex_only;
     // CodexAstraLocal: Draw-synchronous CPU workers and bounded host certificates
     // never enter guest save state; their borrowed jobs finish before each draw returns.
     struct ParallelVertexState;

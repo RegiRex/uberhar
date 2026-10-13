@@ -157,6 +157,8 @@ jobs:
       # CodexAstraLocal: Retain cached-ring source, synthetic payloads, real
       # Vulkan modules and specific defect diagnostics, including failed gates.
       # CodexAstraLocal: Retain bounded Software checks, including failures.
+      # CodexAstraLocal: Retain actual CPU overlap/rollback failure evidence.
+      # CodexAstraLocal: Retain allocation and terminal worker-boundary controls.
       - name: Upload CPU coordination contract evidence
         if: always()
         uses: actions/upload-artifact@v7
@@ -169,6 +171,16 @@ jobs:
             build/uberhar-probe/parallel-assembly/**/provenance.json
             build/uberhar-probe/parallel-assembly/**/*.stdout
             build/uberhar-probe/parallel-assembly/**/*.stderr
+            build/uberhar-probe/cpu-prefix/*.log
+            build/uberhar-probe/cpu-prefix/provenance.json
+            build/uberhar-probe/cpu-prefix/actual_append.inc
+            build/uberhar-probe/descriptor-pool/**/provenance.json
+            build/uberhar-probe/descriptor-pool/**/*.stdout
+            build/uberhar-probe/descriptor-pool/**/*.stderr
+            build/uberhar-probe/shader-worker-recovery/**/provenance.json
+            build/uberhar-probe/shader-worker-recovery/**/status.json
+            build/uberhar-probe/shader-worker-recovery/**/*.stdout
+            build/uberhar-probe/shader-worker-recovery/**/*.stderr
             build/uberhar-probe/vertex-register-decode/**/provenance.json
             build/uberhar-probe/vertex-register-decode/**/*.stdout
             build/uberhar-probe/vertex-register-decode/**/*.stderr

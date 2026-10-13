@@ -10,6 +10,7 @@ import argparse
 import os
 from pathlib import Path
 import subprocess
+import sys
 
 
 def main() -> None:
@@ -26,9 +27,11 @@ def main() -> None:
     methods = source[start:end]
     header = r'''
 #include <cstdio>
+#include <new>
 #include <optional>
 #include <utility>
 #include "video_core/renderer_vulkan/vk_resource_pool.h"
+#include "video_core/shader_recovery_error.h"
 
 namespace Vulkan {
 // CodexAstraUlt: Completion on Refresh models a timeline query or a fence worker
@@ -149,6 +152,16 @@ int main() {
                     "-Isrc", "-Iexternals/vulkan-headers/include", str(cpp),
                     "-o", str(args.output)], check=True)
     subprocess.run([str(args.output)], check=True)
+    # CodexAstraLocal: Preserve every completion/reuse control above and extend
+    # the same mandatory gate with strict descriptor budgets and failure rollback.
+    subprocess.run([sys.executable, str(Path(__file__).with_name("test_descriptor_pool.py")),
+                    "--source", str(args.source),
+                    "--output", str(args.output.parent / "descriptor-pool"),
+                    *(["--sanitize"] if args.sanitize else [])], check=True)
+    # CodexAstraLocal: A typed allocation error on the Vulkan worker must reach
+    # the existing terminal latch, including its post-submission command buffer.
+    subprocess.run([sys.executable, str(Path(__file__).with_name("test_shader_worker_recovery.py")),
+                    "--output", str(args.output.parent / "shader-worker-recovery")], check=True)
 
 
 if __name__ == "__main__":

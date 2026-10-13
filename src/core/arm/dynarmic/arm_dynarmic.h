@@ -6,6 +6,7 @@
 
 #include <map>
 #include <memory>
+#include <exception> // CodexAstraLocal: Preserve terminal callback failures across generated frames.
 #include <dynarmic/interface/A32/a32.h>
 #include "common/arch.h" // CodexAstraLocal: Limit audited callback status isolation to ARM64.
 #include "common/common_types.h"
@@ -89,6 +90,12 @@ private:
     Core::DynarmicExclusiveMonitor& exclusive_monitor;
 
     Dynarmic::A32::Jit* jit = nullptr;
+    // CodexAstraLocal: An SVC may change the current page table/JIT. Halt the
+    // instance executing this Run/Step, then deliver the first renderer failure
+    // from C++ only. Keep the terminal latch until teardown; a retry must never
+    // execute more guest instructions after a partially completed GPU command.
+    Dynarmic::A32::Jit* executing_jit = nullptr;
+    std::exception_ptr renderer_failure;
     std::shared_ptr<Memory::PageTable> current_page_table = nullptr;
     std::map<std::shared_ptr<Memory::PageTable>, std::unique_ptr<Dynarmic::A32::Jit>> jits;
 };

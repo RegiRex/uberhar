@@ -44,6 +44,8 @@ foreach(KEY IN ITEMS
     "uberhar_force_tev"
     # AstraEH: Independently compare the ready-only CPU vertex bridge.
     "uberhar_cpu_vertex_bridge"
+    # CodexAstraLocal: Compare CPU vertex placement without changing Combo fragments.
+    "uberhar_cpu_vertex_only"
     # AstraEH: One mutually exclusive experimental renderer profile.
     "uberhar_test_mode"
     "async_presentation"

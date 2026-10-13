@@ -331,8 +331,7 @@ void PerfStats::LogUberharSettings(const char* event) {
         // from GPU vertex admission. This instant settings sample does not prove
         // compatible ready PSOs or draw coverage; renderer counters report those.
         api == Settings::GraphicsAPI::Vulkan && values.uberhar_hybrid_tev.GetValue() &&
-                Settings::UsesReadyGpuVertices(mode) && Settings::AllowsSpecializedFragments(mode) &&
-                !values.uberhar_force_tev.GetValue()
+                Settings::AllowsFullCpuFragments(mode)
             ? "software_specialized_ready_v1" : "disabled",
         // CodexAstraLocal: Native's new static-TEV tier is independent of full
         // specialization and GPU vertices. Log configured eligibility separately;
@@ -340,10 +339,11 @@ void PerfStats::LogUberharSettings(const char* event) {
         api == Settings::GraphicsAPI::Vulkan && values.uberhar_hybrid_tev.GetValue() &&
                 Settings::AllowsStaticCpuTev(mode)
             ? "software_static_tev_ready_v1" : "disabled",
-        // CodexAstraLocal: Declare the isolation contract without pretending the
-        // shared CPU vertex path or unused graphics startup work disappeared.
-        Settings::RequiresComputeOnly(mode) ? "disabled_omit_unsupported" : "graphics_allowed",
-        Settings::RequiresComputeOnly(mode) ? "shared_cpu" : "route_dependent");
+        // CodexAstraLocal: Calculated consumes original guest inputs in compute;
+        // an unsupported draw terminates rather than being omitted or retried
+        // through Native. These labels declare policy, not successful coverage.
+        Settings::RequiresComputeOnly(mode) ? "disabled_terminal_unsupported" : "graphics_allowed",
+        Settings::RequiresComputeOnly(mode) ? "original_input_compute" : "route_dependent");
     const bool changed = text != uberhar_settings;
     if (changed && !uberhar_settings.empty())
         ++uberhar_settings_changes;

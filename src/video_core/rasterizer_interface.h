@@ -6,6 +6,7 @@
 
 #include <atomic>
 #include <functional>
+#include <exception> // CodexAstraLocal: Refuse rollback without an admitted append owner.
 #include <memory> // CodexAstraLocal: Deferred CPU packets retain their owned results.
 #include <span>   // CodexAstraLocal: Stateless, preallocated hardware conversion.
 #include "common/common_types.h"
@@ -42,6 +43,11 @@ public:
     /// Queues the primitive formed by the given vertices for rendering
     virtual void AddTriangle(const Pica::OutputVertex& v0, const Pica::OutputVertex& v1,
                              const Pica::OutputVertex& v2) = 0;
+
+    // CodexAstraLocal: Optional reversible CPU append only. Unknown/software
+    // renderers refuse before dispatch; no GPU or guest-memory effect is allowed.
+    virtual bool BeginVertexAppend(u32, std::size_t&) { return false; }
+    virtual void RollbackVertexAppend(std::size_t) noexcept { std::terminate(); }
 
     // CodexAstraLocal: Parallel vertex loading may precede ordered submission.
     // Unknown/software sinks can write guest framebuffer RAM in AddTriangle,

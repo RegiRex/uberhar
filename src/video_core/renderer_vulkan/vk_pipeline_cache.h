@@ -371,6 +371,9 @@ private:
     // CodexAstraLocal: Independent CPU fragment capability never enables GPU
     // vertex promotion. The renderer captures this policy once for its lifetime.
     const bool allow_static_cpu_tev;
+    // CodexAstraLocal: Full CPU-layout fragments are independent of the GPU
+    // vertex policy and of forced generic fragments on other interfaces.
+    const bool allow_full_cpu_fragments;
     // CodexAstraLocal: CPU-only optional compilation cannot enable GPU vertices.
     const bool allow_ready_gpu_vertices;
     // AstraEH: A/B switch captured at startup, effective only in normal hybrid mode.

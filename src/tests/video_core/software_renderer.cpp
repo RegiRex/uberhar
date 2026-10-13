@@ -2,6 +2,7 @@
 // Licensed under GPLv2 or any later version; see license.txt.
 #include <algorithm>
 #include <cstring>
+#include <limits> // CodexAstraLocal: Defined singular/unused-derivative regression inputs.
 #ifdef UBERHAR_SOFTWARE_HELPER_PROBE
 // CodexAstraLocal: The small CI gate reuses these exact helper expectations
 // without linking the guest system; native CTest also runs the real triangles.
@@ -19,6 +20,7 @@
 #endif
 #include "video_core/renderer_software/sw_frame.h"
 #include "video_core/renderer_software/sw_sampler.h"
+#include "video_core/renderer_software/sw_texture_demand.h"
 #include "video_core/shader_recovery_error.h"
 #include "video_core/utils.h"
 
@@ -29,10 +31,29 @@ namespace SwRenderer {
 struct SoftwareRendererTestAccess {
     static bool Safe(RasterizerSoftware& raster, const Pica::RegsInternal& regs) {
         std::array<RasterizerSoftware::PreparedTexture, 3> prepared;
-        return raster.PrepareTextures(regs.texturing.GetTextures(), prepared);
+        return raster.PrepareTextures(regs.texturing.GetTextures(), prepared,
+            TextureDemandMask(regs.texturing.GetTevStages(), regs.lighting));
     }
     static unsigned Workers(const RasterizerSoftware& raster) { return raster.sw_workers.CreatedWorkers(); }
     static unsigned Available(const RasterizerSoftware& raster) { return raster.sw_workers.Available(); }
+    // CodexAstraLocal: Use the real private mapper and sample consumer with
+    // deliberately undefined unused helpers; no duplicated filtering oracle.
+    static auto Sample(RasterizerSoftware& raster, const Pica::RegsInternal& regs, float u,
+                       float v, float w, bool footprint) {
+        std::array<RasterizerSoftware::PreparedTexture, 3> prepared;
+        const auto demand = TextureDemandMask(regs.texturing.GetTevStages(), regs.lighting);
+        raster.PrepareTextures(regs.texturing.GetTextures(), prepared, demand);
+        std::array<Common::Vec2<Pica::f24>, 3> uv{};
+        uv[0] = {Pica::f24::FromFloat32(u), Pica::f24::FromFloat32(v)};
+        std::array<RasterizerSoftware::TextureCoordinates, 4> quad{};
+        for (auto& q : quad) {
+            for (auto& coord : q.uv) coord = {Pica::f24::FromFloat32(std::numeric_limits<float>::quiet_NaN()),
+                Pica::f24::FromFloat32(std::numeric_limits<float>::quiet_NaN())};
+            q.w = Pica::f24::Zero();
+        }
+        return raster.TextureColor(uv, regs.texturing.GetTextures(), Pica::f24::FromFloat32(w),
+            prepared, quad, 0, demand, footprint ? 1U : 0U, 3, 7);
+    }
 };
 }
 #endif
@@ -154,7 +175,7 @@ TEST_CASE("Software LCD startup register transitions", "[software][software-star
 }
 #endif
 
-TEST_CASE("Software ordinary mip filters and signed border taps", "[software]") {
+TEST_CASE("Software ordinary mip filters and signed border taps", "[software][software-sampling]") {
     auto config = Sampler(32, 2);
     config.mag_filter.Assign(Config::Nearest); config.min_filter.Assign(Config::Linear);
     auto layout = SwRenderer::MakeTextureLayout(config, Format::RGBA8, false);
@@ -191,9 +212,23 @@ TEST_CASE("Software ordinary mip filters and signed border taps", "[software]") 
     CHECK(SwRenderer::TextureLod(quad, 0, 32, 32) == 3.f);
     CHECK_THROWS_AS(SwRenderer::SampleTexture(std::span<const u8>{data}.first(2), layout, config,
         0,0,0,Game), VideoCore::ShaderRecoveryError);
+    // CodexAstraLocal: Fixed LOD needs no derivative; consumed UV/memory still
+    // must be valid. Nonzero fixed LOD uses minification before image clamping.
+    const auto nan = std::numeric_limits<float>::quiet_NaN();
+    config.wrap_s.Assign(Config::ClampToEdge);
+    config.mag_filter.Assign(Config::Nearest); config.min_filter.Assign(Config::Linear);
+    CHECK(sample(1.f/32, .5f/32, nan).x == 200);
+    config.lod.min_level.Assign(2); config.lod.max_level.Assign(2);
+    CHECK(sample(1.f/8, .5f/8, nan).x == 100);
+    CHECK(sample(1.f/8, .5f/8, nan).y == 160);
+    CHECK_THROWS_AS(sample(nan, .5f, nan), VideoCore::ShaderRecoveryError);
+    config.lod.min_level.Assign(0);
+    CHECK_THROWS_AS(sample(.5f, .5f, nan), VideoCore::ShaderRecoveryError);
+    quad[2].y = nan; // NaN in a later max operand must not be hidden.
+    CHECK(std::isnan(SwRenderer::TextureLod(quad, 0, 32, 32)));
 }
 
-TEST_CASE("Software shadow PCF compares depth before filtering", "[software]") {
+TEST_CASE("Software shadow PCF compares depth before filtering", "[software][software-sampling]") {
     const auto config = Sampler();
     const auto layout = SwRenderer::MakeTextureLayout(config, Format::RGBA8, true);
     std::vector<u8> data(layout.bytes);
@@ -206,6 +241,55 @@ TEST_CASE("Software shadow PCF compares depth before filtering", "[software]") {
     CHECK(SwRenderer::SampleShadow(data, layout, 1.f/8,.5f/8,0,false).x == 200);
     CHECK(SwRenderer::SampleShadow(data, layout, 0,.5f/8,30,false).x == 128);
     CHECK(SwRenderer::SampleShadow(data, layout, 0,.5f/8,30,true).x == 0);
+    // CodexAstraLocal: Far finite coordinates have defined PCF border/edge
+    // values before conversion. Near-border mixed taps must stay fractional.
+    const float large = std::numeric_limits<float>::max();
+    for (float outside : {-large, large}) {
+        CHECK(SwRenderer::SampleShadow(data, layout, outside,.5f,0,false).x == 255);
+        CHECK(SwRenderer::SampleShadow(data, layout, .5f,outside,0,false).x == 255);
+        CHECK(SwRenderer::SampleShadow(data, layout, outside,.5f,0,true).x == 200);
+        CHECK(SwRenderer::SampleShadow(data, layout, .5f,outside,30,true).x == 0);
+    }
+    CHECK(SwRenderer::SampleShadow(data, layout, -.5f/8,.5f,0,false).x == 255);
+    CHECK(SwRenderer::SampleShadow(data, layout, 1.f+.5f/8,.5f,0,false).x == 255);
+    CHECK(SwRenderer::SampleShadow(data, layout, -.25f/8,.5f,0,false).x == 241);
+    for (float invalid : {std::numeric_limits<float>::quiet_NaN(),
+                          std::numeric_limits<float>::infinity()}) {
+        CHECK_THROWS_AS(SwRenderer::SampleShadow(data, layout, invalid,.5f,0,false), VideoCore::ShaderRecoveryError);
+        CHECK_THROWS_AS(SwRenderer::SampleShadow(data, layout, .5f,invalid,0,true), VideoCore::ShaderRecoveryError);
+    }
+}
+
+TEST_CASE("Software texture demand follows consumed TEV and lighting operands", "[software][software-sampling]") {
+    // CodexAstraLocal: Reserved/unused operand fields cannot map guest texture
+    // bytes. Keep Software's existing stage0 alpha Previous behavior explicit.
+    using Stage = Pica::TexturingRegs::TevStageConfig;
+    using Source = Stage::Source;
+    std::array<Stage, 6> stages{};
+    Pica::LightingRegs lighting{}; lighting.disable.Assign(1);
+    const auto mask = [&] { return SwRenderer::TextureDemandMask(stages, lighting); };
+    auto& s = stages[0];
+    s.color_source2.Assign(Source::Texture1); s.color_source3.Assign(Source::Texture2);
+    s.alpha_source2.Assign(Source::Texture3);
+    CHECK(mask() == 0);
+    s.color_source1.Assign(Source::Previous); CHECK(mask() == 4);
+    s.color_source1.Assign(Source::Texture0);
+    s.color_op.Assign(Stage::Operation::Modulate); CHECK(mask() == 3);
+    s.color_op.Assign(Stage::Operation::Lerp); CHECK(mask() == 7);
+    s.color_op.Assign(Stage::Operation::Dot3_RGBA);
+    s.alpha_source1.Assign(Source::Texture3); CHECK(mask() == 3);
+    s.color_op.Assign(Stage::Operation::Dot3_RGB); CHECK(mask() == 11);
+    s.color_op.Assign(Stage::Operation::Replace); s.color_source1.Assign(Source::PrimaryColor);
+    s.alpha_source1.Assign(Source::Previous); s.alpha_source3.Assign(Source::Texture3);
+    CHECK(mask() == 0); // Actual Software alpha Previous reads initial combiner zero.
+    s.alpha_op.Assign(Stage::Operation::Lerp); CHECK(mask() == 8);
+    s = {};
+    lighting.disable.Assign(0); lighting.config0.enable_shadow.Assign(1);
+    lighting.config0.shadow_selector.Assign(3); CHECK(mask() == 8);
+    lighting.config0.bump_mode.Assign(Pica::LightingRegs::LightingBumpMode::NormalMap);
+    lighting.config0.bump_selector.Assign(1); CHECK(mask() == 10);
+    lighting.disable.Assign(1); CHECK(mask() == 0);
+    stages[5].color_source1.Assign(Source::Texture2); CHECK(mask() == 4);
 }
 
 TEST_CASE("Software cube filtering crosses edges with owned face identity", "[software]") {
@@ -227,6 +311,46 @@ TEST_CASE("Software cube filtering crosses edges with owned face identity", "[so
 }
 
 #ifndef UBERHAR_SOFTWARE_HELPER_PROBE
+TEST_CASE("Software actual demanded sampling and fixed helper ownership", "[software][software-sampling]") {
+    // CodexAstraLocal: Real MemorySystem/raster admission must not touch an
+    // enabled, malformed unused texture. Changing the actual consumer restores
+    // its refusal; fixed projection LOD ignores only unused helper values.
+    const auto old_workers = Settings::values.software_renderer_workers.GetValue();
+    struct Restore { u32 value; ~Restore() { Settings::values.software_renderer_workers = value; } } restore{old_workers};
+    Settings::values.software_renderer_workers = 1;
+    Core::System system;
+    Memory::MemorySystem memory{system};
+    Pica::PicaCore pica{memory,{}};
+    auto& regs = pica.regs.internal;
+    regs = {}; regs.lighting.disable.Assign(1);
+    SwRenderer::RasterizerSoftware raster{memory, pica};
+    regs.texturing.main_config.texture0_enable.Assign(1);
+    regs.texturing.texture0 = Sampler(16, 0);
+    regs.texturing.texture0.type.Assign(Config::Projection2D);
+    regs.texturing.texture0.address.Assign((Memory::VRAM_PADDR + 0x10000) / 8);
+    regs.texturing.texture0_format.Assign(Format::RGBA8);
+    auto layout = SwRenderer::MakeTextureLayout(regs.texturing.texture0, Format::RGBA8, false);
+    std::span<u8> bytes{memory.GetPhysicalPointer(regs.texturing.texture0.GetPhysicalAddress()), layout.bytes};
+    for (u32 y = 0; y < 16; ++y) for (u32 x = 0; x < 16; ++x)
+        Put(bytes, layout, 0, x, y, {41,82,123,255});
+    using Source = Pica::TexturingRegs::TevStageConfig::Source;
+    regs.texturing.tev_stage0.color_source1.Assign(Source::Texture0);
+    regs.texturing.main_config.texture1_enable.Assign(1);
+    regs.texturing.texture1.address.Assign((Memory::VRAM_PADDR + 0x20000) / 8); // zero invalid dimensions
+    CHECK(SwRenderer::SoftwareRendererTestAccess::Safe(raster, regs));
+    CHECK(SwRenderer::SoftwareRendererTestAccess::Sample(raster, regs, .5f,.5f,1.f,false)[0] == Color{41,82,123,255});
+    regs.texturing.tev_stage1.alpha_source1.Assign(Source::Texture1);
+    CHECK_THROWS_AS(SwRenderer::SoftwareRendererTestAccess::Safe(raster, regs), VideoCore::ShaderRecoveryError);
+    regs.texturing.tev_stage1.alpha_source1.Assign(Source::PrimaryColor);
+    CHECK_THROWS_AS(SwRenderer::SoftwareRendererTestAccess::Sample(raster, regs, .5f,.5f,0.f,false), VideoCore::ShaderRecoveryError);
+    regs.texturing.texture0.lod.max_level.Assign(1);
+    CHECK_THROWS_AS(SwRenderer::SoftwareRendererTestAccess::Sample(raster, regs, .5f,.5f,1.f,true), VideoCore::ShaderRecoveryError);
+    // Demanding no texture must leave even singular covered values unused.
+    regs.texturing.tev_stage0.color_source1.Assign(Source::PrimaryColor);
+    CHECK_NOTHROW(SwRenderer::SoftwareRendererTestAccess::Sample(raster, regs,
+        std::numeric_limits<float>::quiet_NaN(), .5f, 0.f, false));
+}
+
 TEST_CASE("Software actual triangle budgets and alias admission", "[software]") {
     // CodexAstraLocal: Assign changes only each register field, preserving its
     // neighboring fields. Restore global controls; use actual tiled guest memory,

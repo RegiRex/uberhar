@@ -27,6 +27,11 @@ public:
     void AddTriangle(const Pica::OutputVertex& v0, const Pica::OutputVertex& v1,
                      const Pica::OutputVertex& v2) override;
 
+    // CodexAstraLocal: Reserve a conservative append bound before worker
+    // publication and restore only logical size on a later shader failure.
+    bool BeginVertexAppend(u32 inputs, std::size_t& checkpoint) override;
+    void RollbackVertexAppend(std::size_t checkpoint) noexcept override;
+
     // CodexAstraLocal: Pure complete-list conversion shares the original
     // quaternion correction and exact HardwareVertex constructor with AddTriangle.
     // Callers preallocate precisely 88 bytes per vertex; no renderer is borrowed.

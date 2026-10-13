@@ -333,6 +333,9 @@ public:
   std::unique_ptr<ShaderDiskCache> curr_disk_cache;
   bool hybrid_tev = true, force_tev = false, allow_specialized_fragments = true;
   bool allow_static_cpu_tev = true, allow_ready_gpu_vertices = true;
+  // CodexAstraLocal: Exercise CPU full-fragment permission independently from
+  // the original GPU-fragment/vertex capabilities in extracted production code.
+  bool allow_full_cpu_fragments = true;
   const FSConfig* prepared_cpu_family{};
   std::optional<FSConfig> owned_family;
   u64 ready_cpu_static_selected{}, ready_cpu_full_selected{}, ready_fragment_preflight_deferred{};

@@ -152,6 +152,8 @@ void Config::ReadValues() {
     ReadSetting("Renderer", Settings::values.uberhar_force_tev);
     // AstraEH: Share the bridge switch between global and per-game settings.
     ReadSetting("Renderer", Settings::values.uberhar_cpu_vertex_bridge);
+    // CodexAstraLocal: Apply saved placement before constructing the PICA owner.
+    ReadSetting("Renderer", Settings::values.uberhar_cpu_vertex_only);
     // AstraEH: Read the profile before applying its temporary in-memory overrides.
     ReadSetting("Renderer", Settings::values.uberhar_test_mode);
     ReadSetting("Renderer", Settings::values.spirv_shader_gen);

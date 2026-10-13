@@ -16,6 +16,7 @@
 #include <system_error>
 #include <thread>
 #include <type_traits>
+#include <utility> // CodexAstraLocal: Forward optional owner hooks without copies.
 #include <vector>
 #if defined(__linux__)
 #include <sched.h>
@@ -204,6 +205,9 @@ public:
         // CodexAstraLocal: Optional owner-side wall fields have exactly the
         // timing-only pool scope. Unmeasured jobs perform no clock reads.
         std::uint64_t owner_process_ns{}, join_ns{};
+        // CodexAstraLocal: Speculative CPU append is measured apart from the
+        // subsequent join so overlap is never mislabeled as sleeping time.
+        std::uint64_t owner_hook_ns{};
     };
     explicit ParallelWork(unsigned processors = AvailableProcessors(),
                           void (*worker_start)() = nullptr)
@@ -248,9 +252,28 @@ public:
         return "condition_variable";
     }
 
+    // CodexAstraLocal: The ordinary API compiles out every hook branch. Software
+    // and other callers keep the same publication, owner-only and join contract.
     template <typename Function>
     Result Run(std::uint32_t count, std::uint32_t grain, Function&& function,
                bool measure = false) {
+        return RunImpl<false>(count, grain, std::forward<Function>(function),
+                              [] { return false; }, [] {}, measure);
+    }
+
+    // CodexAstraLocal: Prepare only after actual workers exist and before any
+    // borrowed job is published. A false result disables speculative append.
+    template <typename Function, typename Prepare, typename Hook>
+    Result RunWithOwnerHook(std::uint32_t count, std::uint32_t grain, Function&& function,
+                           Prepare&& prepare, Hook&& hook, bool measure = false) {
+        return RunImpl<true>(count, grain, std::forward<Function>(function),
+                             std::forward<Prepare>(prepare), std::forward<Hook>(hook), measure);
+    }
+
+private:
+    template <bool HasHook, typename Function, typename Prepare, typename Hook>
+    Result RunImpl(std::uint32_t count, std::uint32_t grain, Function&& function,
+                   Prepare&& prepare, Hook&& hook, bool measure) {
         // CodexAstraLocal: Small jobs remain on the owner. Worker count grows
         // only when enough independent items exist; no fixed six/eight-core cap.
         grain = std::max(1U, grain);
@@ -266,6 +289,11 @@ public:
             const auto elapsed = measure ? Elapsed(start, std::chrono::steady_clock::now()) : 0;
             return {count, 0, count != 0 ? 1U : 0U, elapsed, 0};
         }
+
+        // CodexAstraLocal: Small jobs and failed worker startup returned above;
+        // they take no transaction snapshot or readiness-publication overhead.
+        bool prepared = false;
+        if constexpr (HasHook) prepared = prepare();
 
         // CodexAstraLocal: Publication is unchanged except for its synchronizer:
         // release generations for futex workers or the original shared mutex
@@ -312,12 +340,37 @@ public:
         const auto owner_end = measure ? std::chrono::steady_clock::now()
                                        : std::chrono::steady_clock::time_point{};
         result.working_threads = result.owner_items != 0 ? 1U : 0U;
+        std::exception_ptr hook_error;
+        ParallelFloatEnvironment::Status hook_flags{};
+        if constexpr (HasHook) {
+            // CodexAstraLocal: One finite attempt while borrowers remain. Ready
+            // result bytes do not release worker, FP or resource ownership.
+            const auto pending = [&] {
+#if defined(__linux__) && (defined(__GNUC__) || defined(__clang__)) && defined(SYS_futex)
+                if (use_futex) return unfinished.Load();
+#endif
+                std::lock_guard guard{mutex};
+                return remaining;
+            };
+            if (prepared && pending() != 0 && !failed.load(std::memory_order_acquire)) {
+                const auto owner_fp = ParallelFloatEnvironment::Capture();
+                try { hook(); } catch (...) { hook_error = std::current_exception(); }
+                hook_flags = ParallelFloatEnvironment::Flags();
+                // CodexAstraLocal: A later shader error precedes an append that
+                // must roll back, so do not merge its speculative flags yet.
+                owner_fp.Apply();
+            }
+        }
+        const auto join_start = measure && HasHook ? std::chrono::steady_clock::now() : owner_end;
+        if constexpr (HasHook) {
+            if (measure) result.owner_hook_ns = Elapsed(owner_end, join_start);
+        }
         ParallelFloatEnvironment::Status extra{};
         std::exception_ptr exception;
         auto collect = [&] {
             if (measure) {
                 result.owner_process_ns = Elapsed(owner_start, owner_end);
-                result.join_ns = Elapsed(owner_end, std::chrono::steady_clock::now());
+                result.join_ns = Elapsed(join_start, std::chrono::steady_clock::now());
             }
             for (unsigned i = 0; i < active; ++i) {
                 result.worker_items += workers[i]->items;
@@ -347,6 +400,12 @@ public:
         ParallelFloatEnvironment::Merge(extra);
         if (exception)
             std::rethrow_exception(exception);
+        // CodexAstraLocal: Shader failure wins after full drainage. Successful
+        // shading retains append flags, including an append-only failure.
+        if constexpr (HasHook) {
+            if (prepared) ParallelFloatEnvironment::Merge(hook_flags);
+            if (hook_error) std::rethrow_exception(hook_error);
+        }
         return result;
     }
 

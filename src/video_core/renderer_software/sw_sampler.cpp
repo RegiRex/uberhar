@@ -131,14 +131,25 @@ static Common::Vec4<u8> FilterTexture(std::span<const u8> data, const TextureLay
                                const Config& config, float u, float v, float lod,
                                Settings::TextureSampling sampling,
                                const std::array<std::span<const u8>, 6>* faces, u32 face) {
-    if (data.size() < layout.bytes || std::isnan(lod)) {
+    if (data.size() < layout.bytes) {
         throw VideoCore::ShaderRecoveryError{"CPU Software texture/mip range is unavailable"};
     }
     const auto linear = [&](Config::TextureFilter filter) {
         return sampling == Settings::TextureSampling::Linear ||
                (sampling == Settings::TextureSampling::GameControlled && filter == Config::Linear);
     };
-    lod += static_cast<float>(config.lod.bias.Value()) / 256.f;
+    // CodexAstraLocal: A fixed register LOD makes the footprint and bias
+    // irrelevant, including uncovered helper singularities. Consumed dynamic
+    // NaN LOD remains a failure distinct from guest-memory bounds. Infinite
+    // footprints keep the existing defined register clamp behavior.
+    if (config.lod.min_level == config.lod.max_level) {
+        lod = static_cast<float>(config.lod.min_level.Value());
+    } else {
+        if (std::isnan(lod)) {
+            throw VideoCore::ShaderRecoveryError{"CPU Software texture LOD is NaN"};
+        }
+        lod += static_cast<float>(config.lod.bias.Value()) / 256.f;
+    }
     // CodexAstraLocal: Match sampler MIN_LOD/MAX_LOD before selecting min/mag;
     // image-level availability clamps afterwards. In particular maxLod=0 uses
     // magnification even for a large footprint (Khronos Vulkan Samplers mapping).
@@ -190,6 +201,21 @@ Common::Vec4<u8> SampleShadow(std::span<const u8> data, const TextureLayout& lay
         const u32 reference = (u32{color.w} << 16) | (u32{color.z} << 8) | color.y;
         return reference > depth ? static_cast<float>(color.x) : 0.f;
     };
+    // CodexAstraLocal: Finite far-outside 2D footprints consist entirely of
+    // border taps. Classify before multiplication/int conversion, preserving
+    // mixed inside/outside edge taps. Cube taps clamp to the selected face, so
+    // clamping their continuous position first is equivalent and bounded.
+    if (!std::isfinite(u) || !std::isfinite(v)) {
+        throw VideoCore::ShaderRecoveryError{"CPU Software shadow coordinate is not finite"};
+    }
+    if (!cube && (u <= -.5f / info.width || v <= -.5f / info.height ||
+                  u >= 1.f + .5f / info.width || v >= 1.f + .5f / info.height)) {
+        return {255, 255, 255, 255};
+    }
+    if (cube) {
+        u = std::clamp(u, .5f / info.width, 1.f - .5f / info.width);
+        v = std::clamp(v, .5f / info.height, 1.f - .5f / info.height);
+    }
     const float x = u * info.width - .5f, y = v * info.height - .5f;
     const s32 ix = FloorCoordinate(x), iy = FloorCoordinate(y);
     const float fx = x - ix, fy = y - iy;
@@ -203,6 +229,12 @@ float TextureLod(const std::array<Common::Vec2f, 4>& quad, u32 lane,
                  u32 width, u32 height) {
     const auto dx = quad[(lane & 2) | 1] - quad[lane & 2];
     const auto dy = quad[(lane & 1) | 2] - quad[lane & 1];
+    // CodexAstraLocal: std::max can hide a NaN in a later operand. A consumed
+    // undefined derivative must reach the explicit LOD failure, not pick a
+    // plausible level depending on which component happened to be first.
+    if (std::isnan(dx.x) || std::isnan(dx.y) || std::isnan(dy.x) || std::isnan(dy.y)) {
+        return std::numeric_limits<float>::quiet_NaN();
+    }
     const float footprint = std::max({std::abs(dx.x) * width, std::abs(dy.x) * width,
                                       std::abs(dx.y) * height, std::abs(dy.y) * height});
     return footprint == 0.f ? -std::numeric_limits<float>::infinity() : std::log2(footprint);

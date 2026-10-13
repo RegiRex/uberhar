@@ -718,6 +718,8 @@ void QtConfig::ReadRendererValues() {
     ReadGlobalSetting(Settings::values.uberhar_force_tev);
     // AstraEH: Preserve the independent bridge switch in desktop configurations.
     ReadGlobalSetting(Settings::values.uberhar_cpu_vertex_bridge);
+    // CodexAstraLocal: Retain the independent Combo placement choice on desktop.
+    ReadGlobalSetting(Settings::values.uberhar_cpu_vertex_only);
     ReadGlobalSetting(Settings::values.async_presentation);
     ReadGlobalSetting(Settings::values.use_hw_shader);
     ReadGlobalSetting(Settings::values.shaders_accurate_mul);
@@ -1275,6 +1277,8 @@ void QtConfig::SaveRendererValues() {
     WriteGlobalSetting(Settings::values.uberhar_force_tev);
     // AstraEH: Persist the same bridge setting used by Android.
     WriteGlobalSetting(Settings::values.uberhar_cpu_vertex_bridge);
+    // CodexAstraLocal: Preserve saved placement across frontend restarts.
+    WriteGlobalSetting(Settings::values.uberhar_cpu_vertex_only);
     WriteGlobalSetting(Settings::values.async_presentation);
     WriteGlobalSetting(Settings::values.use_hw_shader);
     WriteGlobalSetting(Settings::values.shaders_accurate_mul);

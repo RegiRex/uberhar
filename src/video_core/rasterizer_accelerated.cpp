@@ -4,6 +4,7 @@
 
 #include "common/alignment.h"
 #include <cstring> // CodexAstraLocal: Exact owned CPU vertex bytes, no live renderer access.
+#include <type_traits> // CodexAstraLocal: Rollback destroys only trivial owned vertices.
 #include "common/math_util.h"
 #include "core/memory.h"
 #include "video_core/pica/pica_core.h"
@@ -14,6 +15,27 @@ namespace VideoCore {
 DiskResourceLoadCallback RasterizerInterface::switch_disk_resources_callback{};
 
 using Pica::f24;
+
+// CodexAstraLocal: Each input emits at most one triangle, including persistent
+// strip/fan tails. Reserve before any borrower or assembler mutation exists.
+bool RasterizerAccelerated::BeginVertexAppend(u32 inputs, std::size_t& checkpoint) {
+    checkpoint = vertex_batch.size();
+    if (inputs > (vertex_batch.max_size() - checkpoint) / 3) return false;
+    try {
+        vertex_batch.reserve(checkpoint + std::size_t{inputs} * 3);
+    } catch (const std::bad_alloc&) {
+        return false;
+    }
+    return true;
+}
+
+// CodexAstraLocal: A prepared AddTriangle only appends to this reserved vector;
+// partial output is unpublished and can be discarded after all workers join.
+void RasterizerAccelerated::RollbackVertexAppend(std::size_t checkpoint) noexcept {
+    static_assert(std::is_trivially_destructible_v<HardwareVertex>);
+    if (checkpoint > vertex_batch.size()) std::terminate();
+    while (vertex_batch.size() > checkpoint) vertex_batch.pop_back();
+}
 
 static Common::Vec4f ColorRGBA8(const u32 color) {
     const auto rgba =

@@ -183,12 +183,16 @@ void Scheduler::WorkerThread(std::stop_token stop_token) {
             // CodexAstraUlt-2: Stop the entire stream; the producer reports this
             // typed failure. No draw or submission after it may execute.
             VideoCore::ExecuteShaderCommands(shader_failure,
-                [&] { work->ExecuteAll(current_cmdbuf); }, [&] { work->Discard(); });
-
-            // If the chunk was a submission, reallocate the command buffer.
-            if (has_submit && !shader_failure.Failed()) {
-                AllocateWorkerCommandBuffers();
-            }
+                [&] {
+                    work->ExecuteAll(current_cmdbuf);
+                    // CodexAstraLocal: The next command-buffer allocation is
+                    // still worker-owned work. Capture its typed failure before
+                    // it can escape the thread; already submitted ticks remain
+                    // drainable and subsequent chunks are canceled by the latch.
+                    if (has_submit) {
+                        AllocateWorkerCommandBuffers();
+                    }
+                }, [&] { work->Discard(); });
         }
 
         {

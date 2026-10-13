@@ -8,6 +8,7 @@
 #include <dynarmic/interface/optimization_flags.h>
 #include "common/assert.h"
 #include "common/microprofile.h"
+#include "common/scope_exit.h" // CodexAstraLocal: Clear execution ownership on every C++ return.
 #include "core/arm/dynarmic/arm_dynarmic.h"
 #include "core/arm/dynarmic/arm_dynarmic_cp15.h"
 #include "core/arm/dynarmic/arm_exclusive_monitor.h"
@@ -20,6 +21,7 @@
 #endif
 #include "core/hle/kernel/svc.h"
 #include "core/memory.h"
+#include "video_core/shader_recovery_error.h" // CodexAstraLocal: Only typed renderer failures stop safely.
 
 #ifndef SIGILL
 constexpr u32 SIGILL = 4;
@@ -87,7 +89,18 @@ public:
     }
 
     void CallSVC(std::uint32_t swi) override {
-        svc_context.CallSVC(swi);
+        // CodexAstraLocal: Generated ARM frames are not an exception-unwind
+        // boundary. SVC already emits CheckHalt after this callback; return
+        // normally through it and rethrow immediately from Run/Step instead.
+        try {
+            svc_context.CallSVC(swi);
+        } catch (const VideoCore::ShaderRecoveryError&) {
+            if (!parent.renderer_failure) {
+                parent.renderer_failure = std::current_exception();
+            }
+            ASSERT(parent.executing_jit);
+            parent.executing_jit->HaltExecution();
+        }
     }
 
     void ExceptionRaised(VAddr pc, Dynarmic::A32::Exception exception) override {
@@ -190,21 +203,39 @@ ARM_Dynarmic::~ARM_Dynarmic() = default;
 MICROPROFILE_DEFINE(ARM_Jit, "ARM JIT", "ARM JIT", MP_RGB(255, 64, 64));
 
 void ARM_Dynarmic::Run() {
+    // CodexAstraLocal: Deliver terminal state even on debugger early returns.
+    if (renderer_failure) [[unlikely]] {
+        std::rethrow_exception(renderer_failure);
+    }
     ASSERT(memory.GetCurrentPageTable() == current_page_table);
     MICROPROFILE_SCOPE(ARM_Jit);
     if (break_flag) [[unlikely]] {
         return;
     }
 
-    jit->Run();
+    executing_jit = jit;
+    SCOPE_EXIT({ executing_jit = nullptr; });
+    executing_jit->Run();
+    if (renderer_failure) [[unlikely]] {
+        std::rethrow_exception(renderer_failure);
+    }
 }
 
 void ARM_Dynarmic::Step() {
+    // CodexAstraLocal: Step has the same terminal/error ownership as Run.
+    if (renderer_failure) [[unlikely]] {
+        std::rethrow_exception(renderer_failure);
+    }
     if (break_flag) [[unlikely]] {
         return;
     }
 
-    jit->Step();
+    executing_jit = jit;
+    SCOPE_EXIT({ executing_jit = nullptr; });
+    executing_jit->Step();
+    if (renderer_failure) [[unlikely]] {
+        std::rethrow_exception(renderer_failure);
+    }
 }
 
 void ARM_Dynarmic::SetPC(u32 pc) {

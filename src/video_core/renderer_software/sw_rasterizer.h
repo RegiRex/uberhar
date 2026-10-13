@@ -52,7 +52,7 @@ private:
         f24 w;
     };
     bool PrepareTextures(std::span<const Pica::TexturingRegs::FullTextureConfig, 3> textures,
-                         std::array<PreparedTexture, 3>& prepared) const;
+                         std::array<PreparedTexture, 3>& prepared, u32 demand_mask) const;
     /// Computes the screen coordinates of the provided vertex.
     void MakeScreenCoords(Vertex& vtx);
 
@@ -65,7 +65,8 @@ private:
         std::span<const Common::Vec2<f24>, 3> uv,
         std::span<const Pica::TexturingRegs::FullTextureConfig, 3> textures, f24 tc0_w,
         const std::array<PreparedTexture, 3>& prepared,
-        const std::array<TextureCoordinates, 4>& quad, u32 lane) const;
+        const std::array<TextureCoordinates, 4>& quad, u32 lane, u32 demand_mask,
+        u32 footprint_mask, u16 pixel_x, u16 pixel_y) const;
 
     /// Returns the final pixel color with blending or logic ops applied.
     Common::Vec4<u8> PixelColor(u16 x, u16 y, Common::Vec4<u8> combiner_output) const;
@@ -94,6 +95,10 @@ private:
     // Persistent workers borrow only this triangle and join before it returns.
     Common::Uberhar::ParallelWork sw_workers;
     Framebuffer fb;
+    // CodexAstraLocal TEST-ONLY LOG: One owner-side first-fault payload per
+    // renderer, after join. Remove when the sampled numeric failures have
+    // captured reproductions and regressions; no successful-pixel logging.
+    bool sampling_failure_logged = false;
 };
 
 } // namespace SwRenderer

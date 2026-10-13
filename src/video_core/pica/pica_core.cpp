@@ -22,6 +22,7 @@
 #include "video_core/pica/vertex_loader.h"
 #include "video_core/pica/uberhar_parallel_vertex.h" // CodexAstraLocal: Prove invocation independence.
 #include "video_core/pica/uberhar_vertex_parallel_batch.h" // CodexAstraLocal: Ordered parallel FIFO misses.
+#include "video_core/pica/uberhar_vertex_append.h" // CodexAstraLocal: Reversible ordered CPU prefix.
 #include "video_core/pica/uberhar_index_bounds.h" // AstraPro: Exact bounded retry.
 #include "video_core/pica/uberhar_vertex_timing_batch.h" // CodexAstraLocal: Separate diagnostic loop.
 #include "video_core/renderer_vulkan/uberhar_gpu_vertex_policy.h" // AstraPro: Pure admission.
@@ -144,6 +145,9 @@ struct PicaCore::ParallelVertexState {
     // ordered submission from independent background guest-memory writers.
     u64 submission_writes{};
     u64 owner_invocations{}, worker_invocations{}, chunks{};
+    // CodexAstraLocal TEST-ONLY LOG: Remove prefix evidence after target overlap
+    // qualification; counts are completed append work, not extra shader work.
+    u64 prefix_chunks{}, prefix_inputs{}, prefix_ns{};
     // CodexAstraLocal: One in 257 completed admitted draws measures phase wall
     // time. The prime stride avoids always sampling the same power-of-two slot;
     // these are sampled costs, never scaled into an asserted whole-run budget.
@@ -209,7 +213,14 @@ struct PicaCore::ParallelVertexState {
 PicaCore::PicaCore(Memory::MemorySystem& memory_, std::shared_ptr<DebugContext> debug_context_)
     : memory{memory_}, debug_context{std::move(debug_context_)},
       geometry_pipeline{regs.internal, gs_unit, gs_setup},
-      shader_engine{CreateEngine(Settings::values.use_shader_jit.GetValue())} {
+      shader_engine{CreateEngine(Settings::values.use_shader_jit.GetValue())},
+      // CodexAstraLocal: A placement comparison suppresses only Combo's guest
+      // GPU vertices. Fragment/compute capabilities and worker ownership remain.
+      cpu_vertex_only{Settings::UsesReadyGpuVertices(Settings::values.uberhar_test_mode.GetValue()) &&
+                      Settings::values.uberhar_cpu_vertex_only.GetValue()} {
+    // CodexAstraLocal Log Line: One immutable route label binds performance
+    // comparisons to actual placement, without per-draw logging or live toggles.
+    LOG_INFO(Render, "Uberhar: combo_cpu_vertices_only={}", cpu_vertex_only);
     InitializeRegs();
     dirty_regs.SetAllDirty();
 
@@ -370,7 +381,8 @@ void PicaCore::ReportVirtualVertices(const char* kind, std::chrono::steady_clock
             "independent={} temporary_carry={} address_carry={} condition_carry={} output_carry={} other_refusals={} "
             "serial_small_invocations={} serial_carry_invocations={} serial_other_invocations={} "
             "sampled_draws={} sampled_inputs={} sampled_invocations={} sampled_chunks={} "
-            "plan_ns={} pool_ns={} owner_process_ns={} join_ns={} submit_ns={} timing_stride=257 wait_transport={} "
+            "plan_ns={} pool_ns={} owner_process_ns={} join_ns={} submit_ns={} "
+            "prefix_chunks={} prefix_inputs={} prefix_ns={} timing_stride=257 wait_transport={} "
             "scope=certified_no_gs_fifo_misses serial_scope=completed_attempted_draws submit=ordered_owner observer_policy=serial",
             kind, parallel.batch.Available(), parallel.batch.CreatedWorkers(), parallel.peak_threads,
             parallel.checks, parallel.parallel_batches, parallel.chunks, parallel.owner_invocations,
@@ -391,6 +403,7 @@ void PicaCore::ReportVirtualVertices(const char* kind, std::chrono::steady_clock
             parallel.sampled_draws, parallel.sampled_inputs, parallel.sampled_invocations,
             parallel.sampled_chunks, parallel.plan_ns, parallel.pool_ns,
             parallel.owner_process_ns, parallel.join_ns, parallel.submit_ns,
+            parallel.prefix_chunks, parallel.prefix_inputs, parallel.prefix_ns,
             parallel.batch.WaitTransport());
     }
 
@@ -1526,7 +1539,8 @@ void PicaCore::DrawArrays(bool is_indexed) {
     // CodexAstraUlt: Replace AstraPro's Automatic-only gate with the same vertex policy for
     // both Combo presets; the diagnostic preset changes fragments, never vertex eligibility.
     const bool ready_gpu_mode =
-        Settings::UsesReadyGpuVertices(Settings::values.uberhar_test_mode.GetValue());
+        Settings::UsesReadyGpuVertices(Settings::values.uberhar_test_mode.GetValue()) &&
+        !cpu_vertex_only; // CodexAstraLocal: Reuse full CPU execution before GPU mutation.
     if (ready_gpu_mode) {
         // AstraPro: Explain zero coverage without guessing which topologies a game uses.
         const u32 topology =
@@ -1562,7 +1576,9 @@ void PicaCore::DrawArrays(bool is_indexed) {
     }
 
     // Attempt to use hardware vertex shaders if possible.
-    if (accelerate_draw && rasterizer->AccelerateDrawBatch(is_indexed)) {
+    // CodexAstraLocal: A later mutable hardware-shader toggle cannot bypass the
+    // session's CPU placement through the ordinary acceleration path either.
+    if (accelerate_draw && !cpu_vertex_only && rasterizer->AccelerateDrawBatch(is_indexed)) {
         return;
     }
 
@@ -2113,6 +2129,9 @@ void PicaCore::LoadVertices(bool is_indexed, std::chrono::steady_clock::time_poi
                 // CodexAstraLocal: Sample every chunk of selected admitted draws without
                 // disabling their workers or adding per-vertex timing hooks.
                 const bool measure_parallel = parallel.parallel_batches % 257 == 0;
+                // CodexAstraLocal: Keep early output private and reversible;
+                // the batch joins every borrower before GPU work or return.
+                VertexAppendTransaction append{primitive_assembler, *rasterizer, triangle};
                 counts = parallel.batch.Run(pipeline.num_vertices, is_indexed, vertex_at,
                     [&](std::span<const NativeParallelBatch::Invocation> inputs,
                         std::span<OutputVertex> outputs) {
@@ -2122,16 +2141,13 @@ void PicaCore::LoadVertices(bool is_indexed, std::chrono::steady_clock::time_poi
                             context.Run(independent);
                             outputs[i] = plan.Convert(independent);
                         }
-                    }, [&](u32 size, const auto& get) {
-                        // CodexAstraLocal: The admitted accelerated sink only
-                        // appends owned vertices: it neither observes/reenters
-                        // this assembler nor retains these borrowed references.
-                        primitive_assembler.SubmitOrdered(size, get, triangle);
-                    }, measure_parallel);
+                    }, append, measure_parallel);
                 const auto& work = parallel.batch.LastWork();
                 ++parallel.parallel_batches;
                 parallel.owner_invocations += work.owner_invocations;
                 parallel.worker_invocations += work.worker_invocations;
+                parallel.prefix_chunks += work.prefix_chunks;
+                parallel.prefix_inputs += work.prefix_inputs;
                 if (measure_parallel) {
                     ++parallel.sampled_draws;
                     parallel.sampled_inputs += work.sampled_inputs;
@@ -2141,6 +2157,7 @@ void PicaCore::LoadVertices(bool is_indexed, std::chrono::steady_clock::time_poi
                     parallel.pool_ns += work.pool_ns;
                     parallel.owner_process_ns += work.owner_process_ns;
                     parallel.join_ns += work.join_ns;
+                    parallel.prefix_ns += work.prefix_ns;
                     parallel.submit_ns += work.submit_ns;
                 }
                 // CodexAstraLocal: Count completed work once, outside the vertex

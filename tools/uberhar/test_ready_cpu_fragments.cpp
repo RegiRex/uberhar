@@ -160,7 +160,9 @@ void FailuresProfilesAndModes() {
         PipelineCache p; auto info=Info(); auto config=Config();
         p.ready_cpu_bank.reset();
         if(mode==0) p.ready_vertex_worker.reset();
-        else p.allow_specialized_fragments=false;
+        // CodexAstraLocal: This control disables the CPU-layout tier directly;
+        // GPU specialization no longer controls Native CPU fragment eligibility.
+        else p.allow_full_cpu_fragments=false;
         for(unsigned n=0;n<20;++n) { DrawCpu(p,info,config); Advance(p); }
         Require(p.ready_cpu_requests==0 && p.ready_optional_attempts==0,
                 "control modes have no adaptive metadata work");
@@ -259,14 +261,18 @@ void BindTransportAndModes() {
     Settings::values.uberhar_test_mode.value = mode;
     p.allow_specialized_fragments = false;
     p.allow_static_cpu_tev = mode==Settings::UberharTestMode::Native;
+    // CodexAstraLocal: Full CPU fragments now belong to Native independently
+    // of GPU capabilities; other control modes still make no optional demand.
+    p.allow_full_cpu_fragments = mode==Settings::UberharTestMode::Native;
     p.Fresh(c);
     auto i = Info();
     Require(p.BindPipeline(i, true, nullptr, true, nullptr, &layout, &token),
             "control mode draws");
     p.scheduler.Finish();
     Require(p.ready_cpu_requests == (mode==Settings::UberharTestMode::Native ? 1U : 0U) &&
-                p.curr_disk_cache->ready_fragment_requests == 0,
-            "only Native control has partial CPU demand");
+                p.curr_disk_cache->ready_fragment_requests ==
+                    (mode==Settings::UberharTestMode::Native ? 1U : 0U),
+            "only Native control has independent full CPU demand");
   }
   Settings::values.uberhar_test_mode.value =
       Settings::UberharTestMode::Automatic;
@@ -288,10 +294,8 @@ void BindTransportAndModes() {
     auto call = [&](unsigned n, bool ready, bool dirty) {
       auto x = Info();
       p.Fresh(c);
-      if (!ready)
-        p.allow_specialized_fragments = false;
-      else
-        p.allow_specialized_fragments = true;
+      // CodexAstraLocal: Switch the independent CPU tier for the G/S/G sequence.
+      p.allow_full_cpu_fragments = ready;
       p.tev_constants = {};
       p.tev_constants.framebuffer = n;
       p.offsets = {n, n + 1, n + 2};
@@ -364,6 +368,8 @@ void BindTransportAndModes() {
         Pica::FramebufferRegs::CompareFunc::GreaterThan);
     p.Fresh(c);
     p.allow_specialized_fragments = true;
+    // CodexAstraLocal: Restore the CPU-layout tier before the dynamic-key check.
+    p.allow_full_cpu_fragments = true;
     auto *g = p.GetTevFallback(changed, true);
     auto *same = p.PrepareReadyCpuFragment(changed, g, layout, &token);
     Require((same == special) == dynamic,

@@ -32,7 +32,11 @@ int main() {
         values.uberhar_hybrid_tev = false;
         values.resolution_factor = 3;
         values.use_integer_scaling = true;
+        // CodexAstraLocal: The independent placement preference survives preset
+        // application and never changes fragment/compute capabilities below.
+        values.uberhar_cpu_vertex_only = true;
         ApplyUberharTestProfile();
+        Check(values.uberhar_cpu_vertex_only.GetValue(), "preset erased CPU placement");
         Check(values.graphics_api.GetValue() == GraphicsAPI::Vulkan, "profile must select Vulkan");
         Check(!values.use_hw_shader.GetValue() && values.use_shader_jit.GetValue(),
               "profile must use CPU JIT with GPU vertex specialization disabled");
@@ -48,6 +52,10 @@ int main() {
         const auto id = static_cast<u32>(mode);
         Check(UsesReadyGpuVertices(mode) == (id == 3 || id == 4), "vertex capability changed");
         Check(AllowsSpecializedFragments(mode) == (id == 3), "fragment capability changed");
+        // CodexAstraLocal: Native gains full CPU-layout fragments only; these
+        // independent assertions retain every original GPU route restriction.
+        Check(AllowsFullCpuFragments(mode) == (id == 1 || id == 3),
+              "CPU full-fragment capability changed");
         Check(UsesAutomaticCompute(mode) == (id == 3 || id == 4), "compute selector changed");
         Check(AllowsComputeRendering(mode) == (id >= 2), "compute capability changed");
         // CodexAstraLocal: Isolation is exactly persisted mode2, independently

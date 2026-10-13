@@ -10,6 +10,7 @@
 #include <span>
 #include <vector>
 #include "common/uberhar_parallel_work.h"
+#include "common/scope_exit.h" // CodexAstraLocal: Roll back unpublished owner append on failure.
 #include "video_core/pica/uberhar_vertex_output.h"
 
 namespace Pica {
@@ -26,6 +27,8 @@ public:
     };
     struct Work {
         u64 owner_invocations{}, worker_invocations{}, chunks{};
+        // CodexAstraLocal: Count useful completed prefixes, not requested workers.
+        u64 prefix_chunks{}, prefix_inputs{}, prefix_ns{};
         unsigned peak_threads{};
         // CodexAstraLocal: These totals cover only explicitly sampled draws.
         // Owner/worker invocation totals above continue to cover every job.
@@ -110,10 +113,74 @@ public:
             // misses; keep fewer than 256 actual invocations on the owner.
             const u32 grain = misses < 256 ? std::max(1U, misses) : Grain;
             const auto pool_start = measure ? Clock::now() : Clock::time_point{};
-            const auto completed = pool.Run(misses, grain, [&](u32 first, u32 last) {
+            // CodexAstraLocal: Only an explicitly reversible append sink opts
+            // into overlap. Scalar/ordinary callbacks retain the original path.
+            constexpr bool reversible = requires {
+                submit.Begin(size); submit.Rollback(); submit.Commit();
+            };
+            const auto get = [&](u32 offset) noexcept -> const OutputVertex& {
+                const u32 source = references[offset];
+                return source < capacity ? results[source] : previous[source - capacity];
+            };
+            u32 submitted{};
+            bool transaction = false;
+            SCOPE_EXIT({
+                if constexpr (reversible) {
+                    if (transaction) submit.Rollback();
+                }
+            });
+            const auto shade_range = [&](u32 first, u32 last) {
                 shade(std::span<const Invocation>{invocations}.subspan(first, last - first),
                       std::span<OutputVertex>{results}.subspan(first, last - first));
-            }, measure);
+            };
+            Common::Uberhar::ParallelWork::Result completed;
+            const auto execute = [&] {
+                if constexpr (reversible) {
+                    if (misses >= 256) {
+                        const u32 groups = (misses + Grain - 1) / Grain;
+                        return pool.RunWithOwnerHook(misses, grain,
+                            [&](u32 first, u32 last) {
+                                shade_range(first, last);
+                                // CodexAstraLocal: Setup precedes publication;
+                                // a partial or failed grain is never readable.
+                                if (transaction)
+                                    ready[first / Grain].store(true, std::memory_order_release);
+                            }, [&] {
+                                // CodexAstraLocal: This runs only after actual
+                                // workers exist, before publication. Failed setup
+                                // uses the ordinary joined callback, with no replay.
+                                try {
+                                    if (ready_slots < groups) {
+                                        auto replacement = std::make_unique<std::atomic<bool>[]>(groups);
+                                        ready = std::move(replacement);
+                                        ready_slots = groups;
+                                    }
+                                } catch (const std::bad_alloc&) { return false; }
+                                if (!submit.Begin(size)) return false;
+                                for (u32 i = 0; i < groups; ++i)
+                                    ready[i].store(false, std::memory_order_relaxed);
+                                transaction = true;
+                                return true;
+                            }, [&] {
+                                // CodexAstraLocal: One acquire scan stops at the
+                                // first unfinished grain. Its original input index
+                                // also safely bounds FIFO hits before that grain.
+                                u32 done{};
+                                while (done < groups && ready[done].load(std::memory_order_acquire))
+                                    ++done;
+                                submitted = done == groups ? size :
+                                    invocations[done * Grain].index - static_cast<u32>(begin);
+                                if (submitted) {
+                                    submit(submitted, get);
+                                    ++work.prefix_chunks;
+                                    work.prefix_inputs += submitted;
+                                }
+                            }, measure);
+                    }
+                }
+                return pool.Run(misses, grain, shade_range, measure);
+            };
+            completed = execute();
             const auto submit_start = measure ? Clock::now() : Clock::time_point{};
             counts.invocations += misses;
             work.owner_invocations += completed.owner_items;
@@ -123,15 +190,17 @@ public:
             // CodexAstraLocal: One immutable result generation remains alive
             // through ordered submission. Qualified sinks consume a whole range;
             // ordinary callable sinks retain scalar delivery and ownership.
-            const auto get = [&](u32 offset) noexcept -> const OutputVertex& {
-                const u32 source = references[offset];
-                return source < capacity ? results[source] : previous[source - capacity];
-            };
             if constexpr (requires { submit(size, get); }) {
-                submit(size, get);
+                if (submitted < size)
+                    submit(size - submitted, [&](u32 offset) noexcept -> const OutputVertex& {
+                        return get(submitted + offset);
+                    });
             } else {
                 for (u32 offset = 0; offset < size; ++offset)
                     submit(get(offset));
+            }
+            if constexpr (reversible) {
+                if (transaction) { submit.Commit(); transaction = false; }
             }
             // CodexAstraLocal: Carry exactly the FIFO's final payloads across
             // storage chunks, without re-shading hits or resetting primitive tails.
@@ -156,6 +225,7 @@ public:
                 work.pool_ns += ns(submit_start - pool_start);
                 work.owner_process_ns += completed.owner_process_ns;
                 work.join_ns += completed.join_ns;
+                work.prefix_ns += completed.owner_hook_ns;
                 work.submit_ns += ns(submit_end - submit_start);
             }
         }
@@ -167,6 +237,10 @@ private:
     std::vector<Invocation> invocations;
     std::vector<OutputVertex> results;
     std::vector<u32> references;
+    // CodexAstraLocal: Bounded by this chunk's misses; no readiness allocation
+    // for scalar sinks, small jobs or unsuccessful worker startup.
+    std::unique_ptr<std::atomic<bool>[]> ready;
+    u32 ready_slots{};
     u32 capacity{};
     Work work;
 };

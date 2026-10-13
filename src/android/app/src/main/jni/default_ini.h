@@ -123,6 +123,10 @@ static const char* android_config_default_file_content = (BOOST_HANA_STRING(R"(
 # Requires a restart. 0: Off, 1 (default): On
 )") DECLARE_KEY(uberhar_cpu_vertex_bridge) BOOST_HANA_STRING(R"(
 
+# CodexAstraLocal: Keep Combo guest vertices on CPU, preserving fragment policy.
+# Requires restart; 0 (default): allow ready GPU vertices, 1: CPU vertices only.
+)") DECLARE_KEY(uberhar_cpu_vertex_only) BOOST_HANA_STRING(R"(
+
 # Whether to emit PICA fragment shader using SPIRV or GLSL (Vulkan only)
 # 0: GLSL, 1: SPIR-V (default)
 )") DECLARE_KEY(spirv_shader_gen) BOOST_HANA_STRING(R"(

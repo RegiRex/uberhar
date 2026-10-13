@@ -39,6 +39,9 @@ def main():
     for field, policy, prefix in (
             ('allow_specialized_fragments', 'AllowsSpecializedFragments', ''),
             ('allow_static_cpu_tev', 'AllowsStaticCpuTev', 'hybrid_tev&&'),
+            # CodexAstraLocal: Native CPU full fragments must not inherit the
+            # different ready-GPU permission tested below.
+            ('allow_full_cpu_fragments', 'AllowsFullCpuFragments', 'hybrid_tev&&'),
             ('allow_ready_gpu_vertices', 'UsesReadyGpuVertices', 'hybrid_tev&&')):
         assert (f'{field}{{{prefix}Settings::{policy}'
                 '(Settings::values.uberhar_test_mode.GetValue())}') in constructor, field

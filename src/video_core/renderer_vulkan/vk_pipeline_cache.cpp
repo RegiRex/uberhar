@@ -119,6 +119,10 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
       // static TEV on the same bounded lane as full Combo's optional pipelines.
       allow_static_cpu_tev{hybrid_tev &&
           Settings::AllowsStaticCpuTev(Settings::values.uberhar_test_mode.GetValue())},
+      // CodexAstraLocal: Native can spend bounded CPU compilation on cheaper
+      // fragment execution while keeping guest vertex work on its CPU workers.
+      allow_full_cpu_fragments{hybrid_tev &&
+          Settings::AllowsFullCpuFragments(Settings::values.uberhar_test_mode.GetValue())},
       // CodexAstraLocal: An optional CPU fragment worker is not GPU eligibility.
       // Freeze the original promotion policy independently of worker ownership.
       allow_ready_gpu_vertices{hybrid_tev &&
@@ -158,7 +162,7 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
             ready_vertex_worker = std::make_unique<Common::ThreadWorker>(1, "Uberhar optional");
     }
     // CodexAstraLocal: Optional metadata failure leaves complete generic draws.
-    // Full Combo retains eight full owners/64 attempts; Native and full Combo
+    // Native and full Combo retain eight full owners/64 attempts and both
     // can add eight partial owners/16 attempts. Other modes omit the CPU bank.
     if (ready_vertex_worker && allow_static_cpu_tev) {
         try { ready_cpu_bank = std::make_unique<ReadyCpuBank>(); }
@@ -1101,7 +1105,10 @@ GraphicsPipeline* PipelineCache::PrepareReadyCpuFragment(
             *partial_use = candidate.partial;
             return candidate.ready;
         };
-        const bool allow_full = PreferReadySpecializedFragment(tev_user);
+        // CodexAstraLocal: This branch already requires the exact CPU layout,
+        // trivial VS and a complete generic draw. Native's force_tev still guards
+        // other routes; full fragments here do not authorize GPU guest vertices.
+        const bool allow_full = allow_full_cpu_fragments && tev_user.IsCacheable();
         Candidate full{false, allow_full
             ? curr_disk_cache->UseReadyFragmentShader(*virtual_fs_config, tev_user, false)
             : Fragment{}, current_shaders, info};

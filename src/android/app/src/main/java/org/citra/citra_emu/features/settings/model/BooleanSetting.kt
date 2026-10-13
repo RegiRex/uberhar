@@ -19,6 +19,8 @@ enum class BooleanSetting(
     UBERHAR_FORCE_TEV(SettingKeys.uberhar_force_tev(), Settings.SECTION_RENDERER, false),
     // AstraEH: Enabled within hybrid mode; can be disabled independently for comparison.
     UBERHAR_CPU_VERTEX_BRIDGE(SettingKeys.uberhar_cpu_vertex_bridge(), Settings.SECTION_RENDERER, true),
+    // CodexAstraLocal: Preserve the old Combo default; comparison needs a restart.
+    UBERHAR_CPU_VERTEX_ONLY(SettingKeys.uberhar_cpu_vertex_only(), Settings.SECTION_RENDERER, false),
     DISABLE_SPIRV_OPTIMIZER(SettingKeys.disable_spirv_optimizer(), Settings.SECTION_RENDERER, true),
     PLUGIN_LOADER(SettingKeys.plugin_loader(), Settings.SECTION_SYSTEM, false),
     ALLOW_PLUGIN_LOADER(SettingKeys.allow_plugin_loader(), Settings.SECTION_SYSTEM, true),

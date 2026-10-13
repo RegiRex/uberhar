@@ -367,6 +367,8 @@ jobs:
       # too, distinguishing deliberate terminal controls from a stalled job.
       # CodexAstraLocal: Include packed-decoder compiler/semantic evidence even
       # when a candidate fails before Android packaging or publication.
+      # CodexAstraLocal: Preserve typed renderer recovery in the existing guest
+      # JIT gate, including raw outcomes and the exact extracted callback bodies.
       - name: Upload ARM64 shader contract evidence
         if: always()
         uses: actions/upload-artifact@v7
@@ -382,6 +384,9 @@ jobs:
             build/uberhar-probe/guest-a64-fpsr/**/provenance.json
             build/uberhar-probe/guest-a64-fpsr/**/*.log
             build/uberhar-probe/guest-a64-fpsr/**/*.jsonl
+            build/uberhar-probe/guest-a64-fpsr/**/*.stdout
+            build/uberhar-probe/guest-a64-fpsr/**/*.stderr
+            build/uberhar-probe/guest-a64-fpsr/**/recovery_actual.inc
             build/uberhar-probe/parallel-vertex-observable/**/provenance.json
             build/uberhar-probe/parallel-vertex-observable/**/*.log
             build/uberhar-probe/parallel-vertex-observable/**/*.jsonl

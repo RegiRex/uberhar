@@ -41,6 +41,8 @@ object SettingKeys {
     external fun uberhar_force_tev(): String
     // AstraEH: Native key registration is generated from the shared CMake list.
     external fun uberhar_cpu_vertex_bridge(): String
+    // CodexAstraLocal: Generated native key for independent Combo placement.
+    external fun uberhar_cpu_vertex_only(): String
     // AstraEH: Persist only the selected profile, not three conflicting booleans.
     external fun uberhar_test_mode(): String
     external fun async_presentation(): String

@@ -3,6 +3,8 @@
 // Refer to the license.txt file included.
 
 #include <boost/container/static_vector.hpp>
+#include <bit> // CodexAstraLocal: Exceptional diagnostics preserve float operand bits.
+#include <limits>
 #include "common/logging/log.h"
 #include "common/microprofile.h"
 #include "common/quaternion.h"
@@ -17,6 +19,7 @@
 #include "video_core/renderer_software/sw_proctex.h"
 #include "video_core/renderer_software/sw_rasterizer.h"
 #include "video_core/renderer_software/sw_texturing.h"
+#include "video_core/renderer_software/sw_texture_demand.h"
 #include "video_core/texture/texture_decode.h"
 #include "video_core/shader_recovery_error.h"
 
@@ -214,7 +217,24 @@ void RasterizerSoftware::AddTriangle(const Pica::OutputVertex& v0, const Pica::O
             vtx2.screenpos.x.ToFloat32(), vtx2.screenpos.y.ToFloat32(),
             vtx2.screenpos.z.ToFloat32());
 
-        ProcessTriangle(vtx0, vtx1, vtx2);
+        try {
+            ProcessTriangle(vtx0, vtx1, vtx2);
+        } catch (const VideoCore::ShaderRecoveryError& error) {
+            // CodexAstraLocal TEST-ONLY LOG: ParallelWork has joined before
+            // this owner catch. Remove after the first-fault numerical cases
+            // are reconstructed and covered; never log from every worker/pixel.
+            if (!sampling_failure_logged) {
+                sampling_failure_logged = true;
+                LOG_ERROR(Render_Software,
+                    "Software first fault: {} triangle={} screen=({},{},{})/({},{},{})/({},{},{})",
+                    error.what(), i, vtx0.screenpos.x.ToFloat32(), vtx0.screenpos.y.ToFloat32(),
+                    vtx0.screenpos.z.ToFloat32(), vtx1.screenpos.x.ToFloat32(),
+                    vtx1.screenpos.y.ToFloat32(), vtx1.screenpos.z.ToFloat32(),
+                    vtx2.screenpos.x.ToFloat32(), vtx2.screenpos.y.ToFloat32(),
+                    vtx2.screenpos.z.ToFloat32());
+            }
+            throw;
+        }
     }
 }
 
@@ -317,17 +337,39 @@ void RasterizerSoftware::ProcessTriangle(const Vertex& v0, const Vertex& v1, con
 
     const auto textures = regs.texturing.GetTextures();
     const auto tev_stages = regs.texturing.GetTevStages();
-    bool needs_footprint = false;
+    // CodexAstraLocal: Use the same immutable demand for range mapping, covered
+    // interpolation, helper interpolation and sampling. A fixed LOD cannot
+    // consume quad derivatives, while another unit may still need its own.
+    const u32 demand_mask = TextureDemandMask(tev_stages, regs.lighting);
+    u32 coordinate_mask = 0, footprint_mask = 0, helper_coordinate_mask = 0;
+    bool needs_w = false, helper_needs_w = false;
     for (u32 i = 0; i < 3; ++i) {
         const auto& t = textures[i];
-        needs_footprint |= t.enabled && t.config.address != 0 &&
-            (i != 0 || t.config.type == TexturingRegs::TextureConfig::Texture2D ||
-             t.config.type == TexturingRegs::TextureConfig::TextureCube ||
-             t.config.type == TexturingRegs::TextureConfig::Projection2D);
+        const auto type = i == 0 ? t.config.type.Value() : TexturingRegs::TextureConfig::Texture2D;
+        if (!(demand_mask & (1U << i)) || !t.enabled || t.config.address == 0 ||
+            type == TexturingRegs::TextureConfig::Disabled) continue;
+        const u32 coordinate = i == 2 && regs.texturing.main_config.texture2_use_coord1 ? 1 : i;
+        coordinate_mask |= 1U << coordinate;
+        const bool shadow = type == TexturingRegs::TextureConfig::Shadow2D ||
+                            type == TexturingRegs::TextureConfig::ShadowCube;
+        const bool use_w = type != TexturingRegs::TextureConfig::Texture2D;
+        needs_w |= use_w;
+        if (!shadow && t.config.lod.min_level != t.config.lod.max_level) {
+            footprint_mask |= 1U << i;
+            helper_coordinate_mask |= 1U << coordinate;
+            helper_needs_w |= use_w;
+        }
+    }
+    if ((demand_mask & 8U) && regs.texturing.main_config.texture3_enable) {
+        const u32 coord = regs.texturing.main_config.texture3_coordinates;
+        if (coord >= 3) {
+            throw VideoCore::ShaderRecoveryError{"CPU Software procedural coordinate selector is invalid"};
+        }
+        coordinate_mask |= 1U << coord;
     }
 
     std::array<PreparedTexture, 3> prepared_textures;
-    const bool parallel_safe = PrepareTextures(textures, prepared_textures);
+    const bool parallel_safe = PrepareTextures(textures, prepared_textures, demand_mask);
 
     // CodexAstraLocal: Evaluate all four perspective-correct quad positions,
     // including uncovered helper lanes, before deriving a texture footprint.
@@ -341,11 +383,14 @@ void RasterizerSoftware::ProcessTriangle(const Vertex& v0, const Vertex& v1, con
         const auto attr = [&](f24 a, f24 b, f24 c) {
             return Common::Dot(Common::MakeVec(a, b, c), barycentric) * inverse;
         };
-        TextureCoordinates result;
-        result.uv[0] = {attr(v0.tc0.u(), v1.tc0.u(), v2.tc0.u()), attr(v0.tc0.v(), v1.tc0.v(), v2.tc0.v())};
-        result.uv[1] = {attr(v0.tc1.u(), v1.tc1.u(), v2.tc1.u()), attr(v0.tc1.v(), v1.tc1.v(), v2.tc1.v())};
-        result.uv[2] = {attr(v0.tc2.u(), v1.tc2.u(), v2.tc2.u()), attr(v0.tc2.v(), v1.tc2.v(), v2.tc2.v())};
-        result.w = attr(v0.tc0_w, v1.tc0_w, v2.tc0_w);
+        TextureCoordinates result{};
+        if (helper_coordinate_mask & 1U)
+            result.uv[0] = {attr(v0.tc0.u(), v1.tc0.u(), v2.tc0.u()), attr(v0.tc0.v(), v1.tc0.v(), v2.tc0.v())};
+        if (helper_coordinate_mask & 2U)
+            result.uv[1] = {attr(v0.tc1.u(), v1.tc1.u(), v2.tc1.u()), attr(v0.tc1.v(), v1.tc1.v(), v2.tc1.v())};
+        if (helper_coordinate_mask & 4U)
+            result.uv[2] = {attr(v0.tc2.u(), v1.tc2.u(), v2.tc2.u()), attr(v0.tc2.v(), v1.tc2.v(), v2.tc2.v())};
+        if (helper_needs_w) result.w = attr(v0.tc0_w, v1.tc0_w, v2.tc0_w);
         return result;
     };
 
@@ -456,26 +501,33 @@ void RasterizerSoftware::ProcessTriangle(const Vertex& v0, const Vertex& v1, con
                               255)),
                 };
 
-                std::array<Common::Vec2<f24>, 3> uv;
-                uv[0].u() = get_interpolated_attribute(v0.tc0.u(), v1.tc0.u(), v2.tc0.u());
-                uv[0].v() = get_interpolated_attribute(v0.tc0.v(), v1.tc0.v(), v2.tc0.v());
-                uv[1].u() = get_interpolated_attribute(v0.tc1.u(), v1.tc1.u(), v2.tc1.u());
-                uv[1].v() = get_interpolated_attribute(v0.tc1.v(), v1.tc1.v(), v2.tc1.v());
-                uv[2].u() = get_interpolated_attribute(v0.tc2.u(), v1.tc2.u(), v2.tc2.u());
-                uv[2].v() = get_interpolated_attribute(v0.tc2.v(), v1.tc2.v(), v2.tc2.v());
+                std::array<Common::Vec2<f24>, 3> uv{};
+                if (coordinate_mask & 1U) {
+                    uv[0].u() = get_interpolated_attribute(v0.tc0.u(), v1.tc0.u(), v2.tc0.u());
+                    uv[0].v() = get_interpolated_attribute(v0.tc0.v(), v1.tc0.v(), v2.tc0.v());
+                }
+                if (coordinate_mask & 2U) {
+                    uv[1].u() = get_interpolated_attribute(v0.tc1.u(), v1.tc1.u(), v2.tc1.u());
+                    uv[1].v() = get_interpolated_attribute(v0.tc1.v(), v1.tc1.v(), v2.tc1.v());
+                }
+                if (coordinate_mask & 4U) {
+                    uv[2].u() = get_interpolated_attribute(v0.tc2.u(), v1.tc2.u(), v2.tc2.u());
+                    uv[2].v() = get_interpolated_attribute(v0.tc2.v(), v1.tc2.v(), v2.tc2.v());
+                }
 
                 // Sample bound texture units.
-                const f24 tc0_w = get_interpolated_attribute(v0.tc0_w, v1.tc0_w, v2.tc0_w);
+                const f24 tc0_w = needs_w ? get_interpolated_attribute(v0.tc0_w, v1.tc0_w, v2.tc0_w) : f24::Zero();
                 const u16 qx = ((x >> 4) & ~1U) * 16 + 8;
                 const u16 qy = ((y >> 4) & ~1U) * 16 + 8;
                 // CodexAstraLocal: Untextured/shadow-only triangles need no LOD work.
-                if (needs_footprint && cached_quad != qx) {
+                if (footprint_mask && cached_quad != qx) {
                     quad = {texture_coordinates(qx, qy), texture_coordinates(qx + 16, qy),
                             texture_coordinates(qx, qy + 16), texture_coordinates(qx + 16, qy + 16)};
                     cached_quad = qx;
                 }
                 const u32 lane = ((x >> 4) & 1U) | (((y >> 4) & 1U) << 1);
-                const auto texture_color = TextureColor(uv, textures, tc0_w, prepared_textures, quad, lane);
+                const auto texture_color = TextureColor(uv, textures, tc0_w, prepared_textures,
+                    quad, lane, demand_mask, footprint_mask, x >> 4, y >> 4);
 
                 Common::Vec4<u8> primary_fragment_color = {0, 0, 0, 0};
                 Common::Vec4<u8> secondary_fragment_color = {0, 0, 0, 0};
@@ -551,7 +603,7 @@ void RasterizerSoftware::ProcessTriangle(const Vertex& v0, const Vertex& v1, con
 // aliases. Unknown memory is a typed failure; valid feedback keeps serial order.
 bool RasterizerSoftware::PrepareTextures(
     std::span<const TexturingRegs::FullTextureConfig, 3> textures,
-    std::array<PreparedTexture, 3>& prepared) const {
+    std::array<PreparedTexture, 3>& prepared, u32 demand_mask) const {
     const auto& target = regs.framebuffer.framebuffer;
     const auto& merger = regs.framebuffer.output_merger;
     const bool shadow = merger.fragment_operation_mode == FramebufferRegs::FragmentOperationMode::Shadow;
@@ -591,7 +643,7 @@ bool RasterizerSoftware::PrepareTextures(
     for (u32 i = 0; i < 3; ++i) {
         const auto& texture = textures[i];
         auto& out = prepared[i];
-        if (!texture.enabled || texture.config.address == 0 ||
+        if (!(demand_mask & (1U << i)) || !texture.enabled || texture.config.address == 0 ||
             (i == 0 && texture.config.type == TexturingRegs::TextureConfig::Disabled)) continue;
         const auto type = i == 0 ? texture.config.type.Value() : TexturingRegs::TextureConfig::Texture2D;
         if (type > TexturingRegs::TextureConfig::Disabled) {
@@ -608,7 +660,21 @@ bool RasterizerSoftware::PrepareTextures(
         for (u32 face = 0; face < out.face_count; ++face) {
             out.addresses[face] = cube ? regs.texturing.GetCubePhysicalAddress(
                 static_cast<TexturingRegs::CubeFace>(face)) : texture.config.GetPhysicalAddress();
-            out.faces[face] = range(out.addresses[face], out.layout.bytes);
+            // CodexAstraLocal TEST-ONLY LOG payload: distinguish mapping from
+            // numeric faults without successful-sample logging. Remove extra
+            // context when these failure classes have concrete regressions.
+            const auto ref = memory.GetPhysicalRef(out.addresses[face]);
+            if (!ref || out.layout.bytes > ref.GetSize()) {
+                const auto message = fmt::format(
+                    "CPU Software texture mapping unit={} type={} face={} demand={:#x} address={:#x} "
+                    "size={}x{} format={} lod={}:{} mapped={} required={}",
+                    i, static_cast<u32>(type), face, demand_mask, out.addresses[face],
+                    texture.config.width.Value(), texture.config.height.Value(),
+                    static_cast<u32>(texture.format), texture.config.lod.min_level.Value(),
+                    texture.config.lod.max_level.Value(), ref ? ref.GetSize() : 0, out.layout.bytes);
+                throw VideoCore::ShaderRecoveryError{message.c_str()};
+            }
+            out.faces[face] = {ref.GetPtr(), out.layout.bytes};
             parallel_safe &= !overlaps(out.faces[face], color) && !overlaps(out.faces[face], depth);
         }
     }
@@ -619,11 +685,12 @@ std::array<Common::Vec4<u8>, 4> RasterizerSoftware::TextureColor(
     std::span<const Common::Vec2<f24>, 3> uv,
     std::span<const TexturingRegs::FullTextureConfig, 3> textures, f24 tc0_w,
     const std::array<PreparedTexture, 3>& prepared,
-    const std::array<TextureCoordinates, 4>& quad, u32 lane) const {
+    const std::array<TextureCoordinates, 4>& quad, u32 lane, u32 demand_mask,
+    u32 footprint_mask, u16 pixel_x, u16 pixel_y) const {
     std::array<Common::Vec4<u8>, 4> texture_color{};
     for (u32 i = 0; i < 3; ++i) {
         const auto& texture = textures[i];
-        if (!texture.enabled) continue;
+        if (!(demand_mask & (1U << i)) || !texture.enabled) continue;
         if (texture.config.address == 0) {
             texture_color[i] = {0, 0, 0, 255};
             continue;
@@ -638,69 +705,113 @@ std::array<Common::Vec4<u8>, 4> RasterizerSoftware::TextureColor(
         const bool shadow = type == TexturingRegs::TextureConfig::Shadow2D ||
                             type == TexturingRegs::TextureConfig::ShadowCube;
         u32 face = 0;
-        if (cube) {
-            // CodexAstraLocal: Distinct cube faces may alias the same guest
-            // address, so face identity comes from direction, never the pointer.
-            const float a = std::abs(u.ToFloat32()), b = std::abs(v.ToFloat32());
-            const float c = std::abs(tc0_w.ToFloat32());
-            if (a > b && a > c) face = u > f24::Zero() ? 0 : 1;
-            else if (b > c) face = v > f24::Zero() ? 2 : 3;
-            else face = tc0_w > f24::Zero() ? 4 : 5;
-            f24 z;
-            PAddr address;
-            std::tie(u, v, z, address) = ConvertCubeCoord(u, v, tc0_w, regs.texturing);
-            shadow_z = z.ToFloat32();
-        } else if (type == TexturingRegs::TextureConfig::Projection2D ||
-                   (type == TexturingRegs::TextureConfig::Shadow2D && !regs.texturing.shadow.orthographic)) {
-            u /= tc0_w;
-            v /= tc0_w;
-        }
-        if (shadow) {
-            if (!std::isfinite(shadow_z)) {
-                throw VideoCore::ShaderRecoveryError{"CPU Software shadow depth is not finite"};
-            }
-            const s32 query = std::max(0, static_cast<s32>(std::min(shadow_z, 1.f) * 0xFFFFFF) -
-                                           static_cast<s32>(regs.texturing.shadow.bias.Value() * 2));
-            texture_color[i] = SampleShadow(prepared[i].faces[face], prepared[i].layout,
-                                              u.ToFloat32(), v.ToFloat32(), query, cube);
-            continue;
-        }
-        // CodexAstraLocal: Project all helper lanes onto the selected cube face
-        // before differentiation; choosing a different face per lane creates a
-        // discontinuous LOD. Projection textures divide each helper lane too.
-        std::array<Common::Vec2f, 4> mapped;
-        for (u32 q = 0; q < 4; ++q) {
-            f24 a = quad[q].uv[coordinate].u(), b = quad[q].uv[coordinate].v(), w = quad[q].w;
+        float lod = std::numeric_limits<float>::quiet_NaN();
+        try {
             if (cube) {
-                f24 x, y, z;
-                switch (static_cast<TexturingRegs::CubeFace>(face)) {
-                case TexturingRegs::CubeFace::PositiveX: x = -w; y = -b; z = a; break;
-                case TexturingRegs::CubeFace::NegativeX: x = -w; y = b; z = a; break;
-                case TexturingRegs::CubeFace::PositiveY: x = a; y = w; z = b; break;
-                case TexturingRegs::CubeFace::NegativeY: x = -a; y = w; z = b; break;
-                case TexturingRegs::CubeFace::PositiveZ: x = a; y = -b; z = w; break;
-                case TexturingRegs::CubeFace::NegativeZ: x = a; y = b; z = w; break;
+                // CodexAstraLocal: Distinct cube faces may alias the same guest
+                // address, so face identity comes from direction, never the pointer.
+                const float a = std::abs(u.ToFloat32()), b = std::abs(v.ToFloat32());
+                const float c = std::abs(tc0_w.ToFloat32());
+                // CodexAstraLocal: Reject consumed singular directions before
+                // projection; finite large shadow UVs are handled by PCF borders.
+                if (!std::isfinite(a) || !std::isfinite(b) || !std::isfinite(c) ||
+                    std::max({a, b, c}) == 0.f) {
+                    throw VideoCore::ShaderRecoveryError{"CPU Software cube direction is singular/nonfinite"};
                 }
-                const auto half = f24::FromFloat32(.5f);
-                a = x / z * half + half;
-                b = y / z * half + half;
-            } else if (type == TexturingRegs::TextureConfig::Projection2D) {
-                a /= w; b /= w;
+                if (a > b && a > c) face = u > f24::Zero() ? 0 : 1;
+                else if (b > c) face = v > f24::Zero() ? 2 : 3;
+                else face = tc0_w > f24::Zero() ? 4 : 5;
+                f24 z;
+                PAddr address;
+                std::tie(u, v, z, address) = ConvertCubeCoord(u, v, tc0_w, regs.texturing);
+                shadow_z = z.ToFloat32();
+            } else if (type == TexturingRegs::TextureConfig::Projection2D ||
+                       (type == TexturingRegs::TextureConfig::Shadow2D && !regs.texturing.shadow.orthographic)) {
+                if (!std::isfinite(tc0_w.ToFloat32()) || tc0_w == f24::Zero()) {
+                    throw VideoCore::ShaderRecoveryError{"CPU Software projection denominator is zero/nonfinite"};
+                }
+                u /= tc0_w;
+                v /= tc0_w;
             }
-            mapped[q] = {a.ToFloat32(), b.ToFloat32()};
-        }
-        const float lod = TextureLod(mapped, lane, texture.config.width, texture.config.height);
-        if (cube) {
-            texture_color[i] = SampleCubeTexture(prepared[i].faces, prepared[i].layout,
-                texture.config, face, u.ToFloat32(), v.ToFloat32(), lod,
-                Settings::values.texture_sampling.GetValue());
-        } else {
-            texture_color[i] = SampleTexture(prepared[i].faces[face], prepared[i].layout, texture.config,
-                                               u.ToFloat32(), v.ToFloat32(), lod,
-                                               Settings::values.texture_sampling.GetValue());
+            if (shadow) {
+                if (!std::isfinite(shadow_z)) {
+                    throw VideoCore::ShaderRecoveryError{"CPU Software shadow depth is not finite"};
+                }
+                const s32 query = std::max(0, static_cast<s32>(std::min(shadow_z, 1.f) * 0xFFFFFF) -
+                                               static_cast<s32>(regs.texturing.shadow.bias.Value() * 2));
+                texture_color[i] = SampleShadow(prepared[i].faces[face], prepared[i].layout,
+                                                  u.ToFloat32(), v.ToFloat32(), query, cube);
+                continue;
+            }
+            // CodexAstraLocal: Project all helper lanes onto the selected cube face
+            // before differentiation; choosing a different face per lane creates a
+            // discontinuous LOD. Projection textures divide each helper lane too.
+            if (footprint_mask & (1U << i)) {
+                std::array<Common::Vec2f, 4> mapped;
+                for (u32 q = 0; q < 4; ++q) {
+                    f24 a = quad[q].uv[coordinate].u(), b = quad[q].uv[coordinate].v(), w = quad[q].w;
+                    if (cube) {
+                        f24 x, y, z;
+                        switch (static_cast<TexturingRegs::CubeFace>(face)) {
+                        case TexturingRegs::CubeFace::PositiveX: x = -w; y = -b; z = a; break;
+                        case TexturingRegs::CubeFace::NegativeX: x = -w; y = b; z = a; break;
+                        case TexturingRegs::CubeFace::PositiveY: x = a; y = w; z = b; break;
+                        case TexturingRegs::CubeFace::NegativeY: x = -a; y = w; z = b; break;
+                        case TexturingRegs::CubeFace::PositiveZ: x = a; y = -b; z = w; break;
+                        case TexturingRegs::CubeFace::NegativeZ: x = a; y = b; z = w; break;
+                        }
+                        const auto half = f24::FromFloat32(.5f);
+                        a = x / z * half + half;
+                        b = y / z * half + half;
+                    } else if (type == TexturingRegs::TextureConfig::Projection2D) {
+                        a /= w; b /= w;
+                    }
+                    mapped[q] = {a.ToFloat32(), b.ToFloat32()};
+                }
+                lod = TextureLod(mapped, lane, texture.config.width, texture.config.height);
+            }
+            if (cube) {
+                texture_color[i] = SampleCubeTexture(prepared[i].faces, prepared[i].layout,
+                    texture.config, face, u.ToFloat32(), v.ToFloat32(), lod,
+                    Settings::values.texture_sampling.GetValue());
+            } else {
+                texture_color[i] = SampleTexture(prepared[i].faces[face], prepared[i].layout, texture.config,
+                                                   u.ToFloat32(), v.ToFloat32(), lod,
+                                                   Settings::values.texture_sampling.GetValue());
+            }
+        } catch (const VideoCore::ShaderRecoveryError& error) {
+            // CodexAstraLocal TEST-ONLY LOG payload: this path only builds a
+            // bounded error message; the joined owner emits it once. Remove
+            // after mapped/numeric failures have retained operand regressions.
+            const auto bits = [](f24 value) { return std::bit_cast<u32>(value.ToFloat32()); };
+            std::string message = fmt::format(
+                "{} unit={} type={} face={} demand={:#x} footprint={:#x} pixel={},{} lane={} "
+                "covered_f32bits={:08x},{:08x},{:08x} projected_f32bits={:08x},{:08x} "
+                "lod_f32bits={:08x} size={}x{} format={} minmax={}:{} bias={} filters={}/{}/{} "
+                "wrap={}/{} shadow_ortho={} shadow_bias={} address={:#x} mapped={} required={}",
+                error.what(), i, static_cast<u32>(type), face, demand_mask, footprint_mask,
+                pixel_x, pixel_y, lane, bits(uv[coordinate].u()), bits(uv[coordinate].v()),
+                bits(tc0_w), bits(u), bits(v), std::bit_cast<u32>(lod),
+                texture.config.width.Value(), texture.config.height.Value(),
+                static_cast<u32>(texture.format), texture.config.lod.min_level.Value(),
+                texture.config.lod.max_level.Value(), texture.config.lod.bias.Value(),
+                static_cast<u32>(texture.config.min_filter.Value()),
+                static_cast<u32>(texture.config.mag_filter.Value()),
+                static_cast<u32>(texture.config.mip_filter.Value()),
+                static_cast<u32>(texture.config.wrap_s.Value()),
+                static_cast<u32>(texture.config.wrap_t.Value()), regs.texturing.shadow.orthographic.Value(),
+                regs.texturing.shadow.bias.Value(), prepared[i].addresses[face],
+                prepared[i].faces[face].size(), prepared[i].layout.bytes);
+            if (footprint_mask & (1U << i)) {
+                for (u32 q = 0; q < 4; ++q) {
+                    message += fmt::format(" helper{}={:08x},{:08x},{:08x}", q,
+                        bits(quad[q].uv[coordinate].u()), bits(quad[q].uv[coordinate].v()), bits(quad[q].w));
+                }
+            }
+            throw VideoCore::ShaderRecoveryError{message.c_str()};
         }
     }
-    if (regs.texturing.main_config.texture3_enable) {
+    if ((demand_mask & 8U) && regs.texturing.main_config.texture3_enable) {
         const auto& proctex_uv = uv[regs.texturing.main_config.texture3_coordinates];
         texture_color[3] = ProcTex(proctex_uv.u().ToFloat32(), proctex_uv.v().ToFloat32(),
                                    regs.texturing, pica.proctex);

@@ -998,6 +998,15 @@ class SettingsFragmentPresenter(private val fragmentView: SettingsFragmentView) 
             IntSetting.SOFTWARE_RENDERER_WORKERS.key,
             IntSetting.SOFTWARE_RENDERER_WORKERS.defaultValue
         ))
+        // CodexAstraLocal: Keep placement editable beside the presets. It affects
+        // only Combo guest vertices and is captured when the game starts.
+        sl.add(SwitchSetting(
+            BooleanSetting.UBERHAR_CPU_VERTEX_ONLY,
+            R.string.uberhar_cpu_vertex_only,
+            R.string.uberhar_cpu_vertex_only_description,
+            BooleanSetting.UBERHAR_CPU_VERTEX_ONLY.key,
+            BooleanSetting.UBERHAR_CPU_VERTEX_ONLY.defaultValue
+        ))
         val customStart = sl.size
         sl.apply {
             add(HeaderSetting(R.string.renderer))

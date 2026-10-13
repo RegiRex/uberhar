@@ -24,6 +24,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--root', type=Path, default=Path(__file__).resolve().parents[2])
     parser.add_argument('--output-root', type=Path)
+    # CodexAstraLocal: Local affected-only validation avoids replaying unchanged
+    # capture/cube cases; the existing CI invocation still runs every helper.
+    parser.add_argument('--sampling-only', action='store_true')
     args = parser.parse_args()
     root = args.root.resolve()
     parent = args.output_root or root / 'build/uberhar-probe/software-renderer'
@@ -86,12 +89,14 @@ def main():
         binary = out / 'software-renderer'
         run('link', compiler + objects + ['-pthread', '-o', str(binary)])
         report = out / 'results.xml'
-        run('test', [str(binary), '[software]', '--reporter', 'xml', '--out', str(report)])
+        run('test', [str(binary), '[software-sampling]' if args.sampling_only else '[software]',
+                     '--reporter', 'xml', '--out', str(report)])
         tree = ET.parse(report).getroot()
         totals = tree.find('OverallResultsCases')
-        if totals is None or int(totals.attrib['successes']) != 4 or int(totals.attrib['failures']):
-            raise RuntimeError('Four complete helper cases were not executed')
-        proof['cases'] = 4
+        expected = 3 if args.sampling_only else 5
+        if totals is None or int(totals.attrib['successes']) != expected or int(totals.attrib['failures']):
+            raise RuntimeError(f'{expected} complete helper cases were not executed')
+        proof['cases'] = expected
         proof['assertions'] = tree.find('OverallResults').attrib
         proof['binary_sha256'] = sha(binary)
         proof['passed'] = True

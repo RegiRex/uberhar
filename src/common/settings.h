@@ -556,6 +556,9 @@ struct Values {
     SwitchableSetting<bool> uberhar_force_tev{false, Keys::uberhar_force_tev};
     // AstraEH: Effective only inside hybrid mode; independently disable for A/B tests.
     SwitchableSetting<bool> uberhar_cpu_vertex_bridge{true, Keys::uberhar_cpu_vertex_bridge};
+    // CodexAstraLocal: Session-frozen Combo placement comparison, independent
+    // of fragment specialization. Default retains the existing ready GPU route.
+    SwitchableSetting<bool> uberhar_cpu_vertex_only{false, Keys::uberhar_cpu_vertex_only};
     // AstraEH: Profiles are applied after loading custom values, never written back over them.
     SwitchableSetting<UberharTestMode> uberhar_test_mode{UberharTestMode::Custom,
                                                          Keys::uberhar_test_mode};

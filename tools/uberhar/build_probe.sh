@@ -186,6 +186,9 @@ timeout 60s build/uberhar-probe/test-parallel-batch
 # serialized assembly, including callback throws and deliberately broken paths.
 python3 tools/uberhar/test_parallel_work_transport.py
 python3 tools/uberhar/test_parallel_assembly.py
+# CodexAstraLocal: Actual reserved CPU appends may overlap completed shader grains;
+# later failure must restore full assembly/output before the pool is reused.
+python3 tools/uberhar/test_cpu_prefix.py --output build/uberhar-probe/cpu-prefix
 python3 tools/uberhar/test_parallel_vertex.py --mutants
 # CodexAstraLocal: Exact source identity must survive uploads, cache collisions,
 # descriptor/entry/uniform/output changes and serialized guest-state restoration.

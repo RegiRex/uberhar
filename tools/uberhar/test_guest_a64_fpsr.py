@@ -12,6 +12,7 @@ from pathlib import Path
 import resource
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 
@@ -180,6 +181,14 @@ set(Boost_NO_SYSTEM_PATHS ON CACHE BOOL "" FORCE)
             require((out/(name+'.stderr.log')).read_text() ==
                 f'FAIL immediate post-callback guest FPSCR check={expected_check}\n', 'wrong defect assertion: '+name)
         require(all(sha(Path(p)) == digest for p,digest in proof['source_sha256'].items()), 'source changed during gate')
+        # CodexAstraLocal: Qualify typed renderer failure delivery at the real
+        # generated SVC boundary with this already-built backend. Preserve every
+        # existing FP-status case and avoid a separate repeated Dynarmic build.
+        require(run('renderer-recovery', [sys.executable,
+            str(repo/'tools/uberhar/test_renderer_jit_recovery.py'),
+            '--build-dir', str(out/'build'), '--compiler', str(compiler), '--qemu', str(qemu),
+            '--output-root', str(out/'renderer-recovery')], 120) == 0,
+            'typed renderer JIT failure delivery failed')
         proof['passed'] = True
         proof['result_sha256'] = {p.name: sha(p) for p in out.glob('*.jsonl')}
     finally:

@@ -13,7 +13,8 @@ void SeedPartial(PipelineCache& p, const FSConfig& config) {
     p.curr_disk_cache->static_tev_fragments.emplace(StaticTevPolicy::Key::Hash(family, plan), std::move(entry));
 }
 GraphicsPipeline* Warm(PipelineCache& p, bool partial, const FSConfig& config = Config()) {
-    p.allow_specialized_fragments = !partial;
+    // CodexAstraLocal: Tier tests toggle only CPU-fragment capability.
+    p.allow_full_cpu_fragments = !partial;
     if (partial) SeedPartial(p, config); else SeedModule(p, config);
     for (unsigned frame=0; frame<4; ++frame) {
         for (unsigned draw=0; draw<16; ++draw) DrawCpu(p, Info(), config);
@@ -31,7 +32,7 @@ GraphicsPipeline* Warm(PipelineCache& p, bool partial, const FSConfig& config = 
 void PromotionAndPriority() {
     PipelineCache p;
     auto* partial=Warm(p,true);
-    p.allow_specialized_fragments=true;
+    p.allow_full_cpu_fragments=true;
     bool pending_full_selected_partial=false;
     for(unsigned frame=0;frame<14;++frame) {
         for(unsigned draw=0;draw<32;++draw) {
@@ -136,21 +137,21 @@ void TerminalBudgetsKeepHits() {
     for(unsigned i=0;i<63;++i) Require(Spend(p,false,1000+i), "full lifetime allowance preserved");
     Require(p.ready_cpu_bank->Attempts(0)==64 && p.ready_cpu_bank->Attempts(1)==1,
             "partial cannot consume full attempts");
-    p.allow_specialized_fragments=true;
+    p.allow_full_cpu_fragments=true;
     auto token=DrawCpu(p,Info(),Config());
     Require(bool(token) && p.ready_cpu_bank->AllSlots()[token.slot].owner.get()==full,
             "full ready hit survives 64 full attempts");
     for(unsigned i=0;i<15;++i) Require(Spend(p,true,2000+i), "partial lifetime allowance independent");
     Require(p.ready_cpu_bank->Attempts()==80 && p.ready_cpu_bank->Attempts(1)==16,
             "separate terminal work budgets close");
-    p.allow_specialized_fragments=false;
+    p.allow_full_cpu_fragments=false;
     token=DrawCpu(p,Info(),Config());
     Require(bool(token) && p.ready_cpu_bank->AllSlots()[token.slot].owner.get()==partial,
             "partial ready hit survives 16 partial attempts");
     Require(!p.ready_cpu_bank->AcceptingDemand(p.ready_optional_attempts,0) &&
             !p.ready_cpu_bank->AcceptingDemand(p.ready_optional_attempts,1),
             "both budgets deny only new demand");
-    p.allow_specialized_fragments=true;
+    p.allow_full_cpu_fragments=true;
     token=DrawCpu(p,Info(),Config());
     Require(bool(token) && p.ready_cpu_bank->AllSlots()[token.slot].owner.get()==full,
             "partial exhaustion cannot hide full ready hit");
@@ -208,7 +209,7 @@ void FourRouteBindings() {
     const auto config=Config();const auto layout=SoftwareLayout();auto info=Info();
     std::array<GLSL::DynamicTevState,4> values{};
     for(unsigned n=0;n<4;++n) {
-        p.Fresh(config);p.allow_specialized_fragments=n==2;
+        p.Fresh(config);p.allow_full_cpu_fragments=n==2;
         p.tev_constants.framebuffer^=n<<3;values[n]=p.tev_constants;
         p.offsets={n,n+1,n+2};
         p.scheduler.MakeDirty(StateFlags::FragmentConstants);
@@ -229,16 +230,23 @@ void FourRouteBindings() {
             "partial records actual post-flush draw tick");
 }
 void NativeAndFailureFallback() {
+    // CodexAstraLocal: Native keeps force_tev and GPU permissions disabled,
+    // but independently admits exact full CPU-layout fragments after readiness.
     PipelineCache p;p.allow_ready_gpu_vertices=false;p.allow_specialized_fragments=false;
+    p.force_tev=true;
     auto* partial=Warm(p,true);
     Require(partial && p.ready_vertex_worker, "Native owns optional CPU compiler");
+    auto* full=Warm(p,false);
+    Require(full && p.ready_cpu_full_selected != 0 && p.force_tev &&
+                !p.allow_specialized_fragments,
+            "Native forced generic policy does not prohibit full CPU fragments");
     p.virtual_fs_config.reset();p.current_shaders={&p.other_shader,&p.generic_shader,nullptr};
     p.shader_hashes={31,47,0};auto info=Info();
     const auto queued=p.ready_vertex_worker->scheduled;
     Require(!p.PrepareReadyGpuVertex(info) && p.ready_vertex_worker->scheduled==queued,
             "Native CPU compiler does not admit GPU vertices");
     for(int failure:{1,2,3,4}) {
-        PipelineCache q;q.allow_specialized_fragments=false;SeedPartial(q,Config());
+        PipelineCache q;q.allow_full_cpu_fragments=false;SeedPartial(q,Config());
         Probe::build_failure=failure;
         for(unsigned f=0;f<4;++f){for(unsigned n=0;n<16;++n)DrawCpu(q,Info(),Config());Advance(q);}
         q.ready_vertex_worker->WaitForRequests();Advance(q);Probe::build_failure=0;
