@@ -82,6 +82,7 @@ add_library(video_core STATIC EXCLUDE_FROM_ALL
     rasterizer_cache/surface_params.cpp
     rasterizer_cache/surface_params.h
     rasterizer_cache/texture_codec.h
+    rasterizer_cache/texture_decode_work.h # CodexAstraLocal: Joined CPU upload conversion.
     rasterizer_cache/texture_cube.h
     rasterizer_cache/utils.cpp
     rasterizer_cache/utils.h

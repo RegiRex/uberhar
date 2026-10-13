@@ -19,7 +19,10 @@ namespace Vulkan {
 struct ComputeVertexInput {
     static constexpr u32 MaximumInputs = 4096;
     static constexpr u32 MaximumRawBytes = 16 * 1024 * 1024;
-    static constexpr u32 HeaderWords = 64; // Status, touched semantic pair and state.
+    // CodexAstraLocal: Success carries status, touched semantic pair and state.
+    // Failure reuses these unpublished words for one bounded operand record;
+    // neither path needs a vertex-stream readback or a different consumer ABI.
+    static constexpr u32 HeaderWords = 64;
     std::array<u32, 193> metadata{};
     std::vector<u8> raw;
     Pica::ProgramCode program;

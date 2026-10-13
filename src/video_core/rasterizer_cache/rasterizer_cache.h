@@ -12,6 +12,9 @@
 #include "common/microprofile.h"
 #include "common/scope_exit.h"
 #include "common/settings.h"
+#include "common/thread.h"
+#include "common/uberhar_test_profile.h"
+#include "core/core.h"
 #include "core/memory.h"
 #include "video_core/custom_textures/custom_tex_manager.h"
 #include "video_core/pica/regs_external.h"
@@ -40,7 +43,17 @@ RasterizerCache<T>::RasterizerCache(Memory::MemorySystem& memory_,
       renderer{renderer_}, resolution_scale_factor{renderer.GetResolutionScaleFactor()},
       filter{Settings::values.texture_filter.GetValue()},
       dump_textures{Settings::values.dump_textures.GetValue()},
-      use_custom_textures{Settings::values.custom_textures.GetValue()} {
+      use_custom_textures{Settings::values.custom_textures.GetValue()},
+      // CodexAstraLocal: Freeze the independent experiment for this session;
+      // retain serial codecs in Custom, Software, Calculated and other APIs.
+      texture_decoder{Settings::values.uberhar_parallel_texture_decode.GetValue() &&
+                      Settings::values.graphics_api.GetValue() == Settings::GraphicsAPI::Vulkan &&
+                      (Settings::values.uberhar_test_mode.GetValue() == Settings::UberharTestMode::Native ||
+                       Settings::UsesReadyGpuVertices(Settings::values.uberhar_test_mode.GetValue())),
+                      Common::Uberhar::AvailableProcessors(),
+                      // CodexAstraLocal: Identify helpers once at startup so
+                      // thread CPU samples cannot misclassify them as the owner.
+                      [] { Common::SetCurrentThreadName("Texture decode"); }} {
     using TextureConfig = Pica::TexturingRegs::TextureConfig;
 
     // Create null handles for all cached resources
@@ -98,12 +111,14 @@ RasterizerCache<T>::RasterizerCache(Memory::MemorySystem& memory_,
 template <class T>
 RasterizerCache<T>::~RasterizerCache() {
     ClearAll(false);
+    texture_decoder.Report(true); // CodexAstraLocal TEST-ONLY LOG: Final sampled decode costs.
 }
 
 template <class T>
 void RasterizerCache<T>::TickFrame() {
     custom_tex_manager.TickFrame();
     RunGarbageCollector();
+    texture_decoder.Report(); // CodexAstraLocal TEST-ONLY LOG: Bounded decode cadence, no per-tile logs.
 
     const auto new_filter = Settings::values.texture_filter.GetValue();
     if (filter != new_filter) [[unlikely]] {
@@ -1052,8 +1067,12 @@ void RasterizerCache<T>::UploadSurface(Surface& surface, SurfaceInterval interva
     }
 
     const auto upload_data = source_ptr.GetWriteBytes(load_info.end - load_info.addr);
-    DecodeTexture(load_info, load_info.addr, load_info.end, upload_data, staging.mapped,
-                  runtime.NeedsConversion(surface));
+    // CodexAstraLocal: FlushRegion above completed GPU writes; MemoryRef pins the
+    // source through the join. DSP/RPC/async guest writers refuse parallel reads.
+    // Upload, hashing and validation stay on this owner after all tiles finish.
+    texture_decoder.Decode(load_info, upload_data, staging.mapped,
+                           runtime.NeedsConversion(surface),
+                           [] { return !Core::System::GetInstance().HasConcurrentGuestMemoryWriters(); });
 
     const bool should_dump = False(surface.flags & SurfaceFlagBits::Custom) &&
                              False(surface.flags & SurfaceFlagBits::RenderTarget);

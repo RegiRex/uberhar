@@ -316,6 +316,14 @@
     <string name="uberhar_cpu_vertex_bridge">CPU vertex bridge (experimental)</string>
     <!-- CodexAstraLocal: Describe real placement and restart scope without promising speed. -->
     <string name="uberhar_cpu_vertex_only">Use CPU vertices in Combo</string>
+    <!-- CodexAstraLocal: Explain controls in terms of what an owner can compare. -->
+    <string name="uberhar_native_full_fragments">Native full fragment shaders</string>
+    <string name="uberhar_native_full_fragments_description">Use specialized fragment shaders in Native. Turn off to compare intermittent graphics issues. CPU vertices stay enabled. Restart the game after changing.</string>
+    <string name="uberhar_cpu_prefix_overlap">Overlap CPU vertex assembly</string>
+    <string name="uberhar_cpu_prefix_overlap_description">Assemble completed CPU vertex batches while other workers finish. Turn off to compare graphics and pacing while keeping vertex workers enabled. Restart the game after changing.</string>
+    <string name="uberhar_parallel_texture_decode">Parallel CPU texture decoding</string>
+    <string name="uberhar_parallel_texture_decode_description">Share large texture conversions across CPU workers in Native and Combo. Turn off for a serial comparison. Restart the game after changing.</string>
+
     <string name="uberhar_cpu_vertex_only_description">Keep guest vertex calculations on the CPU in either Combo mode, using workers for eligible batches. Fragment policy stays unchanged. Performance may vary by game. Restart the game after changing.</string>
     <string name="uberhar_cpu_vertex_bridge_description">Requires hybrid TEV. Uses the CPU for eligible vertex work while an optimized GPU pipeline compiles. Turn off to compare performance. Restart the game after changing.</string>
     <string name="uberhar_force_tev">Force TEV fallback for comparison</string>

@@ -27,8 +27,10 @@ constexpr bool AllowsStaticCpuTev(UberharTestMode mode) {
 
 // CodexAstraLocal: CPU-produced vertices may use an exact ready full fragment
 // without granting GPU vertex execution. Keep the generic comparison isolated.
-constexpr bool AllowsFullCpuFragments(UberharTestMode mode) {
-    return mode == UberharTestMode::Native || mode == UberharTestMode::Automatic;
+// CodexAstraLocal: Native-only fragment control leaves Combo policy independent.
+constexpr bool AllowsFullCpuFragments(UberharTestMode mode, bool native_full = true) {
+    return (mode == UberharTestMode::Native && native_full) ||
+           mode == UberharTestMode::Automatic;
 }
 
 constexpr bool UsesAutomaticCompute(UberharTestMode mode) {

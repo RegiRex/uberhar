@@ -122,7 +122,8 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
       // CodexAstraLocal: Native can spend bounded CPU compilation on cheaper
       // fragment execution while keeping guest vertex work on its CPU workers.
       allow_full_cpu_fragments{hybrid_tev &&
-          Settings::AllowsFullCpuFragments(Settings::values.uberhar_test_mode.GetValue())},
+          Settings::AllowsFullCpuFragments(Settings::values.uberhar_test_mode.GetValue(),
+                                          Settings::values.uberhar_native_full_fragments.GetValue())},
       // CodexAstraLocal: An optional CPU fragment worker is not GPU eligibility.
       // Freeze the original promotion policy independently of worker ownership.
       allow_ready_gpu_vertices{hybrid_tev &&

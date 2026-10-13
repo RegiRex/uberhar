@@ -189,6 +189,9 @@ python3 tools/uberhar/test_parallel_assembly.py
 # CodexAstraLocal: Actual reserved CPU appends may overlap completed shader grains;
 # later failure must restore full assembly/output before the pool is reused.
 python3 tools/uberhar/test_cpu_prefix.py --output build/uberhar-probe/cpu-prefix
+# CodexAstraLocal: Actual upload codecs must preserve bytes and orientation when
+# large immutable tiles are shared across the bounded CPU worker pool.
+python3 tools/uberhar/test_parallel_texture.py --output build/uberhar-probe/parallel-texture
 python3 tools/uberhar/test_parallel_vertex.py --mutants
 # CodexAstraLocal: Exact source identity must survive uploads, cache collisions,
 # descriptor/entry/uniform/output changes and serialized guest-state restoration.

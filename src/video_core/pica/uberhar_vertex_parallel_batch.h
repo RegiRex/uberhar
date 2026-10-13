@@ -70,7 +70,8 @@ public:
 
     template <typename VertexAt, typename Shade, typename Submit>
     NativeVertexCounts Run(u32 count, bool indexed, VertexAt&& vertex_at,
-                           Shade&& shade, Submit&& submit, bool measure = false) {
+                           Shade&& shade, Submit&& submit, bool measure = false,
+                           bool overlap = true) {
         assert(capacity != 0 || count == 0);
         VertexCacheIndex fifo;
         std::array<OutputVertex, VertexCacheIndex::Capacity> previous;
@@ -136,7 +137,9 @@ public:
             Common::Uberhar::ParallelWork::Result completed;
             const auto execute = [&] {
                 if constexpr (reversible) {
-                    if (misses >= 256) {
+                    // CodexAstraLocal: OFF uses the unchanged joined worker path,
+                    // with no readiness array or speculative assembler transaction.
+                    if (overlap && misses >= 256) {
                         const u32 groups = (misses + Grain - 1) / Grain;
                         return pool.RunWithOwnerHook(misses, grain,
                             [&](u32 first, u32 last) {

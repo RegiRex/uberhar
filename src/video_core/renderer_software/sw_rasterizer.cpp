@@ -232,6 +232,29 @@ void RasterizerSoftware::AddTriangle(const Pica::OutputVertex& v0, const Pica::O
                     vtx1.screenpos.y.ToFloat32(), vtx1.screenpos.z.ToFloat32(),
                     vtx2.screenpos.x.ToFloat32(), vtx2.screenpos.y.ToFloat32(),
                     vtx2.screenpos.z.ToFloat32());
+                // CodexAstraLocal TEST-ONLY LOG: The FEA fault retained only
+                // final NaN UVs. Capture the original and prepared operands
+                // once, after every worker joined, to distinguish shader input
+                // from clipping/perspective arithmetic. Remove with a retained
+                // reproduction of that remaining first-fault case.
+                const std::array<const Pica::OutputVertex*, 3> source{&v0, &v1, &v2};
+                const std::array<const Pica::OutputVertex*, 3> prepared{&vtx0, &vtx1, &vtx2};
+                const auto bits = [](f24 value) { return std::bit_cast<u32>(value.ToFloat32()); };
+                for (u32 vertex = 0; vertex < source.size(); ++vertex) {
+                    const auto& a = *source[vertex];
+                    const auto& b = *prepared[vertex];
+                    LOG_ERROR(Render_Software,
+                        "Software first fault operands vertex={} source_pos={:08x},{:08x},{:08x},{:08x} "
+                        "source_uv0={:08x},{:08x},{:08x} source_uv1={:08x},{:08x} "
+                        "source_uv2={:08x},{:08x} prepared_invw={:08x} "
+                        "prepared_uv0_over_w={:08x},{:08x},{:08x} "
+                        "prepared_uv1_over_w={:08x},{:08x} prepared_uv2_over_w={:08x},{:08x}",
+                        vertex, bits(a.pos.x), bits(a.pos.y), bits(a.pos.z), bits(a.pos.w),
+                        bits(a.tc0.x), bits(a.tc0.y), bits(a.tc0_w),
+                        bits(a.tc1.x), bits(a.tc1.y), bits(a.tc2.x), bits(a.tc2.y),
+                        bits(b.pos.w), bits(b.tc0.x), bits(b.tc0.y), bits(b.tc0_w),
+                        bits(b.tc1.x), bits(b.tc1.y), bits(b.tc2.x), bits(b.tc2.y));
+                }
             }
             throw;
         }
@@ -276,10 +299,17 @@ void RasterizerSoftware::ProcessTriangle(const Vertex& v0, const Vertex& v1, con
         screen_to_rasterizer_coords(v2.screenpos),
     };
 
+    // CodexAstraLocal: A zero-area primitive covers no filled pixels. KeepAll
+    // must not reverse it into a pass whose interpolation divides by zero.
+    const s32 triangle_area = SignedArea(vtxpos[0].xy(), vtxpos[1].xy(), vtxpos[2].xy());
+    if (triangle_area == 0) {
+        return;
+    }
+
     if (regs.rasterizer.cull_mode == RasterizerRegs::CullMode::KeepAll ||
         regs.rasterizer.cull_mode == RasterizerRegs::CullMode::KeepAll2) {
         // Make sure we always end up with a triangle wound counter-clockwise
-        if (!reversed && SignedArea(vtxpos[0].xy(), vtxpos[1].xy(), vtxpos[2].xy()) <= 0) {
+        if (!reversed && triangle_area < 0) {
             ProcessTriangle(v0, v2, v1, true);
             return;
         }
@@ -290,7 +320,7 @@ void RasterizerSoftware::ProcessTriangle(const Vertex& v0, const Vertex& v1, con
             return;
         }
         // Cull away triangles which are wound clockwise.
-        if (SignedArea(vtxpos[0].xy(), vtxpos[1].xy(), vtxpos[2].xy()) <= 0) {
+        if (triangle_area < 0) {
             return;
         }
     }
@@ -371,14 +401,14 @@ void RasterizerSoftware::ProcessTriangle(const Vertex& v0, const Vertex& v1, con
     std::array<PreparedTexture, 3> prepared_textures;
     const bool parallel_safe = PrepareTextures(textures, prepared_textures, demand_mask);
 
-    // CodexAstraLocal: Evaluate all four perspective-correct quad positions,
-    // including uncovered helper lanes, before deriving a texture footprint.
-    // This preserves the original covered-pixel interpolation arithmetic.
+    // CodexAstraLocal: Quad helpers use the same unbiased interpolation plane
+    // as covered pixels. Top-left coverage offsets must never alter attributes
+    // or the perspective denominator, including outside-triangle helper lanes.
     const auto texture_coordinates = [&](u16 x, u16 y) {
         const auto barycentric = Common::MakeVec(
-            f24::FromFloat32(static_cast<float>(bias0 + SignedArea(vtxpos[1].xy(), vtxpos[2].xy(), {x, y}))),
-            f24::FromFloat32(static_cast<float>(bias1 + SignedArea(vtxpos[2].xy(), vtxpos[0].xy(), {x, y}))),
-            f24::FromFloat32(static_cast<float>(bias2 + SignedArea(vtxpos[0].xy(), vtxpos[1].xy(), {x, y}))));
+            f24::FromFloat32(static_cast<float>(SignedArea(vtxpos[1].xy(), vtxpos[2].xy(), {x, y}))),
+            f24::FromFloat32(static_cast<float>(SignedArea(vtxpos[2].xy(), vtxpos[0].xy(), {x, y}))),
+            f24::FromFloat32(static_cast<float>(SignedArea(vtxpos[0].xy(), vtxpos[1].xy(), {x, y}))));
         const f24 inverse = f24::One() / Common::Dot(w_inverse, barycentric);
         const auto attr = [&](f24 a, f24 b, f24 c) {
             return Common::Dot(Common::MakeVec(a, b, c), barycentric) * inverse;
@@ -416,14 +446,16 @@ void RasterizerSoftware::ProcessTriangle(const Vertex& v0, const Vertex& v1, con
                     }
                 }
 
-                // Calculate the barycentric coordinates w0, w1 and w2
-                const s32 w0 = bias0 + SignedArea(vtxpos[1].xy(), vtxpos[2].xy(), {x, y});
-                const s32 w1 = bias1 + SignedArea(vtxpos[2].xy(), vtxpos[0].xy(), {x, y});
-                const s32 w2 = bias2 + SignedArea(vtxpos[0].xy(), vtxpos[1].xy(), {x, y});
+                // CodexAstraLocal: Coverage alone uses top-left edge biases.
+                // Interpolation and Z/W depth use the true weights and area;
+                // biasing an area-1 triangle can otherwise erase its sum.
+                const s32 w0 = SignedArea(vtxpos[1].xy(), vtxpos[2].xy(), {x, y});
+                const s32 w1 = SignedArea(vtxpos[2].xy(), vtxpos[0].xy(), {x, y});
+                const s32 w2 = SignedArea(vtxpos[0].xy(), vtxpos[1].xy(), {x, y});
                 const s32 wsum = w0 + w1 + w2;
 
                 // If current pixel is not covered by the current primitive
-                if (w0 < 0 || w1 < 0 || w2 < 0) {
+                if (w0 + bias0 < 0 || w1 + bias1 < 0 || w2 + bias2 < 0) {
                     continue;
                 }
 

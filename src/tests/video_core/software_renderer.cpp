@@ -446,4 +446,171 @@ TEST_CASE("Software actual triangle budgets and alias admission", "[software]") 
     target.allow_depth_stencil_write.Assign(0);target.depth_buffer_address.Assign(0);
     CHECK(SwRenderer::SoftwareRendererTestAccess::Safe(raster,regs));
 }
+
+TEST_CASE("Software unbiased interpolation preserves coverage and singular failures",
+          "[software][software-interpolation]") {
+    // CodexAstraLocal: Use the retained Dark Moon 12.4 positions through the
+    // real clip/raster/TEV/depth path. Its original attributes were not logged;
+    // distinct finite fixture attributes expose the zero-sum error directly.
+    const auto old_workers = Settings::values.software_renderer_workers.GetValue();
+    const auto old_sampling = Settings::values.texture_sampling.GetValue();
+    struct Restore {
+        u32 workers;
+        Settings::TextureSampling sampling;
+        ~Restore() {
+            Settings::values.software_renderer_workers = workers;
+            Settings::values.texture_sampling = sampling;
+        }
+    } restore{old_workers, old_sampling};
+    Settings::values.software_renderer_workers = 1;
+    Settings::values.texture_sampling = Game;
+    Core::System system;
+    Memory::MemorySystem memory{system};
+    Pica::PicaCore pica{memory, {}};
+    auto& regs = pica.regs.internal;
+    regs = {};
+    regs.lighting.disable.Assign(1);
+    regs.rasterizer.viewport_size_x.Assign(0x470000); // 256
+    regs.rasterizer.viewport_size_y.Assign(0x470000);
+    regs.rasterizer.viewport_depth_range.Assign(0x3f0000); // 1
+    regs.rasterizer.viewport_depth_near_plane.Assign(0x3f0000);
+    regs.rasterizer.depthmap_enable.Assign(Pica::RasterizerRegs::DepthBuffering::ZBuffering);
+    auto& target = regs.framebuffer.framebuffer;
+    target.width.Assign(512); target.height.Assign(255);
+    target.color_format.Assign(Pica::FramebufferRegs::ColorFormat::RGBA8);
+    target.color_buffer_address.Assign((Memory::VRAM_PADDR + 0x100000) / 8);
+    target.depth_buffer_address.Assign((Memory::VRAM_PADDR + 0x200000) / 8);
+    target.depth_format.Assign(Pica::FramebufferRegs::DepthFormat::D16);
+    target.allow_color_write.Assign(15); target.allow_depth_stencil_write.Assign(1);
+    auto& merger = regs.framebuffer.output_merger;
+    merger.logic_op.Assign(Pica::FramebufferRegs::LogicOp::Copy);
+    merger.red_enable.Assign(1); merger.green_enable.Assign(1);
+    merger.blue_enable.Assign(1); merger.alpha_enable.Assign(1);
+    merger.depth_write_enable.Assign(1);
+    const auto f = [](float value) { return Pica::f24::FromFloat32(value); };
+    const auto vertex = [&](u16 x, u16 y, float w, float z) {
+        Pica::OutputVertex result{};
+        result.pos = {f((x / 4096.f - 1.f) * w), f((y / 4096.f - 1.f) * w),
+                      f(z * w), f(w)};
+        result.color = {f(.25f), f(.5f), f(.75f), f(1)};
+        result.quat.w = f(1);
+        result.tc0 = {f(.25f), f(.125f)};
+        result.tc0_w = f(.5f);
+        return result;
+    };
+    auto a = vertex(3785, 2181, 1, -.25f);
+    auto b = vertex(3784, 2184, 2, -.75f);
+    auto c = vertex(3817, 2084, 4, -.5f);
+    a.color = {f(1), f(0), f(0), f(1)};
+    c.color = {f(0), f(0), f(1), f(1)};
+    a.tc0 = {f(.75f), f(.5f)}; a.tc0_w = f(.75f);
+    c.tc0 = {f(.125f), f(.25f)}; c.tc0_w = f(.25f);
+    auto* color = memory.GetPhysicalPointer(target.GetColorBufferPhysicalAddress());
+    auto* depth = memory.GetPhysicalPointer(target.GetDepthBufferPhysicalAddress());
+    constexpr std::size_t color_size = 512 * 256 * 4, depth_size = 512 * 256 * 2;
+    const auto clear = [&] {
+        std::memset(color, 0, color_size);
+        std::memset(depth, 0xa5, depth_size);
+    };
+    SwRenderer::Framebuffer observed{memory, regs.framebuffer};
+    observed.Bind();
+    SwRenderer::RasterizerSoftware raster{memory, pica};
+    clear();
+    REQUIRE_NOTHROW(raster.AddTriangle(a, b, c));
+    CHECK(observed.GetPixel(236, 136) == Color{64, 128, 191, 255});
+    CHECK(observed.GetDepth(236, 136) == 16383);
+    CHECK(std::count(color, color + color_size, u8{255}) == 1);
+    regs.rasterizer.depthmap_enable.Assign(Pica::RasterizerRegs::DepthBuffering::WBuffering);
+    clear();
+    REQUIRE_NOTHROW(raster.AddTriangle(a, b, c));
+    CHECK(observed.GetDepth(236, 136) == 32767);
+    regs.rasterizer.depthmap_enable.Assign(Pica::RasterizerRegs::DepthBuffering::ZBuffering);
+
+    using Source = Pica::TexturingRegs::TevStageConfig::Source;
+    const auto source = [&](Source selected) {
+        for (auto* stage : {&regs.texturing.tev_stage0, &regs.texturing.tev_stage1,
+                           &regs.texturing.tev_stage2, &regs.texturing.tev_stage3,
+                           &regs.texturing.tev_stage4, &regs.texturing.tev_stage5}) {
+            stage->color_source1.Assign(selected);
+            stage->alpha_source1.Assign(selected);
+        }
+    };
+    source(Source::Texture0);
+    regs.texturing.main_config.texture0_enable.Assign(1);
+    regs.texturing.texture0 = Sampler(8);
+    regs.texturing.texture0.type.Assign(Config::Shadow2D);
+    regs.texturing.texture0.address.Assign((Memory::VRAM_PADDR + 0x10000) / 8);
+    regs.texturing.texture0_format.Assign(Format::RGBA8);
+    auto layout = SwRenderer::MakeTextureLayout(regs.texturing.texture0, Format::RGBA8, true);
+    auto* texture = memory.GetPhysicalPointer(regs.texturing.texture0.GetPhysicalAddress());
+    for (u32 y = 0; y < 8; ++y) for (u32 x = 0; x < 8; ++x)
+        Put({texture, layout.bytes}, layout, 0, x, y, {static_cast<u8>(10 * y + x), 255, 255, 255});
+    clear();
+    REQUIRE_NOTHROW(raster.AddTriangle(a, b, c));
+    CHECK(observed.GetPixel(236, 136) == Color{19, 19, 19, 19});
+
+    // CodexAstraLocal: Dynamic LOD also needs unbiased uncovered helpers.
+    // This affine UV plane has exactly two texels per pixel: select mip 1.
+    regs.texturing.texture0 = Sampler(32, 2);
+    regs.texturing.texture0.address.Assign((Memory::VRAM_PADDR + 0x10000) / 8);
+    layout = SwRenderer::MakeTextureLayout(regs.texturing.texture0, Format::RGBA8, false);
+    const std::array<Color, 3> mip_colors{{{255, 0, 0, 255}, {31, 62, 93, 255}, {0, 0, 255, 255}}};
+    for (u32 level = 0; level < 3; ++level)
+        for (u32 y = 0; y < layout.levels[level].height; ++y)
+            for (u32 x = 0; x < layout.levels[level].width; ++x)
+                Put({texture, layout.bytes}, layout, level, x, y, mip_colors[level]);
+    auto affine = [&](u16 x, u16 y) {
+        auto result = vertex(x, y, 1, -.5f);
+        result.tc0 = {f((x / 16.f - 236.f) / 16.f), f((y / 16.f - 136.f) / 16.f)};
+        return result;
+    };
+    clear();
+    REQUIRE_NOTHROW(raster.AddTriangle(affine(3785, 2181), affine(3784, 2184), affine(3817, 2084)));
+    CHECK(observed.GetPixel(236, 136) == mip_colors[1]);
+
+    // CodexAstraLocal: A shared diagonal must have neither a hole nor two
+    // consumers. Distinct colors make double coverage depend on draw order.
+    regs.texturing.main_config.texture0_enable.Assign(0);
+    source(Source::PrimaryColor);
+    const auto p = vertex(512, 512, 1, -.5f), q = vertex(576, 512, 1, -.5f);
+    const auto r = vertex(512, 576, 1, -.5f), s = vertex(576, 576, 1, -.5f);
+    auto draw = [&](Pica::OutputVertex x, Pica::OutputVertex y, Pica::OutputVertex z, float red) {
+        x.color = y.color = z.color = {f(red), f(0), f(0), f(1)};
+        raster.AddTriangle(x, y, z);
+    };
+    clear(); draw(p, q, r, .25f); draw(q, s, r, .5f);
+    const std::vector<u8> ordered(color, color + color_size);
+    CHECK(std::count(ordered.begin(), ordered.end(), u8{255}) == 16);
+    clear(); draw(q, s, r, .5f); draw(p, q, r, .25f);
+    CHECK(std::equal(ordered.begin(), ordered.end(), color));
+    // Degenerate diagonal center hits must preserve both attachment sentinels.
+    std::memset(color, 0x5a, color_size); std::memset(depth, 0xa5, depth_size);
+    REQUIRE_NOTHROW(raster.AddTriangle(p, vertex(544, 544, 1, -.5f), s));
+    CHECK(std::all_of(color, color + color_size, [](u8 value) { return value == 0x5a; }));
+    CHECK(std::all_of(depth, depth + depth_size, [](u8 value) { return value == 0xa5; }));
+
+    // CodexAstraLocal: FEA retained a nondegenerate triangle but no source UVs.
+    // Its rounded shape works with finite fixture attributes; an injected NaN
+    // must still fail rather than being repaired to a plausible texture value.
+    source(Source::Texture0); regs.texturing.main_config.texture0_enable.Assign(1);
+    regs.texturing.texture0 = Sampler(8);
+    regs.texturing.texture0.address.Assign((Memory::VRAM_PADDR + 0x10000) / 8);
+    layout = SwRenderer::MakeTextureLayout(regs.texturing.texture0, Format::RGBA8, false);
+    for (u32 y = 0; y < 8; ++y) for (u32 x = 0; x < 8; ++x)
+        Put({texture, layout.bytes}, layout, 0, x, y, {42, 84, 126, 255});
+    regs.rasterizer.scissor_test.mode.Assign(Pica::RasterizerRegs::ScissorMode::Include);
+    regs.rasterizer.scissor_test.x1.Assign(137); regs.rasterizer.scissor_test.x2.Assign(137);
+    regs.rasterizer.scissor_test.y1.Assign(184); regs.rasterizer.scissor_test.y2.Assign(184);
+    auto fa = vertex(2256, 2624, 1, -.70808023f);
+    auto fb = vertex(2192, 3104, 1, -.70808035f);
+    auto fc = vertex(2192, 2624, 1, -.70808035f);
+    clear();
+    REQUIRE_NOTHROW(raster.AddTriangle(fa, fb, fc));
+    CHECK(observed.GetPixel(137, 184) == Color{42, 84, 126, 255});
+    fa.tc0.x = f(std::numeric_limits<float>::quiet_NaN());
+    clear();
+    CHECK_THROWS_AS(raster.AddTriangle(fa, fb, fc), VideoCore::ShaderRecoveryError);
+    CHECK(std::all_of(color, color + color_size, [](u8 value) { return value == 0; }));
+    CHECK(std::all_of(depth, depth + depth_size, [](u8 value) { return value == 0xa5; }));
+}
 #endif

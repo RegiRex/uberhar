@@ -151,8 +151,34 @@ void OwnerOnly() {
         [&]{++prepares;return false;}, []{throw std::runtime_error("refused hook");});
     Need(total==512&&prepares==1,"preparation refusal replayed/lost work");
 }
+// CodexAstraLocal: The OFF control keeps parallel shading and exact ordered
+// output, but must never enter a reversible append transaction/readiness hook.
+struct NoOverlapSink : AppendSink {
+    bool BeginVertexAppend(u32, std::size_t&) {
+        throw std::runtime_error("disabled overlap entered transaction");
+    }
+};
+void OverlapOff() {
+    PrimitiveAssembler actual{PipelineRegs::TriangleTopology::Strip};
+    PrimitiveAssembler expected{PipelineRegs::TriangleTopology::Strip};
+    Seed(actual); Seed(expected);
+    NoOverlapSink output; AppendSink oracle;
+    const PrimitiveAssembler::TriangleHandler triangle = [&](const auto& a, const auto& b, const auto& c) {
+        output.AddTriangle(a, b, c);
+    };
+    const auto reference = [&](const auto& a, const auto& b, const auto& c) { oracle.AddTriangle(a, b, c); };
+    NativeParallelBatch batch{4}; Need(batch.Prepare(4608), "OFF prepare");
+    VertexAppendTransaction transaction{actual, output, triangle};
+    batch.Run(4608, false, [](u32 i) { return i; }, [](auto in, auto out) {
+        for (u32 i = 0; i < in.size(); ++i) out[i] = Value(in[i].vertex);
+    }, transaction, true, false);
+    for (u32 i = 0; i < 4608; ++i) expected.SubmitVertex(Value(i), reference);
+    Equal(output, oracle);
+    Need(batch.CreatedWorkers() > 0 && batch.LastWork().prefix_chunks == 0 &&
+         batch.LastWork().prefix_inputs == 0, "OFF disabled worker pool or retained prefix");
+}
 int main() try {
-    OwnerOnly();unsigned cases{};
+    OwnerOnly(); OverlapOff(); unsigned cases{};
     for(auto topology:{PipelineRegs::TriangleTopology::List,PipelineRegs::TriangleTopology::Strip,
                        PipelineRegs::TriangleTopology::Fan,PipelineRegs::TriangleTopology::Shader})
         for(bool indexed:{false,true})for(bool fail:{false,true})for(bool later:{false,true}){

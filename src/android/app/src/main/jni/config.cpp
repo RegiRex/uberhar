@@ -154,6 +154,11 @@ void Config::ReadValues() {
     ReadSetting("Renderer", Settings::values.uberhar_cpu_vertex_bridge);
     // CodexAstraLocal: Apply saved placement before constructing the PICA owner.
     ReadSetting("Renderer", Settings::values.uberhar_cpu_vertex_only);
+    // CodexAstraLocal: Load comparison controls before constructing renderer owners.
+    ReadSetting("Renderer", Settings::values.uberhar_native_full_fragments);
+    ReadSetting("Renderer", Settings::values.uberhar_cpu_prefix_overlap);
+    ReadSetting("Renderer", Settings::values.uberhar_parallel_texture_decode);
+
     // AstraEH: Read the profile before applying its temporary in-memory overrides.
     ReadSetting("Renderer", Settings::values.uberhar_test_mode);
     ReadSetting("Renderer", Settings::values.spirv_shader_gen);

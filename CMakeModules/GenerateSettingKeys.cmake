@@ -46,6 +46,10 @@ foreach(KEY IN ITEMS
     "uberhar_cpu_vertex_bridge"
     # CodexAstraLocal: Compare CPU vertex placement without changing Combo fragments.
     "uberhar_cpu_vertex_only"
+    # CodexAstraLocal: Independent renderer controls shared by native and JNI.
+    "uberhar_native_full_fragments"
+    "uberhar_cpu_prefix_overlap"
+    "uberhar_parallel_texture_decode"
     # AstraEH: One mutually exclusive experimental renderer profile.
     "uberhar_test_mode"
     "async_presentation"

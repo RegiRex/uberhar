@@ -559,6 +559,12 @@ struct Values {
     // CodexAstraLocal: Session-frozen Combo placement comparison, independent
     // of fragment specialization. Default retains the existing ready GPU route.
     SwitchableSetting<bool> uberhar_cpu_vertex_only{false, Keys::uberhar_cpu_vertex_only};
+    // CodexAstraLocal: Independent, session-frozen controls isolate fragment,
+    // assembly and texture scheduling without changing mode or dropping draws.
+    SwitchableSetting<bool> uberhar_native_full_fragments{true, Keys::uberhar_native_full_fragments};
+    SwitchableSetting<bool> uberhar_cpu_prefix_overlap{true, Keys::uberhar_cpu_prefix_overlap};
+    SwitchableSetting<bool> uberhar_parallel_texture_decode{true, Keys::uberhar_parallel_texture_decode};
+
     // AstraEH: Profiles are applied after loading custom values, never written back over them.
     SwitchableSetting<UberharTestMode> uberhar_test_mode{UberharTestMode::Custom,
                                                          Keys::uberhar_test_mode};

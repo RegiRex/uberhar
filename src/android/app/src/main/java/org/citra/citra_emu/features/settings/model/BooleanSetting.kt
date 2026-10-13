@@ -21,6 +21,11 @@ enum class BooleanSetting(
     UBERHAR_CPU_VERTEX_BRIDGE(SettingKeys.uberhar_cpu_vertex_bridge(), Settings.SECTION_RENDERER, true),
     // CodexAstraLocal: Preserve the old Combo default; comparison needs a restart.
     UBERHAR_CPU_VERTEX_ONLY(SettingKeys.uberhar_cpu_vertex_only(), Settings.SECTION_RENDERER, false),
+    // CodexAstraLocal: Persist independent comparison controls; game restart applies them.
+    UBERHAR_NATIVE_FULL_FRAGMENTS(SettingKeys.uberhar_native_full_fragments(), Settings.SECTION_RENDERER, true),
+    UBERHAR_CPU_PREFIX_OVERLAP(SettingKeys.uberhar_cpu_prefix_overlap(), Settings.SECTION_RENDERER, true),
+    UBERHAR_PARALLEL_TEXTURE_DECODE(SettingKeys.uberhar_parallel_texture_decode(), Settings.SECTION_RENDERER, true),
+
     DISABLE_SPIRV_OPTIMIZER(SettingKeys.disable_spirv_optimizer(), Settings.SECTION_RENDERER, true),
     PLUGIN_LOADER(SettingKeys.plugin_loader(), Settings.SECTION_SYSTEM, false),
     ALLOW_PLUGIN_LOADER(SettingKeys.allow_plugin_loader(), Settings.SECTION_SYSTEM, true),

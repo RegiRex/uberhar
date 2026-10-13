@@ -35,8 +35,16 @@ int main() {
         // CodexAstraLocal: The independent placement preference survives preset
         // application and never changes fragment/compute capabilities below.
         values.uberhar_cpu_vertex_only = true;
+        // CodexAstraLocal: Presets must not erase independently saved controls.
+        values.uberhar_native_full_fragments = false;
+        values.uberhar_cpu_prefix_overlap = false;
+        values.uberhar_parallel_texture_decode = false;
         ApplyUberharTestProfile();
         Check(values.uberhar_cpu_vertex_only.GetValue(), "preset erased CPU placement");
+        Check(!values.uberhar_native_full_fragments.GetValue() &&
+                  !values.uberhar_cpu_prefix_overlap.GetValue() &&
+                  !values.uberhar_parallel_texture_decode.GetValue(),
+              "preset erased isolated comparison controls");
         Check(values.graphics_api.GetValue() == GraphicsAPI::Vulkan, "profile must select Vulkan");
         Check(!values.use_hw_shader.GetValue() && values.use_shader_jit.GetValue(),
               "profile must use CPU JIT with GPU vertex specialization disabled");
@@ -56,6 +64,8 @@ int main() {
         // independent assertions retain every original GPU route restriction.
         Check(AllowsFullCpuFragments(mode) == (id == 1 || id == 3),
               "CPU full-fragment capability changed");
+        Check(AllowsFullCpuFragments(mode, false) == (id == 3),
+              "Native isolation changed Combo or retained Native specialization");
         Check(UsesAutomaticCompute(mode) == (id == 3 || id == 4), "compute selector changed");
         Check(AllowsComputeRendering(mode) == (id >= 2), "compute capability changed");
         // CodexAstraLocal: Isolation is exactly persisted mode2, independently

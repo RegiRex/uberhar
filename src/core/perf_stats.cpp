@@ -331,7 +331,7 @@ void PerfStats::LogUberharSettings(const char* event) {
         // from GPU vertex admission. This instant settings sample does not prove
         // compatible ready PSOs or draw coverage; renderer counters report those.
         api == Settings::GraphicsAPI::Vulkan && values.uberhar_hybrid_tev.GetValue() &&
-                Settings::AllowsFullCpuFragments(mode)
+                Settings::AllowsFullCpuFragments(mode, values.uberhar_native_full_fragments.GetValue())
             ? "software_specialized_ready_v1" : "disabled",
         // CodexAstraLocal: Native's new static-TEV tier is independent of full
         // specialization and GPU vertices. Log configured eligibility separately;

@@ -720,6 +720,11 @@ void QtConfig::ReadRendererValues() {
     ReadGlobalSetting(Settings::values.uberhar_cpu_vertex_bridge);
     // CodexAstraLocal: Retain the independent Combo placement choice on desktop.
     ReadGlobalSetting(Settings::values.uberhar_cpu_vertex_only);
+    // CodexAstraLocal: Read the same independent per-game controls as Android.
+    ReadGlobalSetting(Settings::values.uberhar_native_full_fragments);
+    ReadGlobalSetting(Settings::values.uberhar_cpu_prefix_overlap);
+    ReadGlobalSetting(Settings::values.uberhar_parallel_texture_decode);
+
     ReadGlobalSetting(Settings::values.async_presentation);
     ReadGlobalSetting(Settings::values.use_hw_shader);
     ReadGlobalSetting(Settings::values.shaders_accurate_mul);
@@ -1279,6 +1284,11 @@ void QtConfig::SaveRendererValues() {
     WriteGlobalSetting(Settings::values.uberhar_cpu_vertex_bridge);
     // CodexAstraLocal: Preserve saved placement across frontend restarts.
     WriteGlobalSetting(Settings::values.uberhar_cpu_vertex_only);
+    // CodexAstraLocal: Write the same independent per-game controls as Android.
+    WriteGlobalSetting(Settings::values.uberhar_native_full_fragments);
+    WriteGlobalSetting(Settings::values.uberhar_cpu_prefix_overlap);
+    WriteGlobalSetting(Settings::values.uberhar_parallel_texture_decode);
+
     WriteGlobalSetting(Settings::values.async_presentation);
     WriteGlobalSetting(Settings::values.use_hw_shader);
     WriteGlobalSetting(Settings::values.shaders_accurate_mul);

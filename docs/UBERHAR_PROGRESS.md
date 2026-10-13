@@ -1,4 +1,58 @@
-# Uberhar progress — 0.1.42 tested; 0.1.43 integration
+# Uberhar progress — 0.1.44 tested; 0.1.45 CPU texture work
+
+<!-- CodexAstraLocal: Current owner-authorized work supersedes historical pause and test instructions below; retain older evidence as history. -->
+**0.1.44 completed the gated release and Thor test batch.** Native, Combo and
+CPU-only-vertex Combo completed their measured Dark Moon openings at Vulkan 2x,
+normal speed, simulated 3DS GPU timings enabled and cleared application shader
+caches. Their selected mean speeds were 72.07%, 65.73% and 69.63%; slowest complete
+five-second windows were 56.67%, 41.04% and 63.61%. Average app CPU demand was
+1.931, 1.743 and 1.979 core-equivalents. CPU-only Combo covered a shorter opening
+span, so these are observations rather than matched-scene causal gains. Its
+steadier observed pacing is promising; sustained 99% remains unqualified.
+
+<!-- CodexAstraLocal: Correct visual priority from subsequent owner repeats while preserving separate fault evidence. -->
+The owner could not reproduce the title-smoke omission or Native moon anomalies
+with CPU Vertices on or off in subsequent play. Keep them as intermittent
+observations, with ghost corruption tracked separately. No extra visual testing
+is scheduled this cycle. Native already executes guest vertices on the CPU;
+the CPU Vertices switch affects Combo placement.
+
+CPU Software and Calculated did not complete .44 gameplay. .45 corrects the
+Software area-one coverage/interpolation fault, handles exact original
+homogeneous-zero geometry in Calculated, and captures previously missing
+first-failure operands without Native fallback. FEA's Software NaN input and the
+exact title clipping cause remain separate unknowns. Host checks do not establish
+that either title now boots successfully.
+
+<!-- CodexAstraLocal: Explain the concrete CPU scaling experiment and evidence boundary rather than promising busy cores or a fixed resolution ratio. -->
+.45 implements joined parallel CPU texture decoding for large immutable uploads
+and adds independent Native fragment, CPU assembly-overlap and texture-decoding
+controls. Existing CPU placement and phase measurements remain. The architect's
+allocation review found identical 224 MiB peak VMA block storage and 604 MiB raw
+stream storage across the three .44 conditions, despite ordinary Combo's much
+larger driver-reported allocation. Investigate ready GPU shader/pipeline storage
+before changing texture caches; this is not proof of a leak.
+
+The owner authorizes implementation, focused validation, independent review and
+the existing gated .45 build submission, followed immediately by checkpoint and
+**stop**. The owner performs subsequent hardware tests. Agents notify and yield
+while automation runs; completed agents stop. No gate polling, installation or
+autonomous device testing follows this submission. See the
+[.45 release notes](releases/0.1.45.md) and [review](UBERHAR_REVIEW_0.1.45.md).
+
+<!-- CodexAstraLocal: Keep future comparison work and scaling hypotheses distinct from measured release acceptance. -->
+Plan future healthy stock Azahar and CitraMMJ Dark Moon references, preserving
+settings, cache/thermal state, version identity and visible compromises. The .44
+stock attempt was killed for critical memory pressure and is not a qualified
+speed ceiling. A separate MMJ source checkout can support targeted logging;
+retained partial source is not proof of installed-APK identity. The owner's
+observed 4x speed of roughly 40–70% of 2x supports investigating nonlinear
+scaling. 200% at 2x and four useful app core-equivalents are provisional planning
+targets, not guarantees of 99%+ at 4x or substitutes for actual hardware results.
+The long-term goal remains correct first-run gameplay without saved shader
+caches, no skipped draws and sustained 99%+ speed at 4x.
+
+## Earlier 0.1.42 tests and 0.1.43 integration
 
 <!-- CodexAstraLocal: Preserve measured release behavior separately from planned fixes and device qualification. -->
 **0.1.42 is released, verified and installed.** Source

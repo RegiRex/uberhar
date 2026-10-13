@@ -105,6 +105,11 @@ void LogSettings() {
     // CodexAstraLocal: Record the saved CPU-placement switch; PICA separately
     // freezes whether Combo activates it for this renderer instance.
     log_setting("Uberhar_CPUVertexOnly", values.uberhar_cpu_vertex_only.GetValue());
+    // CodexAstraLocal: Identify selected controls once; actual route counters qualify execution.
+    log_setting("UBERHAR_NATIVE_FULL_FRAGMENTS", values.uberhar_native_full_fragments.GetValue());
+    log_setting("UBERHAR_CPU_PREFIX_OVERLAP", values.uberhar_cpu_prefix_overlap.GetValue());
+    log_setting("UBERHAR_PARALLEL_TEXTURE_DECODE", values.uberhar_parallel_texture_decode.GetValue());
+
     // AstraEH Log Line: The effective profile accompanies every session's settings.
     log_setting("Uberhar_TestMode", static_cast<u32>(values.uberhar_test_mode.GetValue()));
     log_setting("Renderer_AsyncPresentation", values.async_presentation.GetValue());
@@ -235,6 +240,11 @@ void RestoreGlobalState(bool is_powered_on) {
     // CodexAstraLocal: Release the per-game CPU-placement override alongside the
     // bridge without changing the saved value or the profile's override policy.
     values.uberhar_cpu_vertex_only.SetGlobal(true);
+    // CodexAstraLocal: Restore global values when leaving per-game settings.
+    values.uberhar_native_full_fragments.SetGlobal(true);
+    values.uberhar_cpu_prefix_overlap.SetGlobal(true);
+    values.uberhar_parallel_texture_decode.SetGlobal(true);
+
     // AstraEH: Reset the profile together with the other per-title renderer settings.
     values.uberhar_test_mode.SetGlobal(true);
     values.async_presentation.SetGlobal(true);

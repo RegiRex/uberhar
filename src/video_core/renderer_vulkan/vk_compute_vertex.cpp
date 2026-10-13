@@ -4,8 +4,11 @@
 #include <bit>
 #include <cmath>
 #include <cstring>
+#include <iterator>
 #include <limits>
+#include <fmt/format.h>
 #include "common/alignment.h"
+#include "common/logging/log.h"
 #include "core/memory.h"
 #include "video_core/pica/pica_core.h"
 #include "video_core/pica/vertex_loader.h"
@@ -25,6 +28,25 @@ namespace {
     throw VideoCore::ShaderRecoveryError(reason);
 }
 constexpr u32 StatusBytes = ComputeVertexInput::HeaderWords * sizeof(u32);
+
+// CodexAstraLocal: Report the actual rejected condition instead of calling every
+// clipping failure a capacity overflow. These are permanent terminal errors,
+// not optional timing/diagnostic instrumentation or permission to retry a draw.
+std::string_view ClipFailureName(u32 code) {
+    using Failure = Pica::Shader::Generator::GLSL::ComputeClipFailure;
+    switch (static_cast<Failure>(code)) {
+    case Failure::PlaneDistance: return "nonfinite_plane_distance";
+    case Failure::PolygonCapacity: return "polygon_capacity";
+    case Failure::IntersectionParameter: return "intersection_parameter";
+    case Failure::InterpolatedField: return "nonfinite_interpolated_field";
+    case Failure::CustomDistance: return "nonfinite_custom_distance";
+    case Failure::NonpositiveW: return "nonpositive_w";
+    case Failure::Reciprocal: return "nonfinite_reciprocal_w";
+    case Failure::OutsidePlane: return "outside_processed_plane";
+    case Failure::OutputCapacity: return "output_capacity";
+    default: return "invalid_failure_record";
+    }
+}
 }
 
 ComputeVertexInput CaptureComputeVertexInput(
@@ -304,7 +326,34 @@ struct ComputeVertexProducer::Impl {
         std::memcpy(status.data(), readback->mapped, StatusBytes);
         if (status[0] != 1 || status[1] != 0) {
             if (status[1] == 2) Refuse("Calculated guest shader produced nonfinite vertex fields");
-            if (status[1] == 3) Refuse("Calculated homogeneous clipping exceeded the finite domain");
+            if (status[1] == 3) {
+                const auto reason = status[60] == 0x43465031 ? ClipFailureName(status[7]) :
+                                                            "invalid_failure_record";
+                // CodexAstraLocal TEST-ONLY LOG: Keep one fixed raw operand
+                // record for the current hardware first fault. Remove this log
+                // and the GPU operand fields once that fault has a retained
+                // regression; preserve the permanent reason/location exception
+                // below. Success adds no logging/readback; accidental reuse
+                // after a caught terminal error cannot flood the log.
+                if (!reported_clip_failure) {
+                    reported_clip_failure = true;
+                    std::string words;
+                    words.reserve((ComputeVertexInput::HeaderWords - 7) * 9);
+                    for (u32 i = 7; i < ComputeVertexInput::HeaderWords; ++i)
+                        fmt::format_to(std::back_inserter(words), "{:08X}{}", status[i],
+                                       i + 1 == ComputeVertexInput::HeaderWords ? "" : ",");
+                    LOG_ERROR(Render_Vulkan,
+                        "Calculated clipping failure: schema=1 reason={} code={} triangle={} "
+                        "plane={} polygon_vertices={} output_cursor={} output_capacity={} "
+                        "topology={} input_vertices={} entry={} custom_plane={} "
+                        "record_scope=header_words_7_to_63 words={}",
+                        reason, status[7], status[8], status[9], status[10], status[11], status[12],
+                        input.metadata[14], count, input.metadata[15], input.metadata[188], words);
+                }
+                const auto message = fmt::format(
+                    "Calculated clipping refused: {} (triangle {}, plane {})", reason, status[8], status[9]);
+                Refuse(message.c_str());
+            }
             Refuse("Calculated guest input or compute completion was rejected");
         }
         if (status[2] > vertex_capacity || status[2] % 3 ||
@@ -330,6 +379,7 @@ struct ComputeVertexProducer::Impl {
     std::vector<Program> programs;
     std::unique_ptr<Buffer> upload, vertices, readback;
     u64 last_use{};
+    bool reported_clip_failure{};
 };
 
 ComputeVertexProducer::ComputeVertexProducer(const Instance& instance, Scheduler& scheduler,

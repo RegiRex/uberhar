@@ -1007,6 +1007,29 @@ class SettingsFragmentPresenter(private val fragmentView: SettingsFragmentView) 
             BooleanSetting.UBERHAR_CPU_VERTEX_ONLY.key,
             BooleanSetting.UBERHAR_CPU_VERTEX_ONLY.defaultValue
         ))
+        // CodexAstraLocal: Keep independent controls immediately below CPU Vertices
+        // and outside the custom-settings lock so every relevant preset can compare.
+        sl.add(SwitchSetting(
+            BooleanSetting.UBERHAR_NATIVE_FULL_FRAGMENTS,
+            R.string.uberhar_native_full_fragments,
+            R.string.uberhar_native_full_fragments_description,
+            BooleanSetting.UBERHAR_NATIVE_FULL_FRAGMENTS.key,
+            BooleanSetting.UBERHAR_NATIVE_FULL_FRAGMENTS.defaultValue
+        ))
+        sl.add(SwitchSetting(
+            BooleanSetting.UBERHAR_CPU_PREFIX_OVERLAP,
+            R.string.uberhar_cpu_prefix_overlap,
+            R.string.uberhar_cpu_prefix_overlap_description,
+            BooleanSetting.UBERHAR_CPU_PREFIX_OVERLAP.key,
+            BooleanSetting.UBERHAR_CPU_PREFIX_OVERLAP.defaultValue
+        ))
+        sl.add(SwitchSetting(
+            BooleanSetting.UBERHAR_PARALLEL_TEXTURE_DECODE,
+            R.string.uberhar_parallel_texture_decode,
+            R.string.uberhar_parallel_texture_decode_description,
+            BooleanSetting.UBERHAR_PARALLEL_TEXTURE_DECODE.key,
+            BooleanSetting.UBERHAR_PARALLEL_TEXTURE_DECODE.defaultValue
+        ))
         val customStart = sl.size
         sl.apply {
             add(HeaderSetting(R.string.renderer))

@@ -217,10 +217,13 @@ PicaCore::PicaCore(Memory::MemorySystem& memory_, std::shared_ptr<DebugContext> 
       // CodexAstraLocal: A placement comparison suppresses only Combo's guest
       // GPU vertices. Fragment/compute capabilities and worker ownership remain.
       cpu_vertex_only{Settings::UsesReadyGpuVertices(Settings::values.uberhar_test_mode.GetValue()) &&
-                      Settings::values.uberhar_cpu_vertex_only.GetValue()} {
+                      Settings::values.uberhar_cpu_vertex_only.GetValue()},
+      // CodexAstraLocal: Changing overlap never changes worker admission or vertex inputs.
+      cpu_prefix_overlap{Settings::values.uberhar_cpu_prefix_overlap.GetValue()} {
     // CodexAstraLocal Log Line: One immutable route label binds performance
     // comparisons to actual placement, without per-draw logging or live toggles.
-    LOG_INFO(Render, "Uberhar: combo_cpu_vertices_only={}", cpu_vertex_only);
+    LOG_INFO(Render, "Uberhar: combo_cpu_vertices_only={} cpu_prefix_overlap={}",
+             cpu_vertex_only, cpu_prefix_overlap);
     InitializeRegs();
     dirty_regs.SetAllDirty();
 
@@ -2141,7 +2144,7 @@ void PicaCore::LoadVertices(bool is_indexed, std::chrono::steady_clock::time_poi
                             context.Run(independent);
                             outputs[i] = plan.Convert(independent);
                         }
-                    }, append, measure_parallel);
+                    }, append, measure_parallel, cpu_prefix_overlap);
                 const auto& work = parallel.batch.LastWork();
                 ++parallel.parallel_batches;
                 parallel.owner_invocations += work.owner_invocations;

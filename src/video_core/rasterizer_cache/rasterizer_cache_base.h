@@ -17,6 +17,7 @@
 #include "video_core/rasterizer_cache/sampler_params.h"
 #include "video_core/rasterizer_cache/surface_params.h"
 #include "video_core/rasterizer_cache/texture_cube.h"
+#include "video_core/rasterizer_cache/texture_decode_work.h"
 
 namespace Memory {
 class MemorySystem;
@@ -231,6 +232,9 @@ private:
     Settings::TextureFilter filter;
     bool dump_textures;
     bool use_custom_textures;
+    // CodexAstraLocal: One lazy joined decoder belongs to this cache and cannot
+    // outlive the owner of its mapped upload resources.
+    ParallelTextureDecoder texture_decoder;
 };
 
 } // namespace VideoCore
