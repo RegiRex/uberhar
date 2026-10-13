@@ -96,6 +96,7 @@ struct ResetOwner {
         CpuDrawExecutor executor{4, 64, 8 * 1024 * 1024, Start};
         std::vector<std::shared_ptr<CpuDrawPacket>> pending;
         std::size_t reconciled{};
+        std::size_t superseded{}; // Claude: Tails a later serial List draw overwrote.
         u64 synchronous_boundaries{}, completed{}, inputs{}, invocations{}, hits{};
         u64 deferred_topology_resets{}, deferred_primitive_resets{};
     };
@@ -279,8 +280,11 @@ inline struct { Setting uberhar_test_mode; } values;
             ('redundant_reset_drain', change(owner, '    void Restart() {',
                 '    void Restart() {\n        ReconcileDeferredVertices();'),
                 'redundant reset drained packets'),
+            # Claude: The adoption is now guarded by the superseded-tail check;
+            # the defect removes the guarded statement as a whole.
             ('missing_reset_pair', change(owner,
-                '        primitive_assembler.AdoptCompletedTriangleTail(result.last_pair);', ''),
+                '        if (state.reconciled >= state.superseded)\n'
+                '            primitive_assembler.AdoptCompletedTriangleTail(result.last_pair);', ''),
                 'reset saved pair differs'),
         ]
         for name, mutated_owner, expected in controls:
