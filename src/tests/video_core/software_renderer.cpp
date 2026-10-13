@@ -16,6 +16,7 @@
 #include "core/core.h"
 #include "core/memory.h"
 #include "video_core/pica/pica_core.h"
+#include "video_core/renderer_software/sw_lighting.h" // CodexAstraLocal: Real multi-light LUT reuse.
 #include "video_core/renderer_software/sw_rasterizer.h"
 #endif
 #include "video_core/renderer_software/sw_frame.h"
@@ -285,7 +286,15 @@ TEST_CASE("Software texture demand follows consumed TEV and lighting operands", 
     s.alpha_op.Assign(Stage::Operation::Lerp); CHECK(mask() == 8);
     s = {};
     lighting.disable.Assign(0); lighting.config0.enable_shadow.Assign(1);
-    lighting.config0.shadow_selector.Assign(3); CHECK(mask() == 8);
+    lighting.config0.shadow_selector.Assign(3);
+    // CodexAstraLocal: Enabled but unconsumed lighting cannot request its
+    // shadow/bump inputs. A late executed operand must restore that demand.
+    CHECK(mask() == 0);
+    CHECK(SwRenderer::GetFragmentDemand(stages, lighting).primary_color);
+    CHECK_FALSE(SwRenderer::GetFragmentDemand(stages, lighting).lighting);
+    stages[5].alpha_source1.Assign(Source::SecondaryFragmentColor);
+    CHECK(mask() == 8);
+    CHECK(SwRenderer::GetFragmentDemand(stages, lighting).lighting);
     lighting.config0.bump_mode.Assign(Pica::LightingRegs::LightingBumpMode::NormalMap);
     lighting.config0.bump_selector.Assign(1); CHECK(mask() == 10);
     lighting.disable.Assign(1); CHECK(mask() == 0);
@@ -445,6 +454,171 @@ TEST_CASE("Software actual triangle budgets and alias admission", "[software]") 
     CHECK_NOTHROW(raster.AddTriangle(a,b,c));
     target.allow_depth_stencil_write.Assign(0);target.depth_buffer_address.Assign(0);
     CHECK(SwRenderer::SoftwareRendererTestAccess::Safe(raster,regs));
+}
+
+TEST_CASE("Software prepared fragment demand preserves actual triangle outputs",
+          "[software][software-preparation]") {
+    // CodexAstraLocal: Exercise the real joined triangle consumer, not a second
+    // TEV evaluator. Literal byte expectations expose stage order, arity,
+    // quantization, delayed-buffer timing and Software's stage0 alpha rule.
+    const auto old_workers = Settings::values.software_renderer_workers.GetValue();
+    struct Restore {
+        u32 workers;
+        ~Restore() { Settings::values.software_renderer_workers = workers; }
+    } restore{old_workers};
+    Settings::values.software_renderer_workers = 1;
+    Core::System system;
+    Memory::MemorySystem memory{system};
+    Pica::PicaCore pica{memory, {}};
+    auto& regs = pica.regs.internal;
+    regs = {};
+    regs.rasterizer.viewport_size_x.Assign(0x420000); // 8
+    regs.rasterizer.viewport_size_y.Assign(0x420000);
+    regs.rasterizer.viewport_depth_near_plane.Assign(0x3f0000);
+    auto& target = regs.framebuffer.framebuffer;
+    target.width.Assign(16); target.height.Assign(15);
+    target.color_format.Assign(Pica::FramebufferRegs::ColorFormat::RGBA8);
+    target.color_buffer_address.Assign((Memory::VRAM_PADDR + 0x40000) / 8);
+    target.allow_color_write.Assign(15);
+    auto& merger = regs.framebuffer.output_merger;
+    merger.logic_op.Assign(Pica::FramebufferRegs::LogicOp::Copy);
+    merger.red_enable.Assign(1); merger.green_enable.Assign(1);
+    merger.blue_enable.Assign(1); merger.alpha_enable.Assign(1);
+    auto* color = memory.GetPhysicalPointer(target.GetColorBufferPhysicalAddress());
+    SwRenderer::Framebuffer observed{memory, regs.framebuffer};
+    observed.Bind();
+    SwRenderer::RasterizerSoftware raster{memory, pica};
+    const auto f = [](float value) { return Pica::f24::FromFloat32(value); };
+    const auto nan = f(std::numeric_limits<float>::quiet_NaN());
+    const auto vertex = [&](float x, float y) {
+        Pica::OutputVertex result{};
+        result.pos = {f(x), f(y), f(-.5f), f(1)};
+        result.color = {nan, nan, nan, nan};
+        result.quat = {nan, nan, nan, nan};
+        result.view = {nan, nan, nan};
+        result.tc0 = result.tc1 = result.tc2 = {nan, nan};
+        return result;
+    };
+    const auto a = vertex(-1, -1), b = vertex(1, -1), c = vertex(-1, 1);
+    using Stage = Pica::TexturingRegs::TevStageConfig;
+    using Source = Stage::Source;
+    const std::array<Stage*, 6> stages{&regs.texturing.tev_stage0, &regs.texturing.tev_stage1,
+        &regs.texturing.tev_stage2, &regs.texturing.tev_stage3, &regs.texturing.tev_stage4,
+        &regs.texturing.tev_stage5};
+    const auto constant = [](Stage& stage, Color value) {
+        stage.const_r.Assign(value.r()); stage.const_g.Assign(value.g());
+        stage.const_b.Assign(value.b()); stage.const_a.Assign(value.a());
+    };
+    const auto reset = [&] {
+        regs.texturing.tev_combiner_buffer_input.update_mask_rgb.Assign(0);
+        regs.texturing.tev_combiner_buffer_input.update_mask_a.Assign(0);
+        for (auto* stage : stages) {
+            *stage = {};
+            stage->color_source1.Assign(Source::Previous);
+            stage->alpha_source1.Assign(Source::Previous);
+        }
+        stages[0]->color_source1.Assign(Source::Constant);
+        stages[0]->alpha_source1.Assign(Source::Constant);
+        constant(*stages[0], {21, 73, 149, 205});
+    };
+    const auto draw = [&] {
+        std::memset(color, 0x6d, 16 * 16 * 4);
+        raster.AddTriangle(a, b, c);
+        return observed.GetPixel(2, 2);
+    };
+    // Invalid enabled bump memory and NaN semantic attributes remain unused
+    // only while no executed operand consumes them; there is no repair value.
+    regs.lighting.config0.bump_mode.Assign(Pica::LightingRegs::LightingBumpMode::NormalMap);
+    regs.lighting.config0.bump_selector.Assign(1);
+    regs.texturing.main_config.texture1_enable.Assign(1);
+    // CodexAstraLocal: Address zero is the renderer's valid constant-color
+    // sampler. Use mapped storage with invalid zero dimensions for this refusal.
+    regs.texturing.texture1.address.Assign((Memory::VRAM_PADDR + 0x10000) / 8);
+    reset();
+    REQUIRE(draw() == Color{21, 73, 149, 205});
+    stages[5]->alpha_source1.Assign(Source::PrimaryFragmentColor);
+    CHECK_THROWS_AS(draw(), VideoCore::ShaderRecoveryError);
+    CHECK(std::all_of(color, color + 16 * 16 * 4, [](u8 value) { return value == 0x6d; }));
+    reset();
+    stages[0]->color_source1.Assign(Source::Previous);
+    stages[0]->color_source3.Assign(Source::Constant);
+    stages[0]->alpha_source1.Assign(Source::Previous);
+    stages[0]->alpha_source3.Assign(Source::Texture1);
+    CHECK(draw() == Color{21, 73, 149, 0});
+    reset();
+    stages[0]->color_modifier1.Assign(Stage::ColorModifier::OneMinusSourceColor);
+    stages[0]->alpha_modifier1.Assign(Stage::AlphaModifier::OneMinusSourceAlpha);
+    stages[0]->color_scale.Assign(1); stages[0]->alpha_scale.Assign(1);
+    CHECK(draw() == Color{255, 255, 212, 100});
+    reset();
+    auto& buffer = regs.texturing.tev_combiner_buffer_color;
+    buffer.r.Assign(3); buffer.g.Assign(5); buffer.b.Assign(7); buffer.a.Assign(11);
+    regs.texturing.tev_combiner_buffer_input.update_mask_rgb.Assign(1);
+    regs.texturing.tev_combiner_buffer_input.update_mask_a.Assign(1);
+    stages[1]->color_source1.Assign(Source::PreviousBuffer);
+    stages[1]->alpha_source1.Assign(Source::PreviousBuffer);
+    CHECK(draw() == Color{3, 5, 7, 11});
+    stages[2]->color_source1.Assign(Source::PreviousBuffer);
+    stages[2]->alpha_source1.Assign(Source::PreviousBuffer);
+    CHECK(draw() == Color{21, 73, 149, 205});
+    reset();
+    const std::array<Stage::Operation, 5> ops{Stage::Operation::Modulate, Stage::Operation::Add,
+        Stage::Operation::Lerp, Stage::Operation::MultiplyThenAdd, Stage::Operation::AddThenMultiply};
+    const std::array<Color, 5> constants{{{128,64,32,128}, {7,11,13,17}, {31,63,95,127},
+                                      {3,5,7,11}, {64,96,128,160}}};
+    for (u32 i = 1; i < 6; ++i) {
+        stages[i]->color_op.Assign(ops[i - 1]); stages[i]->alpha_op.Assign(ops[i - 1]);
+        stages[i]->color_source2.Assign(Source::Constant); stages[i]->color_source3.Assign(Source::Constant);
+        stages[i]->alpha_source2.Assign(Source::Constant); stages[i]->alpha_source3.Assign(Source::Constant);
+        constant(*stages[i], constants[i - 1]);
+    }
+    stages[3]->color_modifier3.Assign(Stage::ColorModifier::SourceAlpha);
+    CHECK(draw() == Color{16, 38, 68, 110});
+}
+
+TEST_CASE("Software repeated lighting vectors preserve distinct light LUT results",
+          "[software][software-preparation]") {
+    // CodexAstraLocal: Two distinct half-vectors repeatedly feed NH/VH/CP.
+    // Sparse LUT entries make stale cross-light reuse or a different LUT input
+    // change literal output bytes without introducing another lighting engine.
+    using L = Pica::LightingRegs;
+    L lighting{};
+    Pica::PicaCore::Lighting state{};
+    lighting.config0.config.Assign(L::LightingConfig::Config7);
+    lighting.config0.enable_primary_alpha.Assign(1);
+    lighting.config0.enable_secondary_alpha.Assign(1);
+    lighting.config1.disable_spot_atten.Assign(255);
+    lighting.config1.disable_dist_atten.Assign(255);
+    lighting.max_light_index.Assign(1);
+    lighting.light_enable.slot_1.Assign(1);
+    lighting.light[0].z.Assign(0x3c00); lighting.light[1].x.Assign(0x3c00);
+    for (auto& light : lighting.light) {
+        light.config.directional.Assign(1);
+        light.diffuse.r.Assign(10); light.diffuse.g.Assign(20); light.diffuse.b.Assign(30);
+        light.specular_0.r.Assign(32); light.specular_0.g.Assign(64); light.specular_0.b.Assign(96);
+        light.specular_1.r.Assign(64); light.specular_1.g.Assign(32); light.specular_1.b.Assign(16);
+    }
+    lighting.lut_input.d0.Assign(L::LightingLutInput::NH);
+    lighting.lut_input.d1.Assign(L::LightingLutInput::VH);
+    lighting.lut_input.rr.Assign(L::LightingLutInput::CP);
+    lighting.lut_input.rg.Assign(L::LightingLutInput::NH);
+    lighting.lut_input.rb.Assign(L::LightingLutInput::VH);
+    lighting.lut_input.fr.Assign(L::LightingLutInput::VH);
+    const auto lut = [&](L::LightingSampler sampler, u32 end, u32 diagonal) {
+        auto& entries = state.luts[static_cast<u32>(sampler)];
+        entries[255].value.Assign(end); entries[181].value.Assign(diagonal);
+    };
+    lut(L::LightingSampler::Distribution0, 4095, 2048);
+    lut(L::LightingSampler::Distribution1, 2048, 4095);
+    lut(L::LightingSampler::ReflectRed, 4095, 4095);
+    lut(L::LightingSampler::ReflectGreen, 1024, 3072);
+    lut(L::LightingSampler::ReflectBlue, 4095, 2048);
+    lut(L::LightingSampler::Fresnel, 0, 3072);
+    const std::array<Color, 4> textures{};
+    const auto result = SwRenderer::ComputeFragmentsColors(lighting, state,
+        Common::Quaternion<float>{{0,0,0},1}, {0,0,2}, textures);
+    CHECK(result.first == Color{10, 20, 30, 191});
+    CHECK(result.second == Color{112, 124, 160, 191});
 }
 
 TEST_CASE("Software unbiased interpolation preserves coverage and singular failures",

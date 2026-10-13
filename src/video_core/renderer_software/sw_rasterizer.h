@@ -20,6 +20,8 @@ class PicaCore;
 namespace SwRenderer {
 
 struct Vertex;
+// CodexAstraLocal: Immutable triangle-local TEV preparation is shared by joined rows.
+struct PreparedTevConfig;
 
 class RasterizerSoftware : public VideoCore::RasterizerInterface {
 public:
@@ -74,7 +76,7 @@ private:
     /// Emulates the TEV configuration and returns the combiner output.
     Common::Vec4<u8> WriteTevConfig(
         std::span<const Common::Vec4<u8>, 4> texture_color,
-        std::span<const Pica::TexturingRegs::TevStageConfig, 6> tev_stages,
+        const PreparedTevConfig& tev,
         Common::Vec4<u8> primary_color, Common::Vec4<u8> primary_fragment_color,
         Common::Vec4<u8> secondary_fragment_color);
 

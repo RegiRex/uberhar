@@ -71,6 +71,9 @@ std::pair<Common::Vec4<u8>, Common::Vec4<u8>> ComputeFragmentsColors(
     Common::Vec4f diffuse_sum = {0.0f, 0.0f, 0.0f, 1.0f};
     Common::Vec4f specular_sum = {0.0f, 0.0f, 0.0f, 1.0f};
 
+    // CodexAstraLocal: Every light consumes the same normalized view. Compute
+    // it at the first original use and reuse the exact scalar result thereafter.
+    Common::Vec3f norm_view{};
     for (u32 light_index = 0; light_index <= lighting.max_light_index; ++light_index) {
         u32 num = lighting.light_enable.GetNum(light_index);
         const auto& light_config = lighting.light[num];
@@ -89,8 +92,22 @@ std::pair<Common::Vec4<u8>, Common::Vec4<u8>> ComputeFragmentsColors(
 
         [[maybe_unused]] const f32 length = light_vector.Normalize();
 
-        Common::Vec3f norm_view = view.Normalized();
+        if (light_index == 0) {
+            norm_view = view.Normalized();
+        }
         Common::Vec3f half_vector = norm_view + light_vector;
+        // CodexAstraLocal: Several LUTs may request the same half-vector.
+        // Normalize on its first actual use, preserving zero/NaN behavior and
+        // avoiding both repeated square roots and unused speculative work.
+        Common::Vec3f normalized_half{};
+        bool half_ready = false;
+        const auto norm_half = [&]() -> const Common::Vec3f& {
+            if (!half_ready) {
+                normalized_half = half_vector.Normalized();
+                half_ready = true;
+            }
+            return normalized_half;
+        };
 
         f32 dist_atten = 1.0f;
         if (!lighting.IsDistAttenDisabled(num)) {
@@ -115,10 +132,10 @@ std::pair<Common::Vec4<u8>, Common::Vec4<u8>> ComputeFragmentsColors(
 
             switch (input) {
             case LightingRegs::LightingLutInput::NH:
-                result = Common::Dot(normal, half_vector.Normalized());
+                result = Common::Dot(normal, norm_half());
                 break;
             case LightingRegs::LightingLutInput::VH:
-                result = Common::Dot(norm_view, half_vector.Normalized());
+                result = Common::Dot(norm_view, norm_half());
                 break;
             case LightingRegs::LightingLutInput::NV:
                 result = Common::Dot(normal, norm_view);
@@ -134,7 +151,7 @@ std::pair<Common::Vec4<u8>, Common::Vec4<u8>> ComputeFragmentsColors(
             }
             case LightingRegs::LightingLutInput::CP:
                 if (lighting.config0.config == LightingRegs::LightingConfig::Config7) {
-                    const Common::Vec3f norm_half_vector = half_vector.Normalized();
+                    const Common::Vec3f& norm_half_vector = norm_half();
                     const Common::Vec3f half_vector_proj =
                         norm_half_vector - normal * Common::Dot(normal, norm_half_vector);
                     result = Common::Dot(half_vector_proj, tangent);

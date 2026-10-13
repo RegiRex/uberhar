@@ -172,26 +172,23 @@ bool same_vertex(ClipVertex a,ClipVertex b) {
 // keep the permanent reason/location and terminal refusal.
 uint clip_ordinal=0u;
 uvec3 clip_references;
-bool fail_clip(uint reason,uint plane,uint count,uint cursor,ClipVertex a,ClipVertex b,
-               float da,float db,float t,float divisor) {
+// CodexAstraLocal: Keep the nested clipping failure edge small. Passing whole
+// varying arrays and reconstructing three vertices here allowed diagnostic work
+// to expand inside each clipping branch. Avoid that structural compiler burden;
+// whether it caused the .45 Adreno rejection remains unproven.
+#define CLIP_POSITION(v) vec4((v).lane[0],(v).lane[1],(v).lane[2],(v).lane[3])
+bool fail_clip(uint reason,uint plane,uint count,uint cursor,vec4 a,vec4 b,
+               float custom_a,float custom_b,float da,float db,float t,float divisor) {
     if(result[7]!=0u)return false;
     result[7]=reason;result[8]=clip_ordinal;result[9]=plane;
     result[10]=count;result[11]=cursor;result[12]=triangle_capacity()*24u;
     result[13]=meta[14];result[14]=meta[136];result[15]=meta[137]|(meta[138]<<1u);
-    // CodexAstraLocal TEST-ONLY LOG: Reconstruct raw operands from immutable
-    // semantic scratch only on failure. Remove with the operand record once
-    // the hardware first fault is captured as a retained regression.
-    for(uint v=0u;v<3u;++v) {
-        ClipVertex original=hardware_vertex(clip_references[v],clip_references.x);
-        for(uint c=0u;c<4u;++c)result[16u+v*4u+c]=floatBitsToUint(original.lane[c]);
-        result[42u+v]=floatBitsToUint(original.custom_distance);
-    }
     for(uint c=0u;c<4u;++c) {
-        result[28u+c]=floatBitsToUint(a.lane[c]);
-        result[33u+c]=floatBitsToUint(b.lane[c]);
+        result[28u+c]=floatBitsToUint(a[c]);
+        result[33u+c]=floatBitsToUint(b[c]);
         result[56u+c]=meta[189u+c];
     }
-    result[32]=floatBitsToUint(a.custom_distance);result[37]=floatBitsToUint(b.custom_distance);
+    result[32]=floatBitsToUint(custom_a);result[37]=floatBitsToUint(custom_b);
     result[38]=floatBitsToUint(da);result[39]=floatBitsToUint(db);
     result[40]=floatBitsToUint(t);result[41]=floatBitsToUint(divisor);
     for(uint v=0u;v<3u;++v) {
@@ -200,6 +197,19 @@ bool fail_clip(uint reason,uint plane,uint count,uint cursor,ClipVertex a,ClipVe
     result[48]=meta[15];result[49]=meta[1];result[50]=meta[188];
     result[60]=0x43465031u;
     return false;
+}
+// CodexAstraLocal TEST-ONLY LOG: Reconstruct original operands at the single
+// terminal exit, after clipping has unwound its polygon arrays. This preserves
+// every diagnostic word without cloning that work into each clipping branch.
+// Remove this epilogue with the raw record after a retained hardware regression;
+// the permanent reason/location and terminal status remain.
+void finish_clip_failure() {
+    for(uint v=0u;v<3u;++v) {
+        ClipVertex original=hardware_vertex(clip_references[v],clip_references.x);
+        for(uint c=0u;c<4u;++c)result[16u+v*4u+c]=floatBitsToUint(original.lane[c]);
+        result[42u+v]=floatBitsToUint(original.custom_distance);
+    }
+    result[1]=3u;
 }
 bool append_clip(inout ClipVertex vertices[10],inout uint count,ClipVertex v) {
     if(count>0u&&same_vertex(vertices[count-1u],v))return true;
@@ -222,7 +232,8 @@ bool intersection(ClipVertex a,ClipVertex b,uint plane,uint count,uint cursor,ou
     precise float divisor=da-db;
     precise float t=da/divisor;
     if(!finite_value(divisor)||!finite_value(t)||t<0.0||t>1.0)
-        return fail_clip(CLIP_INTERSECTION_PARAMETER,plane,count,cursor,a,b,da,db,t,divisor);
+        return fail_clip(CLIP_INTERSECTION_PARAMETER,plane,count,cursor,CLIP_POSITION(a),CLIP_POSITION(b),
+            a.custom_distance,b.custom_distance,da,db,t,divisor);
     precise float inverse=1.0-t;
     for(uint lane=0u;lane<22u;++lane) {
         precise float left=a.lane[lane]*inverse,right=b.lane[lane]*t;
@@ -233,14 +244,16 @@ bool intersection(ClipVertex a,ClipVertex b,uint plane,uint count,uint cursor,ou
             result[51]=lane;result[52]=floatBitsToUint(a.lane[lane]);
             result[53]=floatBitsToUint(b.lane[lane]);result[54]=floatBitsToUint(sum);
             result[55]=floatBitsToUint(inverse);
-            return fail_clip(CLIP_INTERPOLATED_FIELD,plane,count,cursor,a,b,da,db,t,divisor);
+            return fail_clip(CLIP_INTERPOLATED_FIELD,plane,count,cursor,CLIP_POSITION(a),CLIP_POSITION(b),
+                a.custom_distance,b.custom_distance,da,db,t,divisor);
         }
         value.lane[lane]=sum;
     }
     precise float custom_left=a.custom_distance*inverse,custom_right=b.custom_distance*t;
     precise float custom_sum=custom_left+custom_right;
     if(!finite_value(custom_sum))
-        return fail_clip(CLIP_CUSTOM_DISTANCE,plane,count,cursor,a,b,da,db,t,divisor);
+        return fail_clip(CLIP_CUSTOM_DISTANCE,plane,count,cursor,CLIP_POSITION(a),CLIP_POSITION(b),
+            a.custom_distance,b.custom_distance,da,db,t,divisor);
     value.custom_distance=plane==6u?0.0:custom_sum;
     // Exact plane coordinates avoid creating an outside endpoint by rounding;
     // other lanes retain the unmodified homogeneous interpolation result.
@@ -258,7 +271,7 @@ bool clip_triangle(uvec3 references,inout uint cursor) {
     bool homogeneous_origin=false;
     for(uint i=0u;i<3u;++i) {
         polygon[i]=hardware_vertex(references[i],references.x);
-        vec4 position=vec4(polygon[i].lane[0],polygon[i].lane[1],polygon[i].lane[2],polygon[i].lane[3]);
+        vec4 position=CLIP_POSITION(polygon[i]);
         homogeneous_origin=homogeneous_origin||all(equal(position,vec4(0.0)));
     }
     // CodexAstraLocal: An ORIGINAL exact homogeneous zero plus two position
@@ -272,21 +285,25 @@ bool clip_triangle(uvec3 references,inout uint cursor) {
         ClipVertex previous=polygon[count-1u];
         float pd=distance_to_plane(previous,plane);
         if(!finite_value(pd))
-            return fail_clip(CLIP_PLANE_DISTANCE,plane,count,cursor,previous,previous,pd,pd,0.0,0.0);
+            return fail_clip(CLIP_PLANE_DISTANCE,plane,count,cursor,CLIP_POSITION(previous),CLIP_POSITION(previous),
+                previous.custom_distance,previous.custom_distance,pd,pd,0.0,0.0);
         bool previous_inside=pd>=0.0;
         for(uint i=0u;i<count;++i) {
             ClipVertex current=polygon[i];float cd=distance_to_plane(current,plane);
             if(!finite_value(cd))
-                return fail_clip(CLIP_PLANE_DISTANCE,plane,count,cursor,previous,current,pd,cd,0.0,0.0);
+                return fail_clip(CLIP_PLANE_DISTANCE,plane,count,cursor,CLIP_POSITION(previous),CLIP_POSITION(current),
+                    previous.custom_distance,current.custom_distance,pd,cd,0.0,0.0);
             bool inside=cd>=0.0;
             if(inside!=previous_inside) {
                 ClipVertex crossing;
                 if(!intersection(previous,current,plane,count,cursor,crossing))return false;
                 if(!append_clip(next_polygon,next_count,crossing))
-                    return fail_clip(CLIP_POLYGON_CAPACITY,plane,next_count,cursor,previous,current,pd,cd,0.0,0.0);
+                    return fail_clip(CLIP_POLYGON_CAPACITY,plane,next_count,cursor,CLIP_POSITION(previous),CLIP_POSITION(current),
+                        previous.custom_distance,current.custom_distance,pd,cd,0.0,0.0);
             }
             if(inside&&!append_clip(next_polygon,next_count,current))
-                return fail_clip(CLIP_POLYGON_CAPACITY,plane,next_count,cursor,previous,current,pd,cd,0.0,0.0);
+                return fail_clip(CLIP_POLYGON_CAPACITY,plane,next_count,cursor,CLIP_POSITION(previous),CLIP_POSITION(current),
+                    previous.custom_distance,current.custom_distance,pd,cd,0.0,0.0);
             previous=current;previous_inside=inside;pd=cd;
         }
         if(next_count>1u&&same_vertex(next_polygon[0],next_polygon[next_count-1u]))--next_count;
@@ -297,17 +314,21 @@ bool clip_triangle(uvec3 references,inout uint cursor) {
     for(uint i=0u;i<count;++i) {
         float w=polygon[i].lane[3];
         if(!(w>0.0))
-            return fail_clip(CLIP_NONPOSITIVE_W,7u,count,cursor,polygon[i],polygon[i],w,w,0.0,0.0);
+            return fail_clip(CLIP_NONPOSITIVE_W,7u,count,cursor,CLIP_POSITION(polygon[i]),CLIP_POSITION(polygon[i]),
+                polygon[i].custom_distance,polygon[i].custom_distance,w,w,0.0,0.0);
         if(!finite_value(1.0/w))
-            return fail_clip(CLIP_RECIPROCAL,7u,count,cursor,polygon[i],polygon[i],w,w,0.0,0.0);
+            return fail_clip(CLIP_RECIPROCAL,7u,count,cursor,CLIP_POSITION(polygon[i]),CLIP_POSITION(polygon[i]),
+                polygon[i].custom_distance,polygon[i].custom_distance,w,w,0.0,0.0);
         for(uint plane=0u;plane<6u+meta[188];++plane)
             if(distance_to_plane(polygon[i],plane)<0.0)
-                return fail_clip(CLIP_OUTSIDE_PLANE,plane,count,cursor,polygon[i],polygon[i],
-                                 distance_to_plane(polygon[i],plane),0.0,0.0,0.0);
+                return fail_clip(CLIP_OUTSIDE_PLANE,plane,count,cursor,CLIP_POSITION(polygon[i]),CLIP_POSITION(polygon[i]),
+                    polygon[i].custom_distance,polygon[i].custom_distance,
+                    distance_to_plane(polygon[i],plane),0.0,0.0,0.0);
     }
     uint emitted=3u*(count-2u),capacity=triangle_capacity()*24u;
     if(cursor>capacity||emitted>capacity-cursor)
-        return fail_clip(CLIP_OUTPUT_CAPACITY,7u,count,cursor,polygon[0],polygon[0],0.0,0.0,0.0,0.0);
+        return fail_clip(CLIP_OUTPUT_CAPACITY,7u,count,cursor,CLIP_POSITION(polygon[0]),CLIP_POSITION(polygon[0]),
+            polygon[0].custom_distance,polygon[0].custom_distance,0.0,0.0,0.0,0.0);
     uint base=hardware_base();
     for(uint triangle=1u;triangle+1u<count;++triangle) {
         uvec3 selected=uvec3(0u,triangle,triangle+1u);
@@ -352,7 +373,9 @@ void main() {
     uvec2 tail=uvec2(0u,1u);
     uint index=meta[136],written=0u;
     bool ready=meta[137]!=0u,winding=meta[138]!=0u;
-    uint vertex_count=0u;
+    // CodexAstraLocal: Both topology paths converge on one terminal diagnostic
+    // exit; failed scratch never publishes assembly or attachment work.
+    uint vertex_count=0u;bool clip_failed=false;
     for(uint ordinal=0u;ordinal<n;++ordinal) {
         uint reference=ordinal+2u;
         if(meta[14]==0u||meta[14]==3u) {
@@ -361,15 +384,16 @@ void main() {
                 index=0u;
                 uvec3 triangle=uvec3(tail,reference);
                 if(meta[14]==3u&&winding)triangle=triangle.yxz;
-                if(!clip_triangle(triangle,vertex_count)){result[1]=3u;return;}
+                if(!clip_triangle(triangle,vertex_count)){clip_failed=true;break;}
                 if(meta[14]==3u)winding=false;
             }
         } else {
-            if(ready&&!clip_triangle(uvec3(tail,reference),vertex_count)){result[1]=3u;return;}
+            if(ready&&!clip_triangle(uvec3(tail,reference),vertex_count)){clip_failed=true;break;}
             tail[index]=reference;written|=1u<<index;ready=ready||index==1u;
             index=meta[14]==1u?index^1u:1u;
         }
     }
+    if(clip_failed){finish_clip_failure();return;}
     for(uint slot=0u;slot<2u;++slot)if((written&(1u<<slot))!=0u)
         for(uint c=0u;c<24u;++c)result[8u+slot*24u+c]=result[semantic_word(tail[slot])+c];
     result[2]=vertex_count;result[3]=n;result[4]=misses;result[5]=hits;

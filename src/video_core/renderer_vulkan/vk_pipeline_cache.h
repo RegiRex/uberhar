@@ -14,6 +14,8 @@
 #include "video_core/renderer_vulkan/uberhar_pipeline_policy.h" // AstraEH: Admission reason counters.
 #include "video_core/renderer_vulkan/uberhar_push_constants.h" // AstraEH: Exact worker-side uploads.
 #include "video_core/renderer_vulkan/uberhar_tev_preparation.h" // AstraEH: Exact preparation reuse.
+// CodexAstraLocal: Exact owner-side transport reuse is separate from family/PSO caching.
+#include "video_core/renderer_vulkan/uberhar_dynamic_tev_preparation.h"
 #include "video_core/renderer_vulkan/uberhar_wait_diagnostics.h" // AstraEH: Bounded worst waits.
 #include "video_core/renderer_vulkan/vk_graphics_pipeline.h"
 #include "video_core/renderer_vulkan/uberhar_gpu_vertex_policy.h" // AstraPro: Ready-only gates.
@@ -163,6 +165,9 @@ public:
         Pica::ShaderSetup& setup, const PipelineInfo& info, u64 pipeline_key) noexcept;
 
 private:
+    // CodexAstraLocal: Materialize only for a live generic/static consumer; a
+    // ready full fragment must not pay for controls it cannot read.
+    void EnsureDynamicTevState();
     // CodexAstraUlt: One gate covers optional fragment warming, binding and transport;
     // mandatory unsupported-state recovery continues through UseFragmentShader independently.
     bool PreferReadySpecializedFragment(const Pica::Shader::UserConfig& user) const;
@@ -242,8 +247,8 @@ private:
     // Created only in hybrid mode; shader and driver compilation run as one serial job.
     std::unique_ptr<Common::ThreadWorker> tev_worker;
     // AstraPro: Originally Combo-only, one in-flight pipeline and a separate bounded cache.
-    // CodexAstraLocal: Existing single optional lane now also serves Native
-    // static CPU fragments; its queues contain ready-dependency work only.
+    // CodexAstraLocal: Existing single optional lane also serves Native's full
+    // and static CPU fragments; its queues contain ready-dependency work only.
     // Drain this worker before releasing ANY referenced shaders/driver cache.
     std::unique_ptr<Common::ThreadWorker> ready_vertex_worker;
     std::unordered_map<u64, std::unique_ptr<GraphicsPipeline>> ready_vertex_pipelines;
@@ -273,6 +278,7 @@ private:
     // AstraPro: Optimized covered fragments are distinct from correctness recovery.
     u64 virtual_specialized_gpu_draws{};
     u64 tev_transport_bypassed_gpu{};
+    u64 tev_transport_bypassed_cpu{}; // CodexAstraLocal: Full-ready draw count, not GPU time saved.
     u64 ready_fragment_preflight_deferred{};
     u64 ready_vertex_requests{}, ready_vertex_selected{}, ready_vertex_dependency_misses{},
         ready_vertex_deferred{}, ready_vertex_capped{}, ready_vertex_failed{},
@@ -298,6 +304,10 @@ private:
     // AstraEH: The generator owns the versioned 128-byte transport and layout assertions.
     using TevPushConstants = Pica::Shader::Generator::GLSL::DynamicTevState;
     TevPushConstants tev_constants{};
+    // CodexAstraLocal: This original-config snapshot belongs to one draw only.
+    // Pure reuse below owns its key separately; queued draws own their bytes.
+    std::optional<Pica::Shader::FSConfig> pending_tev_transport;
+    DynamicTevPreparation dynamic_tev_preparation;
     // AstraEH: This state belongs to ordered command execution, not draw preparation.
     ExactPushConstants<TevPushConstants> tev_push_constants;
     // AstraEH: Snapshot before application-cache loading; never infer opaque driver hits.

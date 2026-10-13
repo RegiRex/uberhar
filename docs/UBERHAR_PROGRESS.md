@@ -1,4 +1,31 @@
-# Uberhar progress — 0.1.44 tested; 0.1.45 CPU texture work
+# Uberhar progress — 0.1.45 tested; 0.1.46 rendering preparation
+
+<!-- CodexAstraLocal: Latest owner feedback and authorized build-submission stop supersede historical status below. -->
+0.1.45 is released and the authorized comparison batch is complete. Dark Moon
+Native, Combo and CPU-vertex Combo remain below the sustained 99% target; unequal
+scene coverage does not establish a version speedup. CPU Software reached Dark
+Moon's title at unusable speed and stopped on invalid semantic UVs in Fire Emblem.
+Calculated stopped during compute-pipeline creation. A stock comparison ended in
+low-memory process death; it is not a healthy reference ceiling.
+
+The owner reports roughly 40% lower Sonic frame rate with Combo CPU Vertices ON,
+and about 95–150% turbo speed with CPU Vertices OFF and assembly overlap and/or
+parallel texture decoding enabled. These are owner observations, not captured
+five-second measurements or an isolated gain attributable to either control.
+Keep workload-specific placement and the existing GPU vertex route.
+
+0.1.46 removes repeated fragment-register decoding, prepares generic controls on
+demand with exact pure-state reuse, reduces per-pixel CPU Software setup and
+unused operands, and simplifies Calculated's failure-only compute code while
+containing pipeline creation errors. See [release notes](releases/0.1.46.md) and
+[source review](UBERHAR_REVIEW_0.1.46.md). Hardware effects remain unqualified.
+
+The owner authorized implementation, meaningful focused checks and gated .46
+submission. Agents stop when their contributions finish; root stops after
+submission and the detailed report. The owner handles every hardware test. No
+automatic installation, device operation or CI polling follows submission.
+
+## Earlier 0.1.44 and 0.1.45 checkpoint
 
 <!-- CodexAstraLocal: Current owner-authorized work supersedes historical pause and test instructions below; retain older evidence as history. -->
 **0.1.44 completed the gated release and Thor test batch.** Native, Combo and

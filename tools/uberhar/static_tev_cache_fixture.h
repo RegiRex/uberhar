@@ -3,6 +3,8 @@
 // with controlled driver/queue endpoints.
 #include "video_core/renderer_vulkan/uberhar_adaptive_cpu_policy.h"
 #include "video_core/renderer_vulkan/uberhar_static_tev_policy.h"
+// CodexAstraLocal: Test the actual pure transport cache alongside extracted routing.
+#include "video_core/renderer_vulkan/uberhar_dynamic_tev_preparation.h"
 #include "common/logging/log.h"
 #include "common/settings.h"
 #include "common/uberhar_activity.h"
@@ -345,6 +347,9 @@ public:
   GLSL::DynamicTevSupport tev_support_reason{};
   using TevPushConstants = GLSL::DynamicTevState;
   TevPushConstants tev_constants{};
+  // CodexAstraLocal: Bind the production lazy transport owner in extracted route tests.
+  std::optional<FSConfig> pending_tev_transport;
+  DynamicTevPreparation dynamic_tev_preparation;
   ExactPushConstants<TevPushConstants> tev_push_constants;
   std::unordered_map<u64, std::unique_ptr<Shader>> tev_shaders;
   std::unordered_map<u64, std::unique_ptr<GraphicsPipeline>> tev_pipelines,
@@ -375,7 +380,7 @@ public:
       virtual_max_wait_ns{}, specialized_pending{}, fallback_warming{},
       fallback_unavailable{}, skipped_draws{};
   u64 tev_transport_prepared{}, tev_transport_skipped{},
-      tev_transport_bypassed_gpu{};
+      tev_transport_bypassed_gpu{}, tev_transport_bypassed_cpu{};
   std::array<u64, 11> virtual_recovery_reasons{};
   std::array<u64, 7> tev_loop_histogram{}, tev_active_histogram{};
   struct PhaseWait {
@@ -412,11 +417,15 @@ public:
   bool PreferReadySpecializedFragment(const UserConfig &) const;
   void UseFragmentShader(const Pica::RegsInternal &, const UserConfig &,
                          bool = false);
+  void EnsureDynamicTevState(); // CodexAstraLocal: Extract the actual materialization body.
   GraphicsPipeline *GetTevFallback(const PipelineInfo &, bool = false);
   void ReportUberharStats(const char *) {}
   u64 GetProgramID() const { return current_program_id; }
   void ClearTevFallbacks();
   void Fresh(const FSConfig &config) {
+    // CodexAstraLocal: Legacy payload tests explicitly own their constants; a
+    // fixture reset cannot retain a prior production draw's pending obligation.
+    pending_tev_transport.reset();
     virtual_fs_config = config;
     tev_family_config = config;
     owned_family = GLSL::MakeDynamicTevFamilyConfig(config, profile);

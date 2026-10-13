@@ -212,6 +212,10 @@ if (ENABLE_VULKAN)
         renderer_vulkan/vk_compute_raster.h
         renderer_vulkan/uberhar_compute_raster_shader.h
         renderer_vulkan/uberhar_compute_target_format.h
+        # CodexAstraLocal: Compute creation failures retain bounded incident evidence
+        # and use the existing typed stop; fragment transport reuse is owner-only.
+        renderer_vulkan/uberhar_compute_pipeline.h
+        renderer_vulkan/uberhar_dynamic_tev_preparation.h
         renderer_vulkan/uberhar_compute_shadow.h
         renderer_vulkan/vk_compute_vertex.cpp
         renderer_vulkan/vk_compute_vertex.h

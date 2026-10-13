@@ -1,5 +1,18 @@
 # Architecture review ledger
 
+<!-- CodexAstraLocal: Record current scoped review and observed failures without silently declaring a full historical audit complete. -->
+**Current checkpoint: .45 delivered and tested; .46 focused source review complete.**
+The [.44](UBERHAR_REVIEW_0.1.44.md), [.45](UBERHAR_REVIEW_0.1.45.md) and
+[.46](UBERHAR_REVIEW_0.1.46.md) source/purpose reviews are retained independently
+of device qualification. The .45 evidence and owner's newer Sonic observations
+motivate reducing serial preparation while retaining workload-specific placement.
+Experimental renderers remain unqualified. The .46 review records actual changed
+consumer/ownership coverage; it does not claim a fresh audit of every inherited
+line or silently reset the full-review anchor. Owner testing follows publication.
+Current authorization ends at .46 build submission and the root report.
+
+## Earlier .43 checkpoint
+
 <!-- CodexAstraLocal: Record the new source review without counting a pending release or untested device candidate as a completed audit cycle. -->
 **Current checkpoint: .43 source review complete; gated build pending.**
 Released .41 and .42 are the two successful successors to the .40 full-review
