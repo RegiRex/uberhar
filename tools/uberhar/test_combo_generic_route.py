@@ -36,15 +36,18 @@ def main():
     # optional-worker presence to the real constructor, rather than granting a
     # worker or GPU permission unconditionally to make the fixture compile.
     constructor = ''.join(extract(source, 'PipelineCache::PipelineCache(').split())
-    for field, policy, prefix in (
-            ('allow_specialized_fragments', 'AllowsSpecializedFragments', ''),
-            ('allow_static_cpu_tev', 'AllowsStaticCpuTev', 'hybrid_tev&&'),
+    # CodexAstraLocal: Bind Native's saved full-fragment control as well as mode;
+    # the single-argument default would silently ignore the OFF comparison.
+    native_control = ',Settings::values.uberhar_native_full_fragments.GetValue()'
+    for field, policy, prefix, extra_argument in (
+            ('allow_specialized_fragments', 'AllowsSpecializedFragments', '', ''),
+            ('allow_static_cpu_tev', 'AllowsStaticCpuTev', 'hybrid_tev&&', ''),
             # CodexAstraLocal: Native CPU full fragments must not inherit the
             # different ready-GPU permission tested below.
-            ('allow_full_cpu_fragments', 'AllowsFullCpuFragments', 'hybrid_tev&&'),
-            ('allow_ready_gpu_vertices', 'UsesReadyGpuVertices', 'hybrid_tev&&')):
+            ('allow_full_cpu_fragments', 'AllowsFullCpuFragments', 'hybrid_tev&&', native_control),
+            ('allow_ready_gpu_vertices', 'UsesReadyGpuVertices', 'hybrid_tev&&', '')):
         assert (f'{field}{{{prefix}Settings::{policy}'
-                '(Settings::values.uberhar_test_mode.GetValue())}') in constructor, field
+                f'(Settings::values.uberhar_test_mode.GetValue(){extra_argument})}}') in constructor, field
     assert ('if(allow_ready_gpu_vertices||allow_static_cpu_tev)'
             'ready_vertex_worker=std::make_unique<Common::ThreadWorker>') in constructor
     fixture = r'''
@@ -95,13 +98,18 @@ struct PipelineCache {
     bool force_tev{}, hybrid_tev{true};
     // CodexAstraLocal: Model the real constructor's immutable mode capabilities.
     // Native owns a CPU-FS worker, which must not authorize guest GPU vertices.
-    const bool allow_specialized_fragments, allow_ready_gpu_vertices;
+    const bool allow_specialized_fragments, allow_static_cpu_tev,
+               allow_full_cpu_fragments, allow_ready_gpu_vertices;
     bool ready_vertex_worker;
     explicit PipelineCache(Settings::UberharTestMode mode)
         : allow_specialized_fragments{Settings::AllowsSpecializedFragments(mode)},
+          allow_static_cpu_tev{hybrid_tev && Settings::AllowsStaticCpuTev(mode)},
+          // CodexAstraLocal: Match the checked production initializer, freezing
+          // the saved Native control without changing the Combo capabilities.
+          allow_full_cpu_fragments{hybrid_tev && Settings::AllowsFullCpuFragments(
+              mode, Settings::values.uberhar_native_full_fragments.GetValue())},
           allow_ready_gpu_vertices{hybrid_tev && Settings::UsesReadyGpuVertices(mode)},
-          ready_vertex_worker{allow_ready_gpu_vertices ||
-              (hybrid_tev && Settings::AllowsStaticCpuTev(mode))} {}
+          ready_vertex_worker{allow_ready_gpu_vertices || allow_static_cpu_tev} {}
     Disk* curr_disk_cache{};
     int profile{}, tev_constants{};
     bool tev_supported{};
@@ -129,15 +137,26 @@ int main() try {
     using namespace Settings;
     using namespace Vulkan;
     // CodexAstraUlt: Execute both ready/missing optional cases for both Combo presets.
-    for (auto mode : {UberharTestMode::Automatic, UberharTestMode::ComboGeneric}) {
+    // CodexAstraLocal: Native's saved ON/OFF choice must leave each Combo policy
+    // and its complete generic/mandatory recovery behavior unchanged.
+    for (const auto [mode, native_full] : {
+             std::pair{UberharTestMode::Automatic, false},
+             std::pair{UberharTestMode::Automatic, true},
+             std::pair{UberharTestMode::ComboGeneric, false},
+             std::pair{UberharTestMode::ComboGeneric, true}}) {
         for (bool ready : {false,true}) {
             values.uberhar_test_mode = mode;
+            values.uberhar_native_full_fragments = native_full;
             ApplyUberharTestProfile();
             Disk disk; disk.ready = ready;
             PipelineCache cache{mode};
             cache.curr_disk_cache = &disk;
             cache.force_tev = values.uberhar_force_tev.GetValue();
             const bool specialized = mode == UberharTestMode::Automatic;
+            Check(cache.allow_full_cpu_fragments == specialized &&
+                  cache.allow_static_cpu_tev == specialized &&
+                  cache.allow_ready_gpu_vertices && cache.ready_vertex_worker,
+                  "Native full-fragment control changed Combo capabilities");
             Pica::RegsInternal regs;
             Pica::Shader::UserConfig user;
             const bool admitted = cache.ReadyGpuFragmentPreflight(regs,user);
@@ -179,9 +198,14 @@ int main() try {
     // CodexAstraLocal: Actual Native mode creates the optional CPU-fragment lane.
     // Neither module readiness, unsupported state nor a later global mode edit
     // may turn that worker's presence into immutable GPU-vertex eligibility.
-    for (bool ready : {false, true}) {
+    // CodexAstraLocal: Both saved Native settings use the real policy helper;
+    // mutating the globals later must not change the constructed capabilities.
+    for (const auto [native_full, ready] : {
+             std::pair{false, false}, std::pair{false, true},
+             std::pair{true, false}, std::pair{true, true}}) {
         for (bool supported : {false, true}) {
             values.uberhar_test_mode = UberharTestMode::Native;
+            values.uberhar_native_full_fragments = native_full;
             ApplyUberharTestProfile();
             Disk disk; disk.ready = ready;
             PipelineCache native{UberharTestMode::Native};
@@ -189,11 +213,17 @@ int main() try {
             native.force_tev = values.uberhar_force_tev.GetValue();
             Pica::RegsInternal regs{supported};
             Pica::Shader::UserConfig user;
-            Check(native.ready_vertex_worker && !native.allow_ready_gpu_vertices,
+            Check(native.allow_full_cpu_fragments == native_full,
+                  "Native full-fragment ON/OFF control was not captured");
+            Check(native.allow_static_cpu_tev && native.ready_vertex_worker &&
+                  !native.allow_ready_gpu_vertices,
                   "Native worker/capability setup does not model the production mode");
             Check(!native.ReadyGpuFragmentPreflight(regs, user) && disk.optional_calls == 0,
                   "Native optional worker granted GPU vertex admission");
             values.uberhar_test_mode = UberharTestMode::Automatic;
+            values.uberhar_native_full_fragments = !native_full;
+            Check(native.allow_full_cpu_fragments == native_full,
+                  "immutable Native full-fragment policy followed a later setting");
             Check(!native.ReadyGpuFragmentPreflight(regs, user),
                   "immutable Native GPU policy followed a later global mode");
             values.uberhar_test_mode = UberharTestMode::Native;
@@ -207,7 +237,7 @@ int main() try {
                   "Native CPU generic/mandatory recovery changed");
         }
     }
-    std::puts("PASS: extracted Combo fragment gates, generic CPU retry, mandatory recovery and Native CPU-only admission");
+    std::puts("PASS: extracted Combo fragment gates, generic CPU retry, mandatory recovery, Native full-fragment ON/OFF and CPU-only admission");
 } catch (const std::exception& error) {
     std::fprintf(stderr, "%s\n", error.what());
     return 1;
