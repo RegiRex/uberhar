@@ -9,6 +9,7 @@
 #include "common/logging/log.h"
 #include "video_core/pica/uberhar_parallel_vertex.h"
 #include "video_core/pica/uberhar_vertex_parallel_batch.h"
+#include "video_core/uberhar_emulator_pool.h" // Claude: The extracted state borrows the shared pool.
 
 // CodexAstraLocal: Only the optional worker name and logging sinks are adapted;
 // production ShaderSetup mutations, serialization and certificate code execute.
