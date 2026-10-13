@@ -334,6 +334,7 @@ public:
     bool shadow_rendering{};
     RenderPass pass{};
     u32 num_draws{};
+    u64 passes_begun{}; // Claude: Production pass counter in the extracted body.
     void BeginRendering(const Framebuffer*, Common::Rectangle<u32>);
     void BeginRendering(const RenderPass&);
     void EndRendering();
@@ -446,6 +447,8 @@ struct Raster {
     // separate cached-buffer gate executes the three actual ring stamps/reads.
     u64 cached_use_tick{};
     void MarkCachedShaderBuffersUsed() { cached_use_tick = scheduler.CurrentTick(); }
+    // Claude: Extracted production statements count each draw outcome.
+    struct { u64 graphics{}, compute{}, empty{}, no_target{}, invalid_input{}, skipped{}; } draw_ledger;
 
     // CodexAstraLocal: The original sample call sites execute below, while
     // this owner only records their ticks and does not allocate a GPU query.

@@ -16,6 +16,7 @@
 #include "common/logging/log.h" // AstraEH: Bounded run/frame diagnostics.
 #include "common/scm_rev.h" // AstraEH: Identify the exact build in each run snapshot.
 #include "common/settings.h"
+#include "common/uberhar_perf_hint.h" // Claude: Frame work reports for CPU clock hints.
 #include "common/uberhar_test_profile.h" // CodexAstraUlt: Report effective route capabilities.
 #include "core/core_timing.h"
 #include "core/perf_stats.h"
@@ -215,6 +216,15 @@ void PerfStats::EndSystemFrame(std::chrono::microseconds guest_time) {
     const u64 now_ns = duration_cast<std::chrono::nanoseconds>(now - uberhar_start).count();
     const u64 work_ns =
         std::max<s64>(0, duration_cast<std::chrono::nanoseconds>(frame_time).count());
+    // Claude: Work excludes the limiter's sleep. The target is one 3DS frame at
+    // the current speed limit (unlimited speed keeps the 100% frame target).
+    {
+        const auto limit = Settings::GetFrameLimit();
+        const double frame_ns = 1e9 / SCREEN_REFRESH_RATE;
+        const double target_ns = limit > 0 ? frame_ns * 100.0 / limit : frame_ns;
+        Common::Uberhar::PerfHint::ReportFrame(static_cast<s64>(work_ns),
+                                               static_cast<s64>(target_ns));
+    }
     const auto activity = Common::UberharActivity::Capture();
     if (activity.token != uberhar_phase_token) {
         uberhar_phase_token = activity.token;

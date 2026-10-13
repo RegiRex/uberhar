@@ -111,6 +111,8 @@ struct Fixture {
     void ReportStrictCompute() const;
     ComputeRectRenderer owned;
     ComputeRectRenderer* compute_rect{&owned};
+    // Claude: Extracted production statements count each draw outcome.
+    struct { u64 graphics{}, compute{}, empty{}, no_target{}, invalid_input{}, skipped{}; } draw_ledger;
     bool accelerate{};
     Pica::RegsInternal regs{};
     std::vector<HardwareVertex> vertex_batch;
@@ -211,6 +213,8 @@ struct StrictFixture {
 #include "strict_stats.inc"
     StrictComputeStats strict_compute_stats;
     unsigned raster_calls{};bool consumer_failure{};
+    // Claude: Extracted production statements count each draw outcome.
+    struct { u64 graphics{}, compute{}, empty{}, no_target{}, invalid_input{}, skipped{}; } draw_ledger;
     bool Draw(bool,bool,std::nullptr_t,const ComputeVertexProducer::Batch*) {
         if(consumer_failure)throw VideoCore::ShaderRecoveryError("consumer refusal");
         ++raster_calls;return true;
@@ -374,8 +378,11 @@ void TestDeferredAdmission() {
         Check(f.Route() == no_target && f.owned.considered == 0 &&
               f.owned.state_census.Consume({0x180, 0x1a2}).draws == 0,
               "deferred no-target and absent-renderer remain outside census");
-        Check(f.packet.reads == no_target && f.vertex_batch.size() == (no_target ? 6U : 0U),
-              "only no-target retention reads deferred payload before graphics");
+        // Claude: No-target deferred draws are discarded without waiting for or
+        // copying their payload into the next draw's batch.
+        Check(f.packet.reads == 0 && f.vertex_batch.empty() &&
+                  f.draw_ledger.no_target == (no_target ? 1U : 0U),
+              "no-target deferred draws discard their payload unread");
     }
     // CodexAstraLocal: Retain an actual report-level mixed ordinary/deferred
     // interval so raw/effective conservation is checked beyond helper snapshots.
@@ -521,7 +528,10 @@ void TestStrictIsolation() {
             if(failure==6)f.res_cache.surface.traits.storage_support=false;
             Check(f.Route()==(failure==5)&&f.graphics_fallthrough==(failure!=5),
                   "other modes retain graphics fallback and early no-target behavior");
-            Check(!f.res_cache.cancellations&&f.vertex_batch.size()==6&&!f.strict_compute_stats.attempts,
+            // Claude: A no-target draw now discards its batch instead of leaving
+            // it for the next draw; every other failure keeps CPU ownership.
+            Check(!f.res_cache.cancellations&&f.vertex_batch.size()==(failure==5?0U:6U)&&
+                  f.draw_ledger.no_target==(failure==5?1U:0U)&&!f.strict_compute_stats.attempts,
                   "other modes retain batch ownership and no strict counters");
         }
     }

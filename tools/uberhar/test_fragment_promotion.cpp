@@ -23,8 +23,29 @@ int main() {
     Require(!gate.Observe(0x10, b), "hash collision incorrectly admitted");
     for (u32 i = 2; i <= WarmupDraws; ++i)
         Require(gate.Observe(0x10, b) == (i >= WarmupDraws), "collision reset failed");
-    Require(!gate.Observe(0x14, a), "occupied direct-map slot did not reset");
-    Require(gate.Replacements() == 2, "replacement accounting");
+    // Claude: Colliding keys now share a set instead of resetting each other.
+    Require(gate.Observe(0x10, a), "slot collision evicted a hot key");
+    Require(!gate.Observe(0x14, a), "distinct hash aliased an admitted entry");
+    Require(gate.Replacements() == 0, "free ways must not count as replacements");
+    // Claude: Four keys now fill this four-way gate; a fifth evicts the least
+    // recently used one (b), never the recently confirmed hot key a.
+    auto c = a;
+    c.texture.tev_stages[1].ops_raw ^= 1;
+    auto d = a;
+    d.texture.tev_stages[2].ops_raw ^= 1;
+    Require(!gate.Observe(0x18, c), "fourth key admitted early");
+    Require(gate.Replacements() == 0, "fourth key used a free way");
+    Require(!gate.Observe(0x1c, d), "fifth key admitted early");
+    Require(gate.Replacements() == 1, "replacement accounting");
+    Require(gate.Observe(0x10, a), "LRU evicted a recently used hot key");
+    Require(!gate.Observe(0x10, b), "least recently used key was not the victim");
+    Require(gate.Replacements() == 2, "second replacement accounting");
+    // Claude: Alternating colliding hot keys both reach admission.
+    DemandGate<Pica::Shader::FSConfig, 64> wide;
+    bool both = false;
+    for (u32 i = 1; i <= WarmupDraws; ++i)
+        both = wide.Observe(0x40, a) & wide.Observe(0x80, b);
+    Require(both && wide.Replacements() == 0, "alternating slot collision thrashed");
     // AstraPro: Counts saturate; a hot key stays admitted across long sessions.
     for (u32 i = 2; i <= WarmupDraws; ++i) gate.Observe(0x14, a);
     for (u32 i = 0; i < 1000000; ++i)
@@ -56,6 +77,6 @@ int main() {
             }
         }
     }
-    std::printf("PASS: %zu fragment admission/transport cases, full-config hash collision/slot eviction, "
+    std::printf("PASS: %zu fragment admission/transport cases, full-config hash collision, 4-way LRU slot sharing, "
                 "title reset, 1000000 saturated demand hits\n", policy_cases);
 }

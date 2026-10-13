@@ -124,7 +124,7 @@ static const char* android_config_default_file_content = (BOOST_HANA_STRING(R"(
 )") DECLARE_KEY(uberhar_cpu_vertex_bridge) BOOST_HANA_STRING(R"(
 
 # CodexAstraLocal: Keep Combo guest vertices on CPU, preserving fragment policy.
-# Requires restart; 0 (default): allow ready GPU vertices, 1: CPU vertices only.
+# Requires restart; 0: allow ready GPU vertices, 1 (default): CPU vertices only.
 )") DECLARE_KEY(uberhar_cpu_vertex_only) BOOST_HANA_STRING(R"(
 
 # CodexAstraLocal: Native full fragment shaders; independent comparison, restart required.

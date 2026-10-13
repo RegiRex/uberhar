@@ -242,6 +242,8 @@ void RasterizerVulkan::TickFrame() {
     Common::Uberhar::TraceCounter("Uberhar: draws recorded",
                                   static_cast<s64>(draw_ledger.graphics + draw_ledger.compute));
     Common::Uberhar::TraceCounter("Uberhar: draws skipped", static_cast<s64>(draw_ledger.skipped));
+    Common::Uberhar::TraceCounter("Uberhar: render passes",
+                                  static_cast<s64>(renderpass_cache.PassesBegun()));
     scheduler.WaitWorker();
     // CodexAstraLocal: Reuse only this existing drained command boundary; the
     // cache separately checks compiler release and actual GPU completion.
@@ -290,10 +292,10 @@ void RasterizerVulkan::ReportDrawLedger(const char* kind) const {
     // Claude Log Line: Bounded to the 30-second cadence plus shutdown.
     LOG_INFO(Render_Vulkan,
              "Claude draw ledger {}: requests={} graphics={} compute={} empty={} "
-             "no_target={} invalid_input={} skipped={}",
+             "no_target={} invalid_input={} skipped={} render_passes={}",
              kind, draw_ledger.Total(), draw_ledger.graphics, draw_ledger.compute,
              draw_ledger.empty, draw_ledger.no_target, draw_ledger.invalid_input,
-             draw_ledger.skipped);
+             draw_ledger.skipped, renderpass_cache.PassesBegun());
     if (draw_ledger.skipped != 0) {
         // Claude Log Line: Contract violation; never expected in Uberhar builds.
         LOG_ERROR(Render_Vulkan, "Claude draw ledger: {} draws were skipped", draw_ledger.skipped);
@@ -1083,11 +1085,6 @@ bool RasterizerVulkan::Draw(bool accelerate, bool is_indexed,
     const auto fb_helper = res_cache.GetFramebufferSurfaces(using_color_fb, using_depth_fb);
     const Framebuffer* framebuffer = fb_helper.Framebuffer();
     if (!framebuffer->Handle()) {
-        // Claude: A draw with no usable target cannot author pixels, so it ends
-        // here. Upstream (and the earlier deferred copy) left its vertices in
-        // vertex_batch, where the next CPU draw rasterized them with its own state
-        // into its own target. Discard them so no stale geometry can appear.
-        vertex_batch.clear();
         ++draw_ledger.no_target;
         // CodexAstraLocal: A consumed no-target batch authored no framebuffer
         // pixels. Do not leave stale vertices or publish false cache ownership.
@@ -1098,6 +1095,11 @@ bool RasterizerVulkan::Draw(bool accelerate, bool is_indexed,
             // they cannot be reported as successfully rendered guest work.
             throw VideoCore::ShaderRecoveryError("Calculated draw has no supported framebuffer");
         }
+        // Claude: A draw with no usable target cannot author pixels, so it ends
+        // here. Upstream (and the earlier deferred copy) left its vertices in
+        // vertex_batch, where the next CPU draw rasterized them with its own state
+        // into its own target. Discard them so no stale geometry can appear.
+        vertex_batch.clear();
         return true;
     }
 

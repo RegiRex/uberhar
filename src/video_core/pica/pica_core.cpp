@@ -12,6 +12,7 @@
 #include "common/scope_exit.h"
 #include "common/settings.h"
 #include "common/thread.h" // CodexAstraLocal: Identify real CPU vertex workers in activity samples.
+#include "common/uberhar_perf_hint.h" // Claude: CPU clock hints for draw workers.
 #include "common/uberhar_trace.h" // Claude: Perfetto slices for emulator-thread stalls.
 #include "common/uberhar_test_profile.h" // CodexAstraUlt: Shared Combo admission policy.
 #include "core/core.h"
@@ -49,9 +50,18 @@ struct PicaCore::DeferredVertexState {
     // CodexAstraLocal TEST-ONLY LOG: Remove these diagnostic counters after the
     // redundant-reset experiment is qualified; they do not schedule any work.
     u64 deferred_topology_resets{}, deferred_primitive_resets{};
+    // Claude: Leading pending packets whose trailing pair a later serial List
+    // draw has already overwritten. Reconciliation still joins and counts them,
+    // but must not restore their older pair over the newer serial state.
+    std::size_t superseded{};
+    u64 serial_overlaps{};
     explicit DeferredVertexState(unsigned processors)
         : executor{processors, PacketLimit, 8 * 1024 * 1024,
-                   +[] { Common::SetCurrentThreadName("PICA draw pool"); }} {
+                   +[] {
+                       Common::SetCurrentThreadName("PICA draw pool");
+                       // Claude: Queued CPU draws are on the frame's critical path.
+                       Common::Uberhar::PerfHint::RegisterCurrentThread();
+                   }} {
         pending.reserve(PacketLimit);
     }
 };
@@ -284,7 +294,7 @@ void PicaCore::ReportVirtualVertices(const char* kind, std::chrono::steady_clock
             "coordinator_packets={} auxiliary_packets={} resident_packets={} resident_bytes={} "
             "capacity_drains={} boundaries={} capture_attempts={} refused={} work_refused={} "
             "capture_submit_ms={:.3f} capture_submit_max_ms={:.3f} "
-            "deferred_topology_resets={} deferred_primitive_resets={} "
+            "deferred_topology_resets={} deferred_primitive_resets={} serial_overlaps={} "
             "scope=complete_list_or_shader_no_gs min_misses=96 max_vertices=255 min_arithmetic=35 "
             "max_copy_bytes_per_miss=70 timing=owner_capture_submit_not_frame_time",
             kind, deferred.completed, deferred.inputs, deferred.invocations, deferred.hits,
@@ -294,7 +304,7 @@ void PicaCore::ReportVirtualVertices(const char* kind, std::chrono::steady_clock
             deferred.capacity_drains, deferred.synchronous_boundaries, statistics.captures,
             statistics.refused, statistics.work_refused, deferred.capture_submit_ns / 1e6,
             deferred.capture_submit_max_ns / 1e6, deferred.deferred_topology_resets,
-            deferred.deferred_primitive_resets);
+            deferred.deferred_primitive_resets, deferred.serial_overlaps);
     }
     // AstraPro: Existing five-second/final reporting gate. Periodic
     // samples can alias recurring draw patterns; never extrapolate a GPU budget.
@@ -1599,7 +1609,10 @@ void PicaCore::DrawArrays(bool is_indexed) {
     // draw after earlier deferred assembler state has been reconciled.
     if (TryDeferredVertices(is_indexed, virtual_start))
         return;
-    ReconcileDeferredVertices();
+    if (!CanOverlapDeferredVertices()) {
+        UBERHAR_TRACE("Uberhar: join before serial draw");
+        ReconcileDeferredVertices();
+    }
 
     // AstraEH: A bridge replaces a draw that already met the hardware path's
     // empty-assembler/no-GS contract. Isolate strip/fan expansion to preserve that
@@ -1665,7 +1678,8 @@ void PicaCore::ReconcileDeferredVertices() {
         const auto& packet = state.pending[state.reconciled];
         // CodexAstraLocal: One completion lock supplies both owner consumers.
         const auto result = packet->CompletedResult();
-        primitive_assembler.AdoptCompletedTriangleTail(result.last_pair);
+        if (state.reconciled >= state.superseded)
+            primitive_assembler.AdoptCompletedTriangleTail(result.last_pair);
         const auto counts = result.counts;
         ++state.completed;
         state.inputs += packet->VertexCount();
@@ -1674,6 +1688,39 @@ void PicaCore::ReconcileDeferredVertices() {
     }
     state.pending.clear();
     state.reconciled = 0;
+    state.superseded = 0;
+}
+
+// Claude: A refused draw used to join every queued CPU packet first, which held
+// the emulator thread until the workers finished. An ordinary List draw without
+// geometry shading, starting from an empty assembler, reads only the vertices it
+// submits itself and leaves its own trailing pair, so it can run while earlier
+// packets are still shading. Its Vulkan commands are recorded after theirs, as
+// before. Everything that can observe packet state (other topologies, GS,
+// partial or wound assembly, bridges, debugging, timing capture, IRQs, command
+// list ends, save states) still joins first.
+bool PicaCore::CanOverlapDeferredVertices() {
+    if (!deferred_vertices || deferred_vertices->pending.empty())
+        return false;
+    const auto& pipeline = regs.internal.pipeline;
+    if (debug_context || vertex_timing || pipeline.use_gs != PipelineRegs::UseGS::No ||
+        pipeline.num_vertices < 2 ||
+        pipeline.triangle_topology != PipelineRegs::TriangleTopology::List ||
+        primitive_assembler.GetTopology() != PipelineRegs::TriangleTopology::List ||
+        !primitive_assembler.IsEmpty() || primitive_assembler.HasPendingWinding() ||
+        rasterizer->HasPreparedCpuVertexBridge())
+        return false;
+    // Claude: LoadVertices returns before submitting anything when the index
+    // base is unmapped; that draw must not supersede the queued trailing pair.
+    if (!memory.GetPhysicalPointer(pipeline.vertex_attributes.GetPhysicalBaseAddress() +
+                                   pipeline.index_array.offset))
+        return false;
+    auto& state = *deferred_vertices;
+    // Claude: Two or more submitted vertices overwrite both buffered slots, so
+    // every packet queued so far loses its claim on the trailing pair.
+    state.superseded = state.pending.size();
+    ++state.serial_overlaps;
+    return true;
 }
 
 bool PicaCore::TryDeferredVertices(bool is_indexed,

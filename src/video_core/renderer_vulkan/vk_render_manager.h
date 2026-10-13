@@ -51,6 +51,11 @@ public:
     /// Exits from any currently active renderpass instance
     void EndRendering();
 
+    // Claude: Render passes begun since creation (a pass change ends the old one).
+    u64 PassesBegun() const {
+        return passes_begun;
+    }
+
     /// Returns the renderpass associated with the color-depth format pair
     vk::RenderPass GetRenderpass(VideoCore::PixelFormat color, VideoCore::PixelFormat depth,
                                  bool is_clear);
@@ -70,6 +75,7 @@ private:
     bool shadow_rendering{};
     RenderPass pass{};
     u32 num_draws{};
+    u64 passes_begun{};
 };
 
 } // namespace Vulkan

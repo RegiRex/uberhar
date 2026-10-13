@@ -5,6 +5,7 @@
 #pragma once
 
 #include <span>
+#include <vector> // Claude: One draw's clipped triangles awaiting band rasterization.
 #include "common/uberhar_parallel_work.h" // CodexAstraLocal: Bounded owner-participating CPU rows.
 #include "video_core/pica/regs_texturing.h"
 #include "video_core/rasterizer_interface.h"
@@ -24,10 +25,18 @@ struct Vertex;
 class RasterizerSoftware : public VideoCore::RasterizerInterface {
 public:
     explicit RasterizerSoftware(Memory::MemorySystem& memory, Pica::PicaCore& pica);
+    ~RasterizerSoftware() override;
 
     void AddTriangle(const Pica::OutputVertex& v0, const Pica::OutputVertex& v1,
                      const Pica::OutputVertex& v2) override;
-    void DrawTriangles() override {}
+    // Claude: Rasterizes the triangles this draw queued, in submission order.
+    void DrawTriangles() override;
+    // Claude: A batched draw writes guest memory only in DrawTriangles, so
+    // PicaCore may shade its vertices ahead of submission. The same registers
+    // decide batching at this draw's first AddTriangle.
+    bool DefersGuestMemoryWritesUntilDraw() const override {
+        return BatchAdmissible();
+    }
     void FlushAll() override {}
     void FlushRegion(PAddr addr, u32 size) override {}
     void InvalidateRegion(PAddr addr, u32 size) override {}
@@ -56,9 +65,22 @@ private:
     /// Computes the screen coordinates of the provided vertex.
     void MakeScreenCoords(Vertex& vtx);
 
+    // Claude: One worker's rows of a band-parallel draw, in 12.4 fixed point,
+    // plus the draw's texture ranges prepared once on the owner.
+    struct RowWindow {
+        u16 min_y, max_y;
+        const std::array<PreparedTexture, 3>* prepared;
+    };
+    static constexpr u32 BandRows = 8;
+
     /// Processes the triangle defined by the provided vertices.
     void ProcessTriangle(const Vertex& v0, const Vertex& v1, const Vertex& v2,
-                         bool reversed = false);
+                         bool reversed = false, const RowWindow* window = nullptr);
+
+    // Claude: True when this draw's vertex and index inputs cannot overlap its
+    // color/depth storage, so deferring framebuffer writes to DrawTriangles
+    // cannot change what a later vertex of the same draw reads.
+    bool BatchAdmissible() const;
 
     /// Returns the texture color of the currently processed pixel.
     std::array<Common::Vec4<u8>, 4> TextureColor(
@@ -99,6 +121,10 @@ private:
     // renderer, after join. Remove when the sampled numeric failures have
     // captured reproductions and regressions; no successful-pixel logging.
     bool sampling_failure_logged = false;
+    // Claude: Clipped screen-space triangles (three vertices each) of the
+    // current draw, rasterized by DrawTriangles; decided once per draw.
+    std::vector<Vertex> batch;
+    bool batch_decided = false, batching = false;
 };
 
 } // namespace SwRenderer

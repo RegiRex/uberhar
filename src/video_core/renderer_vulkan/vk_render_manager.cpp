@@ -53,6 +53,7 @@ void RenderManager::BeginRendering(const RenderPass& new_pass) {
     }
 
     EndRendering();
+    ++passes_begun; // Claude: Render-pass churn costs tile load/store per pass.
     scheduler.Record([info = new_pass](vk::CommandBuffer cmdbuf) {
         const vk::RenderPassBeginInfo renderpass_begin_info = {
             .renderPass = info.render_pass,

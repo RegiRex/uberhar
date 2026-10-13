@@ -8,8 +8,11 @@
 #include "common/logging/log.h"
 #include "common/microprofile.h"
 #include "common/quaternion.h"
+#include "common/scope_exit.h" // Claude: Release a draw's queued triangles on every exit.
 #include "common/settings.h" // CodexAstraLocal: Restart-only software participant budget.
 #include "common/thread.h" // CodexAstraLocal: Identify sleeping raster workers in ordinary logs.
+#include "common/uberhar_perf_hint.h" // Claude: CPU clock hints for raster workers.
+#include "common/uberhar_trace.h" // Claude: Perfetto slice per band-parallel draw.
 #include "common/vector_math.h"
 #include "core/memory.h"
 #include "video_core/pica/output_vertex.h"
@@ -114,11 +117,124 @@ RasterizerSoftware::RasterizerSoftware(Memory::MemorySystem& memory_, Pica::Pica
           const auto available = Common::Uberhar::AvailableProcessors();
           const auto requested = Settings::values.software_renderer_workers.GetValue();
           return requested == 0 ? available : std::min(available, requested);
-      }(), +[] { Common::SetCurrentThreadName("Software raster"); }},
+      }(), +[] {
+          Common::SetCurrentThreadName("Software raster");
+          // Claude: Band rasterization is on the frame's critical path.
+          Common::Uberhar::PerfHint::RegisterCurrentThread();
+      }},
       fb{memory, regs.framebuffer} {
     // CodexAstraLocal: Permanent effective configuration, emitted once per renderer.
     LOG_INFO(Render_Software, "CPU Software rendering participants={} (owner included), wait={}",
              sw_workers.Available(), sw_workers.WaitTransport());
+}
+
+RasterizerSoftware::~RasterizerSoftware() = default;
+
+bool RasterizerSoftware::BatchAdmissible() const {
+    if (sw_workers.Available() < 2)
+        return false;
+    const auto& pipeline = regs.pipeline;
+    const auto& target = regs.framebuffer.framebuffer;
+    const auto& merger = regs.framebuffer.output_merger;
+    const auto host_range = [&](PAddr address, u64 bytes) -> std::span<const u8> {
+        // Claude: Pre-check the region quietly. GetPhysicalRef logs an error for
+        // unknown addresses, and immediate-mode draws routinely leave base 0.
+        const auto within = [address](u32 start, u32 size) {
+            return address >= start && address - start < size;
+        };
+        if (!within(Memory::VRAM_PADDR, Memory::VRAM_SIZE) &&
+            !within(Memory::DSP_RAM_PADDR, Memory::DSP_RAM_SIZE) &&
+            !within(Memory::FCRAM_PADDR, Memory::FCRAM_N3DS_SIZE) &&
+            !within(Memory::N3DS_EXTRA_RAM_PADDR, Memory::N3DS_EXTRA_RAM_SIZE))
+            return {};
+        const auto ref = memory.GetPhysicalRef(address);
+        if (!ref || bytes > ref.GetSize())
+            return {};
+        return {ref.GetPtr(), static_cast<std::size_t>(bytes)};
+    };
+    const auto overlaps = [](std::span<const u8> a, std::span<const u8> b) {
+        const auto x = reinterpret_cast<std::uintptr_t>(a.data());
+        const auto y = reinterpret_cast<std::uintptr_t>(b.data());
+        return x <= y ? y - x < a.size() : x - y < b.size();
+    };
+    // Claude: Same storage extent PrepareTextures uses for the attachments.
+    const bool shadow = merger.fragment_operation_mode == FramebufferRegs::FragmentOperationMode::Shadow;
+    const bool uses_color = shadow || target.allow_color_write != 0;
+    const bool uses_depth = !shadow && (merger.depth_test_enable ||
+        (merger.stencil_test.enable && target.depth_format == FramebufferRegs::DepthFormat::D24S8) ||
+        (target.allow_depth_stencil_write && merger.depth_write_enable));
+    const u64 pixels = u64((target.GetHeight() - 1) / 8) * 8 * target.GetWidth() +
+                       u64((target.GetWidth() + 7) / 8) * 64;
+    std::array<std::span<const u8>, 2> targets{};
+    if (uses_color) {
+        targets[0] = host_range(target.GetColorBufferPhysicalAddress(), pixels *
+            (shadow ? 4 : FramebufferRegs::BytesPerColorPixel(target.color_format)));
+        if (targets[0].empty()) return false;
+    }
+    if (uses_depth) {
+        targets[1] = host_range(target.GetDepthBufferPhysicalAddress(),
+                                pixels * FramebufferRegs::BytesPerDepthPixel(target.depth_format));
+        if (targets[1].empty()) return false;
+    }
+    // Claude: The draw may be indexed or not, so bound both: any 8/16-bit index
+    // value, or vertex_offset plus the count. Every loader with components can
+    // be read up to that vertex; the index array covers the whole count.
+    const bool index_u16 = pipeline.index_array.format != 0;
+    const u64 last_vertex = std::max<u64>(index_u16 ? 0xFFFF : 0xFF,
+        u64(pipeline.vertex_offset) + (pipeline.num_vertices ? pipeline.num_vertices - 1 : 0));
+    u64 extent = u64(pipeline.index_array.offset) + u64(pipeline.num_vertices) * (index_u16 ? 2 : 1);
+    for (const auto& loader : pipeline.vertex_attributes.attribute_loaders) {
+        if (loader.component_count != 0)
+            extent = std::max(extent, u64(loader.data_offset) + (last_vertex + 1) * loader.byte_count);
+    }
+    const auto inputs = host_range(pipeline.vertex_attributes.GetPhysicalBaseAddress(), extent);
+    if (inputs.empty())
+        return false;
+    for (const auto& storage : targets) {
+        if (!storage.empty() && overlaps(inputs, storage))
+            return false;
+    }
+    return true;
+}
+
+void RasterizerSoftware::DrawTriangles() {
+    batch_decided = false;
+    if (batch.empty())
+        return;
+    SCOPE_EXIT({ batch.clear(); });
+    const std::size_t triangles = batch.size() / 3;
+    // Claude: Draw-level state is fixed until this returns. If its textures
+    // overlap the attachments (feedback) or its storage is odd, keep exact
+    // serial order; a range error is left for the first triangle that samples.
+    std::array<PreparedTexture, 3> prepared;
+    bool parallel = false;
+    try {
+        parallel = PrepareTextures(regs.texturing.GetTextures(), prepared,
+                                   TextureDemandMask(regs.texturing.GetTevStages(), regs.lighting));
+    } catch (const VideoCore::ShaderRecoveryError&) {
+        parallel = false;
+    }
+    const u32 height = regs.framebuffer.framebuffer.GetHeight();
+    const u32 bands = (height + BandRows - 1) / BandRows;
+    if (!parallel || bands < 2 || triangles < 2) {
+        for (std::size_t i = 0; i < triangles; ++i)
+            ProcessTriangle(batch[3 * i], batch[3 * i + 1], batch[3 * i + 2]);
+        return;
+    }
+    // Claude: Each worker owns whole 8-row bands and walks every triangle in
+    // submission order inside them, so each pixel still sees the draw's
+    // triangles in their original order and no two workers share a pixel.
+    UBERHAR_TRACE("Uberhar: software band draw");
+    fb.Bind();
+    sw_workers.Run(bands, 1, [&](u32 first, u32 last) {
+        for (u32 band = first; band < last; ++band) {
+            const RowWindow window{static_cast<u16>((band * BandRows) << 4),
+                                   static_cast<u16>(std::min(height, (band + 1) * BandRows) << 4),
+                                   &prepared};
+            for (std::size_t i = 0; i < triangles; ++i)
+                ProcessTriangle(batch[3 * i], batch[3 * i + 1], batch[3 * i + 2], false, &window);
+        }
+    });
 }
 
 void RasterizerSoftware::AddTriangle(const Pica::OutputVertex& v0, const Pica::OutputVertex& v1,
@@ -217,6 +333,17 @@ void RasterizerSoftware::AddTriangle(const Pica::OutputVertex& v0, const Pica::O
             vtx2.screenpos.x.ToFloat32(), vtx2.screenpos.y.ToFloat32(),
             vtx2.screenpos.z.ToFloat32());
 
+        // Claude: Queue for band rasterization at DrawTriangles when admitted.
+        if (!batch_decided) {
+            batching = BatchAdmissible();
+            batch_decided = true;
+        }
+        if (batching) {
+            batch.push_back(vtx0);
+            batch.push_back(vtx1);
+            batch.push_back(vtx2);
+            continue;
+        }
         try {
             ProcessTriangle(vtx0, vtx1, vtx2);
         } catch (const VideoCore::ShaderRecoveryError& error) {
@@ -284,7 +411,7 @@ void RasterizerSoftware::MakeScreenCoords(Vertex& vtx) {
 }
 
 void RasterizerSoftware::ProcessTriangle(const Vertex& v0, const Vertex& v1, const Vertex& v2,
-                                         bool reversed) {
+                                         bool reversed, const RowWindow* window) {
     MICROPROFILE_SCOPE(GPU_Rasterization);
 
     // Vertex positions in rasterizer coordinates
@@ -310,13 +437,13 @@ void RasterizerSoftware::ProcessTriangle(const Vertex& v0, const Vertex& v1, con
         regs.rasterizer.cull_mode == RasterizerRegs::CullMode::KeepAll2) {
         // Make sure we always end up with a triangle wound counter-clockwise
         if (!reversed && triangle_area < 0) {
-            ProcessTriangle(v0, v2, v1, true);
+            ProcessTriangle(v0, v2, v1, true, window);
             return;
         }
     } else {
         if (!reversed && regs.rasterizer.cull_mode == RasterizerRegs::CullMode::KeepClockWise) {
             // Reverse vertex order and use the CCW code path.
-            ProcessTriangle(v0, v2, v1, true);
+            ProcessTriangle(v0, v2, v1, true, window);
             return;
         }
         // Cull away triangles which are wound clockwise.
@@ -355,6 +482,13 @@ void RasterizerSoftware::ProcessTriangle(const Vertex& v0, const Vertex& v1, con
     max_x = std::min<u16>(max_x, regs.framebuffer.framebuffer.GetWidth() << 4);
     max_y = std::min<u16>(max_y, regs.framebuffer.framebuffer.GetHeight() << 4);
     if (min_x >= max_x || min_y >= max_y) return;
+    // Claude: A band worker rasterizes only its own whole rows; both bounds
+    // are pixel aligned, so the bands' rows together are exactly the original.
+    if (window) {
+        min_y = std::max(min_y, window->min_y);
+        max_y = std::min(max_y, window->max_y);
+        if (min_y >= max_y) return;
+    }
 
     const int bias0 =
         IsRightSideOrFlatBottomEdge(vtxpos[0].xy(), vtxpos[1].xy(), vtxpos[2].xy()) ? -1 : 0;
@@ -398,8 +532,12 @@ void RasterizerSoftware::ProcessTriangle(const Vertex& v0, const Vertex& v1, con
         coordinate_mask |= 1U << coord;
     }
 
-    std::array<PreparedTexture, 3> prepared_textures;
-    const bool parallel_safe = PrepareTextures(textures, prepared_textures, demand_mask);
+    // Claude: Band workers share the owner's draw-level preparation and keep
+    // their rows serial; standalone triangles prepare and may split rows.
+    std::array<PreparedTexture, 3> prepared_storage;
+    const bool parallel_safe =
+        !window && PrepareTextures(textures, prepared_storage, demand_mask);
+    const auto& prepared_textures = window ? *window->prepared : prepared_storage;
 
     // CodexAstraLocal: Quad helpers use the same unbiased interpolation plane
     // as covered pixels. Top-left coverage offsets must never alter attributes
@@ -424,7 +562,8 @@ void RasterizerSoftware::ProcessTriangle(const Vertex& v0, const Vertex& v1, con
         return result;
     };
 
-    fb.Bind();
+    if (!window)
+        fb.Bind(); // Claude: Band draws bind once on the owner before workers start.
 
     // CodexAstraLocal: The owner and sleeping workers steal disjoint small row
     // groups. Preserve the inherited pixel-center traversal inside each group;
@@ -624,7 +763,10 @@ void RasterizerSoftware::ProcessTriangle(const Vertex& v0, const Vertex& v1, con
     // exact ascending y/x serial evaluation. A safe triangle still joins every
     // participant before later guest draws, memory writes or presentation.
     if (parallel_safe) {
-        sw_workers.Run(rows, 4, process_rows);
+        // Claude: 16-row grains (was 4). Small triangles then stay on the owner;
+        // splitting them cost more in wake/join than it saved (opt-in timing
+        // "[.software-bench]": 4000 small triangles, 4 cores, 76 ms vs 61 serial).
+        sw_workers.Run(rows, 16, process_rows);
     } else {
         process_rows(0, rows);
     }

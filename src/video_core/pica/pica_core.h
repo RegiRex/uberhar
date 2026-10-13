@@ -160,6 +160,8 @@ private:
     // preparation; all guest-visible boundaries reconcile on this owner.
     bool TryDeferredVertices(bool is_indexed, std::chrono::steady_clock::time_point batch_start);
     void ReconcileDeferredVertices();
+    // Claude: True when this serial draw cannot observe queued CPU packets.
+    bool CanOverlapDeferredVertices();
     // AstraEH: Aggregate progress, including the engine actually in use.
     void ReportVirtualVertices(const char* kind, std::chrono::steady_clock::time_point now);
     // AstraPro: GPU-heavy runs must not starve route progress diagnostics.

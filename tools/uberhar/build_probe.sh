@@ -187,6 +187,12 @@ c++ -std=c++20 -O2 -pthread -DFMT_HEADER_ONLY -Isrc -Iexternals/fmt/include \
   -Iexternals/boost tools/uberhar/test_parallel_batch.cpp \
   src/video_core/pica/primitive_assembly.cpp -o build/uberhar-probe/test-parallel-batch
 timeout 60s build/uberhar-probe/test-parallel-batch
+# Claude: Serial List draws may run before queued CPU packets are joined; the
+# real assembler must emit and serialize exactly what the joined order would.
+c++ -std=c++20 -O2 -pthread -DFMT_HEADER_ONLY -Isrc -Iexternals/fmt/include \
+  -Iexternals/boost tools/uberhar/test_overlap_tail.cpp \
+  src/video_core/pica/primitive_assembly.cpp -o build/uberhar-probe/test-overlap-tail
+timeout 60s build/uberhar-probe/test-overlap-tail
 # CodexAstraLocal: Execute actual sleeping transport/lifetime controls and exact
 # serialized assembly, including callback throws and deliberately broken paths.
 python3 tools/uberhar/test_parallel_work_transport.py

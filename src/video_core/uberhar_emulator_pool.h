@@ -3,6 +3,7 @@
 #pragma once
 
 #include "common/thread.h"
+#include "common/uberhar_perf_hint.h"
 #include "common/uberhar_parallel_work.h"
 
 namespace VideoCore {
@@ -16,7 +17,10 @@ namespace VideoCore {
 inline Common::Uberhar::ParallelWork& EmulatorPool() {
     static Common::Uberhar::ParallelWork* const pool = new Common::Uberhar::ParallelWork{
         Common::Uberhar::AvailableProcessors(),
-        +[] { Common::SetCurrentThreadName("UberharWorker"); }};
+        +[] {
+            Common::SetCurrentThreadName("UberharWorker");
+            Common::Uberhar::PerfHint::RegisterCurrentThread();
+        }};
     return *pool;
 }
 

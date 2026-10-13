@@ -1,6 +1,7 @@
 // Copyright 2026 Uberhar contributors
 // Licensed under GPLv2 or any later version; see license.txt.
 #include <algorithm>
+#include <chrono> // Claude: Opt-in band draw timing.
 #include <cstring>
 #include <limits> // CodexAstraLocal: Defined singular/unused-derivative regression inputs.
 #ifdef UBERHAR_SOFTWARE_HELPER_PROBE
@@ -445,6 +446,166 @@ TEST_CASE("Software actual triangle budgets and alias admission", "[software]") 
     CHECK_NOTHROW(raster.AddTriangle(a,b,c));
     target.allow_depth_stencil_write.Assign(0);target.depth_buffer_address.Assign(0);
     CHECK(SwRenderer::SoftwareRendererTestAccess::Safe(raster,regs));
+}
+
+TEST_CASE("Software band-parallel draws match serial order", "[software]") {
+    // Claude: Queued triangles of one draw are rasterized in 8-row bands by
+    // several workers. Overlapping, depth-tested random triangles make the
+    // result depend on submission order; every worker budget must reproduce the
+    // serial color and depth bytes exactly, and nothing may be written before
+    // DrawTriangles. Vertex inputs that alias the color buffer keep the
+    // original immediate writes.
+    const auto old_workers = Settings::values.software_renderer_workers.GetValue();
+    const auto old_mode = Settings::values.uberhar_test_mode.GetValue();
+    struct Restore {
+        u32 workers;
+        Settings::UberharTestMode mode;
+        ~Restore() {
+            Settings::values.software_renderer_workers = workers;
+            Settings::values.uberhar_test_mode = mode;
+        }
+    } restore{old_workers, old_mode};
+    Settings::values.uberhar_test_mode = Settings::UberharTestMode::Software;
+    Core::System system;
+    Memory::MemorySystem memory{system};
+    Pica::PicaCore pica{memory, {}};
+    auto& regs = pica.regs.internal;
+    regs = {};
+    regs.lighting.disable.Assign(1);
+    regs.rasterizer.viewport_size_x.Assign(0x440000);
+    regs.rasterizer.viewport_size_y.Assign(0x440000);
+    regs.rasterizer.viewport_depth_range.Assign(0x3f0000);
+    regs.rasterizer.viewport_depth_near_plane.Assign(0x3f0000);
+    auto& target = regs.framebuffer.framebuffer;
+    target.width.Assign(64); target.height.Assign(63);
+    target.color_format.Assign(Pica::FramebufferRegs::ColorFormat::RGBA8);
+    target.color_buffer_address.Assign((Memory::VRAM_PADDR + 0x40000) / 8);
+    target.depth_buffer_address.Assign((Memory::VRAM_PADDR + 0x50000) / 8);
+    target.depth_format.Assign(Pica::FramebufferRegs::DepthFormat::D16);
+    target.allow_color_write.Assign(15); target.allow_depth_stencil_write.Assign(1);
+    auto& merger = regs.framebuffer.output_merger;
+    merger.logic_op.Assign(Pica::FramebufferRegs::LogicOp::Copy);
+    merger.red_enable.Assign(1); merger.green_enable.Assign(1);
+    merger.blue_enable.Assign(1); merger.alpha_enable.Assign(1);
+    merger.depth_test_enable.Assign(1);
+    merger.depth_test_func.Assign(Pica::FramebufferRegs::CompareFunc::LessThanOrEqual);
+    merger.depth_write_enable.Assign(1);
+    regs.pipeline.vertex_attributes.base_address.Assign(Memory::FCRAM_PADDR / 16);
+    regs.pipeline.num_vertices = 3;
+    auto* color = memory.GetPhysicalPointer(target.GetColorBufferPhysicalAddress());
+    auto* depth = memory.GetPhysicalPointer(target.GetDepthBufferPhysicalAddress());
+    constexpr std::size_t color_size = 64 * 64 * 4, depth_size = 64 * 64 * 2;
+    const auto f = [](float value) { return Pica::f24::FromFloat32(value); };
+    std::vector<std::array<Pica::OutputVertex, 3>> triangles;
+    u32 seed = 12345;
+    const auto next = [&] {
+        seed = seed * 1664525U + 1013904223U;
+        return static_cast<float>(seed >> 8) / static_cast<float>(1U << 24);
+    };
+    for (u32 i = 0; i < 300; ++i) {
+        std::array<Pica::OutputVertex, 3> triangle{};
+        const float z = -.1f - .8f * next();
+        const float red = next(), green = next(), blue = next();
+        for (auto& v : triangle) {
+            v.pos = {f(next() * 2.2f - 1.1f), f(next() * 2.2f - 1.1f), f(z), f(1)};
+            v.color = {f(red), f(green), f(blue), f(1)};
+            v.quat.w = f(1);
+        }
+        triangles.push_back(triangle);
+    }
+    const auto render = [&](u32 workers, bool expect_deferred) {
+        Settings::values.software_renderer_workers = workers;
+        SwRenderer::RasterizerSoftware raster{memory, pica};
+        // Claude: The vertex-path opt-in must match the batching decision.
+        CHECK(raster.DefersGuestMemoryWritesUntilDraw() == expect_deferred);
+        std::memset(color, 0, color_size);
+        std::memset(depth, 0xff, depth_size);
+        for (const auto& t : triangles)
+            raster.AddTriangle(t[0], t[1], t[2]);
+        const bool untouched = std::all_of(color, color + color_size, [](u8 v) { return v == 0; });
+        CHECK(untouched == expect_deferred);
+        raster.DrawTriangles();
+        std::vector<u8> bytes(color, color + color_size);
+        bytes.insert(bytes.end(), depth, depth + depth_size);
+        return bytes;
+    };
+    const auto serial = render(1, false);
+    REQUIRE(std::count(serial.begin(), serial.begin() + color_size, u8{255}) > 1000);
+    const bool parallel_host = Common::Uberhar::AvailableProcessors() >= 2;
+    for (u32 workers : {2U, 3U, 8U, 0U}) {
+        INFO("Software participant budget " << workers);
+        CHECK(render(workers, parallel_host) == serial);
+    }
+    // Claude: Inputs over the color buffer must draw immediately, as before.
+    regs.pipeline.vertex_attributes.base_address.Assign(target.GetColorBufferPhysicalAddress() / 16);
+    CHECK(render(4, false) == serial);
+}
+
+// Claude: Opt-in timing (run with the "[.software-bench]" tag). Not a gate.
+TEST_CASE("Software band-parallel draw timing", "[.software-bench]") {
+    const auto old_workers = Settings::values.software_renderer_workers.GetValue();
+    struct Restore { u32 workers; ~Restore() { Settings::values.software_renderer_workers = workers; } }
+        restore{old_workers};
+    Core::System system;
+    Memory::MemorySystem memory{system};
+    Pica::PicaCore pica{memory, {}};
+    auto& regs = pica.regs.internal;
+    regs = {};
+    regs.lighting.disable.Assign(1);
+    regs.rasterizer.viewport_size_x.Assign(0x480000); // 400 / 2 = 200
+    regs.rasterizer.viewport_size_y.Assign(0x46e000); // 240 / 2 = 120
+    regs.rasterizer.viewport_depth_range.Assign(0x3f0000);
+    regs.rasterizer.viewport_depth_near_plane.Assign(0x3f0000);
+    auto& target = regs.framebuffer.framebuffer;
+    target.width.Assign(400); target.height.Assign(239);
+    target.color_format.Assign(Pica::FramebufferRegs::ColorFormat::RGBA8);
+    target.color_buffer_address.Assign((Memory::VRAM_PADDR + 0x100000) / 8);
+    target.depth_buffer_address.Assign((Memory::VRAM_PADDR + 0x200000) / 8);
+    target.depth_format.Assign(Pica::FramebufferRegs::DepthFormat::D24);
+    target.allow_color_write.Assign(15); target.allow_depth_stencil_write.Assign(1);
+    auto& merger = regs.framebuffer.output_merger;
+    merger.logic_op.Assign(Pica::FramebufferRegs::LogicOp::Copy);
+    merger.red_enable.Assign(1); merger.green_enable.Assign(1);
+    merger.blue_enable.Assign(1); merger.alpha_enable.Assign(1);
+    merger.depth_test_enable.Assign(1);
+    merger.depth_test_func.Assign(Pica::FramebufferRegs::CompareFunc::LessThanOrEqual);
+    merger.depth_write_enable.Assign(1);
+    regs.pipeline.vertex_attributes.base_address.Assign(Memory::FCRAM_PADDR / 16);
+    regs.pipeline.num_vertices = 3;
+    const auto f = [](float value) { return Pica::f24::FromFloat32(value); };
+    u32 seed = 99;
+    const auto next = [&] {
+        seed = seed * 1664525U + 1013904223U;
+        return static_cast<float>(seed >> 8) / static_cast<float>(1U << 24);
+    };
+    // Claude: Many small triangles, like a typical 3DS scene.
+    std::vector<std::array<Pica::OutputVertex, 3>> triangles(4000);
+    for (auto& triangle : triangles) {
+        const float cx = next() * 2.f - 1.f, cy = next() * 2.f - 1.f, z = -.1f - .8f * next();
+        for (auto& v : triangle) {
+            v.pos = {f(cx + (next() - .5f) * .15f), f(cy + (next() - .5f) * .15f), f(z), f(1)};
+            v.color = {f(next()), f(next()), f(next()), f(1)};
+            v.quat.w = f(1);
+        }
+    }
+    // Claude: serial, the previous per-triangle row split (inputs unmapped, so
+    // no batching), then band-parallel draws.
+    for (const auto& [workers, banded] : {std::pair{1U, false}, std::pair{0U, false},
+                                          std::pair{0U, true}}) {
+        Settings::values.software_renderer_workers = workers;
+        regs.pipeline.vertex_attributes.base_address.Assign(banded ? Memory::FCRAM_PADDR / 16 : 0);
+        SwRenderer::RasterizerSoftware raster{memory, pica};
+        const auto start = std::chrono::steady_clock::now();
+        for (u32 frame = 0; frame < 10; ++frame) {
+            for (const auto& t : triangles)
+                raster.AddTriangle(t[0], t[1], t[2]);
+            raster.DrawTriangles();
+        }
+        const auto ms = std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - start).count() / 10;
+        WARN("workers=" << (workers ? workers : Common::Uberhar::AvailableProcessors())
+             << " banded=" << banded << " ms_per_draw=" << ms);
+    }
 }
 
 TEST_CASE("Software unbiased interpolation preserves coverage and singular failures",

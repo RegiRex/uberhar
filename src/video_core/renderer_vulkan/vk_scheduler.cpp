@@ -6,6 +6,7 @@
 #include <utility>
 #include "common/microprofile.h"
 #include "common/thread.h"
+#include "common/uberhar_perf_hint.h" // Claude: CPU clock hints for the recorder.
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #ifdef HAVE_LIBRETRO
@@ -146,6 +147,8 @@ void Scheduler::DispatchWork() {
 
 void Scheduler::WorkerThread(std::stop_token stop_token) {
     Common::SetCurrentThreadName("VulkanWorker");
+    // Claude: Command recording is on the frame's critical path.
+    Common::Uberhar::PerfHint::RegisterCurrentThread();
 
     const auto TryPopQueue{[this](auto& work) -> bool {
         if (work_queue.empty()) {

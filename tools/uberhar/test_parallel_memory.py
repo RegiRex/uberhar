@@ -129,7 +129,10 @@ def main():
             "actual_runtime_not_settings": "Settings::" not in blocks["core"] + blocks["lle"],
             # CodexAstraLocal: Bind the default-refusing software declaration
             # and ensure the actual guard precedes any parallel batch execution.
-            "software_retains_default": "DefersGuestMemoryWritesUntilDraw" not in sources["raster_software"],
+            # Claude: Software may now opt in, but only through the same
+            # input/target alias admission that makes it batch its writes.
+            "software_defers_only_when_batched": "DefersGuestMemoryWritesUntilDraw" not in sources["raster_software"]
+                or "return BatchAdmissible();" in sources["raster_software"],
             "submission_guard_before_parallel": sources["pica"].index(blocks["raster_guard"]) < sources["pica"].index("counts = parallel.batch.Run("),
         }
         proof["source_checks"] = checks

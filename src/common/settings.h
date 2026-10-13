@@ -557,8 +557,11 @@ struct Values {
     // AstraEH: Effective only inside hybrid mode; independently disable for A/B tests.
     SwitchableSetting<bool> uberhar_cpu_vertex_bridge{true, Keys::uberhar_cpu_vertex_bridge};
     // CodexAstraLocal: Session-frozen Combo placement comparison, independent
-    // of fragment specialization. Default retains the existing ready GPU route.
-    SwitchableSetting<bool> uberhar_cpu_vertex_only{false, Keys::uberhar_cpu_vertex_only};
+    // of fragment specialization.
+    // Claude: Default on. In the 0.1.44 Thor runs CPU-only Combo held a 63.6%
+    // slowest window versus 41.0% with GPU vertices, and it keeps the GPU on
+    // required graphics. Turn off to restore the ready GPU vertex route.
+    SwitchableSetting<bool> uberhar_cpu_vertex_only{true, Keys::uberhar_cpu_vertex_only};
     // CodexAstraLocal: Independent, session-frozen controls isolate fragment,
     // assembly and texture scheduling without changing mode or dropping draws.
     SwitchableSetting<bool> uberhar_native_full_fragments{true, Keys::uberhar_native_full_fragments};

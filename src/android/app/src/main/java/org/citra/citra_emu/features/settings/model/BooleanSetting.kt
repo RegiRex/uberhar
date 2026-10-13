@@ -20,7 +20,7 @@ enum class BooleanSetting(
     // AstraEH: Enabled within hybrid mode; can be disabled independently for comparison.
     UBERHAR_CPU_VERTEX_BRIDGE(SettingKeys.uberhar_cpu_vertex_bridge(), Settings.SECTION_RENDERER, true),
     // CodexAstraLocal: Preserve the old Combo default; comparison needs a restart.
-    UBERHAR_CPU_VERTEX_ONLY(SettingKeys.uberhar_cpu_vertex_only(), Settings.SECTION_RENDERER, false),
+    UBERHAR_CPU_VERTEX_ONLY(SettingKeys.uberhar_cpu_vertex_only(), Settings.SECTION_RENDERER, true),
     // CodexAstraLocal: Persist independent comparison controls; game restart applies them.
     UBERHAR_NATIVE_FULL_FRAGMENTS(SettingKeys.uberhar_native_full_fragments(), Settings.SECTION_RENDERER, true),
     UBERHAR_CPU_PREFIX_OVERLAP(SettingKeys.uberhar_cpu_prefix_overlap(), Settings.SECTION_RENDERER, true),
