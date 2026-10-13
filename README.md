@@ -1,220 +1,165 @@
-<!-- AstraEH: Uberhar branch overview; the upstream README begins after the separator. -->
-# Uberhar development branch
+<!-- CodexAstraLocal: Present Uberhar's identity with a local, credited wordmark; keep upstream distribution and support clearly separate. -->
+# Uberhar
 
-Uberhar is an unofficial experimental Azahar fork for Android ARM64, based on
-Azahar 2126.1.2. See [UBERHAR.md](UBERHAR.md) for current status, the limited
-Vulkan TEV fallback, known limitations, and testing instructions. A full
-ubershader renderer and screen-synchronization changes are not implemented yet.
+<img src="docs/assets/uberhar-logo.svg" alt="Uberhar Emulator" width="640">
 
-The upstream project information and download links below describe Azahar.
-Uberhar builds are produced by this repository's **Uberhar ARM64 prerelease** workflow.
+**An experimental Azahar fork focused on Android ARM64, complete graphics and
+smoother first playthroughs.** Uberhar develops alternative ways to divide 3DS
+rendering between the CPU and GPU, with useful CPU parallelism and correct output
+as the priorities.
 
-<!-- CodexAstraUlt: Replace the current candidate pointer after the full memory/architecture review; retain prior release records. -->
-Comparison candidate: **[0.1.22 lit triangle correctness and driver memory evidence](docs/releases/0.1.22.md)**.
-Follow [build/device status](docs/UBERHAR_PROGRESS.md) and the
-[roadmap](docs/Uberhar_Roadmap.html). Older milestones below retain their original evidence.
+[Download Uberhar](https://github.com/RegiRex/uberhar/releases) ·
+[Report an issue](https://github.com/RegiRex/uberhar/issues) ·
+[Build workflow](https://github.com/RegiRex/uberhar/actions/workflows/uberhar-alpha.yml) ·
+[Roadmap](docs/Uberhar_Roadmap.html)
 
-**The initial APK was withdrawn:** an unintended Android `testOnly` flag
-blocked normal installation. Packaging was fixed in **0.0.2**; **0.0.3** isolates
-and limits fallback compilation after the first gameplay stall report, following the owner's
-**release.beta.alpha** numbering. Test builds are published as
-[GitHub pre-releases](https://github.com/RegiRex/uberhar/releases) after package validation.
-See [UBERHAR.md](UBERHAR.md) for status and testing instructions.
-[Published ARM64 pre-releases](https://github.com/RegiRex/uberhar/releases).
-The [0.0.10 eight-session analysis](docs/UBERHAR_LOG_ANALYSIS_0.0.10.md) identifies
-high CPU vertex cost and zero compute coverage in Awakening. **0.0.11** restores
-cached CPU shader translation in the three profiles, accelerates vertex-cache
-lookup, persists generic shader modules and improves bounded diagnostics.
-**0.0.12** adds overlay-independent frame pacing, pause/fast-forward markers,
-late worst-hitch retention and bounded Android thermal/battery/memory sampling.
-Its [first Thor Native cold/warm test](docs/UBERHAR_LOG_ANALYSIS_0.0.12.md) at 2x
-reports 99.760% warm emulation speed and a substantial user-observed improvement.
-Cold generic compilation still produced hitches; that result supplied the baseline
-for 0.0.13, not proof of a completed compilation-free renderer.
-**0.0.13** moves lighting lookup controls and physical-light selection into per-draw
-state to reduce fragment families, with expanded pixel/Vulkan validation and
-same-workload family-count diagnostics. The [three-run Thor result](docs/UBERHAR_LOG_ANALYSIS_0.0.13.md)
-shows 37→21 cold families under the same observed state, 2.948 s of cold generic
-waiting, and 99.776% fully warm speed. This is the new Native/2x reference;
-coverage differences limit comparison with the prior 8.121 s cold result.
-<!-- AstraEH: Next runtime upgrade is distinct from the measured 0.0.13 reference. -->
-**0.0.14** also supplies lighting enables/configuration support as runtime data,
-adds same-run 0.0.13/current family counts and bounded remaining-family details,
-and expands rendering comparisons to 928 cases. The [two-run Thor result](docs/UBERHAR_LOG_ANALYSIS_0.0.14.md)
-confirms correct sleep exclusion, 21→16 same-workload families and 99.757% warm
-speed, but cold generic wait rises to 3.298 seconds as individual programs get larger.
-<!-- AstraEH: Four-run beta evidence and the CPU headroom step. -->
-**0.0.15** replaces repeated per-light code with a compact ordered runtime loop.
-Its [four-run Thor analysis](docs/UBERHAR_LOG_ANALYSIS_0.0.15.md) reports about **80%
-less cold generic waiting**, 99.795% normal warm speed and 283.379/292.518% cold/warm
-fast-only speed at a 400% cap. The owner reports no noticeable gameplay slowdown.
-**0.1.0 promotes the tested Native path to beta** and targets CPU headroom with
-prepared vertex-register transport and exact final-vertex reuse. Sparse bounded
-samples separate input, shader, conversion and submission work. It preserves the
-successful fragment path; device results are summarized below.
+Active development is on
+[`uberhar/hybrid-shaders`](https://github.com/RegiRex/uberhar/tree/uberhar/hybrid-shaders).
+Use that branch for the Uberhar source and documentation.
 
-<!-- AstraEH: Broader beta validation and a focused diagnostic iteration. -->
-The [0.1.0 six-session analysis](docs/UBERHAR_LOG_ANALYSIS_0.1.0.md) confirms full
-normal speed in Awakening, about 10% less vertex-stage work per input, and Ocarina
-at 99.912% normal / 374.628% fast-forward speed. Awakening fast-forward averages
-are lower than 0.0.15 with different workload coverage, so total headroom gains
-are not yet established. Sonic's sustained racing slowdown continues after
-compilation finishes; dense draw/vertex work is a major measured cost.
-**0.1.1** keeps the renderer intact and extends sparse diagnostics throughout long
-runs, adds startup machine context and bounds repeated friend-service warnings.
+<!-- CodexAstraLocal: State performance and correctness objectives as goals, keeping cold-cache rendering distinct from warmed benchmarks and CPU occupancy. -->
+## Purpose and goals
 
-Next test: Sonic Native/**2x**, one warm race; then, if practical, a separate warm
-race with only **New 3DS model off** and CPU clock still 100%. Exit/relaunch between
-model changes. Do not switch backend or resolution in that comparison. A short
-Awakening normal-speed regression check is useful; repeating all four runs is optional
-for this diagnostics-only change. Automatic per-title compatibility profiles are a
-[post-1.0 roadmap item](docs/UBERHAR_COMPATIBILITY_PROFILES.md), not an active Sonic fix.
-See the [0.1.1 notes](docs/releases/0.1.1.md),
-[full beta architecture review](docs/UBERHAR_ARCHITECTURE_0.1.0.md) and
-[Actions](https://github.com/RegiRex/uberhar/actions/workflows/uberhar-alpha.yml).
-Publication requires all build/package/shader gates. The next default architectural
-review remains after 0.1.3; see the [review ledger](docs/UBERHAR_REVIEW_CADENCE.md).
+Uberhar is for Android players testing demanding games and for contributors
+working on shader compilation, rendering correctness and CPU/GPU scheduling.
+Its development goals are:
 
----
+- **A correct cold first playthrough:** reduce compilation hitches without
+  depending on a prebuilt application shader cache or skipping draws to hide
+  compilation. First-use compilation can still pause today.
+- **Sustained 99% or better normal emulation speed at 2×, then 4×**, measured
+  with a 100% speed limit, complete graphics and consistent frame pacing.
+- **Useful adaptive CPU multicore work:** distribute independent work within the
+  available CPU budget, preserve dependent work in order, and judge improvement
+  by complete frames. Three useful app CPU core-equivalents is a 0.2.0 development
+  target, not an achieved result or a reason to create unnecessary load.
+  One core-equivalent means one core fully occupied over the measured interval;
+  it does not require pinning work to a particular physical core.
+- **Renderer choices with clear ownership:** retain CPU vertex execution where
+  useful, investigate mixed rendering, and develop independent compute and CPU
+  graphics paths without silently substituting a different mode.
 
-![Azahar Emulator](https://azahar-emu.org/resources/images/logo/azahar-name-and-logo.svg)
+These are development targets. Native and Combo have completed device game runs,
+but substantial slowdowns and visual defects remain. Calculated and CPU Software
+are experimental and have failed tested game scenes; local correctness checks
+and successful builds do not establish playable whole-game support. Read the
+notes attached to each [published release](https://github.com/RegiRex/uberhar/releases)
+for its scope. The source branch may contain changes awaiting release or device
+qualification.
 
-![Current Release](https://img.shields.io/github/v/release/azahar-emu/azahar?label=Current%20Release)
-![Current Prerelease](https://img.shields.io/github/v/release/azahar-emu/azahar?include_prereleases&label=Current%20Prerelease)
+<!-- CodexAstraLocal: Describe actual guest-work placement so Native, GPU compute and CPU Software cannot be mistaken for equivalent backends. -->
+## Rendering modes
 
-![GitHub Downloads](https://img.shields.io/github/downloads/azahar-emu/azahar/total?logo=github&label=GitHub%20Downloads)
-![Google Play Downloads](https://playbadges.pavi2410.com/badge/downloads?id=io.github.lime3ds.android&pretty&label=Play%20Store%20Downloads)
-![Flathub Downloads](https://img.shields.io/flathub/downloads/org.azahar_emu.Azahar?logo=flathub&label=Flathub%20Downloads)
-![CI Build Status](https://github.com/azahar-emu/azahar/actions/workflows/build.yml/badge.svg)
+All modes still emulate the guest CPU on the host CPU. The table describes
+**guest graphics**; the host GPU also handles display presentation.
 
-<b>Azahar</b> is an open-source 3DS emulator project based on Citra.
+| Mode | Where graphics work runs | Intended use and limits |
+| --- | --- | --- |
+| **Native** — “Virtual PICA: native rasterization” | Guest vertex shaders run on the CPU; Vulkan rasterization and fragment shading run on the GPU. Eligible CPU work can use workers. | Main CPU-vertex rendering path. Generic and ready prepared fragment shaders reduce first-use work, but compilation stalls and rendering defects remain possible. |
+| **Combo** — “Virtual PICA: automatic combination” | CPU vertices combine with ready GPU vertex execution for eligible draws, Vulkan rasterization and bounded fragment specialization. | Compare mixed work placement with Native. It is not the independent compute renderer. Pending optional specialization retains a complete rendering path. |
+| **Calculated** | Vulkan compute processes original guest vertex inputs, assembly, clipping and fragment work independently of Native rasterization. | Experimental coverage. Unsupported states terminate emulation with an error; there is no Native rendering fallback. Device usability remains unqualified. |
+| **CPU Software** | Guest rasterization, texture sampling and fragment operations run on the CPU at **1×**. OpenGL ES presents completed frames. | Experimental CPU graphics with **1 / 2 / Automatic** rendering participants. Ordering and feedback can require serial work; game compatibility remains incomplete. |
 
-It was created from the merging of PabloMK7's Citra fork and the Lime3DS project, both of which emerged shortly after Citra was taken down.
+**Combo (generic fragments)** is a comparison mode that keeps Combo's vertex
+policy while limiting optional fragment specialization. **Custom** exposes the
+inherited graphics settings; it does not carry the same preset behavior.
 
-The goal of this project is to be the de-facto platform for future development.
+Choose a mode in Android's **Graphics** settings and restart the game after
+changing it. The presets apply their own effective graphics settings. Native,
+Combo and Calculated use Vulkan; CPU Software uses its separate 1× path. The
+**Native mode** name does not mean **1× native resolution**.
 
-# Installation
+<!-- CodexAstraLocal: Route installs to this fork and state the actual Android package/minimum SDK without borrowing upstream desktop or store qualification. -->
+## Downloads and setup
 
-### Windows
+1. Get the ARM64 APK from [RegiRex/uberhar releases](https://github.com/RegiRex/uberhar/releases).
+   Uberhar's release assets include an APK checksum, validation records and native
+   symbols. Development builds are experimental.
+2. Install it on a **64-bit ARM Android device running Android 10 or newer**.
+   This is the package's platform minimum, not a promise of game performance;
+   the Vulkan modes also require a compatible device and driver.
+3. Select an empty Uberhar data folder, or one already initialized by Uberhar.
+   Its separate app ID, `org.uberhar.uberhar_emu`, allows it to coexist with Azahar.
+   Copy any saves you want to use into that separate setup.
+4. Select a renderer and resolution, then launch a game. Keep the version,
+   renderer, resolution and settings with any compatibility report.
 
-Azahar is available as both an installer and a zip archive.
+Uberhar's published build target is Android ARM64. Windows, macOS and Linux code
+and build support are inherited from Azahar; this fork's Android qualification
+does not qualify those platforms. The Google Play, Flathub and desktop downloads
+in the [preserved Azahar README](docs/UPSTREAM_README_AZAHAR.md) are upstream Azahar
+products.
 
-Download the latest release in your preferred format from the [Releases](https://github.com/azahar-emu/azahar/releases) page.
+<!-- CodexAstraLocal: Separate the owner's hardware planning targets from platform minimums and completed device qualification. -->
+Performance development targets the **Retroid Pocket Duo class of hardware
+(eight CPU cores and 8 GB RAM)** as its planning baseline. **Ayn Thor Max** is the
+primary hardware-validation device; **Odin 3 and newer flagship hardware** are
+scaling targets. These are design targets, not a completed compatibility or
+performance guarantee. Worker budgets account for available CPU capacity;
+heterogeneous cores, Android background work and thermals affect useful throughput.
 
-If you are unsure of whether you want to use MSVC or MSYS2, use MSYS2.
+<!-- CodexAstraLocal: Make the fork's checked-in build and validation recipes authoritative while retaining upstream platform instructions. -->
+## Building and contributing
 
----
+Clone this fork with its submodules:
 
-### MacOS
-
-To download a build that will work on all Macs, you can download the `macos-universal` build on the [Releases](https://github.com/azahar-emu/azahar/releases) page.
-
-Alternatively, if you wish to download a build specifically for your Mac, you can choose either:
-
-- `macos-arm64` for Apple Silicon Macs
-- `macos-x86_64` for Intel Macs
-
----
-
-### Android
-
-There are two variants of Azahar available on Android, those being the Vanilla and Google Play builds.
-
-The Vanilla build is technically superior, as it uses an alternative method of file management which is faster, but isn't permitted on the Google Play store.
-
-For most users, we currently recommended downloading Azahar on Android via the Google Play Store for ease of accessibility:
-
-<a href='https://play.google.com/store/apps/details?id=io.github.lime3ds.android'><img width='180' alt='Get it on Google Play' src='https://raw.githubusercontent.com/pioug/google-play-badges/06ccd9252af1501613da2ca28eaffe31307a4e6d/svg/English.svg'/></a>
-
-Alternatively, you can install the app using Obtainium, allowing you to use the Vanilla variant:
-1. Download and install Obtainium from [here](https://github.com/ImranR98/Obtainium/releases) (use the file named `app-release.apk`)
-2. Open Obtainium and click 'Add App'
-3. Type `https://github.com/azahar-emu/azahar` into the 'App Source URL' section
-4. Click 'Add'
-5. Click 'Install', and select the preferred variant
-
-If you wish, you can also simply install the latest APK from the [Releases](https://github.com/azahar-emu/azahar/releases) page.
-
-Keep in mind that you will not recieve automatic updates when installing via the APK.
-
----
-
-### Linux
-
-The recommended format for using Azahar on Linux is the Flatpak available on Flathub:
-
-<a href='https://flathub.org/apps/org.azahar_emu.Azahar'><img width='180' alt='Download on Flathub' src='https://dl.flathub.org/assets/badges/flathub-badge-en.png'/></a>
-
-Azahar is also available as an AppImage on the [Releases](https://github.com/azahar-emu/azahar/releases) page.
-
-There are two variants of the AppImage available, those being `azahar.AppImage` and `azahar-wayland.AppImage`.
-
-If you are unsure of which variant to use, we recommend using the default `azahar.AppImage`. This is because of upstream issues in the Wayland ecosystem which may cause problems when running the emulator (e.g. [#1162](https://github.com/azahar-emu/azahar/issues/1162)).
-
-Unless you explicitly require native Wayland support (e.g. you are running a system with no Xwayland), the non-Wayland variant is recommended.
-
-The Flatpak build of Azahar also has native Wayland support disabled by default. If you require native Wayland support, it can be enabled using [Flatseal](https://flathub.org/en/apps/com.github.tchx84.Flatseal).
-
-# Build instructions
-
-Please refer this repository's [wiki](https://github.com/azahar-emu/azahar/wiki/Building-From-Source) for build instructions
-
-# How can I contribute?
-
-### Pull requests
-
-If you want to implement a change and have the technical capability to do so, we would be happy to accept your contributions.
-
-If you are contributing a new feature, it is highly suggested that you first make a Feature Request issue to discuss the addition before writing any code. This is to ensure that your time isn't wasted working on a feature which isn't deemed appropriate for the project.
-
-After creating a pull request, please don't repeatedly merge `master` into your branch. A maintainer will update the branch for you if/ when it is appropriate to do so.
-
-### Language translations
-
-Additionally, we are accepting language translations on [Transifex](https://app.transifex.com/azahar/azahar). If you know a non-english language listed on our Transifex page, please feel free to contribute.
-
-> [!NOTE]
-> We are not currently accepting new languages for translation. Please do not request for new languages or language variants to be added.
-
-### Compatibility reports
-
-Even if you don't wish to contribute code or translations, you can help the project by reporting game compatibility data to our compatibility list.
-
-To do so, simply read https://github.com/azahar-emu/compatibility-list/blob/master/CONTRIBUTING.md and follow the instructions.
-
-Contributing compatibility data helps more accurately reflect the current capabilities of the emulator, so it would be highly appreciated if you could go through the reporting process after completing a game.
-
-# Minimum requirements
-
-Below are the minimum requirements to run Azahar:
-
-### Desktop
-
-```
-Operating System: Windows 10 (64-bit), MacOS 13.4 (Ventura), or modern 64-bit Linux
-CPU: x86-64/ARM64 CPU (Windows for ARM not supported).
-     Single core performance higher than 1,800 on Passmark.
-     SSE4.2 required on x86_64.
-GPU: OpenGL 4.3 or Vulkan 1.1 support
-Memory: 2GB of RAM. 4GB is recommended
-```
-### Android
-
-```
-Operating System: Android 10.0+ (64-bit)
-CPU: Snapdragon 835 SoC or better
-GPU: OpenGL ES 3.2 or Vulkan 1.1 support
-Memory: 2GB of RAM. 4GB is recommended
+```sh
+git clone --recurse-submodules --branch uberhar/hybrid-shaders https://github.com/RegiRex/uberhar.git
+cd uberhar
 ```
 
-# What's next?
+The [ARM64 workflow](.github/workflows/uberhar-alpha.yml) contains the Android
+toolchain, signing and packaging recipe. It builds the `uberhar` flavor with
+`assembleUberharRelease` and `-PuberharArm64Only=true`; other Android flavors
+retain upstream identities. Publication depends on both the Android job and the
+[shader and correctness workflow](.github/workflows/uberhar-shaders.yml), followed
+by package, checksum and signature validation. Build success remains separate
+from device rendering and performance qualification.
 
-We share public roadmaps for upcoming releases in the form of GitHub milestones.
+The [host probe](tools/uberhar/build_probe.sh) and
+[technical overview](UBERHAR.md) describe the fork's validation entry points.
+General platform build instructions remain in the
+[upstream reference](docs/UPSTREAM_README_AZAHAR.md#build-instructions).
 
-You can find these at https://github.com/azahar-emu/azahar/milestones.
+Use [Uberhar issues](https://github.com/RegiRex/uberhar/issues) and
+[pull requests](https://github.com/RegiRex/uberhar/pulls) for fork-specific changes
+and reports. Include the release, device/driver, game and scene, renderer,
+resolution, speed limit, relevant settings and whether the application shader
+cache was cold or warm. Graphics defects, crashes and frame pacing matter as
+much as average speed. Share relevant logs after removing personal information.
+Upstream translation and compatibility-reporting links are preserved in the
+[Azahar reference](docs/UPSTREAM_README_AZAHAR.md#how-can-i-contribute); label
+Uberhar-only behavior as such.
 
-# Join the conversation
+<!-- CodexAstraLocal: Link dated evidence instead of presenting old next-test instructions and release chronology as current status. -->
+## Design and development history
 
-We have a community Discord server where you can chat about the project, keep up to date with the latest announcements, or coordinate emulator development.
+- [Technical overview and archived development notes](UBERHAR.md)
+- [Release notes](docs/releases) and [historical progress](docs/UBERHAR_PROGRESS.md)
+- [Roadmap](docs/Uberhar_Roadmap.html), [review cadence](docs/UBERHAR_REVIEW_CADENCE.md)
+  and [code map](docs/UBERHAR_CODE_MAP.md)
+- [Experiment ledger](docs/UBERHAR_EXPERIMENT_LEDGER_0.1.40.md) and
+  [architecture reviews](docs/UBERHAR_REVIEW_0.1.44.md)
 
-Join at https://discord.gg/4ZjMpAp3M6
+Dated reports retain the conditions and limitations of their original tests;
+older “next test” or candidate statements are historical, not current setup
+instructions.
+
+<!-- CodexAstraLocal: Retain upstream lineage and distinguish source-code licensing from the adapted documentation artwork. -->
+## Upstream, credits and license
+
+Uberhar builds on **Azahar**, which brought together **PabloMK7's Citra fork** and
+**Lime3DS**, and on the work of **Citra** and its contributors. The
+[complete inherited Azahar README](docs/UPSTREAM_README_AZAHAR.md) preserves its
+history, installation instructions, platform requirements, build guidance,
+translations, compatibility resources and community links. Uberhar is an
+independent fork; those upstream services do not represent Uberhar support.
+
+Emulator code is licensed under **GPL-2.0-or-later**; see [license.txt](license.txt)
+and individual source notices. Bundled dependencies retain their own licenses.
+
+The Uberhar wordmark adapts the **Azahar Emu Logo**, © 2024 **angyartanddraw and
+PabloMK7**, under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+**CodexAstraLocal** adapted the lettering and contrast for Uberhar. See
+[artwork provenance](docs/assets/README.md) for the original source and modification
+details; the adaptation does not imply upstream endorsement.

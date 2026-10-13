@@ -1,3 +1,83 @@
+<!-- CodexAstraLocal: Replace superseded current-status instructions with a source-level guide, preserving the earlier authored notes as explicitly historical records below. -->
+# Uberhar technical overview and history
+
+The [README](README.md) introduces the project, renderer modes, downloads and
+goals. This page describes the checked-in design and links its evidence. Source
+implementation, published packages and actual device qualification are separate;
+use the notes attached to [Uberhar releases](https://github.com/RegiRex/uberhar/releases)
+for a particular build.
+
+<!-- CodexAstraLocal: Explain the shared cold-rendering contract without retaining obsolete claims that Native is generic-only or Calculated falls back to Native. -->
+## Rendering contract
+
+Native keeps guest vertex execution on the CPU and uses Vulkan for rasterization
+and fragment shading. Combo may select ready GPU vertex work for eligible draws.
+Both can prepare fragment shaders while a complete generic path remains available
+for supported pending specialization. First-use CPU translation, new generic
+families and driver pipeline creation can still stall. Shader caching remains
+enabled: the cold-playthrough goal concerns correctness and useful speed without
+an existing application cache, not disabling caches for ordinary play.
+
+Calculated is an independent original-input Vulkan compute path with explicit
+unsupported-state failure and no Native rendering fallback. CPU Software renders
+guest graphics on CPU at 1× and publishes owned completed frames for Android
+OpenGL ES presentation. Both remain experimental; their local correctness checks
+do not establish playable coverage of complete games.
+
+The [preset policy](src/common/uberhar_test_profile.h) defines effective settings
+and keeps fragment preparation separate from GPU vertex eligibility. Custom
+settings and the generic-fragment comparison serve different purposes. A game
+restart is required after changing modes or session-scoped worker/placement
+settings.
+
+<!-- CodexAstraLocal: Describe useful parallel work and actual ordering obligations rather than equating worker creation with frame throughput. -->
+## CPU work and ordering
+
+Eligible vertex batches reuse CPU JIT bindings, input plans and worker pools.
+Independent owned packets can execute concurrently; ordered reconciliation and
+GPU consumers retain their dependencies. The ordered-prefix path lets the owner
+assemble completed vertices while later CPU shading finishes, then joins before
+remaining submission and GPU drawing. It does not issue speculative GPU draws.
+Unsupported sinks keep the ordinary joined path. CPU Software's participant
+budget is 1, 2 or Automatic, with serial execution where feedback requires it.
+
+The performance objective is complete frames with correct output and stable
+pacing. More threads, higher CPU occupancy or a larger GPU draw fraction do not
+by themselves demonstrate improvement. Sustained 99% normal speed at 2× and then
+4×, and the 0.2.0 useful-CPU target, remain evidence gates.
+
+<!-- CodexAstraLocal: Point to live build sources and dated reviews instead of freezing another soon-stale candidate/version instruction. -->
+## Build and evidence entry points
+
+- [Android package and release workflow](.github/workflows/uberhar-alpha.yml):
+  ARM64 Uberhar flavor, package validation, signing and gated publication.
+- [Shader/correctness workflow](.github/workflows/uberhar-shaders.yml) and
+  [host probe](tools/uberhar/build_probe.sh): focused production-source controls
+  and rendering comparisons; their scopes are recorded with each review.
+- [Version source](UBERHAR_VERSION) and [release notes](docs/releases): source
+  versioning and the changes associated with each candidate or release.
+- [0.1.43 integration review](docs/UBERHAR_REVIEW_0.1.43.md) and
+  [0.1.44 architecture/purpose review](docs/UBERHAR_REVIEW_0.1.44.md): rendering,
+  queue, recovery and allocation contracts, with remaining device obligations.
+- [Experiment ledger](docs/UBERHAR_EXPERIMENT_LEDGER_0.1.40.md),
+  [code map](docs/UBERHAR_CODE_MAP.md) and [roadmap](docs/Uberhar_Roadmap.html):
+  retained decisions and future goals, interpreted at their recorded dates.
+
+Historical attribution markers, including AstraEH, AstraPro, CodexAstraUlt and
+CodexAstraLocal, identify changed sections without claiming authorship of the
+surrounding upstream code. Preserve them when maintaining those sections.
+
+<!-- CodexAstraLocal: Archive the previous overview intact; every current/next-test statement inside is a dated snapshot, not an instruction for today's release. -->
+## Archived development snapshots
+
+The records below preserve previous wording, results and authorship. Their
+“current”, “next”, pending-release, settings and test instructions are superseded
+historical statements. They must not be used to infer present renderer support,
+performance, release status or a need to reset user data.
+
+<details>
+<summary>Earlier technical notes and status snapshots (archived)</summary>
+
 <!-- AstraEH: Scope, validation evidence, build notes and device-test instructions for this fork. -->
 # Uberhar
 
@@ -633,3 +713,91 @@ boundaries. These identify work in this fork, not authorship of surrounding
 upstream code. The [code map](docs/UBERHAR_CODE_MAP.md) lists every affected area
 and provides the exact baseline diff command. Preserve this convention in
 subsequent AstraEH changes.
+
+</details>
+
+<!-- CodexAstraLocal: Preserve the replaced README chronology and its original attribution off the project front page. -->
+<details>
+<summary>Earlier README development overview (archived)</summary>
+
+<!-- AstraEH: Uberhar branch overview; the upstream README begins after the separator. -->
+# Uberhar development branch
+
+Uberhar is an unofficial experimental Azahar fork for Android ARM64, based on
+Azahar 2126.1.2. See [UBERHAR.md](UBERHAR.md) for current status, the limited
+Vulkan TEV fallback, known limitations, and testing instructions. A full
+ubershader renderer and screen-synchronization changes are not implemented yet.
+
+The upstream project information and download links below describe Azahar.
+Uberhar builds are produced by this repository's **Uberhar ARM64 prerelease** workflow.
+
+<!-- CodexAstraUlt: Replace the current candidate pointer after the full memory/architecture review; retain prior release records. -->
+Comparison candidate: **[0.1.22 lit triangle correctness and driver memory evidence](docs/releases/0.1.22.md)**.
+Follow [build/device status](docs/UBERHAR_PROGRESS.md) and the
+[roadmap](docs/Uberhar_Roadmap.html). Older milestones below retain their original evidence.
+
+**The initial APK was withdrawn:** an unintended Android `testOnly` flag
+blocked normal installation. Packaging was fixed in **0.0.2**; **0.0.3** isolates
+and limits fallback compilation after the first gameplay stall report, following the owner's
+**release.beta.alpha** numbering. Test builds are published as
+[GitHub pre-releases](https://github.com/RegiRex/uberhar/releases) after package validation.
+See [UBERHAR.md](UBERHAR.md) for status and testing instructions.
+[Published ARM64 pre-releases](https://github.com/RegiRex/uberhar/releases).
+The [0.0.10 eight-session analysis](docs/UBERHAR_LOG_ANALYSIS_0.0.10.md) identifies
+high CPU vertex cost and zero compute coverage in Awakening. **0.0.11** restores
+cached CPU shader translation in the three profiles, accelerates vertex-cache
+lookup, persists generic shader modules and improves bounded diagnostics.
+**0.0.12** adds overlay-independent frame pacing, pause/fast-forward markers,
+late worst-hitch retention and bounded Android thermal/battery/memory sampling.
+Its [first Thor Native cold/warm test](docs/UBERHAR_LOG_ANALYSIS_0.0.12.md) at 2x
+reports 99.760% warm emulation speed and a substantial user-observed improvement.
+Cold generic compilation still produced hitches; that result supplied the baseline
+for 0.0.13, not proof of a completed compilation-free renderer.
+**0.0.13** moves lighting lookup controls and physical-light selection into per-draw
+state to reduce fragment families, with expanded pixel/Vulkan validation and
+same-workload family-count diagnostics. The [three-run Thor result](docs/UBERHAR_LOG_ANALYSIS_0.0.13.md)
+shows 37→21 cold families under the same observed state, 2.948 s of cold generic
+waiting, and 99.776% fully warm speed. This is the new Native/2x reference;
+coverage differences limit comparison with the prior 8.121 s cold result.
+<!-- AstraEH: Next runtime upgrade is distinct from the measured 0.0.13 reference. -->
+**0.0.14** also supplies lighting enables/configuration support as runtime data,
+adds same-run 0.0.13/current family counts and bounded remaining-family details,
+and expands rendering comparisons to 928 cases. The [two-run Thor result](docs/UBERHAR_LOG_ANALYSIS_0.0.14.md)
+confirms correct sleep exclusion, 21→16 same-workload families and 99.757% warm
+speed, but cold generic wait rises to 3.298 seconds as individual programs get larger.
+<!-- AstraEH: Four-run beta evidence and the CPU headroom step. -->
+**0.0.15** replaces repeated per-light code with a compact ordered runtime loop.
+Its [four-run Thor analysis](docs/UBERHAR_LOG_ANALYSIS_0.0.15.md) reports about **80%
+less cold generic waiting**, 99.795% normal warm speed and 283.379/292.518% cold/warm
+fast-only speed at a 400% cap. The owner reports no noticeable gameplay slowdown.
+**0.1.0 promotes the tested Native path to beta** and targets CPU headroom with
+prepared vertex-register transport and exact final-vertex reuse. Sparse bounded
+samples separate input, shader, conversion and submission work. It preserves the
+successful fragment path; device results are summarized below.
+
+<!-- AstraEH: Broader beta validation and a focused diagnostic iteration. -->
+The [0.1.0 six-session analysis](docs/UBERHAR_LOG_ANALYSIS_0.1.0.md) confirms full
+normal speed in Awakening, about 10% less vertex-stage work per input, and Ocarina
+at 99.912% normal / 374.628% fast-forward speed. Awakening fast-forward averages
+are lower than 0.0.15 with different workload coverage, so total headroom gains
+are not yet established. Sonic's sustained racing slowdown continues after
+compilation finishes; dense draw/vertex work is a major measured cost.
+**0.1.1** keeps the renderer intact and extends sparse diagnostics throughout long
+runs, adds startup machine context and bounds repeated friend-service warnings.
+
+Next test: Sonic Native/**2x**, one warm race; then, if practical, a separate warm
+race with only **New 3DS model off** and CPU clock still 100%. Exit/relaunch between
+model changes. Do not switch backend or resolution in that comparison. A short
+Awakening normal-speed regression check is useful; repeating all four runs is optional
+for this diagnostics-only change. Automatic per-title compatibility profiles are a
+[post-1.0 roadmap item](docs/UBERHAR_COMPATIBILITY_PROFILES.md), not an active Sonic fix.
+See the [0.1.1 notes](docs/releases/0.1.1.md),
+[full beta architecture review](docs/UBERHAR_ARCHITECTURE_0.1.0.md) and
+[Actions](https://github.com/RegiRex/uberhar/actions/workflows/uberhar-alpha.yml).
+Publication requires all build/package/shader gates. The next default architectural
+review remains after 0.1.3; see the [review ledger](docs/UBERHAR_REVIEW_CADENCE.md).
+
+---
+
+
+</details>
