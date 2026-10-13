@@ -23,3 +23,18 @@ typedef void* HANDLE;
 #include <microprofile.h>
 
 #define MP_RGB(r, g, b) ((r) << 16 | (g) << 8 | (b) << 0)
+
+// Claude: With MicroProfile compiled out (the Android default), turn its existing
+// scopes into Perfetto/systrace slices so device traces show the same phases:
+// ARM JIT slices, command lists, uploads, pipeline binds/builds, submits, presents.
+#if defined(UBERHAR_ATRACE) && !MICROPROFILE_ENABLED
+#include "common/uberhar_trace.h"
+#undef MICROPROFILE_DECLARE
+#undef MICROPROFILE_DEFINE
+#undef MICROPROFILE_SCOPE
+#define MICROPROFILE_DECLARE(var) extern const ::Common::Uberhar::TraceToken g_mp_##var
+#define MICROPROFILE_DEFINE(var, group, name, color)                                            \
+    extern const ::Common::Uberhar::TraceToken g_mp_##var;                                     \
+    const ::Common::Uberhar::TraceToken g_mp_##var { group ": " name }
+#define MICROPROFILE_SCOPE(var) ::Common::Uberhar::TraceScope UBERHAR_TRACE_JOIN(mp_trace_, __LINE__) { g_mp_##var }
+#endif

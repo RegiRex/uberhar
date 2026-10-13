@@ -125,6 +125,7 @@ add_library(video_core STATIC EXCLUDE_FROM_ALL
     texture/etc1.h
     texture/texture_decode.cpp
     texture/texture_decode.h
+    uberhar_emulator_pool.h # Claude: One shared emulator-thread fork-join pool.
     utils.h
     video_core.cpp
     video_core.h

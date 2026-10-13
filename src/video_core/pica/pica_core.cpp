@@ -12,6 +12,7 @@
 #include "common/scope_exit.h"
 #include "common/settings.h"
 #include "common/thread.h" // CodexAstraLocal: Identify real CPU vertex workers in activity samples.
+#include "common/uberhar_trace.h" // Claude: Perfetto slices for emulator-thread stalls.
 #include "common/uberhar_test_profile.h" // CodexAstraUlt: Shared Combo admission policy.
 #include "core/core.h"
 #include "core/memory.h"
@@ -27,6 +28,7 @@
 #include "video_core/pica/uberhar_vertex_timing_batch.h" // CodexAstraLocal: Separate diagnostic loop.
 #include "video_core/renderer_vulkan/uberhar_gpu_vertex_policy.h" // AstraPro: Pure admission.
 #include "video_core/rasterizer_interface.h"
+#include "video_core/uberhar_emulator_pool.h" // Claude: Shared emulator-thread workers.
 #include "video_core/shader/shader.h"
 #include "video_core/pica/uberhar_cpu_draw_queue.h" // CodexAstraLocal: Bounded independent CPU draws.
 #include "video_core/shader_recovery_error.h" // CodexAstraLocal: Shared terminal completion channel.
@@ -130,9 +132,8 @@ struct PicaCore::ParallelVertexState {
         std::array<Proof, 16> proofs{};
         u32 cursor{};
     };
-    NativeParallelBatch batch{Common::Uberhar::AvailableProcessors(), +[] {
-        Common::SetCurrentThreadName("UberharVertex");
-    }};
+    // Claude: Share worker threads with texture decoding instead of a private pool.
+    NativeParallelBatch batch{VideoCore::EmulatorPool()};
     std::array<Program, 8> programs{};
     Program* current{};
     u64 revision{};
@@ -385,7 +386,7 @@ void PicaCore::ReportVirtualVertices(const char* kind, std::chrono::steady_clock
             "serial_small_invocations={} serial_carry_invocations={} serial_other_invocations={} "
             "sampled_draws={} sampled_inputs={} sampled_invocations={} sampled_chunks={} "
             "plan_ns={} pool_ns={} owner_process_ns={} join_ns={} submit_ns={} "
-            "prefix_chunks={} prefix_inputs={} prefix_ns={} timing_stride=257 wait_transport={} "
+            "prefix_chunks={} prefix_inputs={} prefix_ns={} timing_stride=257 wait_transport={} pool_busy_fallbacks={} "
             "scope=certified_no_gs_fifo_misses serial_scope=completed_attempted_draws submit=ordered_owner observer_policy=serial",
             kind, parallel.batch.Available(), parallel.batch.CreatedWorkers(), parallel.peak_threads,
             parallel.checks, parallel.parallel_batches, parallel.chunks, parallel.owner_invocations,
@@ -407,7 +408,7 @@ void PicaCore::ReportVirtualVertices(const char* kind, std::chrono::steady_clock
             parallel.sampled_chunks, parallel.plan_ns, parallel.pool_ns,
             parallel.owner_process_ns, parallel.join_ns, parallel.submit_ns,
             parallel.prefix_chunks, parallel.prefix_inputs, parallel.prefix_ns,
-            parallel.batch.WaitTransport());
+            parallel.batch.WaitTransport(), parallel.batch.BusyFallbacks());
     }
 
     // AstraPro: Existing five-second/final cadence; no per-index clocks.
@@ -1658,6 +1659,7 @@ void PicaCore::ReconcileDeferredVertices() {
         return;
     auto& state = *deferred_vertices;
     ++state.synchronous_boundaries;
+    UBERHAR_TRACE("Uberhar: CPU draw drain");
     state.executor.Drain();
     for (; state.reconciled < state.pending.size(); ++state.reconciled) {
         const auto& packet = state.pending[state.reconciled];

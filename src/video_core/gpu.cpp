@@ -4,7 +4,9 @@
 
 #include "common/archives.h"
 #include "common/hacks/hack_manager.h"
+#include "common/logging/log.h"
 #include "common/microprofile.h"
+#include "common/settings.h"
 #include "core/core.h"
 #include "core/core_timing.h"
 #include "core/hle/service/gsp/gsp_gpu.h"
@@ -94,6 +96,15 @@ GPU::GPU(Core::System& system, Frontend::EmuWindow& emu_window,
         "GPU::VBlankCallback",
         [this](uintptr_t user_data, s64 cycles_late) { VBlankCallback(user_data, cycles_late); });
     impl->timing.ScheduleEvent(FRAME_TICKS, impl->vblank_event);
+
+    // Claude: Uberhar never skips guest draws. The right-eye heuristic ignores
+    // whole command lists (including their register writes) and display
+    // transfers, so it stays off regardless of the saved setting.
+    right_eye_disabler->SetEnabled(false);
+    if (Settings::values.disable_right_eye_render.GetValue()) {
+        // Claude Log Line: Once per GPU instance, only when the setting is on.
+        LOG_INFO(HW_GPU, "Claude: 'Disable right eye rendering' ignored; every command list runs");
+    }
 
     // Bind the rasterizer to the PICA GPU
     impl->pica.BindRasterizer(impl->rasterizer);

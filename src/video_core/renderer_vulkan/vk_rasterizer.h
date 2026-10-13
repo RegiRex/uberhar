@@ -205,6 +205,18 @@ private:
     // AstraPro: Bounded host-state evidence shared by Native and Combo.
     u32 fixed_attribute_max_bytes{};
     u64 fixed_attribute_over_legacy{}, diagnostic_draws{};
+    // Claude: Never-skip ledger. Every renderer draw request ends in exactly one
+    // outcome; `skipped` must stay zero. `empty` means no complete triangle reached
+    // the renderer (for example one immediate-mode vertex), not a dropped draw.
+    struct DrawLedger {
+        u64 graphics{}, compute{}, empty{}, no_target{}, invalid_input{}, skipped{};
+        u64 Total() const {
+            return graphics + compute + empty + no_target + invalid_input + skipped;
+        }
+    };
+    DrawLedger draw_ledger;
+    std::chrono::steady_clock::time_point next_ledger_report{};
+    void ReportDrawLedger(const char* kind) const;
     // CodexAstraUlt-2: Count input fallbacks; only the first four emit a record.
     u64 ready_vertex_zero_stride_rejections{};
     // CodexAstraUlt: Count each additional input-parity fallback separately, with

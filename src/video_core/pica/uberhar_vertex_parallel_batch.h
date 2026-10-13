@@ -7,9 +7,11 @@
 #include <cassert>
 #include <chrono> // CodexAstraLocal: Sparse owner-side phase clocks, never per vertex.
 #include <limits>
+#include <memory>
 #include <span>
 #include <vector>
 #include "common/uberhar_parallel_work.h"
+#include "common/uberhar_trace.h" // Claude: Perfetto slice per parallel batch.
 #include "common/scope_exit.h" // CodexAstraLocal: Roll back unpublished owner append on failure.
 #include "video_core/pica/uberhar_vertex_output.h"
 
@@ -39,11 +41,15 @@ public:
 
     explicit NativeParallelBatch(unsigned processors = Common::Uberhar::AvailableProcessors(),
                                  void (*worker_start)() = nullptr)
-        : pool{processors, worker_start} {}
+        : owned{std::make_unique<Common::Uberhar::ParallelWork>(processors, worker_start)},
+          pool{*owned} {}
+    // Claude: Borrow a pool shared with other emulator-thread fork-joins.
+    explicit NativeParallelBatch(Common::Uberhar::ParallelWork& shared) : pool{shared} {}
 
     unsigned Available() const { return pool.Available(); }
     unsigned CreatedWorkers() const { return pool.CreatedWorkers(); }
     unsigned StartupFailures() const { return pool.StartupFailures(); }
+    std::uint64_t BusyFallbacks() const { return pool.BusyFallbacks(); }
     // CodexAstraLocal: Expose the selected sleeping mechanism at the ordinary log cadence.
     const char* WaitTransport() const { return pool.WaitTransport(); }
     const Work& LastWork() const { return work; }
@@ -141,6 +147,7 @@ public:
                     // with no readiness array or speculative assembler transaction.
                     if (overlap && misses >= 256) {
                         const u32 groups = (misses + Grain - 1) / Grain;
+                        UBERHAR_TRACE("Uberhar: vertex batch (overlapped)");
                         return pool.RunWithOwnerHook(misses, grain,
                             [&](u32 first, u32 last) {
                                 shade_range(first, last);
@@ -181,6 +188,7 @@ public:
                             }, measure);
                     }
                 }
+                UBERHAR_TRACE("Uberhar: vertex batch");
                 return pool.Run(misses, grain, shade_range, measure);
             };
             completed = execute();
@@ -236,7 +244,8 @@ public:
     }
 
 private:
-    Common::Uberhar::ParallelWork pool;
+    std::unique_ptr<Common::Uberhar::ParallelWork> owned;
+    Common::Uberhar::ParallelWork& pool;
     std::vector<Invocation> invocations;
     std::vector<OutputVertex> results;
     std::vector<u32> references;

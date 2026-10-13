@@ -7,6 +7,7 @@
 #include "common/memory_detect.h"
 #include "common/microprofile.h"
 #include "common/settings.h"
+#include "common/uberhar_trace.h" // Claude: Perfetto frame boundary.
 #include "core/core.h"
 #include "core/frontend/emu_window.h"
 #include "video_core/gpu.h"
@@ -1130,6 +1131,7 @@ void RendererVulkan::DrawCursor(const Layout::FramebufferLayout& layout) {
 }
 
 void RendererVulkan::SwapBuffers() {
+    UBERHAR_TRACE("Uberhar: swap buffers");
     system.perf_stats->StartSwap();
     screenRendered = false;
 #ifndef ANDROID

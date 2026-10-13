@@ -87,6 +87,8 @@ inline void ApplyUberharTestProfile() {
         values.dump_textures = false;
         values.custom_textures = false;
         values.use_skip_duplicate_frames = false;
+        // Claude: Match real hardware's GPU completion timing in every preset.
+        values.simulate_3ds_gpu_timings = true;
         return;
     }
     values.graphics_api = GraphicsAPI::Vulkan;
@@ -120,6 +122,10 @@ inline void ApplyUberharTestProfile() {
     values.custom_textures = false;
     values.async_custom_loading = true;
     values.use_skip_duplicate_frames = false;
+    // Claude: Simulated 3DS GPU completion timing is the more faithful behavior
+    // and nearly doubled Dark Moon speed in the 0.1.40 device tests. Presets
+    // previously left it at the saved value, which defaults to off.
+    values.simulate_3ds_gpu_timings = true;
     // Resolution factor and integer scaling deliberately retain the user's values.
 }
 

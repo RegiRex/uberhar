@@ -27,6 +27,7 @@
 #if defined(__i386__) || defined(__x86_64__) || defined(_M_IX86) || defined(_M_X64)
 #include <xmmintrin.h>
 #endif
+#include "common/uberhar_trace.h" // Claude: Perfetto slice per worker job.
 
 namespace Common::Uberhar {
 
@@ -254,11 +255,13 @@ public:
 
     // CodexAstraLocal: The ordinary API compiles out every hook branch. Software
     // and other callers keep the same publication, owner-only and join contract.
+    // Claude: max_participants caps owner+workers for one job (0 = the pool's
+    // allowance), so a caller that wants headroom can share a wider pool.
     template <typename Function>
     Result Run(std::uint32_t count, std::uint32_t grain, Function&& function,
-               bool measure = false) {
+               bool measure = false, unsigned max_participants = 0) {
         return RunImpl<false>(count, grain, std::forward<Function>(function),
-                              [] { return false; }, [] {}, measure);
+                              [] { return false; }, [] {}, measure, max_participants);
     }
 
     // CodexAstraLocal: Prepare only after actual workers exist and before any
@@ -267,20 +270,38 @@ public:
     Result RunWithOwnerHook(std::uint32_t count, std::uint32_t grain, Function&& function,
                            Prepare&& prepare, Hook&& hook, bool measure = false) {
         return RunImpl<true>(count, grain, std::forward<Function>(function),
-                             std::forward<Prepare>(prepare), std::forward<Hook>(hook), measure);
+                             std::forward<Prepare>(prepare), std::forward<Hook>(hook), measure, 0);
     }
+
+    // Claude: Jobs that found the pool already running and executed on their own
+    // owner instead. Nonzero means two owners overlapped or a callback nested.
+    std::uint64_t BusyFallbacks() const { return busy_fallbacks.load(std::memory_order_relaxed); }
 
 private:
     template <bool HasHook, typename Function, typename Prepare, typename Hook>
     Result RunImpl(std::uint32_t count, std::uint32_t grain, Function&& function,
-                   Prepare&& prepare, Hook&& hook, bool measure) {
+                   Prepare&& prepare, Hook&& hook, bool measure, unsigned max_participants) {
+        // Claude: A shared pool publishes one job at a time. A second owner, or a
+        // callback that calls back into this pool, runs its job on its own thread
+        // instead of corrupting the published job or deadlocking on the join.
+        const bool exclusive = !running.exchange(true, std::memory_order_acquire);
+        struct Release {
+            std::atomic<bool>* flag;
+            ~Release() { if (flag) flag->store(false, std::memory_order_release); }
+        } release{exclusive ? &running : nullptr};
+        if (!exclusive)
+            busy_fallbacks.fetch_add(1, std::memory_order_relaxed);
         // CodexAstraLocal: Small jobs remain on the owner. Worker count grows
         // only when enough independent items exist; no fixed six/eight-core cap.
         grain = std::max(1U, grain);
-        const unsigned requested = ParallelFloatEnvironment::AllowsParallel()
-            ? std::min(available, std::max(1U, count / grain)) : 1U;
-        EnsureWorkers(requested - 1);
-        const unsigned active = std::min(requested - 1, CreatedWorkers());
+        const unsigned allowance = max_participants != 0 ? std::min(available, max_participants)
+                                                         : available;
+        const unsigned requested = exclusive && ParallelFloatEnvironment::AllowsParallel()
+            ? std::min(allowance, std::max(1U, count / grain)) : 1U;
+        // Claude: Only the exclusive owner may grow or read the worker list.
+        if (exclusive)
+            EnsureWorkers(requested - 1);
+        const unsigned active = exclusive ? std::min(requested - 1, CreatedWorkers()) : 0U;
         if (active == 0) {
             const auto start = measure ? std::chrono::steady_clock::now()
                                        : std::chrono::steady_clock::time_point{};
@@ -488,7 +509,11 @@ private:
             }
             const auto previous = ParallelFloatEnvironment::Capture();
             environment.Apply();
-            const auto done = Process();
+            std::uint32_t done;
+            {
+                UBERHAR_TRACE("Uberhar: pool job");
+                done = Process();
+            }
             const auto flags = ParallelFloatEnvironment::Flags();
             previous.Apply();
 #if defined(__linux__) && (defined(__GNUC__) || defined(__clang__)) && defined(SYS_futex)
@@ -535,6 +560,8 @@ private:
         return processed;
     }
     const unsigned available;
+    std::atomic<bool> running{};
+    std::atomic<std::uint64_t> busy_fallbacks{};
     unsigned worker_limit;
     void (*on_worker_start)();
     unsigned startup_failures{};

@@ -7,9 +7,11 @@
 #include <chrono>
 #include <cstdint>
 #include <limits>
+#include <memory>
 #include <span>
 #include "common/logging/log.h"
 #include "common/uberhar_parallel_work.h"
+#include "common/uberhar_trace.h" // Claude: Perfetto slice per parallel decode.
 #include "video_core/rasterizer_cache/surface_params.h"
 #include "video_core/rasterizer_cache/texture_codec.h"
 #include "video_core/rasterizer_cache/utils.h"
@@ -26,7 +28,15 @@ public:
     explicit ParallelTextureDecoder(bool enabled_, unsigned processors =
                                         Common::Uberhar::AvailableProcessors(),
                                     void (*worker_start)() = nullptr)
-        : enabled{enabled_}, pool{processors > 2 ? processors - 2 : 1, worker_start},
+        : enabled{enabled_}, owned{std::make_unique<Common::Uberhar::ParallelWork>(
+                                 processors > 2 ? processors - 2 : 1, worker_start)},
+          pool{*owned}, participants{owned->Available()}, last_report{Clock::now()} {}
+    // Claude: Borrow the emulator pool shared with vertex batches. Both run
+    // synchronously on the emulator thread, so they never hold it together;
+    // each decode still leaves the same two-processor headroom as before.
+    ParallelTextureDecoder(bool enabled_, Common::Uberhar::ParallelWork& shared)
+        : enabled{enabled_}, pool{shared},
+          participants{shared.Available() > 2 ? shared.Available() - 2 : 1},
           last_report{Clock::now()} {}
 
     unsigned CreatedWorkers() const { return pool.CreatedWorkers(); }
@@ -52,9 +62,10 @@ public:
             if (decode) {
                 admitted = true;
                 const u32 count = static_cast<u32>(pixels / 64);
+                UBERHAR_TRACE("Uberhar: parallel texture decode");
                 work = pool.Run(count, Grain, [&](u32 first, u32 last) {
                     decode(info.width, info.height, source, dest, first, last);
-                }, measure);
+                }, measure, participants);
             }
         }
         if (!admitted) {
@@ -97,7 +108,7 @@ public:
                  "owner_ns={} join_ns={} budget={} created={} startup_failures={}",
                  final, enabled, calls, input_bytes, serial_calls, parallel_calls, owner_tiles,
                  worker_tiles, peak_threads, serial_samples, parallel_samples, serial_ns,
-                 parallel_ns, owner_ns, join_ns, pool.Available(), pool.CreatedWorkers(),
+                 parallel_ns, owner_ns, join_ns, participants, pool.CreatedWorkers(),
                  pool.StartupFailures());
     }
 
@@ -168,7 +179,9 @@ private:
         DecodeTiles<PixelFormat::RGBA4, true>};
 
     const bool enabled;
-    Common::Uberhar::ParallelWork pool;
+    std::unique_ptr<Common::Uberhar::ParallelWork> owned;
+    Common::Uberhar::ParallelWork& pool;
+    const unsigned participants;
     Clock::time_point last_report;
     u64 calls{}, input_bytes{}, serial_calls{}, parallel_calls{}, owner_tiles{}, worker_tiles{};
     u64 serial_samples{}, parallel_samples{}, serial_ns{}, parallel_ns{}, owner_ns{}, join_ns{};

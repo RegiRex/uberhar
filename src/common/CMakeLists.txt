@@ -100,6 +100,8 @@ add_library(citra_common STATIC EXCLUDE_FROM_ALL
     timer.cpp
     timer.h
     uberhar_parallel_work.h # CodexAstraLocal: Joined, affinity-sized CPU shader workers.
+    uberhar_trace.cpp # Claude: Perfetto/systrace slices on Android.
+    uberhar_trace.h
     unique_function.h
     vector_math.h
     web_util.cpp
@@ -139,6 +141,13 @@ if (ANDROID AND NOT ENABLE_LIBRETRO)
     android_utils.cpp
     android_utils.h
   )
+endif()
+
+# Claude: Perfetto/systrace slices for the Android app. libandroid is already a
+# reviewed platform dependency of the APK; libretro cores do not use it.
+if (ANDROID AND NOT ENABLE_LIBRETRO)
+  target_compile_definitions(citra_common PUBLIC UBERHAR_ATRACE)
+  target_link_libraries(citra_common PRIVATE android)
 endif()
 
 if (MSVC)

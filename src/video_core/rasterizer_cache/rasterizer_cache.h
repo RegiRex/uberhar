@@ -23,6 +23,7 @@
 #include "video_core/rasterizer_cache/surface_base.h"
 #include "video_core/renderer_base.h"
 #include "video_core/texture/texture_decode.h"
+#include "video_core/uberhar_emulator_pool.h" // Claude: Shared emulator-thread workers.
 
 namespace VideoCore {
 
@@ -50,10 +51,8 @@ RasterizerCache<T>::RasterizerCache(Memory::MemorySystem& memory_,
                       Settings::values.graphics_api.GetValue() == Settings::GraphicsAPI::Vulkan &&
                       (Settings::values.uberhar_test_mode.GetValue() == Settings::UberharTestMode::Native ||
                        Settings::UsesReadyGpuVertices(Settings::values.uberhar_test_mode.GetValue())),
-                      Common::Uberhar::AvailableProcessors(),
-                      // CodexAstraLocal: Identify helpers once at startup so
-                      // thread CPU samples cannot misclassify them as the owner.
-                      [] { Common::SetCurrentThreadName("Texture decode"); }} {
+                      // Claude: Share the vertex batches' named workers ("UberharWorker").
+                      VideoCore::EmulatorPool()} {
     using TextureConfig = Pica::TexturingRegs::TextureConfig;
 
     // Create null handles for all cached resources

@@ -38,7 +38,8 @@ jobs:
       - name: Install build tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y ccache ninja-build
+          # Claude: vk_platform includes the Xlib/Wayland Vulkan surface headers on Linux.
+          sudo apt-get install -y ccache ninja-build libx11-dev libxext-dev libwayland-dev
       - name: Restore compiler cache
         uses: actions/cache/restore@v5
         with:

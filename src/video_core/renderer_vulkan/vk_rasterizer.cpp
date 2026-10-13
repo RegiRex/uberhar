@@ -12,6 +12,7 @@
 #include "common/microprofile.h"
 #include "common/settings.h"
 #include "common/uberhar_activity.h" // CodexAstraUlt: Existing atomic run correlation.
+#include "common/uberhar_trace.h" // Claude: Perfetto draw counters.
 #include "common/uberhar_test_profile.h" // CodexAstraLocal: Capture only optional Combo routes.
 #include "common/scope_exit.h" // AstraPro: Clear speculative draw state on every exit.
 #include "core/core.h"
@@ -97,8 +98,17 @@ RasterizerVulkan::RasterizerVulkan(Memory::MemorySystem& memory, Pica::PicaCore&
         // resources and the shared evaluator; it never selects rectangle recovery.
         compute_raster = std::make_unique<ComputeRasterizer>(instance, scheduler, update_queue);
         compute_vertices = std::make_unique<ComputeVertexProducer>(instance, scheduler, update_queue);
-    } else if (Settings::values.uberhar_test_mode.GetValue() != Settings::UberharTestMode::Custom) {
+    } else if (Settings::AllowsComputeRendering(Settings::values.uberhar_test_mode.GetValue())) {
+        // Claude: Only presets that can actually select compute rectangles pay for
+        // their per-draw admission. Native never chooses them, and their presence
+        // also refused deferred CPU packets for rectangle-like draws.
         compute_rect = std::make_unique<ComputeRectRenderer>(instance, scheduler, update_queue);
+    }
+    // Claude Log Line: Draws never skip while a pipeline compiles, so this
+    // setting no longer changes rendering. Record once that it was ignored.
+    if (async_shaders) {
+        LOG_INFO(Render_Vulkan, "Claude: async shader compilation requested; draws wait for "
+                                "their pipeline instead of being skipped");
     }
     vertex_buffers.fill(stream_buffer.Handle());
 
@@ -199,6 +209,7 @@ RasterizerVulkan::~RasterizerVulkan() {
                  ready_vertex_output_rejections, ready_vertex_output_writes.Size(),
                  ready_vertex_output_writes.Hits(), ready_vertex_output_writes.Scans());
     }
+    ReportDrawLedger("totals");
     if (compute_rect || compute_raster || compute_benchmark) {
         // AstraEH: Queued compute/timestamp commands must finish before their owners die.
         scheduler.Finish();
@@ -227,6 +238,10 @@ RasterizerVulkan::~RasterizerVulkan() {
 }
 
 void RasterizerVulkan::TickFrame() {
+    // Claude: Running totals; Perfetto plots their per-frame slope.
+    Common::Uberhar::TraceCounter("Uberhar: draws recorded",
+                                  static_cast<s64>(draw_ledger.graphics + draw_ledger.compute));
+    Common::Uberhar::TraceCounter("Uberhar: draws skipped", static_cast<s64>(draw_ledger.skipped));
     scheduler.WaitWorker();
     // CodexAstraLocal: Reuse only this existing drained command boundary; the
     // cache separately checks compiler release and actual GPU completion.
@@ -263,7 +278,25 @@ void RasterizerVulkan::TickFrame() {
             if (compute_rect)
                 compute_rect->ReportCensus(now);
             next_memory_snapshot = now + std::chrono::seconds{30};
+            // Claude: Same bounded 30-second cadence; survives an abnormal exit.
+            ReportDrawLedger("progress");
         }
+    }
+}
+
+// Claude: One line per report. Every outcome is a real renderer decision;
+// `skipped` counts the only path that may drop a draw and must stay zero.
+void RasterizerVulkan::ReportDrawLedger(const char* kind) const {
+    // Claude Log Line: Bounded to the 30-second cadence plus shutdown.
+    LOG_INFO(Render_Vulkan,
+             "Claude draw ledger {}: requests={} graphics={} compute={} empty={} "
+             "no_target={} invalid_input={} skipped={}",
+             kind, draw_ledger.Total(), draw_ledger.graphics, draw_ledger.compute,
+             draw_ledger.empty, draw_ledger.no_target, draw_ledger.invalid_input,
+             draw_ledger.skipped);
+    if (draw_ledger.skipped != 0) {
+        // Claude Log Line: Contract violation; never expected in Uberhar builds.
+        LOG_ERROR(Render_Vulkan, "Claude draw ledger: {} draws were skipped", draw_ledger.skipped);
     }
 }
 
@@ -767,6 +800,9 @@ bool RasterizerVulkan::AccelerateDrawBatch(bool is_indexed) {
     if (vertex_info.Invalid()) {
         // AstraPro: An optional promotion must not change the CPU path's handling
         // of an invalid vertex analysis. Ordinary hardware mode retains its behavior.
+        // Claude: Count the inherited invalid-input outcome instead of hiding it.
+        if (!ready_vertex_attempt)
+            ++draw_ledger.invalid_input;
         return !ready_vertex_attempt;
     }
     if (ready_vertex_attempt) {
@@ -812,10 +848,16 @@ bool RasterizerVulkan::AccelerateDrawBatchInternal(bool is_indexed) {
         SetupIndexArray();
     }
 
-    const bool wait_built = !async_shaders || regs.pipeline.num_vertices <= 6;
+    // Claude: Never skip a draw because its pipeline is still compiling. Upstream
+    // dropped draws of more than six vertices when async compilation was enabled;
+    // waiting keeps every draw, and hybrid modes bridge with the generic shader.
+    constexpr bool wait_built = true;
     if (!pipeline_cache.BindPipeline(pipeline_info, wait_built, nullptr, !cpu_bridge.preferred,
                                      ready_vertex_pipeline)) {
         // AstraPro: A ready-key mismatch requires CPU recovery, not a skipped draw.
+        // Claude: With wait_built set this is unreachable outside ready attempts.
+        if (!ready_vertex_attempt)
+            ++draw_ledger.skipped;
         return !ready_vertex_attempt;
     }
 
@@ -856,6 +898,7 @@ bool RasterizerVulkan::AccelerateDrawBatchInternal(bool is_indexed) {
                     draw(cmdbuf);
                     evidence.Recorded();
                 });
+                ++draw_ledger.graphics; // Claude: Captured draws are still real draws.
                 // CodexAstraLocal: Capture publication is still a real draw;
                 // stamp only after its final bind/index preparation and enqueue.
                 MarkCachedShaderBuffersUsed();
@@ -864,6 +907,7 @@ bool RasterizerVulkan::AccelerateDrawBatchInternal(bool is_indexed) {
         }
     }
     scheduler.Record(draw);
+    ++draw_ledger.graphics; // Claude: Counted only after the actual enqueue.
 
     // CodexAstraLocal: A rejected/pending pipeline returned above without a
     // draw. Only this actual enqueue extends cached shader-buffer lifetime.
@@ -953,6 +997,7 @@ void RasterizerVulkan::DrawTriangles() {
     if (vertex_batch.empty()) {
         // AstraEH: Invalid/empty CPU output must not leave a prepared handle latched.
         cpu_bridge = {};
+        ++draw_ledger.empty; // Claude: No complete triangle; nothing to draw.
         return;
     }
 
@@ -1002,6 +1047,7 @@ bool RasterizerVulkan::DrawComputeBatch(bool is_indexed,
             ++strict_compute_stats.rasterized;
         } else {
             ++strict_compute_stats.empty_batches;
+            ++draw_ledger.empty; // Claude: Fully clipped or partial primitive batch.
         }
         completed = batch.assembly;
         ++strict_compute_stats.computed;
@@ -1037,15 +1083,12 @@ bool RasterizerVulkan::Draw(bool accelerate, bool is_indexed,
     const auto fb_helper = res_cache.GetFramebufferSurfaces(using_color_fb, using_depth_fb);
     const Framebuffer* framebuffer = fb_helper.Framebuffer();
     if (!framebuffer->Handle()) {
-        if (deferred) {
-            // CodexAstraLocal: Ordinary non-strict draws retain their CPU batch
-            // when no framebuffer exists. Preserve those exact already-shaded
-            // bytes for the next draw; never drop them or execute the shader twice.
-            const auto bytes = deferred->HardwareBytes();
-            vertex_batch.resize(deferred->VertexCount());
-            ASSERT(bytes.size() == vertex_batch.size() * sizeof(HardwareVertex));
-            std::memcpy(vertex_batch.data(), bytes.data(), bytes.size());
-        }
+        // Claude: A draw with no usable target cannot author pixels, so it ends
+        // here. Upstream (and the earlier deferred copy) left its vertices in
+        // vertex_batch, where the next CPU draw rasterized them with its own state
+        // into its own target. Discard them so no stale geometry can appear.
+        vertex_batch.clear();
+        ++draw_ledger.no_target;
         // CodexAstraLocal: A consumed no-target batch authored no framebuffer
         // pixels. Do not leave stale vertices or publish false cache ownership.
         if (strict_compute) {
@@ -1171,6 +1214,7 @@ bool RasterizerVulkan::Draw(bool accelerate, bool is_indexed,
             throw;
         }
         vertex_batch.clear();
+        ++draw_ledger.compute; // Claude: Independent compute draw enqueued.
         return true;
     }
 
@@ -1222,6 +1266,7 @@ bool RasterizerVulkan::Draw(bool accelerate, bool is_indexed,
                     compute_rect->Draw(surface, *compute_packet);
                     compute_rect->EndSample(timing_slot);
                     vertex_batch.clear();
+                    ++draw_ledger.compute; // Claude: Compute rectangle replaced the draw.
                     return true;
                 }
             }
@@ -1393,6 +1438,7 @@ bool RasterizerVulkan::Draw(bool accelerate, bool is_indexed,
                 cmdbuf.draw(vertex_count, 1, 0, 0);
             });
         }
+        ++draw_ledger.graphics; // Claude: CPU-vertex draw enqueued.
         // CodexAstraLocal: Ordinary and deferred CPU draws both consumed the
         // cached ranges at this final tick, after pass/bind/geometry flushes.
         MarkCachedShaderBuffersUsed();

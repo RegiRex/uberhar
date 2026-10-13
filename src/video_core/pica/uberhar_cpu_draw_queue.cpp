@@ -11,6 +11,7 @@
 #include <mutex>
 #include <thread>
 #include <vector>
+#include "common/uberhar_trace.h" // Claude: Perfetto slices for deferred CPU draws.
 #include "video_core/pica/uberhar_parallel_vertex.h"
 #include "video_core/shader_recovery_error.h"
 
@@ -82,6 +83,7 @@ struct CpuDrawPacket::Impl {
     // serially. Only different packets run concurrently, including carried shader
     // values. The stateless writer receives complete owned output and no renderer.
     void Execute() noexcept {
+        UBERHAR_TRACE("Uberhar: CPU draw packet");
         const auto incoming = Environment::Capture();
         environment.Apply();
         try {
@@ -226,6 +228,7 @@ struct CpuDrawExecutor::Impl {
                     running = true;
                     wave.swap(pending);
                 }
+                Common::Uberhar::TraceCounter("Uberhar: CPU draw wave", static_cast<s64>(wave.size()));
                 const auto result = pool.Run(static_cast<u32>(wave.size()), 1,
                     [&](u32 first, u32 end) {
                         for (u32 n = first; n < end; ++n) wave[n]->impl->Execute();

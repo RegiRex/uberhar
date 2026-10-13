@@ -83,6 +83,15 @@ int main() {
                   !CanSelect(true, false, 7, 8) && CanSelect(true, false, 7, 7),
               "ready GPU selection bypasses completion/failure/identity");
     }
+    // Claude: Every GPU preset enables simulated 3DS GPU completion timing,
+    // even when the saved custom value is off.
+    for (const auto mode : {UberharTestMode::Native, UberharTestMode::Automatic,
+                            UberharTestMode::ComboGeneric, UberharTestMode::Compute}) {
+        values.uberhar_test_mode = mode;
+        values.simulate_3ds_gpu_timings = false;
+        ApplyUberharTestProfile();
+        Check(values.simulate_3ds_gpu_timings.GetValue(), "preset left GPU timing simulation off");
+    }
     // CodexAstraLocal: Switching from GPU presets to Software must not leave an
     // accelerated renderer or stale high resolution active, nor enable compute.
     values.uberhar_test_mode = UberharTestMode::Software;

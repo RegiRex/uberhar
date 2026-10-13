@@ -178,6 +178,11 @@ python3 tools/uberhar/test_shader_draw_context.py
 c++ -std=c++20 -O2 -pthread -frounding-math -Isrc tools/uberhar/test_parallel_work.cpp \
   -o build/uberhar-probe/test-parallel-work
 timeout 45s build/uberhar-probe/test-parallel-work
+# Claude: Vertex batches and texture decoding share one pool; nested or
+# overlapping owners must run their job exactly once without deadlock.
+c++ -std=c++20 -O2 -pthread -frounding-math -Isrc tools/uberhar/test_shared_pool.cpp \
+  -o build/uberhar-probe/test-shared-pool
+timeout 60s build/uberhar-probe/test-shared-pool
 c++ -std=c++20 -O2 -pthread -DFMT_HEADER_ONLY -Isrc -Iexternals/fmt/include \
   -Iexternals/boost tools/uberhar/test_parallel_batch.cpp \
   src/video_core/pica/primitive_assembly.cpp -o build/uberhar-probe/test-parallel-batch
