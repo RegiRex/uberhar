@@ -70,7 +70,9 @@ def main():
         draw=func(candidate,'bool RasterizerVulkan::Draw(')
         branch=func(draw,'    if (!framebuffer->Handle())')
         original=branch
-        retain=extractor.function(branch,'        if (deferred)')
+        # Claude: The no-target return discards its vertices; the defect keeps them.
+        discard='        vertex_batch.clear();\n        return true;'
+        need(branch.count(discard)==1,'No-target discard anchor drift')
         generated={
             'hardware-type.inc':func(header,'    struct HardwareVertex {')+';',
             'hardware-functions.inc':'\n'.join(bodies),
@@ -81,12 +83,12 @@ def main():
             'original-no-target.inc':original,
             'candidate-no-target.inc':branch,
         }
-        # CodexAstraLocal: Old missing retention must fail the first full byte
-        # comparison. A separate wrong-quaternion defect challenges the converter
-        # rather than relying only on control-flow instrumentation.
+        # Claude: Leaving no-target vertices for the next draw must fail. A
+        # separate wrong-quaternion defect challenges the converter rather than
+        # relying only on control-flow instrumentation.
         variants={
             'candidate':generated,
-            'old_missing_retention':dict(generated,**{'candidate-no-target.inc':branch.replace(retain,'',1)}),
+            'leaked_no_target':dict(generated,**{'candidate-no-target.inc':branch.replace(discard,'        return true;',1)}),
             'wrong_quaternion':dict(generated,**{'hardware-functions.inc':'\n'.join(bodies[:-1])+ '\n'+
                 writer.replace('HardwareVertex{b, AreQuaternionsOpposite(a.quat, b.quat)}','HardwareVertex{b, false}',1)}),
         }
@@ -112,8 +114,10 @@ def main():
                 need(result.returncode==0,'Candidate failed: '+str(directory));record['result']=json.loads(result.stdout)
                 need(record['result']['scenarios']==144,'Population drift')
             else:
-                need(result.returncode==1 and result.stderr==b'FAIL no-target retained original 88B bytes\n',
-                     'Defect did not expose intended byte mismatch: '+name)
+                expected={'leaked_no_target':b'FAIL no-target left vertices for a later draw\n',
+                          'wrong_quaternion':b'FAIL complete ordered 88B draw equality\n'}[name]
+                need(result.returncode==1 and result.stderr==expected,
+                     'Defect did not expose intended failure: '+name)
             text=dep.read_text().replace('\\\n',' ').split(':',1)[1]
             record['dependencies']={str(Path(p).resolve()):sha(Path(p)) for p in shlex.split(text)}
             print(name+': PASS',flush=True)

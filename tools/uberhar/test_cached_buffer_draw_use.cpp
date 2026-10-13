@@ -79,6 +79,7 @@ struct RasterizerVulkan {
  std::vector<HardwareVertex> vertex_batch;
  bool strict_compute{};
  struct {unsigned no_target{};}strict_compute_stats;
+ struct { u64 graphics{}, compute{}, empty{}, no_target{}, invalid_input{}, skipped{}; } draw_ledger; // Claude: Extracted outcome counters.
  bool NoTarget(bool packet){
   Framebuffer fb;const auto* framebuffer=&fb;FramebufferHelper fb_helper;
   std::shared_ptr<Packet> deferred=packet?std::make_shared<Packet>():nullptr;
@@ -118,7 +119,9 @@ int main(){
    Require(strict?terminal&&!returned:returned&&!terminal,"no-target strict terminal or ordinary return");
    Require(r.scheduler.draws==0&&r.uniform_buffer.stamps==0&&r.texture_buffer.stamps==0&&r.texture_lf_buffer.stamps==0,
            "no-target queues no cached use");
-   Require(r.vertex_batch.size()==(packet?3:0),"no-target retained packet bytes are not cleared on terminal failure");
+   // Claude: No-target draws no longer copy packet bytes into the batch, so
+   // nothing is left for a later draw on either the ordinary or strict path.
+   Require(r.vertex_batch.empty(),"no-target leaves no vertices for a later draw");
    ++cases;
   }
   std::cout<<"PASS draw-use cases="<<cases<<" checks="<<checks<<'\n';

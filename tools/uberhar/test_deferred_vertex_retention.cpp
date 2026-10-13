@@ -1,5 +1,5 @@
-// CodexAstraLocal: Compare retained no-target batches against the original
-// AddTriangle/Draw return path. Vulkan targets and actual draws are recording
+// CodexAstraLocal: Compare no-target batches against the original
+// AddTriangle/Draw return path. Claude: both now discard them. Vulkan targets and actual draws are recording
 // endpoints; conversion, preflight and no-target branch bodies are source extracts.
 #include <array>
 #include <atomic>
@@ -80,6 +80,7 @@ public:
     bool compute_rect{true};
     Pica::RegsInternal regs{};
     struct { u32 no_target{}; } strict_compute_stats;
+    struct { u64 graphics{}, compute{}, empty{}, no_target{}, invalid_input{}, skipped{}; } draw_ledger; // Claude: Extracted outcome counters.
     std::vector<std::vector<u8>> draws;
     u32 shader_batches{}, packet_conversions{};
     DeferredHardwareWriter PrepareDeferredVertices(u32 count) const;
@@ -159,40 +160,45 @@ void EqualDraws(const Vulkan::RasterizerVulkan& a,const Vulkan::RasterizerVulkan
 }
 
 // CodexAstraLocal: The oracle appends every triangle through original AddTriangle
-// and invokes the unchanged no-target return. Candidate admission must stop once
-// retained bytes exist; later ordinary work concatenates before the one valid draw.
+// and invokes the extracted no-target return.
+// Claude: A draw with no usable target now discards its vertices on both paths
+// instead of leaving them for the next valid draw, which used to draw them with
+// its own state. The next draw must contain exactly its own vertices, and the
+// packet path must still convert every 88B vertex exactly.
 void Sequence(u32 first,u32 later,u32 missing,u32 pattern) {
     Vulkan::RasterizerVulkan original,candidate;
     const auto a=Vertices(first,1,pattern);
     original.Append(a); const auto packet=candidate.Packet(a);
     Need(original.Reference(false) && candidate.Candidate(false,packet),"no-target consumed once");
-    EqualBytes(original.Bytes(),candidate.Bytes(),"no-target retained original 88B bytes");
-    Need(candidate.draws.empty(),"no-target did not issue draw");
-    Need(candidate.PrepareDeferredVertices(later)==nullptr,"retained batch rejects deferred replacement");
+    Need(original.vertex_batch.empty() && candidate.vertex_batch.empty(),
+         "no-target left vertices for a later draw");
+    Need(original.draws.empty() && candidate.draws.empty(),"no-target did not issue draw");
+    Need(candidate.PrepareDeferredVertices(later)!=nullptr,"discarded batch keeps deferred admission");
     for(u32 i=0;i<missing;++i) {
         const auto b=Vertices(later,2+i,(pattern+1)%6);
         original.Append(b); candidate.Append(b);
         original.Reference(false); candidate.Candidate(false);
-        EqualBytes(original.Bytes(),candidate.Bytes(),"repeated no-target concatenation");
+        Need(original.vertex_batch.empty() && candidate.vertex_batch.empty(),
+             "no-target left vertices for a later draw");
     }
     const auto b=Vertices(later,10,(pattern+2)%6);
     original.Append(b);candidate.Append(b);
     const auto expected=original.Bytes();
     original.Reference(true);candidate.Candidate(true);
     EqualDraws(original,candidate);
-    Need(candidate.draws.size()==1 && candidate.draws[0].size()==(first+(missing+1)*later)*88,
-         "one complete concatenated draw, no skipped/replayed vertices");
-    EqualBytes(expected,candidate.draws[0],"original retained prefix before current draw");
-    Need(original.vertex_batch.empty() && candidate.vertex_batch.empty(),"target consumes full retained batch");
+    Need(candidate.draws.size()==1 && candidate.draws[0].size()==later*88,
+         "one draw with only its own vertices");
+    EqualBytes(expected,candidate.draws[0],"valid draw bytes");
+    Need(original.vertex_batch.empty() && candidate.vertex_batch.empty(),"target consumes its batch");
     Need(original.shader_batches==candidate.shader_batches && candidate.packet_conversions==1,
          "same shading batch count, no retry after publication");
-    // CodexAstraLocal: Once the retained batch is consumed, a later independent
-    // packet can be admitted again without duplicating the earlier prefix.
+    // CodexAstraLocal: A later independent packet is drawn from its exact
+    // converted bytes, matching the original AddTriangle conversion.
     const auto c=Vertices(3,31,(pattern+3)%6);
     original.Append(c);const auto next=candidate.Packet(c);
     original.Reference(true);candidate.Candidate(true,next);EqualDraws(original,candidate);
     Need(candidate.packet_conversions==2 && original.shader_batches==candidate.shader_batches,
-         "later packet is independent of retained draw");
+         "later packet is independent of the discarded draw");
     ++scenarios;
 }
 
@@ -206,14 +212,17 @@ int main()try {
     const auto inputs=Vertices(6,1,0);
     const auto packet=raster.Packet(inputs);
     packet->impl->submitted=false;
+    // Claude: A no-target draw no longer reads or waits for its packet; an
+    // unpublished or failed packet still reaches PicaCore's reconciliation,
+    // which reports the terminal error.
     bool caught=false;
     try{raster.Candidate(false,packet);}catch(const VideoCore::ShaderRecoveryError&){caught=true;}
-    Need(caught && raster.vertex_batch.empty() && raster.draws.empty(),"unpublished is terminal before retention");
+    Need(!caught && raster.vertex_batch.empty() && raster.draws.empty(),"unpublished no-target draw is discarded unread");
     packet->impl->submitted=true;
     packet->impl->error=std::make_exception_ptr(std::runtime_error("controlled worker failure"));
     caught=false;
     try{raster.Candidate(false,packet);}catch(const VideoCore::ShaderRecoveryError&){caught=true;}
-    Need(caught && raster.vertex_batch.empty() && raster.draws.empty(),"failed is terminal before retention");
+    Need(!caught && raster.vertex_batch.empty() && raster.draws.empty(),"failed no-target draw is discarded unread");
     // CodexAstraLocal: Check actual state-helper rejection, not only a raw mask
     // stub. Output-dependent blend-only admission must remain synchronous.
     const auto effective=Vulkan::PrepareComputeRectState(raster.regs,

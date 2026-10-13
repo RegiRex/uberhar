@@ -110,6 +110,8 @@ python3 tools/uberhar/test_cached_buffer_lifetime.py
 python3 tools/uberhar/test_cached_buffer_draw_use.py
 # CodexAstraLocal: Deferred no-target returns retain original complete hardware
 # bytes and ordered concatenation; this host gate performs no Vulkan/device work.
+# Claude: No-target returns now discard their vertices on both paths; the gate
+# checks the next draw holds only its own bytes and packet conversion is exact.
 python3 tools/uberhar/test_deferred_vertex_retention.py
 # CodexAstraLocal: Actual coherent lease/ring methods reject stale reservations,
 # early retirement and duplicate publication under controlled driver endpoints.
