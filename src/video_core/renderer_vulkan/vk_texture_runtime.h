@@ -319,6 +319,10 @@ public:
           res_scale(std::exchange(other.res_scale, 1)) {}
 
     Framebuffer& operator=(Framebuffer&& other) noexcept {
+        // CodexAstraLocal: Retire only independently owned overwritten views.
+        if (this == &other)
+            return *this;
+        RetireOwnedViews();
         VideoCore::FramebufferParams::operator=(std::move(other));
         images = std::exchange(other.images, {});
         image_views = std::exchange(other.image_views, {});
@@ -369,6 +373,8 @@ private:
     std::array<vk::ImageView, 2> image_views{};
     vk::Framebuffer framebuffer{};
     vk::RenderPass render_pass{};
+    // CodexAstraLocal: Conservative lifetime hook for independently owned views.
+    void RetireOwnedViews();
     std::vector<vk::UniqueImageView> framebuffer_views;
     std::array<vk::ImageAspectFlags, 2> aspects{};
     std::array<VideoCore::PixelFormat, 2> formats{VideoCore::PixelFormat::Invalid,
@@ -386,14 +392,17 @@ public:
     Sampler(const Sampler&) = delete;
     Sampler& operator=(const Sampler&) = delete;
 
-    Sampler(Sampler&& o) noexcept = default;
-    Sampler& operator=(Sampler&& o) noexcept = default;
+    // CodexAstraLocal: Preserve descriptor identity across ownership moves.
+    Sampler(Sampler&& o) noexcept;
+    Sampler& operator=(Sampler&& o) noexcept;
 
     [[nodiscard]] vk::Sampler Handle() const noexcept {
         return sampler.get();
     }
 
 private:
+    // CodexAstraLocal: Owner survives through sampler destruction/move replacement.
+    const Instance* descriptor_instance{};
     vk::UniqueSampler sampler;
 };
 

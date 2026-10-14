@@ -249,6 +249,10 @@ void Handle::Create(u32 width, u32 height, u32 levels, TextureType type, vk::For
 void Handle::Destroy() {
     const auto device = instance.GetDevice();
 
+    // CodexAstraLocal: Invalidate exact descriptor reuse before handles can be
+    // recycled. Empty moved-from handles do not invalidate useful reuse.
+    if (std::any_of(image_views.begin(), image_views.end(), [](auto view) { return bool(view); }))
+        instance.RetireImageDescriptors();
     // Image views
     if (auto view = image_views[ViewType::Sample]) {
         device.destroyImageView(view);
@@ -1551,12 +1555,22 @@ Framebuffer::Framebuffer(TextureRuntime& runtime, const VideoCore::FramebufferPa
 }
 
 Framebuffer::~Framebuffer() {
+    // CodexAstraLocal: Normal framebuffer views are borrowed from Handle. Only
+    // independently owned future views require a separate retirement event.
+    RetireOwnedViews();
     if (framebuffer) {
         instance.GetDevice().destroyFramebuffer(framebuffer);
     }
 }
 
-Sampler::Sampler(TextureRuntime& runtime, const VideoCore::SamplerParams& params) {
+void Framebuffer::RetireOwnedViews() {
+    // CodexAstraLocal: Also used before move replacement of unique view owners.
+    if (!framebuffer_views.empty())
+        instance.RetireImageDescriptors();
+}
+
+Sampler::Sampler(TextureRuntime& runtime, const VideoCore::SamplerParams& params)
+    : descriptor_instance{&runtime.GetInstance()} {
     using TextureConfig = VideoCore::SamplerParams::TextureConfig;
 
     const Instance& instance = runtime.GetInstance();
@@ -1608,7 +1622,27 @@ Sampler::Sampler(TextureRuntime& runtime, const VideoCore::SamplerParams& params
     sampler = instance.GetDevice().createSamplerUnique(sampler_info);
 }
 
-Sampler::~Sampler() = default;
+// CodexAstraLocal: Moves transfer ownership without retirement; replacement
+// retires the overwritten sampler before its numeric handle can be recycled.
+Sampler::Sampler(Sampler&& other) noexcept
+    : descriptor_instance{std::exchange(other.descriptor_instance, nullptr)},
+      sampler{std::move(other.sampler)} {}
+
+Sampler& Sampler::operator=(Sampler&& other) noexcept {
+    if (this != &other) {
+        if (sampler)
+            descriptor_instance->RetireImageDescriptors();
+        sampler = std::move(other.sampler);
+        descriptor_instance = std::exchange(other.descriptor_instance, nullptr);
+    }
+    return *this;
+}
+
+Sampler::~Sampler() {
+    // CodexAstraLocal: Ignore moved-from owners; retire before UniqueSampler frees.
+    if (sampler)
+        descriptor_instance->RetireImageDescriptors();
+}
 
 DebugScope::DebugScope(TextureRuntime& runtime, Common::Vec4f color, std::string_view label)
     : scheduler{runtime.GetScheduler()},

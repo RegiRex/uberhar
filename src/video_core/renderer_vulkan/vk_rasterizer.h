@@ -112,12 +112,12 @@ private:
 
     /// Binds the PICA shadow cube required for shadow mapping
     void BindShadowCube(const Pica::TexturingRegs::FullTextureConfig& texture,
-                        vk::DescriptorSet texture_set, const Framebuffer* framebuffer,
+                        const Framebuffer* framebuffer,
                         ComputeRasterizer::TextureBindings* compute_bindings);
 
     /// Binds a texture cube to texture unit 0
     void BindTextureCube(const Pica::TexturingRegs::FullTextureConfig& texture,
-                         vk::DescriptorSet texture_set, const Framebuffer* framebuffer,
+                         const Framebuffer* framebuffer,
                          ComputeRasterizer::TextureBindings* compute_bindings);
 
     /// Upload the uniform blocks to the uniform buffer object

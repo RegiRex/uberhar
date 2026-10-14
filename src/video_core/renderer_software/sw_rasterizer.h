@@ -68,7 +68,7 @@ private:
         std::span<const Pica::TexturingRegs::FullTextureConfig, 3> textures, f24 tc0_w,
         const std::array<PreparedTexture, 3>& prepared,
         const std::array<TextureCoordinates, 4>& quad, u32 lane, u32 demand_mask,
-        u32 footprint_mask, u16 pixel_x, u16 pixel_y) const;
+        u32 footprint_mask, u16 pixel_x, u16 pixel_y, TexelMemo* memo = nullptr) const;
 
     /// Returns the final pixel color with blending or logic ops applied.
     Common::Vec4<u8> PixelColor(u16 x, u16 y, Common::Vec4<u8> combiner_output) const;

@@ -7,30 +7,32 @@
 
 namespace Pica::Shader::Generator::GLSL {
 namespace {
-// CodexAstraLocal: Keep original compact loads and FIFO carry in one invocation.
-// The output has a small completion/tail header, semantic scratch, then a packed
-// 88-byte clipped triangle stream. Only the final status authorizes rasterization.
-constexpr std::string_view Prefix = R"glsl(#version 450
+// CodexAstraLocal: Separate guest execution from ordered assembly/clipping to
+// bound compiler private-state interaction. Both use the same immutable capture
+// and unpublished semantic scratch; only stage two can authorize rasterization.
+constexpr std::string_view Layout = R"glsl(#version 450
 layout(local_size_x=1) in;
 layout(set=0,binding=0,std430) readonly buffer Raw { uint raw[]; };
 layout(set=0,binding=1,std430) readonly buffer Meta { uint meta[]; };
 layout(set=0,binding=2,std430) buffer Result { uint result[]; };
-struct Uniforms { uint b; uvec4 i[4]; vec4 f[96]; };
+)glsl";
+
+// CodexAstraLocal: Read immutable captured float uniforms directly. The old
+// private 96-vector copy made guest code and clipping compete for compiler/local
+// storage; byte loading preserves unaligned captures and exact float bit patterns.
+constexpr std::string_view GuestGlobals = R"glsl(
+struct Uniforms { uint b; uvec4 i[4]; };
 Uniforms uniforms;
 vec4 input_regs[16];
 vec4 output_regs[16];
+uint word_at(uint p);
+vec4 compute_uniform(uint index) {
+    uint p=meta[10]+index*16u;
+    return uintBitsToFloat(uvec4(word_at(p),word_at(p+4u),word_at(p+8u),word_at(p+12u)));
+}
 )glsl";
 
-constexpr std::string_view Body = R"glsl(
-uint byte_at(uint p) { return (raw[p/4u] >> ((p%4u)*8u)) & 255u; }
-uint word_at(uint p) { return byte_at(p)|(byte_at(p+1u)<<8)|(byte_at(p+2u)<<16)|(byte_at(p+3u)<<24); }
-uint short_at(uint p) { return byte_at(p)|(byte_at(p+1u)<<8); }
-uint vertex_at(uint ordinal) {
-    if (meta[5]==0u) return meta[2]+ordinal;
-    return meta[8]==1u ? byte_at(meta[7]+ordinal) : short_at(meta[7]+ordinal*2u);
-}
-bool fits(uint offset,uint bytes) { return offset<=meta[6] && bytes<=meta[6]-offset; }
-// CodexAstraLocal: A ready Strip/Fan or two-vertex List tail can emit a triangle
+constexpr std::string_view CommonBody = R"glsl(// CodexAstraLocal: A ready Strip/Fan or two-vertex List tail can emit a triangle
 // from just one new input. Six standard planes plus one custom plane can leave
 // ten polygon vertices, so reserve eight clipped triangles per assembled one.
 uint triangle_capacity() {
@@ -40,6 +42,18 @@ uint triangle_capacity() {
 }
 uint semantic_word(uint reference) { return 64u+reference*24u; }
 uint hardware_base() { return 64u+(meta[1]+2u)*24u; }
+bool finite_value(float v) { return !isnan(v)&&!isinf(v); }
+)glsl";
+
+constexpr std::string_view InputBody = R"glsl(
+uint byte_at(uint p) { return (raw[p/4u] >> ((p%4u)*8u)) & 255u; }
+uint word_at(uint p) { return byte_at(p)|(byte_at(p+1u)<<8)|(byte_at(p+2u)<<16)|(byte_at(p+3u)<<24); }
+uint short_at(uint p) { return byte_at(p)|(byte_at(p+1u)<<8); }
+uint vertex_at(uint ordinal) {
+    if (meta[5]==0u) return meta[2]+ordinal;
+    return meta[8]==1u ? byte_at(meta[7]+ordinal) : short_at(meta[7]+ordinal*2u);
+}
+bool fits(uint offset,uint bytes) { return offset<=meta[6] && bytes<=meta[6]-offset; }
 bool valid_input() {
     if (meta.length()!=193 || meta[0]!=0x43565231u || meta[1]==0u || meta[1]>4096u ||
         meta[3]<meta[2] || meta[3]>65535u || meta[4]==0u || meta[4]>16u || meta[5]>1u ||
@@ -96,7 +110,6 @@ void load_vertex(uint v) {
         input_regs[meta[b]]=value;
     }
 }
-bool finite_value(float v) { return !isnan(v)&&!isinf(v); }
 bool store_vertex(uint ordinal) {
     for(uint c=0u;c<24u;++c) {
         uint source=meta[112u+c];
@@ -108,7 +121,9 @@ bool store_vertex(uint ordinal) {
     return true;
 }
 
-// CodexAstraLocal: Quaternion sign correction precedes homogeneous clipping,
+)glsl";
+
+constexpr std::string_view ClipBody = R"glsl(// CodexAstraLocal: Quaternion sign correction precedes homogeneous clipping,
 // exactly where the accelerated 88-byte transport applies it to each triangle.
 const uint hardware_source[22]=uint[](0,1,2,3,8,9,10,11,12,13,14,15,22,23,16,4,5,6,7,18,19,20);
 struct ClipVertex { float lane[22]; float custom_distance; };
@@ -338,8 +353,10 @@ bool clip_triangle(uvec3 references,inout uint cursor) {
     }
     ++clip_ordinal;return true;
 }
-void main() {
-    result[0]=0u;result[1]=1u;result[7]=0u;
+)glsl";
+
+constexpr std::string_view GuestMain = R"glsl(void main() {
+    result[0]=0u;result[1]=1u;result[7]=0u;result[61]=0u;
     if(!valid_input())return;
     uint n=meta[1],hits=0u,misses=0u,cursor=0u,size=0u;
     uint keys[64],references[64];
@@ -351,7 +368,6 @@ void main() {
         uniforms.b|=byte_at(meta[11]+i)<<i;
         uniforms.i[i/4u][i%4u]=byte_at(meta[12]+i);
     }
-    for(uint i=0u;i<384u;++i)uniforms.f[i/4u][i%4u]=uintBitsToFloat(word_at(meta[10]+i*4u));
     for(uint slot=0u;slot<2u;++slot)if((meta[139]&(1u<<slot))!=0u)
         for(uint c=0u;c<24u;++c)result[semantic_word(slot)+c]=meta[140u+slot*24u+c];
     for(uint ordinal=0u;ordinal<n;++ordinal) {
@@ -367,6 +383,22 @@ void main() {
             if(meta[5]!=0u){keys[cursor]=key;references[cursor]=ordinal;cursor=(cursor+1u)%64u;size=min(64u,size+1u);}
         }
     }
+    // CodexAstraLocal: This token authorizes only stage two. There is no
+    // successful draw/tail header until ordered assembly and clipping finish.
+    result[3]=n;result[4]=misses;result[5]=hits;
+    result[61]=0x43565331u;
+}
+)glsl";
+
+constexpr std::string_view AssemblyMain = R"glsl(void main() {
+    // CodexAstraLocal: The owner cleared the whole header before stage one and
+    // orders both dispatches with a complete shader-write/read barrier. Missing
+    // completion preserves stage one's exact terminal status and scratch.
+    uint n=meta[1];
+    if(result[0]!=0u||result[1]!=1u||result[61]!=0x43565331u||result[3]!=n||
+       result[4]>n||result[5]>n||result[4]+result[5]!=n)return;
+    // The token is transient; failure diagnostics may reuse this operand word.
+    result[61]=0u;
     // CodexAstraLocal: Port the actual PICA SubmitVertex ordering, including
     // Strip ABC,CBD,CDE and pending Shader winding. FIFO references are draw-local;
     // old tails are original semantic outputs from their original shader/map.
@@ -396,28 +428,39 @@ void main() {
     if(clip_failed){finish_clip_failure();return;}
     for(uint slot=0u;slot<2u;++slot)if((written&(1u<<slot))!=0u)
         for(uint c=0u;c<24u;++c)result[8u+slot*24u+c]=result[semantic_word(tail[slot])+c];
-    result[2]=vertex_count;result[3]=n;result[4]=misses;result[5]=hits;
+    result[2]=vertex_count;
     result[6]=hardware_base();result[7]=0u;
     result[56]=meta[14];result[57]=index;
     result[58]=uint(ready)|(uint(winding)<<1u);result[59]=written;
     result[1]=0u;result[0]=1u;
 }
 )glsl";
+
+// CodexAstraLocal: One composition routine is used by every guest program;
+// both stages share only metadata/semantic storage, never private shader state.
+std::string BuildGuestSource(std::string_view translated,u32 entry) {
+    auto source=std::string{Layout}+std::string{GuestGlobals}+std::string{translated};
+    source+="\nvoid reset_compute_temporaries() {\n";
+    for(u32 i=0;i<16;++i)source+=fmt::format("reg_tmp{}=vec4(0);\n",i);
+    source+="}\n";
+    source+=fmt::format("const uint COMPUTE_ENTRY={}u;\n",entry);
+    source+=CommonBody;source+=InputBody;source+=GuestMain;
+    return source;
+}
 } // namespace
 
 std::string GenerateComputeGuestVertex(const ProgramCode& program, const SwizzleData& swizzles,
                                        u32 entry, bool sanitize_mul) {
-    if (entry >= program.size()) return {};
-    const auto translated = DecompileProgram(program, swizzles, entry,
-        [](u32 reg) { return fmt::format("input_regs[{}]", reg); },
-        [](u32 reg) { return fmt::format("output_regs[{}]", reg); }, sanitize_mul, true, true);
-    if (translated.empty()) return {};
-    auto source = std::string{Prefix} + translated;
-    source += "\nvoid reset_compute_temporaries() {\n";
-    // CodexAstraLocal: ShaderUnit is zeroed once per draw, not on each FIFO miss.
-    for (u32 i = 0; i < 16; ++i) source += fmt::format("reg_tmp{}=vec4(0);\n", i);
-    source += "}\n";
-    source += fmt::format("const uint COMPUTE_ENTRY={}u;\n", entry);
+    if(entry>=program.size())return {};
+    const auto translated=DecompileProgram(program,swizzles,entry,
+        [](u32 reg){return fmt::format("input_regs[{}]",reg);},
+        [](u32 reg){return fmt::format("output_regs[{}]",reg);},sanitize_mul,true,true,true);
+    if(translated.empty())return {};
+    return BuildGuestSource(translated,entry);
+}
+
+std::string GenerateComputeAssembly() {
+    auto source=std::string{Layout}+std::string{CommonBody};
     // CodexAstraLocal: Generate GPU detail IDs from the shared host enum so
     // terminal explanations cannot silently drift from the completion record.
     const std::pair<std::string_view, ComputeClipFailure> failures[] = {
@@ -433,7 +476,7 @@ std::string GenerateComputeGuestVertex(const ProgramCode& program, const Swizzle
     };
     for (const auto& [name, failure] : failures)
         source += fmt::format("const uint CLIP_{}={}u;\n", name, static_cast<u32>(failure));
-    source += Body;
+    source+=ClipBody;source+=AssemblyMain;
     return source;
 }
 } // namespace Pica::Shader::Generator::GLSL

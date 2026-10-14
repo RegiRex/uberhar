@@ -13,11 +13,15 @@
 #include "common/color.h"
 #include "common/settings.h"
 #ifndef UBERHAR_SOFTWARE_HELPER_PROBE
+#include <sstream> // CodexAstraLocal: Round-trip the actual first-candidate archive, not a substitute.
+#include <nihstro/inline_assembly.h>
+#include "common/archives.h"
 #include "core/core.h"
 #include "core/memory.h"
 #include "video_core/pica/pica_core.h"
 #include "video_core/renderer_software/sw_lighting.h" // CodexAstraLocal: Real multi-light LUT reuse.
 #include "video_core/renderer_software/sw_rasterizer.h"
+#include "video_core/shader/shader.h"
 #endif
 #include "video_core/renderer_software/sw_frame.h"
 #include "video_core/renderer_software/sw_sampler.h"
@@ -54,6 +58,29 @@ struct SoftwareRendererTestAccess {
         }
         return raster.TextureColor(uv, regs.texturing.GetTextures(), Pica::f24::FromFloat32(w),
             prepared, quad, 0, demand, footprint ? 1U : 0U, 3, 7);
+    }
+};
+}
+namespace Pica {
+// CodexAstraLocal: Exercise the real demand/serializer/proof seam without writing
+// diagnostics into a user's dump directory or replacing shader execution.
+struct SoftwareProducerTestAccess {
+    static u32 Mask(const PicaCore& pica) { return pica.SoftwareProducerMask(); }
+    static u32 Invalid(u32 mask, const OutputVertex& output) {
+        return PicaCore::SoftwareInvalidSemantics(mask, output);
+    }
+    static OutputVertex Run(PicaCore& pica, ShaderSetup& setup, ShaderUnit& unit) {
+        pica.shader_engine->SetupBatch(setup, 1);
+        pica.shader_engine->Run(setup, unit);
+        AttributeBuffer buffer{};
+        unit.WriteOutput(pica.regs.internal.vs, buffer);
+        return OutputVertex{pica.regs.internal.rasterizer, buffer};
+    }
+    static auto Snapshot(const PicaCore& pica, ShaderSetup& setup, const ShaderUnit& unit,
+                         const OutputVertex& output, bool fresh, bool post = true) {
+        const auto mask = Mask(pica);
+        return pica.MakeSoftwareProducerSnapshot(mask, Invalid(mask, output), output,
+            setup, unit, fresh ? 0 : 1, 17, "fixture_cpu", fresh, post, 0x12345678ULL);
     }
 };
 }
@@ -319,7 +346,265 @@ TEST_CASE("Software cube filtering crosses edges with owned face identity", "[so
     CHECK(SwRenderer::SampleCubeTexture(faces,layout,config,0,0,.5f,0,Game).x == 100);
 }
 
+TEST_CASE("Software texel memo preserves filtered formats mip faces and shadow", "[software][software-memo]") {
+    // CodexAstraLocal: Compare the real sampler's new tap source with its live
+    // decoder over finite synthetic bytes. No copied filtering/ETC oracle or
+    // game shader is used. Per-format memos cover mip changes; shared-face and
+    // same-pointer/different-format key checks are separate cases below.
+    auto config = Sampler(32, 2);
+    config.min_filter.Assign(Config::Linear);
+    config.mag_filter.Assign(Config::Linear);
+    config.mip_filter.Assign(Config::Linear);
+    config.wrap_s.Assign(Config::Repeat);
+    config.wrap_t.Assign(Config::MirroredRepeat);
+    SwRenderer::TexelMemo memo;
+    const std::array<Common::Vec2f, 7> positions{{{.01f,.01f}, {.24f,.26f}, {.49f,.51f},
+        {.99f,.99f}, {-.02f,.1f}, {1.02f,.9f}, {2.25f,-.25f}}};
+    for (u32 format = 0; format <= static_cast<u32>(Format::ETC1A4); ++format) {
+        const auto layout = SwRenderer::MakeTextureLayout(config, static_cast<Format>(format), false);
+        std::vector<u8> bytes(layout.bytes);
+        for (std::size_t i = 0; i < bytes.size(); ++i) bytes[i] = static_cast<u8>(i * 37 + i / 11 + 19);
+        // A fresh immutable lifetime starts for each allocation, even if its
+        // allocator happens to reuse the exact prior address/format.
+        SwRenderer::TexelMemo format_memo;
+        for (float lod : {0.f, .5f, 1.f, 1.5f, 2.f}) {
+            for (const auto uv : positions) {
+                INFO("format=" << format << " lod=" << lod << " uv=" << uv.x << ',' << uv.y);
+                const auto live = SwRenderer::SampleTexture(bytes, layout, config, uv.x, uv.y, lod, Game);
+                CHECK(SwRenderer::SampleTexture(bytes, layout, config, uv.x, uv.y, lod, Game, &format_memo) == live);
+                CHECK(SwRenderer::SampleTexture(bytes, layout, config, uv.x, uv.y, lod, Game, &format_memo) == live);
+            }
+        }
+        if (format >= static_cast<u32>(Format::ETC1)) {
+            // Expensive compressed texels also use the memo for nearest taps.
+            auto nearest = config;
+            nearest.mag_filter.Assign(Config::Nearest);
+            nearest.min_filter.Assign(Config::Nearest);
+            for (const auto uv : positions) {
+                CHECK(SwRenderer::SampleTexture(bytes, layout, nearest, uv.x, uv.y, .5f, Game, &format_memo) ==
+                      SwRenderer::SampleTexture(bytes, layout, nearest, uv.x, uv.y, .5f, Game));
+            }
+        }
+    }
+
+    const auto layout = SwRenderer::MakeTextureLayout(config, Format::RGBA8, false);
+    std::array<std::vector<u8>, 6> storage;
+    std::array<std::span<const u8>, 6> faces;
+    for (u32 face = 0; face < faces.size(); ++face) {
+        storage[face].resize(layout.bytes);
+        for (std::size_t i = 0; i < layout.bytes; ++i) storage[face][i] = static_cast<u8>(i * 13 + face * 31);
+        faces[face] = storage[face];
+    }
+    faces[3] = faces[0]; // Different cube identity may share one physical source.
+    for (u32 face = 0; face < faces.size(); ++face) {
+        for (const auto uv : positions) {
+            CHECK(SwRenderer::SampleCubeTexture(faces, layout, config, face, uv.x, uv.y, .5f, Game, &memo) ==
+                  SwRenderer::SampleCubeTexture(faces, layout, config, face, uv.x, uv.y, .5f, Game));
+        }
+    }
+    auto shadow_config = Sampler(32);
+    const auto shadow_layout = SwRenderer::MakeTextureLayout(shadow_config, Format::RGBA8, true);
+    for (bool cube : {false, true}) for (u32 depth : {0U, 0x123456U, 0xffffffU}) {
+        for (const auto uv : positions) {
+            CHECK(SwRenderer::SampleShadow(faces[0], shadow_layout, uv.x, uv.y, depth, cube, &memo) ==
+                  SwRenderer::SampleShadow(faces[0], shadow_layout, uv.x, uv.y, depth, cube));
+        }
+    }
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    CHECK_THROWS_AS(SwRenderer::SampleTexture(faces[0], layout, config, nan, .5f, 0, Game, &memo), VideoCore::ShaderRecoveryError);
+    CHECK_THROWS_AS(SwRenderer::SampleTexture(faces[0], layout, config, .5f, .5f, nan, Game, &memo), VideoCore::ShaderRecoveryError);
+    CHECK_THROWS_AS(SwRenderer::SampleTexture(faces[0].first(layout.bytes - 1), layout, config, .5f, .5f, 0, Game, &memo), VideoCore::ShaderRecoveryError);
+    CHECK_THROWS_AS(SwRenderer::SampleShadow(faces[0], shadow_layout, nan, .5f, 0, false, &memo), VideoCore::ShaderRecoveryError);
+}
+
+TEST_CASE("Software texel memo admission and lifetime preserve live writes", "[software][software-memo]") {
+    // CodexAstraLocal: No alias proof can authorize reuse during concurrent
+    // writes. Intentionally changing bytes here exposes that distinction:
+    // admitted immutable samples reuse, bypass and a fresh group see new bytes.
+    CHECK(SwRenderer::CanMemoizeTexels(true, false));
+    CHECK_FALSE(SwRenderer::CanMemoizeTexels(false, false));
+    CHECK_FALSE(SwRenderer::CanMemoizeTexels(true, true));
+    CHECK_FALSE(SwRenderer::CanMemoizeTexels(false, true));
+    auto config = Sampler(8);
+    config.mag_filter.Assign(Config::Linear);
+    const auto layout = SwRenderer::MakeTextureLayout(config, Format::RGBA8, false);
+    std::vector<u8> bytes(layout.bytes);
+    const auto fill = [&](Color color) {
+        for (u32 y = 0; y < 8; ++y) for (u32 x = 0; x < 8; ++x) Put(bytes, layout, 0, x, y, color);
+    };
+    fill({21,42,63,255});
+    SwRenderer::TexelMemo group;
+    CHECK(SwRenderer::SampleTexture(bytes, layout, config, .5f, .5f, 0, Game, &group) == Color{21,42,63,255});
+    fill({32,64,96,255});
+    CHECK(SwRenderer::SampleTexture(bytes, layout, config, .5f, .5f, 0, Game, &group) == Color{21,42,63,255});
+    CHECK(SwRenderer::SampleTexture(bytes, layout, config, .5f, .5f, 0, Game) == Color{32,64,96,255});
+    SwRenderer::TexelMemo next_group;
+    CHECK(SwRenderer::SampleTexture(bytes, layout, config, .5f, .5f, 0, Game, &next_group) == Color{32,64,96,255});
+    // The same pointer interpreted as a different format must not reuse bytes.
+    const auto other = SwRenderer::MakeTextureLayout(config, Format::RGBA4, false);
+    CHECK(SwRenderer::SampleTexture(bytes, other, config, .5f, .5f, 0, Game, &next_group) ==
+          SwRenderer::SampleTexture(bytes, other, config, .5f, .5f, 0, Game));
+    // Nearest uncompressed sampling has no memo setup/use benefit and remains live.
+    config.mag_filter.Assign(Config::Nearest);
+    fill({17,34,51,255});
+    CHECK(SwRenderer::SampleTexture(bytes, layout, config, .5f, .5f, 0, Game, &next_group) == Color{17,34,51,255});
+}
+
 #ifndef UBERHAR_SOFTWARE_HELPER_PROBE
+TEST_CASE("Software producer capsule preserves demanded inputs and carry limits",
+          "[software][software-producer]") {
+    // CodexAstraLocal: The first candidate is evidence, not an injected renderer
+    // error. Actual CPU shader output and the native save serializers must retain
+    // NaN payloads, mapping and post-carry without inventing a replay pre-state.
+    using Access = Pica::SoftwareProducerTestAccess;
+    using Semantic = Pica::RasterizerRegs::VSOutputAttributes;
+    using Stage = Pica::TexturingRegs::TevStageConfig;
+    const auto old_mode = Settings::values.uberhar_test_mode.GetValue();
+    const auto old_jit = Settings::values.use_shader_jit.GetValue();
+    struct Restore {
+        Settings::UberharTestMode mode; bool jit;
+        ~Restore() { Settings::values.uberhar_test_mode = mode; Settings::values.use_shader_jit = jit; }
+    } restore{old_mode, old_jit};
+    Settings::values.uberhar_test_mode = Settings::UberharTestMode::Software;
+    Settings::values.use_shader_jit = false;
+    Core::System system;
+    Memory::MemorySystem memory{system};
+    Pica::PicaCore pica{memory,{}};
+    auto& regs = pica.regs.internal;
+    regs = {}; regs.lighting.disable.Assign(1);
+    for (auto* stage : {&regs.texturing.tev_stage0, &regs.texturing.tev_stage1,
+                       &regs.texturing.tev_stage2, &regs.texturing.tev_stage3,
+                       &regs.texturing.tev_stage4, &regs.texturing.tev_stage5}) {
+        stage->color_source1.Assign(Stage::Source::Constant);
+        stage->alpha_source1.Assign(Stage::Source::Constant);
+    }
+    Pica::OutputVertex semantic{};
+    const auto nan = std::bit_cast<Pica::f24>(0x7fc12345U);
+    semantic.tc0.x = nan;
+    CHECK(Access::Invalid(Access::Mask(pica), semantic) == 0);
+    regs.texturing.tev_stage0.color_source1.Assign(Stage::Source::Texture0);
+    regs.texturing.main_config.texture0_enable.Assign(1);
+    regs.texturing.texture0.address.Assign(Memory::VRAM_PADDR / 8);
+    CHECK(Access::Invalid(Access::Mask(pica), semantic) == (1U << Semantic::TEXCOORD0_U));
+    regs.texturing.texture0.address.Assign(0); // The actual sampler returns constant black here.
+    CHECK(Access::Invalid(Access::Mask(pica), semantic) == 0);
+    regs.texturing.texture0.address.Assign(Memory::VRAM_PADDR / 8);
+    regs.texturing.texture0.type.Assign(Config::Disabled);
+    CHECK(Access::Invalid(Access::Mask(pica), semantic) == 0);
+    regs.texturing.texture0.type.Assign(Config::Projection2D);
+    semantic.tc0 = {}; semantic.tc0_w = nan;
+    CHECK(Access::Invalid(Access::Mask(pica), semantic) == (1U << Semantic::TEXCOORD0_W));
+    regs.texturing.texture0.type.Assign(Config::Texture2D);
+    CHECK(Access::Invalid(Access::Mask(pica), semantic) == 0);
+    regs.texturing.tev_stage0.color_source1.Assign(Stage::Source::Texture2);
+    regs.texturing.main_config.texture2_enable.Assign(1);
+    regs.texturing.main_config.texture2_use_coord1.Assign(1);
+    regs.texturing.texture2.address.Assign(Memory::VRAM_PADDR / 8);
+    semantic.tc1.y = nan; semantic.tc2.x = nan;
+    CHECK(Access::Invalid(Access::Mask(pica), semantic) == (1U << Semantic::TEXCOORD1_V));
+    regs.texturing.tev_stage0.color_source1.Assign(Stage::Source::Constant);
+    regs.texturing.tev_stage0.alpha_source1.Assign(Stage::Source::Previous);
+    regs.texturing.tev_stage0.alpha_source3.Assign(Stage::Source::Texture1);
+    regs.texturing.main_config.texture1_enable.Assign(1);
+    regs.texturing.texture1.address.Assign(Memory::VRAM_PADDR / 8);
+    CHECK(Access::Invalid(Access::Mask(pica), semantic) == 0); // Retained Software alpha semantics.
+
+    const auto compile = [](std::initializer_list<nihstro::InlineAsm> code) {
+        const auto binary = nihstro::InlineAsm::CompileToRawBinary(code);
+        Pica::ShaderSetup setup;
+        setup.uniforms = {};
+        Pica::ProgramCode program{};
+        Pica::SwizzleData swizzles{};
+        std::transform(binary.program.begin(), binary.program.end(), program.begin(),
+                       [](const auto& word) { return word.hex; });
+        std::transform(binary.swizzle_table.begin(), binary.swizzle_table.end(), swizzles.begin(),
+                       [](const auto& word) { return word.hex; });
+        setup.UpdateProgramCode(program);
+        setup.UpdateSwizzleData(swizzles);
+        setup.entry_point = 1;
+        return setup;
+    };
+    using Op = nihstro::OpCode::Id;
+    using Dest = nihstro::DestRegister;
+    using Source = nihstro::SourceRegister;
+    auto setup = compile({{Op::NOP}, {Op::MOV, Dest::MakeOutput(0), Source::MakeInput(0)}, {Op::END}});
+    setup.uniforms.f[2] = {nan, Pica::f24::One(), Pica::f24::Zero(), Pica::f24::One()};
+    setup.uniforms.b[3] = true; setup.uniforms.i[1] = {1, 2, 3, 4};
+    regs.vs.output_mask.Assign(1);
+    regs.rasterizer.vs_output_total.Assign(1);
+    auto& mapping = regs.rasterizer.vs_output_attributes[0];
+    mapping.map_x.Assign(Semantic::TEXCOORD0_U); mapping.map_y.Assign(Semantic::TEXCOORD0_V);
+    mapping.map_z.Assign(Semantic::INVALID); mapping.map_w.Assign(Semantic::TEXCOORD0_W);
+    regs.texturing.tev_stage0.color_source1.Assign(Stage::Source::Texture0);
+    Pica::ShaderUnit unit;
+    unit.input[0] = {nan, Pica::f24::One(), Pica::f24::Zero(), Pica::f24::One()};
+    unit.temporary[7].w = nan; unit.address_registers[2] = 19; unit.conditional_code[1] = true;
+    unit.output[1][4].z = nan;
+    const auto output = Access::Run(pica, setup, unit);
+    REQUIRE(Access::Invalid(Access::Mask(pica), output) == (1U << Semantic::TEXCOORD0_U));
+    const auto snapshot = Access::Snapshot(pica, setup, unit, output, false);
+    // CodexAstraLocal: The same capsule remains evidence on other hosts, but
+    // only the recorded exact FP-control contracts authorize value replay.
+#if (defined(__aarch64__) && (defined(__GNUC__) || defined(__clang__))) || \
+    defined(__i386__) || defined(__x86_64__)
+    constexpr bool replay_host = true;
+#else
+    constexpr bool replay_host = false;
+#endif
+    REQUIRE(snapshot.replay_qualified == replay_host);
+    REQUIRE(snapshot.payload.size() < 64 * 1024);
+    REQUIRE(snapshot.metadata.size() < 4096);
+    CHECK(snapshot.metadata.find("\"entry\":1") != std::string::npos);
+    CHECK(snapshot.metadata.find("post_shader_not_pre_carry") != std::string::npos);
+    Pica::RegsInternal restored_regs{};
+    Pica::ShaderSetup restored_setup;
+    Pica::ShaderUnit restored_unit;
+    Pica::OutputVertex restored_output{};
+    std::istringstream stream{snapshot.payload, std::ios::in | std::ios::binary};
+    iarchive archive{stream};
+    archive >> restored_regs.reg_array >> restored_setup >> restored_unit >> restored_output;
+    CHECK(restored_regs.reg_array == regs.reg_array);
+    CHECK(restored_setup.GetProgramCode() == setup.GetProgramCode());
+    CHECK(restored_setup.GetSwizzleData() == setup.GetSwizzleData());
+    CHECK(std::memcmp(restored_setup.uniforms.f.data(), setup.uniforms.f.data(), sizeof(setup.uniforms.f)) == 0);
+    CHECK(restored_setup.uniforms.b == setup.uniforms.b);
+    CHECK(restored_setup.uniforms.i == setup.uniforms.i);
+    CHECK(std::memcmp(restored_unit.input.data(), unit.input.data(), sizeof(unit.input)) == 0);
+    CHECK(std::memcmp(restored_unit.temporary.data(), unit.temporary.data(), sizeof(unit.temporary)) == 0);
+    CHECK(std::memcmp(restored_unit.output.data(), unit.output.data(), sizeof(unit.output)) == 0);
+    CHECK(restored_unit.output_bank == unit.output_bank);
+    CHECK(restored_unit.address_registers[2] == 19);
+    CHECK(restored_unit.conditional_code[1]);
+    CHECK(std::bit_cast<u32>(restored_output.tc0.x) == 0x7fc12345U);
+    CHECK(std::bit_cast<u32>(unit.input[0].x) == 0x7fc12345U);
+    Pica::ShaderUnit replay;
+    replay.input = restored_unit.input;
+    const auto replay_output = Access::Run(pica, restored_setup, replay);
+    CHECK(std::bit_cast<u32>(replay_output.tc0.x) == std::bit_cast<u32>(output.tc0.x));
+
+    // CodexAstraLocal: A current input cannot reconstruct a prior invocation's
+    // mutable temporary. Fresh carry is bounded; late effects still refuse it.
+    auto carry = compile({{Op::NOP}, {Op::MOV, Dest::MakeOutput(0), Source::MakeTemporary(0)},
+        {Op::MOV, Dest::MakeTemporary(0), Source::MakeInput(0)}, {Op::END}});
+    Pica::ShaderUnit carried;
+    carried.input[0] = unit.input[0];
+    (void)Access::Run(pica, carry, carried);
+    const auto carried_output = Access::Run(pica, carry, carried);
+    CHECK_FALSE(Access::Snapshot(pica, carry, carried, carried_output, false).replay_qualified);
+    Pica::ShaderUnit fresh;
+    fresh.input[0] = unit.input[0];
+    const auto fresh_output = Access::Run(pica, carry, fresh);
+    CHECK(Access::Snapshot(pica, carry, fresh, fresh_output, true).replay_qualified == replay_host);
+    CHECK(std::bit_cast<u32>(carried_output.tc0.x) == 0x7fc12345U);
+    CHECK(std::bit_cast<u32>(fresh_output.tc0.x) == 0U);
+    auto effect = compile({{Op::NOP}, {Op::MOV, Dest::MakeOutput(0), Source::MakeTemporary(0)},
+        {Op::MOV, Dest::MakeTemporary(0), Source::MakeInput(0)}, {Op::EMIT}, {Op::END}});
+    CHECK_FALSE(Access::Snapshot(pica, effect, fresh, fresh_output, true).replay_qualified);
+    const auto mid_emit = Access::Snapshot(pica, setup, unit, output, false, false);
+    CHECK_FALSE(mid_emit.replay_qualified);
+    CHECK(mid_emit.metadata.find("buffered GS vertex may precede current emit") != std::string::npos);
+}
+
 TEST_CASE("Software actual demanded sampling and fixed helper ownership", "[software][software-sampling]") {
     // CodexAstraLocal: Real MemorySystem/raster admission must not touch an
     // enabled, malformed unused texture. Changing the actual consumer restores
@@ -574,6 +859,29 @@ TEST_CASE("Software prepared fragment demand preserves actual triangle outputs",
     }
     stages[3]->color_modifier3.Assign(Stage::ColorModifier::SourceAlpha);
     CHECK(draw() == Color{16, 38, 68, 110});
+    // CodexAstraLocal: Complete Copy may omit destination reads; any channel
+    // mask, non-Copy logic or blend must still consume the seeded destination.
+    reset();
+    merger.red_enable.Assign(0);
+    CHECK(draw() == Color{109, 73, 149, 205});
+    merger.red_enable.Assign(1);
+    merger.logic_op.Assign(Pica::FramebufferRegs::LogicOp::Xor);
+    CHECK(draw() == Color{120, 36, 248, 160});
+    merger.logic_op.Assign(Pica::FramebufferRegs::LogicOp::Copy);
+    merger.alphablend_enable.Assign(1);
+    merger.alpha_blending.factor_source_rgb.Assign(Pica::FramebufferRegs::BlendFactor::One);
+    merger.alpha_blending.factor_source_a.Assign(Pica::FramebufferRegs::BlendFactor::One);
+    merger.alpha_blending.factor_dest_rgb.Assign(Pica::FramebufferRegs::BlendFactor::One);
+    merger.alpha_blending.factor_dest_a.Assign(Pica::FramebufferRegs::BlendFactor::One);
+    CHECK(draw() == Color{130, 182, 255, 255});
+    merger.alphablend_enable.Assign(0);
+    const std::array<Color, 5> encoded{{{21,73,149,205}, {21,73,149,255}, {16,74,148,255},
+                                      {16,73,148,255}, {17,68,153,204}}};
+    // Native PICA framebuffer order is RGBA8, RGB8, RGB5A1, RGB565, RGBA4.
+    for (u32 format = 0; format < encoded.size(); ++format) {
+        target.color_format.Assign(static_cast<Pica::FramebufferRegs::ColorFormat>(format));
+        CHECK(draw() == encoded[format]);
+    }
 }
 
 TEST_CASE("Software repeated lighting vectors preserve distinct light LUT results",

@@ -18,6 +18,8 @@
 #include "video_core/renderer_vulkan/uberhar_dynamic_tev_preparation.h"
 #include "video_core/renderer_vulkan/uberhar_wait_diagnostics.h" // AstraEH: Bounded worst waits.
 #include "video_core/renderer_vulkan/vk_graphics_pipeline.h"
+// CodexAstraLocal: Exact immutable image descriptors are finalized at the draw tick.
+#include "video_core/renderer_vulkan/uberhar_image_descriptors.h"
 #include "video_core/renderer_vulkan/uberhar_gpu_vertex_policy.h" // AstraPro: Ready-only gates.
 #include "video_core/renderer_vulkan/vk_resource_pool.h"
 #include "video_core/renderer_vulkan/vk_shader_disk_cache.h"
@@ -71,6 +73,23 @@ public:
         const auto descriptor_set = descriptor_heaps[index].Commit();
         bound_descriptor_sets[index] = descriptor_set;
         return descriptor_set;
+    }
+
+    // CodexAstraLocal: Resource resolution remains in the rasterizer; these
+    // pending writes do not borrow a pool slot across a possible submission.
+    void BeginImageBindings(DescriptorHeapType type) {
+        pending_images[static_cast<u32>(type) - 1].count = 0;
+    }
+    void StageTexture(u8 binding, u8 element, vk::ImageView view, vk::Sampler sampler) {
+        pending_images[0].Append({sampler ? vk::DescriptorType::eCombinedImageSampler :
+            vk::DescriptorType::eSampledImage, binding, element, view, sampler});
+    }
+    // CodexAstraLocal: Preserve the utility layout's second declared image.
+    void StageUtilityNormal(vk::ImageView view, vk::Sampler sampler) {
+        pending_images[1].Append({vk::DescriptorType::eCombinedImageSampler, 1, 0, view, sampler});
+    }
+    void StageUtility(vk::ImageView view) {
+        pending_images[1].Append({vk::DescriptorType::eStorageImage, 0, 0, view, {}});
     }
 
     /// Sets the dynamic offset for the uniform buffer at binding
@@ -168,6 +187,8 @@ private:
     // CodexAstraLocal: Materialize only for a live generic/static consumer; a
     // ready full fragment must not pay for controls it cannot read.
     void EnsureDynamicTevState();
+    // CodexAstraLocal: Last potentially flushing preparation precedes this resolve.
+    void ResolveImageBindings();
     // CodexAstraUlt: One gate covers optional fragment warming, binding and transport;
     // mandatory unsupported-state recovery continues through UseFragmentShader independently.
     bool PreferReadySpecializedFragment(const Pica::Shader::UserConfig& user) const;
@@ -292,6 +313,9 @@ private:
     PipelineBuildStats fallback_build_stats;
     std::array<DescriptorHeap, NumDescriptorHeaps> descriptor_heaps;
     std::array<vk::DescriptorSet, NumRasterizerSets> bound_descriptor_sets{};
+    // CodexAstraLocal: Only the last exact payload is retained; memory is bounded.
+    std::array<ImageDescriptorPayload, 2> pending_images{};
+    std::array<ImageDescriptorReuse, 2> image_descriptor_reuse{};
     std::array<u32, NumDynamicOffsets> offsets{};
 
     std::array<u64, MAX_SHADER_STAGES> shader_hashes;

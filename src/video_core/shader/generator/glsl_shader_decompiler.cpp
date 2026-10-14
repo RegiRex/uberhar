@@ -269,11 +269,13 @@ public:
     GLSLGenerator(const std::set<Subroutine>& subroutines, const ProgramCode& program_code,
                   const SwizzleData& swizzle_data, u32 main_offset,
                   const RegGetter& inputreg_getter, const RegGetter& outputreg_getter,
-                  bool sanitize_mul, bool precise_jit_dot, bool compute_a64_math)
+                  bool sanitize_mul, bool precise_jit_dot, bool compute_a64_math,
+                  bool compute_uniform_reads)
         : subroutines(subroutines), program_code(program_code), swizzle_data(swizzle_data),
           main_offset(main_offset), inputreg_getter(inputreg_getter),
           outputreg_getter(outputreg_getter), sanitize_mul(sanitize_mul),
-          precise_jit_dot(precise_jit_dot), compute_a64_math(compute_a64_math) {
+          precise_jit_dot(precise_jit_dot), compute_a64_math(compute_a64_math),
+          compute_uniform_reads(compute_uniform_reads) {
 
         Generate();
     }
@@ -338,7 +340,10 @@ private:
                 return fmt::format("get_offset_register({}, address_registers.{})", index,
                                    "xyz"[address_register_index - 1]);
             }
-            return fmt::format("uniforms.f[{}]", index);
+            // CodexAstraLocal: Only independent compute selects the captured
+            // SSBO accessor; ordinary graphics retains its exact UBO source.
+            return compute_uniform_reads ? fmt::format("compute_uniform({}u)", index)
+                                         : fmt::format("uniforms.f[{}]", index);
         default:
             UNREACHABLE();
             return "";
@@ -895,7 +900,13 @@ private:
         ++shader.scope;
         shader.AddLine("int fixed_offset = offset >= -128 && offset <= 127 ? offset : 0;");
         shader.AddLine("uint index = uint((base_index + fixed_offset) & 0x7F);");
-        shader.AddLine("return index < 96u ? uniforms.f[index] : vec4(1.0);");
+        // CodexAstraLocal: Keep the inherited indirect wrap/range rules while
+        // avoiding a dynamically indexed 96-vector private compute allocation.
+        if (compute_uniform_reads) {
+            shader.AddLine("return index < 96u ? compute_uniform(index) : vec4(1.0);");
+        } else {
+            shader.AddLine("return index < 96u ? uniforms.f[index] : vec4(1.0);");
+        }
         --shader.scope;
         shader.AddLine("}}\n");
 
@@ -985,6 +996,9 @@ private:
     const bool precise_jit_dot;
     // CodexAstraLocal: Compute-only numerical policy; no graphics caller opts in.
     const bool compute_a64_math;
+    // CodexAstraLocal: The caller supplies compute_uniform over immutable input;
+    // this changes storage placement, not arithmetic or guest addressing.
+    const bool compute_uniform_reads;
 
     ShaderWriter shader;
 };
@@ -992,13 +1006,14 @@ private:
 std::string DecompileProgram(const ProgramCode& program_code, const SwizzleData& swizzle_data,
                              u32 main_offset, const RegGetter& inputreg_getter,
                              const RegGetter& outputreg_getter, bool sanitize_mul,
-                             bool precise_jit_dot, bool compute_a64_math) {
+                             bool precise_jit_dot, bool compute_a64_math,
+                             bool compute_uniform_reads) {
 
     try {
         auto subroutines = ControlFlowAnalyzer(program_code, main_offset).MoveSubroutines();
         GLSLGenerator generator(subroutines, program_code, swizzle_data, main_offset,
                                 inputreg_getter, outputreg_getter, sanitize_mul, precise_jit_dot,
-                                compute_a64_math);
+                                compute_a64_math, compute_uniform_reads);
         return generator.MoveShaderCode();
     } catch (const DecompileFail& exception) {
         LOG_INFO(HW_GPU, "Shader decompilation failed: {}", exception.what());

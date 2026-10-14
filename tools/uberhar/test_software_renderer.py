@@ -93,7 +93,9 @@ def main():
                      '--reporter', 'xml', '--out', str(report)])
         tree = ET.parse(report).getroot()
         totals = tree.find('OverallResultsCases')
-        expected = 3 if args.sampling_only else 5
+        # CodexAstraLocal: The default gate includes both new memo/immutability
+        # cases; the unchanged sampling-only selector still owns three cases.
+        expected = 3 if args.sampling_only else 7
         if totals is None or int(totals.attrib['successes']) != expected or int(totals.attrib['failures']):
             raise RuntimeError(f'{expected} complete helper cases were not executed')
         proof['cases'] = expected

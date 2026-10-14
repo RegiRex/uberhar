@@ -72,6 +72,19 @@ jobs:
             --glslang "$(command -v glslangValidator)" \
             --spirv-val "$(command -v spirv-val)" \
             --icd "$uberhar_lvp_icd"
+      # CodexAstraLocal: Exercise immutable image descriptors with real sampled
+      # pixels and deliberate tick/epoch/rewrite defects before publication.
+      - name: Execute Vulkan image descriptor reuse
+        run: |
+          uberhar_lvp_icd=/usr/share/vulkan/icd.d/lvp_icd.json
+          if [ ! -r "$uberhar_lvp_icd" ]; then
+            uberhar_lvp_icd=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+          fi
+          test -r "$uberhar_lvp_icd"
+          python3 tools/uberhar/test_image_descriptors.py \
+            --glslang "$(command -v glslangValidator)" \
+            --spirv-val "$(command -v spirv-val)" \
+            --icd "$uberhar_lvp_icd"
       - name: Validate Vulkan fragment modules
         # AstraEH: Both user-selectable frontend optimizer modes must preserve
         # valid Vulkan modules and the compact TEV loop's no-unroll hint.
@@ -159,6 +172,7 @@ jobs:
       # CodexAstraLocal: Retain bounded Software checks, including failures.
       # CodexAstraLocal: Retain actual CPU overlap/rollback failure evidence.
       # CodexAstraLocal: Retain allocation and terminal worker-boundary controls.
+      # CodexAstraLocal: Retain descriptor pixels, sources and failure controls.
       - name: Upload CPU coordination contract evidence
         if: always()
         uses: actions/upload-artifact@v7
@@ -191,6 +205,7 @@ jobs:
             build/uberhar-probe/cached-buffer-lifetime/**
             build/uberhar-probe/cached-buffer-draw-use/**
             build/uberhar-probe/cached-buffer-lifetime-vulkan/**
+            build/uberhar-probe/image-descriptors/**
             build/uberhar-probe/software-renderer/**/provenance.json
             build/uberhar-probe/software-renderer/**/results.xml
             build/uberhar-probe/software-renderer/**/*.stdout

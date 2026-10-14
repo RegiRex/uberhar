@@ -5,6 +5,7 @@
 #pragma once
 
 #include <span>
+#include <limits> // CodexAstraLocal: Descriptor lifetime epoch never wraps.
 #include <string_view> // CodexAstraUlt: Bounded memory report phase labels.
 
 #include "video_core/pica/regs_pipeline.h"
@@ -74,6 +75,18 @@ public:
     /// Returns the Vulkan device
     virtual vk::Device GetDevice() const {
         return *device;
+    }
+
+    // CodexAstraLocal: Numeric Vulkan handles can be recycled. Retire all
+    // graphics image/sampler descriptor identities before destroying an owner.
+    u64 ImageDescriptorEpoch() const noexcept {
+        return image_descriptor_epoch.load(std::memory_order_relaxed);
+    }
+    void RetireImageDescriptors() const noexcept {
+        auto epoch = image_descriptor_epoch.load(std::memory_order_relaxed);
+        while (epoch != std::numeric_limits<u64>::max() &&
+               !image_descriptor_epoch.compare_exchange_weak(epoch, epoch + 1,
+                                                             std::memory_order_relaxed)) {}
     }
 
     /// Returns the VMA allocator handle
@@ -340,6 +353,8 @@ protected:
     mutable MemoryDiagnosticCounter raw_stream_memory, descriptor_pools, descriptor_sets,
         command_buffers;
     mutable std::atomic<u64> raw_stream_failures{};
+    // CodexAstraLocal: Saturation permanently disables reuse for this instance.
+    mutable std::atomic<u64> image_descriptor_epoch{};
     vk::Queue present_queue;
     vk::Queue graphics_queue;
     std::vector<vk::PhysicalDevice> physical_devices;

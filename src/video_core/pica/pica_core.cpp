@@ -6,9 +6,13 @@
 #include <limits> // AstraPro: Checked index address arithmetic.
 #include <chrono> // AstraEH: Bounded virtual-PICA stage timing.
 #include <system_error> // CodexAstraLocal: Optional coordinator startup resource refusal.
+#include <sstream> // CodexAstraLocal: Reuse bounded native shader serialization only on first fault.
+#include <json.hpp> // CodexAstraLocal: Self-describing producer evidence, never per-draw transport.
 #include "common/arch.h"
 #include "common/archives.h"
+#include "common/file_util.h" // CodexAstraLocal: Exclusive first-candidate sidecar retention.
 #include "common/microprofile.h"
+#include "common/scm_rev.h" // CodexAstraLocal: Bind producer evidence to actual executable source.
 #include "common/scope_exit.h"
 #include "common/settings.h"
 #include "common/thread.h" // CodexAstraLocal: Identify real CPU vertex workers in activity samples.
@@ -30,6 +34,7 @@
 #include "video_core/shader/shader.h"
 #include "video_core/pica/uberhar_cpu_draw_queue.h" // CodexAstraLocal: Bounded independent CPU draws.
 #include "video_core/shader_recovery_error.h" // CodexAstraLocal: Shared terminal completion channel.
+#include "video_core/renderer_software/sw_texture_demand.h" // CodexAstraLocal: Actual Software operand demand.
 
 namespace Pica {
 
@@ -210,6 +215,184 @@ struct PicaCore::ParallelVertexState {
     }
 };
 
+u32 PicaCore::SoftwareProducerMask() const {
+    // CodexAstraLocal TEST-ONLY LOG: Reuse the pixel consumer's six-stage demand,
+    // including its stage0 alpha behavior, then remove physically unused units.
+    // Only draw setup pays this work; remove after FEA producer reconstruction.
+    if (!software_producer_diagnostics || software_producer_attempted) return 0;
+    using Semantic = RasterizerRegs::VSOutputAttributes;
+    using Texture = TexturingRegs::TextureConfig;
+    const auto& state = regs.internal;
+    const auto demand = SwRenderer::GetFragmentDemand(state.texturing.GetTevStages(), state.lighting);
+    const auto lanes = [](u32 first, u32 count) { return ((1U << count) - 1) << first; };
+    u32 mask = lanes(Semantic::POSITION_X, 4);
+    if (demand.primary_color) mask |= lanes(Semantic::COLOR_R, 4);
+    if (demand.lighting) mask |= lanes(Semantic::QUATERNION_X, 4) | lanes(Semantic::VIEW_X, 3);
+    const std::array<u32, 3> coordinate{Semantic::TEXCOORD0_U, Semantic::TEXCOORD1_U,
+                                       Semantic::TEXCOORD2_U};
+    const auto textures = state.texturing.GetTextures();
+    for (u32 i = 0; i < textures.size(); ++i) {
+        const auto& texture = textures[i];
+        const auto type = i == 0 ? texture.config.type.Value() : Texture::Texture2D;
+        if (!(demand.textures & (1U << i)) || !texture.enabled ||
+            texture.config.address == 0 || type == Texture::Disabled) continue;
+        const u32 selected = i == 2 && state.texturing.main_config.texture2_use_coord1 ? 1 : i;
+        mask |= lanes(coordinate[selected], 2);
+        if (type != Texture::Texture2D) mask |= 1U << Semantic::TEXCOORD0_W;
+    }
+    if ((demand.textures & 8U) && state.texturing.main_config.texture3_enable) {
+        const u32 selected = state.texturing.main_config.texture3_coordinates;
+        // Invalid selectors still reach the original sampler error; diagnostics
+        // must not invent a coordinate or throw before that consumer.
+        if (selected < coordinate.size()) mask |= lanes(coordinate[selected], 2);
+    }
+    return mask;
+}
+
+u32 PicaCore::SoftwareInvalidSemantics(u32 mask, const OutputVertex& output) {
+    // CodexAstraLocal TEST-ONLY LOG: Integer bit inspection leaves signaling NaNs
+    // and FP status untouched. Padding/unused lanes are never inspected.
+    u32 invalid{};
+    while (mask) {
+        const u32 lane = std::countr_zero(mask);
+        mask &= mask - 1;
+        u32 bits;
+        std::memcpy(&bits, reinterpret_cast<const u8*>(&output) + lane * sizeof(f24), sizeof(bits));
+        if ((bits & 0x7f800000U) == 0x7f800000U) invalid |= 1U << lane;
+    }
+    return invalid;
+}
+
+PicaCore::SoftwareProducerSnapshot PicaCore::MakeSoftwareProducerSnapshot(
+    u32 mask, u32 invalid, const OutputVertex& output, ShaderSetup& setup,
+    const ShaderUnit& unit, u32 index, u32 vertex, const char* route,
+    bool fresh_unit, bool post_shader, u64 title) const {
+    // CodexAstraLocal TEST-ONLY LOG: Existing save serializers retain exact input,
+    // both output banks, post-unit carry, source/uniforms and semantic mapping.
+    // They do not serialize generated pointers. No guest memory is reread.
+    const auto fp = Common::Uberhar::ParallelFloatEnvironment::Capture();
+    std::ostringstream stream{std::ios::out | std::ios::binary};
+    {
+        oarchive archive{stream};
+        archive << regs.internal.reg_array << setup << unit << output;
+    }
+    SoftwareProducerSnapshot snapshot;
+    snapshot.payload = stream.str();
+    if (snapshot.payload.size() > 64 * 1024) throw std::runtime_error{"producer payload bound"};
+    const bool no_gs = regs.internal.pipeline.use_gs == PipelineRegs::UseGS::No;
+    ParallelVertexCertificate proof;
+    if (post_shader && no_gs) {
+        proof = AnalyzeParallelVertex(setup.GetProgramCode(), setup.GetSwizzleData(),
+            setup.entry_point, ParallelVertexBooleanUniforms(setup.uniforms),
+            regs.internal.vs.output_mask, ParallelVertexContract::FullArithmeticReads);
+    }
+    // The four carry exits follow full effect/flow validation. A genuinely fresh
+    // unit supplies their missing initial state; later carried units do not.
+    const bool validated_carry = proof.status == ParallelVertexStatus::TemporaryCarry ||
+        proof.status == ParallelVertexStatus::AddressCarry ||
+        proof.status == ParallelVertexStatus::ConditionCarry ||
+        proof.status == ParallelVertexStatus::OutputCarry;
+    snapshot.replay_qualified = post_shader && no_gs &&
+        (proof.Supported() || (fresh_unit && validated_carry));
+    // CodexAstraLocal: The extern revision has unknown array extent here; own
+    // its text before JSON's compatible-type deduction rather than deducing char[].
+    nlohmann::json metadata{
+        {"schema", 1}, {"author", "CodexAstraLocal"}, {"build", std::string{Common::g_scm_rev}},
+        {"title", fmt::format("{:016X}", title)}, {"route", route},
+        {"engine", shader_engine->EngineName()}, {"submitted_index", index}, {"vertex_id", vertex},
+        {"semantic_mask", mask}, {"nonfinite_mask", invalid}, {"fresh_unit", fresh_unit},
+        {"post_shader", post_shader}, {"no_gs", no_gs}, {"entry", setup.entry_point},
+        {"program_hash", fmt::format("{:016x}", setup.GetProgramCodeHash())},
+        {"swizzle_hash", fmt::format("{:016x}", setup.GetSwizzleDataHash())},
+        {"boolean_uniforms", ParallelVertexBooleanUniforms(setup.uniforms)},
+        {"replay_qualified", snapshot.replay_qualified},
+        {"proof", {{"contract", "FullArithmeticReads"}, {"status", static_cast<u32>(proof.status)},
+            {"pc", proof.pc}, {"nodes", proof.nodes}, {"register", proof.reg}, {"lanes", proof.lanes}}},
+        {"payload", "Boost native binary archive: RegsInternal.reg_array, ShaderSetup, ShaderUnit, OutputVertex"},
+        {"unit_state", post_shader ? "post_shader_not_pre_carry" : "mid_geometry_emit_not_pre_carry"},
+        {"unit_correspondence", post_shader ? "same_invocation" : "unqualified: buffered GS vertex may precede current emit"},
+        {"scope", "first demanded nonfinite source candidate before clipping; not proof of a failing covered pixel"},
+        {"replay_limit", "same backend/FP controls; bounded offline shader values only; no live replay; pre-FP-status and full draw/texture/assembler state absent"},
+        {"initial_state", snapshot.replay_qualified ? "zero unit plus captured actual input registers" : "unavailable: do not replace pre-carry with captured post-state"},
+        {"payload_bytes", snapshot.payload.size()}};
+#if defined(__aarch64__) && (defined(__GNUC__) || defined(__clang__))
+    metadata["host"] = "aarch64";
+    metadata["fp_control"] = fp.control;
+    metadata["fp_post_status"] = fp.status;
+#elif defined(__i386__) || defined(__x86_64__)
+    metadata["host"] = "x86";
+    metadata["fp_mxcsr"] = fp.mxcsr;
+    std::array<u8, sizeof(fp.environment)> x87{};
+    std::memcpy(x87.data(), &fp.environment, x87.size());
+    metadata["fp_x87_native_bytes"] = x87;
+#else
+    metadata["host"] = "portable_fenv_unqualified";
+    snapshot.replay_qualified = false;
+    metadata["replay_qualified"] = false;
+    metadata["initial_state"] = "unqualified host FP controls";
+#endif
+    snapshot.metadata = metadata.dump();
+    if (snapshot.metadata.size() > 4096) throw std::runtime_error{"producer metadata bound"};
+    return snapshot;
+}
+
+void PicaCore::ObserveSoftwareProducer(u32 mask, const OutputVertex& output, ShaderSetup& setup,
+    const ShaderUnit& unit, u32 index, u32 vertex, const char* route,
+    bool fresh_unit, bool post_shader) noexcept {
+    if (!mask || software_producer_attempted) return;
+    const u32 invalid = SoftwareInvalidSemantics(mask, output);
+    if (!invalid) return;
+    // CodexAstraLocal TEST-ONLY LOG: One bounded attempt, without stopping or
+    // repairing the draw. Preserve FP state and all diagnostic failures. Remove
+    // after this capsule yields a fixed/reproduced producer regression.
+    software_producer_attempted = true;
+    const auto fp = Common::Uberhar::ParallelFloatEnvironment::Capture();
+    SCOPE_EXIT({ fp.Apply(); });
+    try {
+        u64 title{};
+        auto& system = Core::System::GetInstance();
+        if (system.IsPoweredOn()) (void)system.GetAppLoader().ReadProgramId(title);
+        const auto snapshot = MakeSoftwareProducerSnapshot(mask, invalid, output, setup, unit,
+            index, vertex, route, fresh_unit, post_shader, title);
+        const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+        const std::string path = FileUtil::GetUserPath(FileUtil::UserPath::DumpDir) +
+            fmt::format("software_producer_{:016X}_{}.usp", title, stamp);
+        bool written = false;
+        // Match the existing capture's exclusive raw-filesystem contract. A
+        // provider that strips 'x' must not overwrite an earlier incident.
+#if !defined(_WIN32) && !defined(HAVE_LIBRETRO_VFS)
+#if defined(ANDROID)
+        const bool raw_filesystem = AndroidUtils::CanUseRawFS();
+#else
+        const bool raw_filesystem = true;
+#endif
+        if (raw_filesystem && !FileUtil::Exists(path) && FileUtil::CreateFullPath(path)) {
+            FileUtil::IOFile file{path, "wbx"};
+            std::array<u8, 16> header{'U', 'B', 'S', 'W', 'P', '0', '0', '1'};
+            for (u32 i = 0; i < 4; ++i) {
+                header[8 + i] = static_cast<u8>(snapshot.metadata.size() >> (8 * i));
+                header[12 + i] = static_cast<u8>(snapshot.payload.size() >> (8 * i));
+            }
+            written = file.IsOpen() && file.WriteBytes(header.data(), header.size()) == header.size() &&
+                file.WriteBytes(snapshot.metadata.data(), snapshot.metadata.size()) == snapshot.metadata.size() &&
+                file.WriteBytes(snapshot.payload.data(), snapshot.payload.size()) == snapshot.payload.size();
+            written &= file.Flush();
+            written &= file.Close();
+        }
+#endif
+        LOG_ERROR(Render_Software,
+            "Software producer candidate: schema=1 written={} title={:016X} route={} engine={} "
+            "index={} vertex={} semantic_mask={:#x} nonfinite_mask={:#x} replay_qualified={} path={}",
+            written, title, route, shader_engine->EngineName(), index, vertex, mask, invalid,
+            snapshot.replay_qualified, path);
+    } catch (...) {
+        // Diagnostic allocation, serialization and filesystem errors cannot mask
+        // a later sampler failure or create a new renderer failure themselves.
+        try { LOG_WARNING(Render_Software, "Software producer candidate unavailable: route={} index={} vertex={}",
+                          route, index, vertex); } catch (...) {}
+    }
+}
+
 PicaCore::PicaCore(Memory::MemorySystem& memory_, std::shared_ptr<DebugContext> debug_context_)
     : memory{memory_}, debug_context{std::move(debug_context_)},
       geometry_pipeline{regs.internal, gs_unit, gs_setup},
@@ -219,7 +402,11 @@ PicaCore::PicaCore(Memory::MemorySystem& memory_, std::shared_ptr<DebugContext> 
       cpu_vertex_only{Settings::UsesReadyGpuVertices(Settings::values.uberhar_test_mode.GetValue()) &&
                       Settings::values.uberhar_cpu_vertex_only.GetValue()},
       // CodexAstraLocal: Changing overlap never changes worker admission or vertex inputs.
-      cpu_prefix_overlap{Settings::values.uberhar_cpu_prefix_overlap.GetValue()} {
+      cpu_prefix_overlap{Settings::values.uberhar_cpu_prefix_overlap.GetValue()},
+      // CodexAstraLocal TEST-ONLY LOG: Immutable mode admission keeps producer
+      // observation out of Native/Combo workers and deferred packets.
+      software_producer_diagnostics{
+          Settings::values.uberhar_test_mode.GetValue() == Settings::UberharTestMode::Software} {
     // CodexAstraLocal Log Line: One immutable route label binds performance
     // comparisons to actual placement, without per-draw logging or live toggles.
     LOG_INFO(Render, "Uberhar: combo_cpu_vertices_only={} cpu_prefix_overlap={}",
@@ -233,6 +420,13 @@ PicaCore::PicaCore(Memory::MemorySystem& memory_, std::shared_ptr<DebugContext> 
             rasterizer->AddTriangle(v0, v1, v2);
         };
         const auto vertex = OutputVertex(regs.internal.rasterizer, buffer);
+        if (software_producer_diagnostics && regs.internal.pipeline.use_gs != PipelineRegs::UseGS::No) {
+            // CodexAstraLocal TEST-ONLY LOG: This is an actual GS emitter callback,
+            // not a completed VS invocation; preserve that replay limitation.
+            ObserveSoftwareProducer(SoftwareProducerMask(), vertex, gs_setup, gs_unit,
+                std::numeric_limits<u32>::max(), std::numeric_limits<u32>::max(),
+                "geometry_emit", false, false);
+        }
         primitive_assembler.SubmitVertex(vertex, add_triangle);
     };
 
@@ -1433,6 +1627,13 @@ void PicaCore::DrawImmediate() {
     shader_unit.LoadInput(regs.internal.vs, immediate.input_vertex);
     shader_engine->Run(vs_setup, shader_unit);
     shader_unit.WriteOutput(regs.internal.vs, output);
+    if (const u32 mask = SoftwareProducerMask(); mask &&
+        regs.internal.pipeline.use_gs == PipelineRegs::UseGS::No) {
+        // CodexAstraLocal TEST-ONLY LOG: Immediate invocations really start from
+        // a fresh unit; observe the same semantic conversion before submission.
+        ObserveSoftwareProducer(mask, OutputVertex{regs.internal.rasterizer, output},
+            vs_setup, shader_unit, 0, 0, "immediate_cpu", true, true);
+    }
 
     // Reconfigure geometry pipeline if needed.
     if (immediate.reset_geometry_pipeline) {
@@ -1863,6 +2064,9 @@ void PicaCore::LoadVertices(bool is_indexed, std::chrono::steady_clock::time_poi
     geometry_pipeline.Reconfigure();
     geometry_pipeline.Setup(shader_engine.get());
     ASSERT(!geometry_pipeline.NeedIndexInput() || is_indexed);
+    // CodexAstraLocal TEST-ONLY LOG: Choose Software observation once per draw;
+    // other modes retain their uninstrumented per-invocation loops.
+    const u32 software_semantic_mask = SoftwareProducerMask();
 
     // AstraEH: Experimental no-GS draws can reuse final rasterizer vertices. Keep
     // Custom, debugger and geometry-shader execution on their established path.
@@ -1931,8 +2135,8 @@ void PicaCore::LoadVertices(bool is_indexed, std::chrono::steady_clock::time_poi
             // vertex partitions input loading, shader execution and output conversion.
             // CodexAstraLocal: Share input/output source while specializing only
             // the ordinary call policy. No FIFO, state-carry or transport behavior changes.
-            const auto shade_with_run = [&]<bool Sample>(u32 vertex, u32 index,
-                                                         const auto& run_shader) {
+            const auto shade_with_run = [&]<bool Sample, bool ObserveProducer = false>(
+                u32 vertex, u32 index, const auto& run_shader, const char* producer_route = nullptr) {
                 using Clock = NativeVertexSamples::Clock;
                 Clock::time_point start, loaded, shaded;
                 if constexpr (Sample)
@@ -1951,6 +2155,12 @@ void PicaCore::LoadVertices(bool is_indexed, std::chrono::steady_clock::time_poi
                 if constexpr (Sample)
                     shaded = Clock::now();
                 auto output = plan.Convert(shader_unit);
+                if constexpr (ObserveProducer) {
+                    // CodexAstraLocal TEST-ONLY LOG: Inputs remain the actual
+                    // loaded registers; post-state is never presented as pre-carry.
+                    ObserveSoftwareProducer(software_semantic_mask, output, vs_setup, shader_unit,
+                        index, vertex, producer_route, index == 0, true);
+                }
                 if constexpr (Sample) {
                     const auto converted = Clock::now();
                     native_samples.input_ns += NativeVertexSamples::Nanoseconds(start, loaded);
@@ -2203,6 +2413,28 @@ void PicaCore::LoadVertices(bool is_indexed, std::chrono::steady_clock::time_poi
                 counts = RunTimedNativeVertexBatch(pipeline.num_vertices, is_indexed, vertex_at,
                     load_input, [&] { run_diagnostic(shader_unit); },
                     [&] { return plan.Convert(shader_unit); }, submit, *vertex_timing, *timing_range);
+            } else if (software_semantic_mask) {
+                // CodexAstraLocal TEST-ONLY LOG: No snapshots, hashes or files on
+                // finite outputs. Keep native sampling/accounting unchanged and
+                // compile the observer out of every non-Software shader closure.
+                const auto software_shade = [&]<bool Sample>(u32 vertex, u32 index) {
+                    return shade_with_run.template operator()<Sample, true>(vertex, index,
+                        run_diagnostic, context ? "native_plan_prepared_cpu" : "native_plan_inherited_cpu");
+                };
+                if (native_batch_sampled) {
+                    native_samples.setup_ns += NativeVertexSamples::Nanoseconds(
+                        batch_start, std::chrono::steady_clock::now());
+                    const u32 sample_index =
+                        (static_cast<u32>(samples + 1) * 2654435761U) % pipeline.num_vertices;
+                    counts = RunNativeVertexBatch<true>(pipeline.num_vertices, is_indexed, vertex_at,
+                        software_shade, submit, native_samples, sample_index);
+                    ++native_samples.batches;
+                    native_samples.batch_inputs += pipeline.num_vertices;
+                    native_samples.batch_invocations += counts.invocations;
+                } else {
+                    counts = RunNativeVertexBatch<false>(pipeline.num_vertices, is_indexed, vertex_at,
+                        software_shade, submit, native_samples);
+                }
             } else if (native_batch_sampled) {
                 // AstraEH: Include loader/JIT/map setup before the loop without timing every draw.
                 native_samples.setup_ns +=
@@ -2312,6 +2544,13 @@ void PicaCore::LoadVertices(bool is_indexed, std::chrono::steady_clock::time_poi
             shader_unit.LoadInput(regs.internal.vs, input);
             shader_engine->Run(vs_setup, shader_unit);
             shader_unit.WriteOutput(regs.internal.vs, vs_output);
+            if (software_semantic_mask && pipeline.use_gs == PipelineRegs::UseGS::No) {
+                // CodexAstraLocal TEST-ONLY LOG: Recovery mapping uses the actual
+                // inherited conversion, not the optimized plan being diagnosed.
+                ObserveSoftwareProducer(software_semantic_mask,
+                    OutputVertex{regs.internal.rasterizer, vs_output}, vs_setup, shader_unit,
+                    index, vertex, "legacy_mapping_cpu", invocations == 0, true);
+            }
 
             ++invocations;
             // AstraEH: Insert only on a miss; hits never move the FIFO cursor.

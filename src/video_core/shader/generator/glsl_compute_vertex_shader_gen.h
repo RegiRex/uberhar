@@ -22,9 +22,10 @@ enum class ComputeClipFailure : u32 {
     OutputCapacity,
 };
 
-// CodexAstraLocal: Original byte loads, FIFO-ordered guest shader invocations,
-// semantic mapping, quaternion fixup and homogeneous clipping all run in this
-// compute module. An empty translation is a terminal unsupported program.
+// CodexAstraLocal: Stage one performs original byte loads, FIFO-ordered guest
+// invocations and semantic mapping. Stage two consumes only a complete semantic
+// stream and publishes ordered assembly/clipping. Neither stage has a fallback.
 std::string GenerateComputeGuestVertex(const ProgramCode& program, const SwizzleData& swizzles,
                                        u32 entry, bool sanitize_mul);
+std::string GenerateComputeAssembly();
 } // namespace Pica::Shader::Generator::GLSL

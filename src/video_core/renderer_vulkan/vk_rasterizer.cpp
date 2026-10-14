@@ -1457,13 +1457,15 @@ void RasterizerVulkan::SyncTextureUnits(const Framebuffer* framebuffer,
     // CodexAstraLocal: Cache preparation may submit while making a texture
     // readable. Compute captures handles first and stamps its own descriptors
     // only after every potentially flushing preparation/reservation completes.
-    const auto texture_set = compute_bindings ? vk::DescriptorSet{} :
-        pipeline_cache.Acquire(DescriptorHeapType::Texture);
+    // CodexAstraLocal: Graphics also defers allocation to its final consumer;
+    // all cache/feedback resolution below still executes for every draw.
+    if (!compute_bindings)
+        pipeline_cache.BeginImageBindings(DescriptorHeapType::Texture);
     const auto bind = [&](u32 index, vk::ImageView view, vk::Sampler sampler) {
         if (compute_bindings)
             (*compute_bindings)[index] = {sampler, view, vk::ImageLayout::eGeneral};
         else
-            update_queue.AddImageSampler(texture_set, index, 0, view, sampler);
+            pipeline_cache.StageTexture(index, 0, view, sampler);
     };
 
     for (u32 texture_index = 0; texture_index < pica_textures.size(); ++texture_index) {
@@ -1517,11 +1519,11 @@ void RasterizerVulkan::SyncTextureUnits(const Framebuffer* framebuffer,
                 continue;
             }
             case TextureType::ShadowCube: {
-                BindShadowCube(texture, texture_set, framebuffer, compute_bindings);
+                BindShadowCube(texture, framebuffer, compute_bindings);
                 continue;
             }
             case TextureType::TextureCube: {
-                BindTextureCube(texture, texture_set, framebuffer, compute_bindings);
+                BindTextureCube(texture, framebuffer, compute_bindings);
                 continue;
             }
             default:
@@ -1555,26 +1557,32 @@ void RasterizerVulkan::SyncUtilityTextures(const Framebuffer* framebuffer) {
         shadow_reading &= shadow_texture.enabled;
     }
 
-    const auto utility_set = pipeline_cache.Acquire(DescriptorHeapType::Utility);
+    // CodexAstraLocal: Preserve the shadow binding plus the null normal-map binding.
+    pipeline_cache.BeginImageBindings(DescriptorHeapType::Utility);
+    // CodexAstraLocal: Every new/reused utility set retains the declared null
+    // normal-map binding; constructor initialization alone cannot cover new sets.
+    auto& normal_surface = res_cache.GetSurface(VideoCore::NULL_SURFACE_ID);
+    auto& normal_sampler = res_cache.GetSampler(VideoCore::NULL_SAMPLER_ID);
+    pipeline_cache.StageUtilityNormal(normal_surface.ImageView(), normal_sampler.Handle());
 
     // Reading and writing are mutually exclusive
     assert(!(shadow_writing && shadow_reading));
 
     if (shadow_writing) {
-        update_queue.AddStorageImage(utility_set, 0, framebuffer->ImageView(SurfaceType::Color));
+        pipeline_cache.StageUtility(framebuffer->ImageView(SurfaceType::Color));
     } else if (shadow_reading) {
         const u32 shadow_texture_unit = regs.lighting.config0.shadow_selector.Value();
         const auto shadow_texture = regs.texturing.GetTextures()[shadow_texture_unit];
         Surface& shadow_surface = res_cache.GetTextureSurface(shadow_texture);
-        update_queue.AddStorageImage(utility_set, 0, shadow_surface.StorageView());
+        pipeline_cache.StageUtility(shadow_surface.StorageView());
     } else {
         Surface& null_surface = res_cache.GetSurface(VideoCore::NULL_SURFACE_ID);
-        update_queue.AddStorageImage(utility_set, 0, null_surface.StorageView());
+        pipeline_cache.StageUtility(null_surface.StorageView());
     }
 }
 
 void RasterizerVulkan::BindShadowCube(const Pica::TexturingRegs::FullTextureConfig& texture,
-                                      vk::DescriptorSet texture_set, const Framebuffer* framebuffer,
+                                      const Framebuffer* framebuffer,
                                       ComputeRasterizer::TextureBindings* compute_bindings) {
     using CubeFace = Pica::TexturingRegs::CubeFace;
     auto info = Pica::Texture::TextureInfo::FromPicaRegister(texture.config, texture.format);
@@ -1597,13 +1605,14 @@ void RasterizerVulkan::BindShadowCube(const Pica::TexturingRegs::FullTextureConf
             (*compute_bindings)[slot] = {sampler.Handle(),
                 ComputeTextureView(surface, framebuffer, true), vk::ImageLayout::eGeneral};
         } else {
-            update_queue.AddImageSampler(texture_set, 0, binding, surface.StorageView(), sampler.Handle());
+            // CodexAstraLocal: Preserve each shadow array element in the exact payload.
+            pipeline_cache.StageTexture(0, binding, surface.StorageView(), sampler.Handle());
         }
     }
 }
 
 void RasterizerVulkan::BindTextureCube(const Pica::TexturingRegs::FullTextureConfig& texture,
-                                       vk::DescriptorSet texture_set, const Framebuffer* framebuffer,
+                                       const Framebuffer* framebuffer,
                                        ComputeRasterizer::TextureBindings* compute_bindings) {
     using CubeFace = Pica::TexturingRegs::CubeFace;
     const VideoCore::TextureCubeConfig config = {
@@ -1628,7 +1637,8 @@ void RasterizerVulkan::BindTextureCube(const Pica::TexturingRegs::FullTextureCon
         (*compute_bindings)[0] = {sampler.Handle(), ComputeTextureView(surface, framebuffer, false),
                                   vk::ImageLayout::eGeneral};
     } else
-        update_queue.AddImageSampler(texture_set, 0, 0, surface.ImageView(), sampler.Handle());
+        // CodexAstraLocal: Cube sampling retains its original typed view and sampler.
+        pipeline_cache.StageTexture(0, 0, surface.ImageView(), sampler.Handle());
 }
 
 void RasterizerVulkan::FlushAll() {

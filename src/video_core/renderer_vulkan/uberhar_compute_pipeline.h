@@ -19,14 +19,15 @@
 
 namespace Vulkan {
 
-// CodexAstraLocal: Four roles belong to the guest and raster compute owners.
+// CodexAstraLocal: Five roles belong to the guest and raster compute owners.
 // Raster/expand/pack share one first-failure latch because every failure is terminal.
 // A failed module/pipeline must stop before any draw publication.
-enum class ComputePipelineRole { GuestVertex, Raster, Expand, Pack };
+enum class ComputePipelineRole { GuestVertex, AssemblyClip, Raster, Expand, Pack };
 
 inline std::string_view ComputePipelineRoleName(ComputePipelineRole role) {
     switch (role) {
     case ComputePipelineRole::GuestVertex: return "guest_vertex";
+    case ComputePipelineRole::AssemblyClip: return "assembly_clip";
     case ComputePipelineRole::Raster: return "raster";
     case ComputePipelineRole::Expand: return "expand";
     case ComputePipelineRole::Pack: return "pack";

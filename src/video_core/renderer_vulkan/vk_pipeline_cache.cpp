@@ -265,6 +265,30 @@ void PipelineCache::LoadCache(const std::atomic_bool& stop_loading,
     LoadDiskCache(stop_loading, callback);
 }
 
+// CodexAstraLocal: All image/geometry/LUT preparation has completed before this
+// point. DescriptorUpdateQueue may flush writes but cannot submit scheduler work.
+void PipelineCache::ResolveImageBindings() {
+    const u64 tick = scheduler.CurrentTick();
+    const u64 epoch = instance.ImageDescriptorEpoch();
+    for (u32 index = 0; index < pending_images.size(); ++index) {
+        const auto type = static_cast<DescriptorHeapType>(index + 1);
+        const auto set = image_descriptor_reuse[index].Resolve(
+            pending_images[index], tick, epoch, [&](const ImageDescriptorPayload& payload) {
+                const auto allocated = Acquire(type);
+                for (std::size_t i = 0; i < payload.count; ++i) {
+                    const auto& write = payload.writes[i];
+                    if (write.type == vk::DescriptorType::eStorageImage)
+                        update_queue.AddStorageImage(allocated, write.binding, write.view, write.layout);
+                    else
+                        update_queue.AddImageSampler(allocated, write.binding, write.element,
+                                                     write.view, write.sampler, write.layout);
+                }
+                return allocated;
+            });
+        bound_descriptor_sets[index + 1] = set;
+    }
+}
+
 void PipelineCache::SwitchCache(u64 title_id, const std::atomic_bool& stop_loading,
                                 const VideoCore::DiskResourceLoadCallback& callback) {
     if (GetProgramID() == title_id) {
@@ -273,6 +297,10 @@ void PipelineCache::SwitchCache(u64 title_id, const std::atomic_bool& stop_loadi
                   title_id);
         return;
     }
+
+    // CodexAstraLocal: Title changes cannot inherit a previous owner's last value.
+    for (auto& entry : image_descriptor_reuse)
+        entry.Invalidate();
 
     // Make sure we have a valid pipeline cache before switching
     if (!driver_pipeline_cache) {
@@ -721,6 +749,9 @@ bool PipelineCache::BindPipeline(PipelineInfo& info, bool wait_built,
     // A full ready CPU/GPU fragment without alternatives consumes no TEV bytes.
     if (using_fallback || static_tev_cpu || alternative)
         EnsureDynamicTevState();
+    // CodexAstraLocal: Resolve on the consuming tick after every preparation
+    // that can flush. Record captures immutable handles immediately afterward.
+    ResolveImageBindings();
     // AstraEH: Copy TEV registers into the queued command; later draws may change them.
     scheduler.Record([this, is_dirty, constants_dirty, pipeline, using_fallback, static_tev_cpu, alternative,
                       draw_id = draw_requests, alternative_was_pending, constants = tev_constants,
@@ -1864,6 +1895,14 @@ void PipelineCache::ReportUberharStats(const char* kind) {
     const auto delivery = std::strcmp(kind, "progress") == 0
                               ? Common::Log::Delivery::Diagnostic
                               : Common::Log::Delivery::Reliable;
+    // CodexAstraLocal TEST-ONLY LOG: Remove after descriptor reuse is qualified
+    // on hardware; these are work counts, not CPU time or speedup estimates.
+    LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
+        "Uberhar image descriptors {}: texture_requests={} texture_hits={} texture_writes={} "
+        "utility_requests={} utility_hits={} utility_writes={}", kind,
+        image_descriptor_reuse[0].requests, image_descriptor_reuse[0].hits,
+        image_descriptor_reuse[0].writes, image_descriptor_reuse[1].requests,
+        image_descriptor_reuse[1].hits, image_descriptor_reuse[1].writes);
     // AstraPro: Existing five-second/final cadence; no per-draw strings.
     // CodexAstraUlt Log Line: Replace AstraPro's blocking progress enqueue; totals stay reliable.
     LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,

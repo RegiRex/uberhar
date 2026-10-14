@@ -5,6 +5,7 @@
 #pragma once
 
 #include <chrono> // AstraEH: Bounded vertex-stage windows.
+#include <string> // CodexAstraLocal: First-candidate producer capsule, allocated only on a fault.
 
 #include "common/common_types.h"
 #include "core/hle/service/gsp/gsp_interrupt.h"
@@ -164,6 +165,25 @@ private:
     void ReportVirtualVertices(const char* kind, std::chrono::steady_clock::time_point now);
     // AstraPro: GPU-heavy runs must not starve route progress diagnostics.
     void ReportVirtualVerticesIfDue();
+
+    // CodexAstraLocal TEST-ONLY LOG: Observe demanded Software semantics before
+    // clipping without changing execution. Remove with a reproduced/fixed FEA
+    // producer case; these host-only diagnostics never enter guest save state.
+    u32 SoftwareProducerMask() const;
+    static u32 SoftwareInvalidSemantics(u32 mask, const OutputVertex& output);
+    struct SoftwareProducerSnapshot {
+        std::string metadata;
+        std::string payload;
+        bool replay_qualified{};
+    };
+    SoftwareProducerSnapshot MakeSoftwareProducerSnapshot(
+        u32 mask, u32 invalid, const OutputVertex& output, ShaderSetup& setup,
+        const ShaderUnit& unit, u32 index, u32 vertex, const char* route,
+        bool fresh_unit, bool post_shader, u64 title) const;
+    void ObserveSoftwareProducer(u32 mask, const OutputVertex& output, ShaderSetup& setup,
+        const ShaderUnit& unit, u32 index, u32 vertex, const char* route,
+        bool fresh_unit, bool post_shader) noexcept;
+    friend struct SoftwareProducerTestAccess;
 
 public:
     union Regs {
@@ -441,6 +461,10 @@ private:
     const bool cpu_vertex_only;
     // CodexAstraLocal: Prefix comparison is frozen independently of CPU placement.
     const bool cpu_prefix_overlap;
+    // CodexAstraLocal TEST-ONLY LOG: One candidate/attempt per constructed PICA
+    // owner, including write failure. Remove with the producer diagnostic above.
+    const bool software_producer_diagnostics;
+    bool software_producer_attempted{};
     // CodexAstraLocal: Draw-synchronous CPU workers and bounded host certificates
     // never enter guest save state; their borrowed jobs finish before each draw returns.
     struct ParallelVertexState;

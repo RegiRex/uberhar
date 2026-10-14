@@ -20,6 +20,9 @@ std::string DecompileProgram(const Pica::ProgramCode& program_code,
                              // CodexAstraLocal: The independent compute producer
                              // additionally uses the retained A64 DP3/RSQ tree;
                              // existing graphics callers retain their source.
-                             bool compute_a64_math = false);
+                             bool compute_a64_math = false,
+                             // CodexAstraLocal: Compute can read the immutable
+                             // captured uniform bytes without a private bank.
+                             bool compute_uniform_reads = false);
 
 } // namespace Pica::Shader::Generator::GLSL

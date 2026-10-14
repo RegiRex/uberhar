@@ -10,6 +10,31 @@
 namespace SwRenderer {
 using Config = Pica::TexturingRegs::TextureConfig;
 using Format = Pica::TexturingRegs::TextureFormat;
+
+Common::Vec4<u8> TexelMemo::Read(const u8* source, const Pica::Texture::TextureInfo& info,
+                               std::size_t tile_bytes, u32 x, u32 y) {
+    // CodexAstraLocal: Resolve the same checked tile as LookupTexture. Include
+    // every raw-decoder interpretation in the exact key; collisions evict.
+    // Width/height/stride have already selected the physical tile address.
+    const auto* tile = source + (y / 8) * info.stride + (x / 8) * tile_bytes;
+    const auto address = reinterpret_cast<std::uintptr_t>(tile);
+    const std::size_t slot = ((x / 8) ^ ((y / 8) << 1) ^ (address >> 10)) & 7U;
+    auto& entry = entries[slot];
+    if (entry.tile != tile || entry.format != info.format || entry.shadow != info.is_shadow_source) {
+        entry.tile = tile;
+        entry.format = info.format;
+        entry.shadow = info.is_shadow_source;
+        entry.valid = 0;
+    }
+    const u32 index = (y % 8) * 8 + x % 8;
+    const u64 bit = u64{1} << index;
+    if (!(entry.valid & bit)) {
+        entry.colors[index] = Pica::Texture::LookupTexelInTile(tile, x % 8, y % 8, info, false);
+        entry.valid |= bit;
+    }
+    return entry.colors[index];
+}
+
 namespace {
 // CodexAstraLocal: Validate coordinates before float-to-integer conversion;
 // invalid shader coordinates become a contained error, never an invalid read.
@@ -36,8 +61,16 @@ bool Border(Config::WrapMode mode, s32 coordinate, u32 size) {
 }
 Common::Vec4f SampleLevel(std::span<const u8> data, const TextureLayout& layout,
                          const Config& config, u32 level, float u, float v, bool linear,
-                         const std::array<std::span<const u8>, 6>* faces, u32 face) {
+                         const std::array<std::span<const u8>, 6>* faces, u32 face,
+                         TexelMemo* memo) {
     const auto& info = layout.levels[level];
+    // CodexAstraLocal: Repeated filtering taps and ETC decoding can reuse work.
+    // Cheap nearest uncompressed samples retain the original direct decoder.
+    if (!linear && info.format != Format::ETC1 && info.format != Format::ETC1A4) memo = nullptr;
+    const auto read = [&](const u8* source, u32 x, u32 y) {
+        return memo ? memo->Read(source, info, layout.tile_bytes, x, y)
+                    : Pica::Texture::LookupTexture(source, x, y, info);
+    };
     // CodexAstraLocal: Ordinary cubemap filtering carries taps across the
     // selected face's edges. Three incident corner texels share a corner tap;
     // shadow cubemaps deliberately use their separate clamped-face PCF rule.
@@ -67,8 +100,8 @@ Common::Vec4f SampleLevel(std::span<const u8> data, const TextureLayout& layout,
                                    static_cast<s32>(info.width) - 1);
         const auto ty = std::clamp(FloorCoordinate((py / z * .5f + .5f) * info.height), 0,
                                    static_cast<s32>(info.height) - 1);
-        return Pica::Texture::LookupTexture((*faces)[selected].data() + layout.offsets[level],
-                                            tx, info.height - 1 - ty, info).Cast<float>();
+        return read((*faces)[selected].data() + layout.offsets[level],
+                    tx, info.height - 1 - ty).Cast<float>();
     };
     const auto tap = [&](s32 x, s32 y) {
         if (faces) {
@@ -86,8 +119,7 @@ Common::Vec4f SampleLevel(std::span<const u8> data, const TextureLayout& layout,
         }
         x = GetWrappedTexCoord(config.wrap_s, x, info.width);
         y = GetWrappedTexCoord(config.wrap_t, y, info.height);
-        return Pica::Texture::LookupTexture(data.data() + layout.offsets[level], x,
-                                            info.height - 1 - y, info).Cast<float>();
+        return read(data.data() + layout.offsets[level], x, info.height - 1 - y).Cast<float>();
     };
     const float x = u * info.width - (linear ? .5f : 0.f);
     const float y = v * info.height - (linear ? .5f : 0.f);
@@ -107,13 +139,14 @@ TextureLayout MakeTextureLayout(const Config& config, Format format, bool shadow
         throw VideoCore::ShaderRecoveryError{"CPU Software invalid tiled texture dimensions/format"};
     }
     TextureLayout result;
+    result.tile_bytes = Pica::Texture::CalculateTileSize(format);
     u32 width = config.width, height = config.height;
     for (u32 level = 0; ; ++level) {
         auto& info = result.levels[level];
         info = {0, width, height, 0, format, shadow};
         info.SetDefaultStride();
         result.offsets[level] = result.bytes;
-        result.bytes += Pica::Texture::CalculateTileSize(format) * (width / 8) * (height / 8);
+        result.bytes += result.tile_bytes * (width / 8) * (height / 8);
         result.max_level = level;
         if (shadow || level == config.lod.max_level || width <= 8 || height <= 8) break;
         width >>= 1;
@@ -130,7 +163,8 @@ TextureLayout MakeTextureLayout(const Config& config, Format format, bool shadow
 static Common::Vec4<u8> FilterTexture(std::span<const u8> data, const TextureLayout& layout,
                                const Config& config, float u, float v, float lod,
                                Settings::TextureSampling sampling,
-                               const std::array<std::span<const u8>, 6>* faces, u32 face) {
+                               const std::array<std::span<const u8>, 6>* faces, u32 face,
+                               TexelMemo* memo) {
     if (data.size() < layout.bytes) {
         throw VideoCore::ShaderRecoveryError{"CPU Software texture/mip range is unavailable"};
     }
@@ -161,30 +195,30 @@ static Common::Vec4<u8> FilterTexture(std::span<const u8> data, const TextureLay
     if (linear(config.mip_filter) && minify) {
         const u32 low = static_cast<u32>(std::floor(lod));
         const u32 high = std::min(low + 1, layout.max_level);
-        return RoundColor(Mix(SampleLevel(data, layout, config, low, u, v, filter, faces, face),
-                              SampleLevel(data, layout, config, high, u, v, filter, faces, face), lod - low));
+        return RoundColor(Mix(SampleLevel(data, layout, config, low, u, v, filter, faces, face, memo),
+                              SampleLevel(data, layout, config, high, u, v, filter, faces, face, memo), lod - low));
     }
     const u32 level = static_cast<u32>(std::floor(lod + .5f));
-    return RoundColor(SampleLevel(data, layout, config, level, u, v, filter, faces, face));
+    return RoundColor(SampleLevel(data, layout, config, level, u, v, filter, faces, face, memo));
 }
 
 Common::Vec4<u8> SampleTexture(std::span<const u8> data, const TextureLayout& layout,
                                const Config& config, float u, float v, float lod,
-                               Settings::TextureSampling sampling) {
-    return FilterTexture(data, layout, config, u, v, lod, sampling, nullptr, 0);
+                               Settings::TextureSampling sampling, TexelMemo* memo) {
+    return FilterTexture(data, layout, config, u, v, lod, sampling, nullptr, 0, memo);
 }
 
 Common::Vec4<u8> SampleCubeTexture(const std::array<std::span<const u8>, 6>& faces,
                                    const TextureLayout& layout, const Config& config,
                                    u32 face, float u, float v, float lod,
-                                   Settings::TextureSampling sampling) {
+                                   Settings::TextureSampling sampling, TexelMemo* memo) {
     if (face >= 6 || std::any_of(faces.begin(), faces.end(), [&](auto data) { return data.size() < layout.bytes; }))
         throw VideoCore::ShaderRecoveryError{"CPU Software cube range is unavailable"};
-    return FilterTexture(faces[face], layout, config, u, v, lod, sampling, &faces, face);
+    return FilterTexture(faces[face], layout, config, u, v, lod, sampling, &faces, face, memo);
 }
 
 Common::Vec4<u8> SampleShadow(std::span<const u8> data, const TextureLayout& layout,
-                              float u, float v, u32 depth, bool cube) {
+                              float u, float v, u32 depth, bool cube, TexelMemo* memo) {
     if (data.size() < layout.bytes) {
         throw VideoCore::ShaderRecoveryError{"CPU Software shadow range is unavailable"};
     }
@@ -197,7 +231,10 @@ Common::Vec4<u8> SampleShadow(std::span<const u8> data, const TextureLayout& lay
                    y >= static_cast<s32>(info.height)) {
             return 255.f;
         }
-        const auto color = Pica::Texture::LookupTexture(data.data(), x, info.height - 1 - y, info);
+        // CodexAstraLocal: Reuse only packed texel decoding. Each PCF tap still
+        // compares its own depth before density interpolation and rounding.
+        const auto color = memo ? memo->Read(data.data(), info, layout.tile_bytes, x, info.height - 1 - y)
+                                : Pica::Texture::LookupTexture(data.data(), x, info.height - 1 - y, info);
         const u32 reference = (u32{color.w} << 16) | (u32{color.z} << 8) | color.y;
         return reference > depth ? static_cast<float>(color.x) : 0.f;
     };

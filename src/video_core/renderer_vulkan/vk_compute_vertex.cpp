@@ -259,6 +259,22 @@ struct ComputeVertexProducer::Impl {
         programs.push_back(std::move(p));
         return programs.back();
     }
+    // CodexAstraLocal: The shared ordered assembly/clip kernel is independent of
+    // guest code. Produce has retired last_use before replacing either handle.
+    // Resolve both stages before dispatch, so a second-stage creation failure
+    // cannot leave a half-executed draw or publish a semantic tail.
+    void PrepareAssembly(bool disable_optimizer) {
+        if (assembly_pipeline && assembly_disable_optimizer == disable_optimizer) return;
+        const auto source = Pica::Shader::Generator::GLSL::GenerateComputeAssembly();
+        const auto code = CompileGLSL(source, vk::ShaderStageFlagBits::eCompute, "", disable_optimizer);
+        if (code.empty()) Refuse("Calculated assembly compute compilation failed");
+        auto objects = CreateComputePipeline(instance, *layout, source, code, disable_optimizer,
+                                             ComputePipelineRole::AssemblyClip,
+                                             reported_creation_failure);
+        assembly_module = std::move(objects.module);
+        assembly_pipeline = std::move(objects.pipeline);
+        assembly_disable_optimizer = disable_optimizer;
+    }
     Batch Produce(const ComputeVertexInput& input, bool disable_optimizer) {
         // CodexAstraLocal: This explicit first-version wait protects reuse and
         // yields a whole-batch admission result before any framebuffer mutation.
@@ -275,6 +291,7 @@ struct ComputeVertexProducer::Impl {
         const u32 first_word = ComputeVertexInput::HeaderWords + (count + 2) * 24;
         scheduler.Wait(last_use);
         auto& program = Pipeline(input, disable_optimizer);
+        PrepareAssembly(disable_optimizer);
         const auto limits = instance.GetPhysicalDevice().getProperties().limits;
         const auto meta_offset = Common::AlignUp<vk::DeviceSize>(input.raw.size(),
             std::max<vk::DeviceSize>(4, limits.minStorageBufferOffsetAlignment));
@@ -296,7 +313,8 @@ struct ComputeVertexProducer::Impl {
         updates.AddBuffer(set, 0, vk::Buffer{upload->buffer}, 0, input.raw.size(), vk::DescriptorType::eStorageBuffer);
         updates.AddBuffer(set, 1, vk::Buffer{upload->buffer}, meta_offset, sizeof(input.metadata), vk::DescriptorType::eStorageBuffer);
         updates.AddBuffer(set, 2, vk::Buffer{vertices->buffer}, 0, result_bytes, vk::DescriptorType::eStorageBuffer);
-        scheduler.Record([set, pipeline = *program.pipeline, pipeline_layout = *layout,
+        scheduler.Record([set, pipeline = *program.pipeline, clip_pipeline = *assembly_pipeline,
+                          pipeline_layout = *layout,
                           output = vk::Buffer{vertices->buffer}, status = vk::Buffer{readback->buffer}]
                           (vk::CommandBuffer cmd) {
             // CodexAstraLocal: Explicitly unpublish stale success before dispatch;
@@ -309,6 +327,16 @@ struct ComputeVertexProducer::Impl {
                 vk::PipelineStageFlagBits::eComputeShader, {}, input_ready, {}, {});
             cmd.bindPipeline(vk::PipelineBindPoint::eCompute, pipeline);
             cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, pipeline_layout, 0, set, {});
+            cmd.dispatch(1, 1, 1);
+            // CodexAstraLocal: Stage one owns FIFO/carry and writes complete
+            // semantic scratch plus a transient token. Stage two sees both only
+            // after this buffer-wide dependency; it alone publishes final state.
+            const vk::MemoryBarrier semantic_ready{
+                .srcAccessMask = vk::AccessFlagBits::eShaderWrite,
+                .dstAccessMask = vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eShaderWrite};
+            cmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader,
+                vk::PipelineStageFlagBits::eComputeShader, {}, semantic_ready, {}, {});
+            cmd.bindPipeline(vk::PipelineBindPoint::eCompute, clip_pipeline);
             cmd.dispatch(1, 1, 1);
             const vk::MemoryBarrier complete{.srcAccessMask = vk::AccessFlagBits::eShaderWrite,
                 .dstAccessMask = vk::AccessFlagBits::eTransferRead | vk::AccessFlagBits::eShaderRead};
@@ -379,6 +407,9 @@ struct ComputeVertexProducer::Impl {
     DescriptorUpdateQueue& updates;
     std::unique_ptr<DescriptorHeap> descriptors;
     vk::UniquePipelineLayout layout;
+    vk::UniqueShaderModule assembly_module;
+    vk::UniquePipeline assembly_pipeline;
+    bool assembly_disable_optimizer{};
     std::vector<Program> programs;
     std::unique_ptr<Buffer> upload, vertices, readback;
     u64 last_use{};

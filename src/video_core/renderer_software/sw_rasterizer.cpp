@@ -5,12 +5,14 @@
 #include <boost/container/static_vector.hpp>
 #include <bit> // CodexAstraLocal: Exceptional diagnostics preserve float operand bits.
 #include <limits>
+#include <optional> // CodexAstraLocal: Feedback/untextured rows construct no texel memo.
 #include "common/logging/log.h"
 #include "common/microprofile.h"
 #include "common/quaternion.h"
 #include "common/settings.h" // CodexAstraLocal: Restart-only software participant budget.
 #include "common/thread.h" // CodexAstraLocal: Identify sleeping raster workers in ordinary logs.
 #include "common/vector_math.h"
+#include "core/core.h" // CodexAstraLocal: Memo admission excludes concurrent guest writers.
 #include "core/memory.h"
 #include "video_core/pica/output_vertex.h"
 #include "video_core/pica/pica_core.h"
@@ -462,6 +464,28 @@ void RasterizerSoftware::ProcessTriangle(const Vertex& v0, const Vertex& v1, con
 
     std::array<PreparedTexture, 3> prepared_textures;
     const bool parallel_safe = PrepareTextures(textures, prepared_textures, demand_mask);
+    // CodexAstraLocal: Do not initialize memo entries for untextured work or
+    // cheap nearest uncompressed sampling; only repeated taps/ETC can use them.
+    const auto sampling = Settings::values.texture_sampling.GetValue();
+    bool reusable_texels = false;
+    for (u32 i = 0; i < textures.size(); ++i) {
+        if (prepared_textures[i].layout.bytes == 0) continue;
+        const auto& texture = textures[i];
+        const auto type = i == 0 ? texture.config.type.Value() : TexturingRegs::TextureConfig::Texture2D;
+        reusable_texels |= type == TexturingRegs::TextureConfig::Shadow2D ||
+            type == TexturingRegs::TextureConfig::ShadowCube ||
+            texture.format == TexturingRegs::TextureFormat::ETC1 ||
+            texture.format == TexturingRegs::TextureFormat::ETC1A4 ||
+            sampling == Settings::TextureSampling::Linear ||
+            (sampling == Settings::TextureSampling::GameControlled &&
+             (texture.config.min_filter == TexturingRegs::TextureConfig::Linear ||
+              texture.config.mag_filter == TexturingRegs::TextureConfig::Linear));
+    }
+    // CodexAstraLocal: Nonaliasing alone does not exclude DSP/RPC/async guest
+    // writes. The owner admits reuse only while that existing execution guard
+    // is clear; no new guest job starts before the complete triangle join.
+    const bool memo_safe = reusable_texels && CanMemoizeTexels(parallel_safe,
+        Core::System::GetInstance().HasConcurrentGuestMemoryWriters());
 
     // CodexAstraLocal: Quad helpers use the same unbiased interpolation plane
     // as covered pixels. Top-left coverage offsets must never alter attributes
@@ -493,12 +517,23 @@ void RasterizerSoftware::ProcessTriangle(const Vertex& v0, const Vertex& v1, con
     const float depth_scale = f24::FromRaw(regs.rasterizer.viewport_depth_range).ToFloat32();
     const float depth_offset = f24::FromRaw(regs.rasterizer.viewport_depth_near_plane).ToFloat32();
     const bool w_buffer = regs.rasterizer.depthmap_enable == RasterizerRegs::DepthBuffering::WBuffering;
+    // CodexAstraLocal: A complete Copy consumes no destination color. Decide
+    // once, then preserve the same alpha/fog/depth/stencil and final encoding.
+    const auto& merger = regs.framebuffer.output_merger;
+    const bool overwrite_color = !merger.alphablend_enable &&
+        merger.logic_op == FramebufferRegs::LogicOp::Copy && merger.red_enable &&
+        merger.green_enable && merger.blue_enable && merger.alpha_enable;
 
     // CodexAstraLocal: The owner and sleeping workers steal disjoint small row
     // groups. Preserve the inherited pixel-center traversal inside each group;
     // no per-scanline heap task or extra owner wait thread is needed.
     const u32 rows = max_y > min_y ? (max_y - min_y) / 0x10 : 0;
     const auto process_rows = [&](u32 first, u32 end) {
+        // CodexAstraLocal: This callback owns requested decoded texels only for
+        // its row group. Feedback and concurrent-writer routes pass no memo.
+        std::optional<TexelMemo> memo;
+        if (memo_safe) memo.emplace();
+        auto* const texel_memo = memo ? &*memo : nullptr;
         for (u32 row = first; row < end; ++row) {
             const u16 y = static_cast<u16>(min_y + 8 + row * 0x10);
             // CodexAstraLocal: Adjacent covered pixels share immutable helper
@@ -628,7 +663,7 @@ void RasterizerSoftware::ProcessTriangle(const Vertex& v0, const Vertex& v1, con
                 }
                 const u32 lane = ((x >> 4) & 1U) | (((y >> 4) & 1U) << 1);
                 const auto texture_color = TextureColor(uv, textures, tc0_w, prepared_textures,
-                    quad, lane, demand_mask, footprint_mask, x >> 4, y >> 4);
+                    quad, lane, demand_mask, footprint_mask, x >> 4, y >> 4, texel_memo);
 
                 Common::Vec4<u8> primary_fragment_color = {0, 0, 0, 0};
                 Common::Vec4<u8> secondary_fragment_color = {0, 0, 0, 0};
@@ -683,7 +718,8 @@ void RasterizerSoftware::ProcessTriangle(const Vertex& v0, const Vertex& v1, con
                 if (regs.framebuffer.framebuffer.allow_color_write != 0) {
                     // CodexAstraLocal: A depth-only draw has no color read or
                     // write; an absent unused color target is not an error.
-                    const auto result = PixelColor(x, y, combiner_output);
+                    const auto result = overwrite_color ? combiner_output
+                                                        : PixelColor(x, y, combiner_output);
                     fb.DrawPixel(x >> 4, y >> 4, result);
                 }
             }
@@ -787,7 +823,7 @@ std::array<Common::Vec4<u8>, 4> RasterizerSoftware::TextureColor(
     std::span<const TexturingRegs::FullTextureConfig, 3> textures, f24 tc0_w,
     const std::array<PreparedTexture, 3>& prepared,
     const std::array<TextureCoordinates, 4>& quad, u32 lane, u32 demand_mask,
-    u32 footprint_mask, u16 pixel_x, u16 pixel_y) const {
+    u32 footprint_mask, u16 pixel_x, u16 pixel_y, TexelMemo* memo) const {
     std::array<Common::Vec4<u8>, 4> texture_color{};
     for (u32 i = 0; i < 3; ++i) {
         const auto& texture = textures[i];
@@ -841,7 +877,7 @@ std::array<Common::Vec4<u8>, 4> RasterizerSoftware::TextureColor(
                 const s32 query = std::max(0, static_cast<s32>(std::min(shadow_z, 1.f) * 0xFFFFFF) -
                                                static_cast<s32>(regs.texturing.shadow.bias.Value() * 2));
                 texture_color[i] = SampleShadow(prepared[i].faces[face], prepared[i].layout,
-                                                  u.ToFloat32(), v.ToFloat32(), query, cube);
+                                                  u.ToFloat32(), v.ToFloat32(), query, cube, memo);
                 continue;
             }
             // CodexAstraLocal: Project all helper lanes onto the selected cube face
@@ -874,11 +910,11 @@ std::array<Common::Vec4<u8>, 4> RasterizerSoftware::TextureColor(
             if (cube) {
                 texture_color[i] = SampleCubeTexture(prepared[i].faces, prepared[i].layout,
                     texture.config, face, u.ToFloat32(), v.ToFloat32(), lod,
-                    Settings::values.texture_sampling.GetValue());
+                    Settings::values.texture_sampling.GetValue(), memo);
             } else {
                 texture_color[i] = SampleTexture(prepared[i].faces[face], prepared[i].layout, texture.config,
                                                    u.ToFloat32(), v.ToFloat32(), lod,
-                                                   Settings::values.texture_sampling.GetValue());
+                                                   Settings::values.texture_sampling.GetValue(), memo);
             }
         } catch (const VideoCore::ShaderRecoveryError& error) {
             // CodexAstraLocal TEST-ONLY LOG payload: this path only builds a
