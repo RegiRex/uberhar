@@ -9,6 +9,10 @@ import shlex
 import subprocess
 import tempfile
 
+# CodexAstraLocal: Reuse the existing comment/string-aware balanced extractor;
+# a neighboring PicaCore method is not a stable end boundary for this struct.
+from test_optional_fragment_worker import extract
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -22,15 +26,21 @@ def main():
              root / 'src/video_core/pica/pica_core.cpp',
              root / 'src/video_core/pica/shader_setup.h',
              root / 'src/video_core/pica/shader_setup.cpp',
-             root / 'src/video_core/pica/uberhar_parallel_vertex.h']
+             root / 'src/video_core/pica/uberhar_parallel_vertex.h',
+             root / 'tools/uberhar/test_optional_fragment_worker.py']
     def hashes():
         return {str(p.relative_to(root)): hashlib.sha256(p.read_bytes()).hexdigest() for p in paths}
     proof = {'author': 'CodexAstraLocal', 'sources_before': hashes(), 'variants': []}
     pica, setup = paths[2].read_text(), paths[3].read_text()
-    start, end = 'struct PicaCore::ParallelVertexState {', '\nPicaCore::PicaCore('
-    if pica.count(start) != 1 or pica.count(end) != 1:
+    start = 'struct PicaCore::ParallelVertexState {'
+    if pica.count(start) != 1:
         raise RuntimeError('Production cache extraction boundary changed')
-    cache = pica[pica.index(start):pica.index(end)].replace(start, 'struct ParallelVertexState {', 1)
+    # CodexAstraLocal: Compile exactly the production struct, preserving nested
+    # bodies while excluding unrelated diagnostics inserted before the constructor.
+    cache = extract(pica, start)
+    if not pica[pica.index(start) + len(cache):].lstrip().startswith(';'):
+        raise RuntimeError('Production cache struct terminator changed')
+    cache = cache.replace(start, 'struct ParallelVertexState {', 1) + ';\n'
     # CodexAstraLocal: Defects must compile and reach the fresh-certificate oracle
     # or actual restore/safety assertions. Source checks alone are not evidence.
     mutations = [
@@ -65,6 +75,10 @@ def main():
                 '-Iexternals/nihstro/include', str(paths[1]), str(paths[4]), '-o', str(binary)]
             compiled = subprocess.run(command, cwd=root, capture_output=True, timeout=120)
             (variant / 'compile.log').write_bytes(compiled.stdout + compiled.stderr)
+            # CodexAstraLocal: Surface compiler failures in the job log as well
+            # as the retained artifact so a failed gate is directly diagnosable.
+            if compiled.returncode:
+                print((compiled.stdout + compiled.stderr).decode(errors='replace'), flush=True)
             compiled.check_returncode()
             run = subprocess.run([str(binary)], capture_output=True, timeout=30)
             text = (run.stdout + run.stderr).decode()

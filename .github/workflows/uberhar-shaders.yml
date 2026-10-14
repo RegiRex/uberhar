@@ -173,6 +173,7 @@ jobs:
       # CodexAstraLocal: Retain actual CPU overlap/rollback failure evidence.
       # CodexAstraLocal: Retain allocation and terminal worker-boundary controls.
       # CodexAstraLocal: Retain descriptor pixels, sources and failure controls.
+      # CodexAstraLocal: Preserve proof-cache extraction and compiler failures.
       - name: Upload CPU coordination contract evidence
         if: always()
         uses: actions/upload-artifact@v7
@@ -185,6 +186,9 @@ jobs:
             build/uberhar-probe/parallel-assembly/**/provenance.json
             build/uberhar-probe/parallel-assembly/**/*.stdout
             build/uberhar-probe/parallel-assembly/**/*.stderr
+            build/uberhar-probe/parallel-cache/**/provenance.json
+            build/uberhar-probe/parallel-cache/**/*.log
+            build/uberhar-probe/parallel-cache/**/parallel_cache.inc
             build/uberhar-probe/cpu-prefix/*.log
             build/uberhar-probe/cpu-prefix/provenance.json
             build/uberhar-probe/cpu-prefix/actual_append.inc
