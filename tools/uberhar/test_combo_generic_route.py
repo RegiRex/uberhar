@@ -26,7 +26,10 @@ def main():
     bodies = '\n'.join(extract(source, signature) for signature in (
         'bool PipelineCache::PreferReadySpecializedFragment(',
         'bool PipelineCache::ReadyGpuFragmentPreflight(',
-        'void PipelineCache::UseFragmentShader('))
+        'void PipelineCache::UseFragmentShader(',
+        # CodexAstraLocal: Exercise the real deferred consumer as well as setup;
+        # adding only its pending member would retain obsolete eager assertions.
+        'void PipelineCache::EnsureDynamicTevState()'))
     # CodexAstraUlt: Supplement execution with integration checks that the same gate
     # reaches binding/preparation and both Combo modes allocate their optional worker.
     for signature in ('bool PipelineCache::BindPipeline(',
@@ -61,12 +64,15 @@ def main():
 Settings::Values Settings::values;
 // CodexAstraUlt: Model shader payload/device boundaries only; routing methods below are extracted.
 namespace Pica {
-struct RegsInternal { bool supported{true}; };
+// CodexAstraLocal: A distinct payload per draw exposes stale retry snapshots.
+struct RegsInternal { bool supported{true}; int transport{128}; };
 namespace Shader {
 struct UserConfig { bool cacheable{true}; bool IsCacheable() const { return cacheable; } };
 struct FSConfig {
-    explicit FSConfig(const RegsInternal& regs) : supported{regs.supported} {}
+    explicit FSConfig(const RegsInternal& regs)
+        : supported{regs.supported}, transport{regs.transport} {}
     bool supported{};
+    int transport{};
     struct { std::array<int,6> tev_stages{}; struct { void Assign(int) {} } combiner_buffer_input; } texture;
 };
 }}
@@ -77,8 +83,18 @@ enum class DynamicTevSupport { Ready, Unsupported };
 inline DynamicTevSupport CheckDynamicTevSupport(const FSConfig& config, const Pica::Shader::UserConfig&) {
     return config.supported ? DynamicTevSupport::Ready : DynamicTevSupport::Unsupported;
 }
-inline int MakeDynamicTevState(const FSConfig&, int) { return 128; }
+inline int MakeDynamicTevState(const FSConfig& config, int) { return config.transport; }
 }
+// CodexAstraLocal: Model only the pure producer endpoint. Exact full-config
+// cache equality is covered by the separate production-cache fixture; real
+// EnsureDynamicTevState below owns consumption, reset and accounting here.
+struct DynamicTevPreparation {
+    unsigned calls{};
+    int Get(const FSConfig& config, int profile) {
+        ++calls;
+        return GLSL::MakeDynamicTevState(config, profile);
+    }
+};
 enum ProgramType { VS, FS, GS };
 struct Shader {};
 struct Disk {
@@ -115,6 +131,9 @@ struct PipelineCache {
     bool tev_supported{};
     GLSL::DynamicTevSupport tev_support_reason{};
     std::optional<FSConfig> tev_family_config, virtual_fs_config;
+    // CodexAstraLocal: Match .46's draw-owned deferred transport obligation.
+    std::optional<FSConfig> pending_tev_transport;
+    DynamicTevPreparation dynamic_tev_preparation;
     // CodexAstraLocal: UseFragmentShader must clear this borrowed previous-draw
     // pointer before either supported generic setup or mandatory recovery.
     const FSConfig* prepared_cpu_family{};
@@ -126,6 +145,7 @@ struct PipelineCache {
     bool PreferReadySpecializedFragment(const Pica::Shader::UserConfig&) const;
     bool ReadyGpuFragmentPreflight(const Pica::RegsInternal&, const Pica::Shader::UserConfig&);
     void UseFragmentShader(const Pica::RegsInternal&, const Pica::Shader::UserConfig&, bool);
+    void EnsureDynamicTevState();
 };
 '''
     tests = r'''
@@ -164,25 +184,50 @@ int main() try {
             Check(disk.optional_calls == unsigned(specialized), "generic mode warmed optional FS");
             const FSConfig previous{regs};
             cache.prepared_cpu_family = &previous;
+            cache.pending_tev_transport = previous;
             cache.UseFragmentShader(regs,user,true);
             Check(!cache.prepared_cpu_family, "stale CPU family survived new fragment setup");
             Check(cache.virtual_fs_config && !cache.current_shaders[FS],
                   "covered setup lost generic recovery snapshot");
-            Check(cache.tev_transport_prepared == unsigned(!specialized),
-                  "generic GPU route lacks complete dynamic transport");
+            // CodexAstraLocal: Setup defers work; specialized GPU preparation
+            // drops a stale obligation, while generic preparation keeps its own.
+            Check(bool(cache.pending_tev_transport) == !specialized &&
+                  cache.tev_transport_prepared == 0 && cache.dynamic_tev_preparation.calls == 0,
+                  "GPU setup did not preserve deferred transport policy");
+            cache.EnsureDynamicTevState();
+            Check(!cache.pending_tev_transport &&
+                  cache.tev_transport_prepared == unsigned(!specialized) &&
+                  cache.dynamic_tev_preparation.calls == unsigned(!specialized) &&
+                  cache.tev_constants == (specialized ? 0 : 128),
+                  "generic GPU consumer lacks current transport");
             // CodexAstraUlt: A failed/pending GPU attempt re-enters this actual CPU setup;
-            // it must retain the generic snapshot, rebuild transport and not enqueue specialization.
+            // it must retain the generic snapshot without enqueueing specialization.
+            // CodexAstraLocal: Change the input before retry and materialize only
+            // at the consumer; a repeated consume must perform no further work.
             const auto optional_before = disk.optional_calls;
+            regs.transport = 257;
             cache.UseFragmentShader(regs,user,false);
-            Check(cache.virtual_fs_config && cache.tev_constants == 128 &&
+            Check(cache.virtual_fs_config && cache.pending_tev_transport &&
+                  cache.pending_tev_transport->transport == 257 &&
+                  cache.tev_transport_prepared == unsigned(!specialized),
+                  "CPU retry lost its deferred current input");
+            cache.EnsureDynamicTevState();
+            cache.EnsureDynamicTevState();
+            Check(!cache.pending_tev_transport && cache.tev_constants == 257 &&
                   cache.tev_transport_prepared == unsigned(!specialized)+1 &&
+                  cache.dynamic_tev_preparation.calls == unsigned(!specialized)+1 &&
                   disk.optional_calls == optional_before && disk.mandatory_calls == 0,
                   "CPU retry no longer prepares full generic recovery");
             regs.supported = false;
             Check(cache.ReadyGpuFragmentPreflight(regs,user), "unsupported state blocked recovery");
             cache.prepared_cpu_family = &previous;
+            cache.pending_tev_transport = previous;
             cache.UseFragmentShader(regs,user,false);
             Check(!cache.prepared_cpu_family, "stale CPU family survived unsupported recovery");
+            cache.EnsureDynamicTevState();
+            Check(!cache.pending_tev_transport && cache.tev_constants == 257 &&
+                  cache.dynamic_tev_preparation.calls == unsigned(!specialized)+1,
+                  "unsupported recovery consumed previous draw transport");
             Check(!cache.virtual_fs_config && disk.mandatory_calls == 1 &&
                   cache.current_shaders[FS] == &disk.shader && cache.shader_hashes[FS] == 9,
                   "mandatory unsupported-state specialization disabled");
@@ -229,10 +274,21 @@ int main() try {
             values.uberhar_test_mode = UberharTestMode::Native;
             const FSConfig previous{regs};
             native.prepared_cpu_family = &previous;
+            native.pending_tev_transport = previous;
             native.UseFragmentShader(regs, user, false);
             Check(!native.prepared_cpu_family, "Native setup retained a stale CPU family");
+            // CodexAstraLocal: Native has the same deferred-consumer contract;
+            // unsupported recovery must clear the deliberately seeded stale input.
+            Check(bool(native.pending_tev_transport) == supported &&
+                  native.tev_transport_prepared == 0,
+                  "Native setup did not defer only supported transport");
+            native.EnsureDynamicTevState();
+            native.EnsureDynamicTevState();
             Check(bool(native.virtual_fs_config) == supported &&
                   native.tev_transport_prepared == unsigned(supported) &&
+                  native.dynamic_tev_preparation.calls == unsigned(supported) &&
+                  !native.pending_tev_transport &&
+                  native.tev_constants == (supported ? regs.transport : 0) &&
                   disk.mandatory_calls == unsigned(!supported) && disk.optional_calls == 0,
                   "Native CPU generic/mandatory recovery changed");
         }
