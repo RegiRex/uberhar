@@ -65,6 +65,25 @@ def digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+# CodexAstraLocal: The route fixture supplies resolved handles at the descriptor
+# boundary. Keep the real final-consumer call and immutable command capture in
+# order; allocation, tick/epoch reuse and Vulkan pixels have their separate gate.
+def check_final_image_capture(bind: str) -> None:
+    code = re.sub(r'//[^\n]*|/\*.*?\*/', '', bind, flags=re.DOTALL)
+    resolve = 'ResolveImageBindings();'
+    record = 'scheduler.Record('
+    if code.count(resolve) != 1 or code.count(record) != 1:
+        raise ValueError('Expected one final image resolve and command capture')
+    final, capture = code.index(resolve), code.index(record)
+    if final >= capture or code[final + len(resolve):capture].strip():
+        raise ValueError('Image resolution must immediately precede command capture')
+    if code.rfind('EnsureDynamicTevState();') >= final:
+        raise ValueError('TEV preparation must precede final image resolution')
+    if ('descriptor_sets = bound_descriptor_sets' not in code[capture:] or
+            not re.search(r'\bdescriptor_sets,\s*offsets\);', code[capture:])):
+        raise ValueError('Queued descriptor binding must consume captured handles')
+
+
 # CodexAstraLocal: These endpoints deliberately expose a delayed queue and one
 # frontend mode. No production worker or settings implementation is replaced.
 WORKER = r'''#pragma once
@@ -132,6 +151,7 @@ def main() -> None:
         inputs[str(p)]=digest(p)
         return p.read_text()
     cpp=read('src/video_core/renderer_vulkan/vk_pipeline_cache.cpp')
+    check_final_image_capture(function(cpp, 'bool PipelineCache::BindPipeline('))
     graphics=read('src/video_core/renderer_vulkan/vk_graphics_pipeline.cpp')
     parts=[function(graphics,'u64 GraphicsPipeline::Key()').replace('GraphicsPipeline::Key()','GraphicsPipeline::ActualKey()'),
            function(graphics,'bool GraphicsPipeline::MatchesExecution(')]

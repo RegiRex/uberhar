@@ -6,6 +6,7 @@
 
 #include <chrono> // AstraEH: Bounded vertex-stage windows.
 #include <string> // CodexAstraLocal: First-candidate producer capsule, allocated only on a fault.
+#include <optional> // CodexAstraLocal: At most one pending immutable capsule per GS slot.
 
 #include "common/common_types.h"
 #include "core/hle/service/gsp/gsp_interrupt.h"
@@ -175,14 +176,39 @@ private:
         std::string metadata;
         std::string payload;
         bool replay_qualified{};
+        u32 schema{1};
+        u64 title{};
+        std::optional<std::array<u8, sizeof(AttributeBuffer)>> geometry_slot_bytes;
+    };
+    // CodexAstraLocal TEST-ONLY LOG: One owned GS entry while observation is
+    // armed, not a post-EMIT carry substitute. No guest/serialization layout
+    // changes; remove with the first-producer diagnostic after FEA reproduction.
+    struct SoftwareGeometryEntry {
+        ShaderUnit unit;
+        u64 invocation{};
+        u32 emit{};
+        u32 semantic_mask{};
+        u32 entry{};
+        u32 output_mask{};
+        u8 emit_state{};
+        std::array<std::optional<SoftwareProducerSnapshot>, 3> pending;
     };
     SoftwareProducerSnapshot MakeSoftwareProducerSnapshot(
         u32 mask, u32 invalid, const OutputVertex& output, ShaderSetup& setup,
         const ShaderUnit& unit, u32 index, u32 vertex, const char* route,
-        bool fresh_unit, bool post_shader, u64 title) const;
+        bool fresh_unit, bool post_shader, u64 title,
+        const SoftwareGeometryEntry* geometry_entry = nullptr,
+        const AttributeBuffer* geometry_slot = nullptr) const;
     void ObserveSoftwareProducer(u32 mask, const OutputVertex& output, ShaderSetup& setup,
         const ShaderUnit& unit, u32 index, u32 vertex, const char* route,
         bool fresh_unit, bool post_shader) noexcept;
+    void WriteSoftwareProducerSnapshot(const SoftwareProducerSnapshot& snapshot,
+        const char* route, u32 mask, u32 invalid, u32 index, u32 vertex) const;
+    void BeginSoftwareGeometry(SoftwareGeometryEntry& entry, bool begin) noexcept;
+    std::optional<SoftwareProducerSnapshot> SoftwareGeometryCandidate(
+        SoftwareGeometryEntry& entry, const AttributeBuffer& buffer, u32 slot, bool publishing);
+    void ObserveSoftwareGeometry(SoftwareGeometryEntry& entry, const AttributeBuffer& buffer,
+                                 u32 slot, bool publishing) noexcept;
     friend struct SoftwareProducerTestAccess;
 
 public:

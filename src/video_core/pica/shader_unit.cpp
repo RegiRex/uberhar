@@ -36,11 +36,31 @@ void GeometryEmitter::Emit(std::span<Common::Vec4<f24>, 16> output_regs) {
         buffer[emit_state.vertex_id][output_index++] = output_regs[reg];
     }
 
+    // CodexAstraLocal TEST-ONLY LOG: Observe only the slot written by THIS
+    // EMIT, including non-publishing emits. Publishing all three slots later
+    // can otherwise attribute an earlier invocation's vertex to this shader.
+    // Observation must not throw through generated shader frames. Remove with
+    // the bounded Software producer capture after the FEA defect is reproduced.
+    if (handlers && handlers->emit_observer) {
+        try {
+            handlers->emit_observer(buffer[emit_state.vertex_id], emit_state.vertex_id, false);
+        } catch (...) {
+        }
+    }
+
     if (emit_state.prim_emit) {
         if (emit_state.winding) {
             handlers->winding_setter();
         }
         for (std::size_t i = 0; i < buffer.size(); ++i) {
+            // CodexAstraLocal TEST-ONLY LOG: A pending source candidate becomes
+            // relevant only if this slot survives to actual publication.
+            if (handlers->emit_observer) {
+                try {
+                    handlers->emit_observer(buffer[i], static_cast<u32>(i), true);
+                } catch (...) {
+                }
+            }
             handlers->vertex_handler(buffer[i]);
         }
     }

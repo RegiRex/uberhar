@@ -418,6 +418,11 @@ public:
   void UseFragmentShader(const Pica::RegsInternal &, const UserConfig &,
                          bool = false);
   void EnsureDynamicTevState(); // CodexAstraLocal: Extract the actual materialization body.
+  // CodexAstraLocal: Descriptor allocation is a controlled boundary here: the
+  // fixture supplies resolved handles and the extracted bind captures them.
+  // Preserve that call and its final-consumer order (checked by the driver);
+  // actual allocation/reuse and Vulkan consumers have the image-descriptor gate.
+  void ResolveImageBindings() {}
   GraphicsPipeline *GetTevFallback(const PipelineInfo &, bool = false);
   void ReportUberharStats(const char *) {}
   u64 GetProgramID() const { return current_program_id; }

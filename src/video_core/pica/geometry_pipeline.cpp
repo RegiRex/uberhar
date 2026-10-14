@@ -6,6 +6,7 @@
 #include <boost/serialization/export.hpp>
 #include <boost/serialization/unique_ptr.hpp>
 #include "common/archives.h"
+#include "common/scope_exit.h" // CodexAstraLocal: Close optional observation on exceptional returns.
 #include "core/core.h"
 #include "video_core/gpu.h"
 #include "video_core/pica/geometry_pipeline.h"
@@ -377,6 +378,21 @@ void GeometryPipeline::SubmitVertex(const AttributeBuffer& input) {
         vertex_handler(input);
     } else {
         if (backend->SubmitVertex(input)) {
+            // CodexAstraLocal TEST-ONLY LOG: The inputs/uniform transfers are
+            // complete here and the GS has not changed its carry yet. Keep the
+            // observer on this actual Run boundary, not a preceding VS submit.
+            // Diagnostic failures cannot change shader execution. Remove after
+            // a captured FEA producer has a fixed regression.
+            const auto observe = [&](bool begin) noexcept {
+                if (gs_unit.emitter.handlers && gs_unit.emitter.handlers->invocation_observer) {
+                    try {
+                        gs_unit.emitter.handlers->invocation_observer(begin);
+                    } catch (...) {
+                    }
+                }
+            };
+            observe(true);
+            SCOPE_EXIT({ observe(false); });
             shader_engine->Run(gs, gs_unit);
 
             // The uniform b15 is set to true after every geometry shader invocation. This is useful

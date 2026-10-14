@@ -14,6 +14,7 @@
 #include "common/settings.h"
 #ifndef UBERHAR_SOFTWARE_HELPER_PROBE
 #include <sstream> // CodexAstraLocal: Round-trip the actual first-candidate archive, not a substitute.
+#include <json.hpp> // CodexAstraLocal: Verify invocation/entry ownership in the actual capsule metadata.
 #include <nihstro/inline_assembly.h>
 #include "common/archives.h"
 #include "core/core.h"
@@ -65,6 +66,8 @@ namespace Pica {
 // CodexAstraLocal: Exercise the real demand/serializer/proof seam without writing
 // diagnostics into a user's dump directory or replacing shader execution.
 struct SoftwareProducerTestAccess {
+    using GeometryEntry = PicaCore::SoftwareGeometryEntry;
+    using SnapshotType = PicaCore::SoftwareProducerSnapshot;
     static u32 Mask(const PicaCore& pica) { return pica.SoftwareProducerMask(); }
     static u32 Invalid(u32 mask, const OutputVertex& output) {
         return PicaCore::SoftwareInvalidSemantics(mask, output);
@@ -81,6 +84,30 @@ struct SoftwareProducerTestAccess {
         const auto mask = Mask(pica);
         return pica.MakeSoftwareProducerSnapshot(mask, Invalid(mask, output), output,
             setup, unit, fresh ? 0 : 1, 17, "fixture_cpu", fresh, post, 0x12345678ULL);
+    }
+    // CodexAstraLocal: Drive the actual GS boundary/emitter from the fixture;
+    // only file retention is replaced by an owned in-memory snapshot consumer.
+    static void Begin(PicaCore& pica, GeometryEntry& entry, bool begin) {
+        pica.BeginSoftwareGeometry(entry, begin);
+    }
+    static auto GeometryCandidate(PicaCore& pica, GeometryEntry& entry,
+                                  const AttributeBuffer& buffer, u32 slot, bool publishing) {
+        return pica.SoftwareGeometryCandidate(entry, buffer, slot, publishing);
+    }
+    static void GeometryObserve(PicaCore& pica, GeometryEntry& entry,
+                                const AttributeBuffer& buffer, u32 slot, bool publishing) {
+        pica.ObserveSoftwareGeometry(entry, buffer, slot, publishing);
+    }
+    static void SetupGeometry(PicaCore& pica) {
+        pica.geometry_pipeline.Reconfigure();
+        pica.geometry_pipeline.Setup(pica.shader_engine.get());
+    }
+    static void SubmitGeometry(PicaCore& pica, const AttributeBuffer& buffer) {
+        pica.geometry_pipeline.SubmitVertex(buffer);
+    }
+    static void RunGeometry(PicaCore& pica, ShaderSetup& setup, GeometryShaderUnit& unit) {
+        pica.shader_engine->SetupBatch(setup, setup.entry_point);
+        pica.shader_engine->Run(setup, unit);
     }
 };
 }
@@ -603,6 +630,235 @@ TEST_CASE("Software producer capsule preserves demanded inputs and carry limits"
     const auto mid_emit = Access::Snapshot(pica, setup, unit, output, false, false);
     CHECK_FALSE(mid_emit.replay_qualified);
     CHECK(mid_emit.metadata.find("buffered GS vertex may precede current emit") != std::string::npos);
+}
+
+TEST_CASE("Software geometry capsule owns the producing emit and entry carry",
+          "[software][software-producer-geometry]") {
+    // CodexAstraLocal: A later EMIT may publish an older slot. Exercise real
+    // interpreter/GeometryPipeline/emitter code and keep the captured producer's
+    // source/entry, never the later publisher's uniforms or post-state.
+    using Access = Pica::SoftwareProducerTestAccess;
+    using Semantic = Pica::RasterizerRegs::VSOutputAttributes;
+    using Stage = Pica::TexturingRegs::TevStageConfig;
+    using Op = nihstro::OpCode::Id;
+    using Dest = nihstro::DestRegister;
+    using Source = nihstro::SourceRegister;
+    const auto old_mode = Settings::values.uberhar_test_mode.GetValue();
+    const auto old_jit = Settings::values.use_shader_jit.GetValue();
+    struct Restore {
+        Settings::UberharTestMode mode; bool jit;
+        ~Restore() { Settings::values.uberhar_test_mode = mode; Settings::values.use_shader_jit = jit; }
+    } restore{old_mode, old_jit};
+    Settings::values.uberhar_test_mode = Settings::UberharTestMode::Software;
+    Settings::values.use_shader_jit = false;
+    Core::System system;
+    Memory::MemorySystem memory{system};
+    Pica::PicaCore pica{memory,{}};
+    auto& regs = pica.regs.internal;
+    regs = {}; regs.lighting.disable.Assign(1);
+    for (auto* stage : {&regs.texturing.tev_stage0, &regs.texturing.tev_stage1,
+                       &regs.texturing.tev_stage2, &regs.texturing.tev_stage3,
+                       &regs.texturing.tev_stage4, &regs.texturing.tev_stage5}) {
+        stage->color_source1.Assign(Stage::Source::Constant);
+        stage->alpha_source1.Assign(Stage::Source::Constant);
+    }
+    regs.texturing.tev_stage0.color_source1.Assign(Stage::Source::Texture0);
+    regs.texturing.main_config.texture0_enable.Assign(1);
+    regs.texturing.texture0.address.Assign(Memory::VRAM_PADDR / 8);
+    regs.pipeline.use_gs.Assign(Pica::PipelineRegs::UseGS::Yes);
+    regs.pipeline.gs_config.mode.Assign(Pica::PipelineRegs::GSMode::Point);
+    regs.gs.shader_mode.Assign(Pica::ShaderRegs::ShaderMode::GS);
+    regs.gs.main_offset.Assign(1);
+    regs.gs.output_mask.Assign(1);
+    regs.rasterizer.vs_output_total.Assign(1);
+    auto& mapping = regs.rasterizer.vs_output_attributes[0];
+    mapping.map_x.Assign(Semantic::TEXCOORD0_U); mapping.map_y.Assign(Semantic::TEXCOORD0_V);
+    mapping.map_z.Assign(Semantic::INVALID); mapping.map_w.Assign(Semantic::TEXCOORD0_W);
+
+    const auto make_program = [](std::initializer_list<nihstro::InlineAsm> code) {
+        const auto binary = nihstro::InlineAsm::CompileToRawBinary(code);
+        Pica::ShaderSetup setup;
+        setup.uniforms = {};
+        Pica::ProgramCode program{}; Pica::SwizzleData swizzles{};
+        std::transform(binary.program.begin(), binary.program.end(), program.begin(),
+                       [](const auto& word) { return word.hex; });
+        std::transform(binary.swizzle_table.begin(), binary.swizzle_table.end(), swizzles.begin(),
+                       [](const auto& word) { return word.hex; });
+        setup.UpdateProgramCode(program); setup.UpdateSwizzleData(swizzles); setup.entry_point = 1;
+        return setup;
+    };
+    const auto setemit = [](Pica::ShaderSetup& setup, u32 pc, u32 slot, bool publish) {
+        nihstro::Instruction word{};
+        word.opcode = nihstro::OpCode{Op::SETEMIT};
+        word.setemit.vertex_id.Assign(slot); word.setemit.prim_emit.Assign(publish);
+        setup.UpdateProgramCode(pc, word.hex);
+    };
+    auto first = make_program({{Op::NOP}, {Op::MOV, Dest::MakeOutput(0), Source::MakeTemporary(0)},
+        {Op::NOP}, {Op::EMIT}, {Op::MOV, Dest::MakeOutput(0), Source::MakeInput(0)},
+        {Op::NOP}, {Op::EMIT}, {Op::END}});
+    setemit(first, 2, 0, false); setemit(first, 5, 1, false);
+    const auto nan = std::bit_cast<Pica::f24>(0x7fc12345U);
+    first.uniforms.f[3].x = nan; first.uniforms.b[2] = true;
+    pica.gs_setup = first;
+    pica.gs_unit.emitter.buffer = {};
+    pica.gs_unit.emitter.buffer[0][5].w = nan; // Unwritten slot carry, outside the mapped prefix.
+    pica.gs_unit.emitter.emit_state.raw = 0;
+    pica.gs_unit.temporary[0] = {nan, Pica::f24::One(), Pica::f24::Zero(), Pica::f24::One()};
+    pica.gs_unit.address_registers[2] = 19;
+    pica.gs_unit.conditional_code[1] = true;
+    pica.gs_unit.output[1][4].z = nan;
+    auto& handlers = *pica.gs_unit.emitter.handlers;
+    Access::GeometryEntry entry;
+    std::optional<Access::SnapshotType> retained;
+    std::vector<Pica::AttributeBuffer> published;
+    u32 begins{}, ends{}, writes{};
+    handlers.vertex_handler = [&](const Pica::AttributeBuffer& buffer) { published.push_back(buffer); };
+    handlers.winding_setter = [] {};
+    handlers.invocation_observer = [&](bool begin) {
+        begin ? ++begins : ++ends;
+        Access::Begin(pica, entry, begin);
+    };
+    handlers.emit_observer = [&](const Pica::AttributeBuffer& buffer, u32 slot, bool publishing) {
+        writes += !publishing;
+        if (auto candidate = Access::GeometryCandidate(pica, entry, buffer, slot, publishing))
+            retained = std::move(candidate);
+    };
+    Pica::AttributeBuffer input{};
+    input[0] = {Pica::f24::One(), Pica::f24::One(), Pica::f24::Zero(), Pica::f24::One()};
+    Access::SetupGeometry(pica);
+    Access::SubmitGeometry(pica, input);
+    REQUIRE(entry.pending[0].has_value());
+    CHECK_FALSE(retained.has_value());
+    CHECK(begins == 1); CHECK(ends == 1); CHECK(writes == 2);
+    CHECK(published.empty()); CHECK(entry.semantic_mask == 0);
+    const auto metadata = nlohmann::json::parse(entry.pending[0]->metadata);
+    CHECK(metadata.at("schema") == 2);
+    CHECK(metadata.at("geometry").at("invocation") == 1);
+    CHECK(metadata.at("geometry").at("emit_ordinal") == 1);
+    CHECK(metadata.at("geometry").at("slot") == 0);
+    CHECK_FALSE(entry.pending[0]->replay_qualified);
+    CHECK(entry.pending[0]->metadata.find("upstream VS") != std::string::npos);
+    CHECK(metadata.at("geometry").at("written_attribute_count") == 1);
+
+    // CodexAstraLocal: Decode the actual schema-2 extension. It must retain the
+    // pre-entry state, including carry/input and bool15 BEFORE the pipeline sets
+    // it after Run; neither the second emit nor next shader may replace it.
+    Pica::RegsInternal restored_regs{};
+    Pica::ShaderSetup restored_setup;
+    Pica::ShaderUnit mid_unit, entry_unit;
+    Pica::OutputVertex captured_output{};
+    Pica::AttributeBuffer raw_slot{};
+    std::array<u8, sizeof(raw_slot)> raw_slot_bytes{};
+    std::istringstream stream{entry.pending[0]->payload, std::ios::in | std::ios::binary};
+    iarchive archive{stream};
+    archive >> restored_regs.reg_array >> restored_setup >> mid_unit >> captured_output >> entry_unit >> raw_slot_bytes;
+    std::memcpy(&raw_slot, raw_slot_bytes.data(), raw_slot_bytes.size());
+    CHECK(restored_setup.GetProgramCode() == first.GetProgramCode());
+    CHECK(restored_setup.GetSwizzleData() == first.GetSwizzleData());
+    CHECK(std::bit_cast<u32>(restored_setup.uniforms.f[3].x) == 0x7fc12345U);
+    CHECK_FALSE(restored_setup.uniforms.b[15]); CHECK(pica.gs_setup.uniforms.b[15]);
+    CHECK(std::memcmp(entry_unit.input.data(), pica.gs_unit.input.data(), sizeof(entry_unit.input)) == 0);
+    CHECK(std::bit_cast<u32>(entry_unit.temporary[0].x) == 0x7fc12345U);
+    CHECK(std::bit_cast<u32>(entry_unit.output[1][4].z) == 0x7fc12345U);
+    CHECK(entry_unit.address_registers[2] == 19); CHECK(entry_unit.conditional_code[1]);
+    CHECK(std::bit_cast<u32>(entry_unit.output[0][0].x) == 0U);
+    CHECK(std::bit_cast<u32>(mid_unit.output[0][0].x) == 0x7fc12345U);
+    CHECK(std::bit_cast<u32>(captured_output.tc0.x) == 0x7fc12345U);
+    CHECK(std::bit_cast<u32>(raw_slot[0].x) == 0x7fc12345U);
+    CHECK(std::bit_cast<u32>(raw_slot[5].w) == 0x7fc12345U);
+    CHECK(metadata.at("unit_correspondence").get<std::string>().find("carried/unqualified") != std::string::npos);
+
+    auto publisher = make_program({{Op::NOP}, {Op::MOV, Dest::MakeOutput(0), Source::MakeInput(0)},
+                                  {Op::NOP}, {Op::EMIT}, {Op::END}});
+    setemit(publisher, 2, 2, true);
+    publisher.uniforms.f[3].x = Pica::f24::FromFloat32(42);
+    pica.gs_setup = publisher;
+    regs.texturing.texture0.border_color.raw = 0x76543210; // Consumer register state can change too.
+    Access::SetupGeometry(pica);
+    Access::SubmitGeometry(pica, input);
+    CHECK(begins == 2); CHECK(ends == 2); CHECK(writes == 3);
+    REQUIRE(published.size() == 3);
+    REQUIRE(retained.has_value());
+    CHECK(std::bit_cast<u32>(published[0][0].x) == 0x7fc12345U);
+    CHECK(published[1][0].x == Pica::f24::One()); CHECK(published[2][0].x == Pica::f24::One());
+    CHECK(restored_setup.GetProgramCode() != pica.gs_setup.GetProgramCode());
+    const auto published_metadata = nlohmann::json::parse(retained->metadata);
+    CHECK(published_metadata.at("geometry") == metadata.at("geometry"));
+    CHECK(published_metadata.at("publication").at("invocation") == 2);
+    CHECK(published_metadata.at("publication").at("slot") == 0);
+    CHECK(published_metadata.at("program_hash") == metadata.at("program_hash"));
+    CHECK_FALSE(entry.pending[0].has_value());
+    Pica::RegsInternal publication_regs{};
+    Pica::OutputVertex publication_output{};
+    std::istringstream publication_stream{retained->payload.substr(
+        published_metadata.at("publication_archive_offset").get<std::size_t>()),
+        std::ios::in | std::ios::binary};
+    iarchive publication_archive{publication_stream};
+    publication_archive >> publication_regs.reg_array >> publication_output;
+    CHECK(publication_regs.reg_array == regs.reg_array);
+    CHECK(publication_regs.reg_array != restored_regs.reg_array);
+    CHECK(std::bit_cast<u32>(publication_output.tc0.x) == 0x7fc12345U);
+    CHECK(retained->payload.size() < 64 * 1024);
+
+    // CodexAstraLocal: This finite synthetic GS can reproduce NEW slot values
+    // from its actual entry. That check does not qualify arbitrary captured GS
+    // termination, previous buffered primitives, full frames or GPU equivalence.
+    Pica::GeometryShaderUnit replay;
+    static_cast<Pica::ShaderUnit&>(replay) = entry_unit;
+    replay.emitter_ptr = &replay.emitter;
+    replay.emitter.output_mask = 1; replay.emitter.emit_state.raw = 0; replay.emitter.buffer = {};
+    Pica::Handlers replay_handlers;
+    replay.emitter.handlers = &replay_handlers;
+    std::vector<Pica::AttributeBuffer> replay_writes;
+    replay_handlers.emit_observer = [&](const Pica::AttributeBuffer& value, u32, bool publishing) {
+        if (!publishing) replay_writes.push_back(value);
+    };
+    restored_setup.entry_point = metadata.at("entry").get<u32>();
+    Access::RunGeometry(pica, restored_setup, replay);
+    REQUIRE(replay_writes.size() == 2);
+    CHECK(std::bit_cast<u32>(replay_writes[0][0].x) == 0x7fc12345U);
+    CHECK(replay_writes[1][0].x == Pica::f24::One());
+
+    // CodexAstraLocal: A non-publishing invalid slot may be overwritten before
+    // any triangle uses it. The pending capsule must disappear rather than
+    // consume the once-only retained incident or blame a later finite vertex.
+    retained.reset();
+    pica.gs_setup = first;
+    Access::SetupGeometry(pica); Access::SubmitGeometry(pica, input);
+    REQUIRE(entry.pending[0].has_value());
+    auto overwrite = publisher;
+    setemit(overwrite, 2, 0, false);
+    pica.gs_setup = overwrite;
+    Access::SetupGeometry(pica); Access::SubmitGeometry(pica, input);
+    CHECK_FALSE(entry.pending[0].has_value());
+    pica.gs_setup = publisher;
+    Access::SetupGeometry(pica); Access::SubmitGeometry(pica, input);
+    CHECK_FALSE(retained.has_value());
+
+    // CodexAstraLocal: Observe an unused signaling color lane through the real
+    // nonfatal wrapper. Even conversion's FP effects are restored; finite UVs
+    // do not request file retention or a new renderer error.
+    mapping.map_z.Assign(Semantic::COLOR_R);
+    auto observed = input;
+    observed[0].z = std::bit_cast<Pica::f24>(0x7f800001U);
+    Access::Begin(pica, entry, true);
+    const auto before_flags = Common::Uberhar::ParallelFloatEnvironment::Flags();
+    Access::GeometryObserve(pica, entry, observed, 0, false);
+    CHECK(Common::Uberhar::ParallelFloatEnvironment::Flags() == before_flags);
+    CHECK_FALSE(entry.pending[0].has_value());
+    Access::Begin(pica, entry, false);
+
+    // CodexAstraLocal: Throwing optional observers cannot cancel original
+    // publication or leave entry active. No renderer/sampler error is injected.
+    handlers.invocation_observer = [](bool) { throw std::runtime_error{"observer only"}; };
+    handlers.emit_observer = [](const Pica::AttributeBuffer&, u32, bool) { throw std::runtime_error{"observer only"}; };
+    const auto prior_publications = published.size();
+    Access::SetupGeometry(pica);
+    CHECK_NOTHROW(Access::SubmitGeometry(pica, input));
+    CHECK(published.size() == prior_publications + 3);
+    Pica::GeometryEmitter standalone{};
+    standalone.output_mask = 1; standalone.emit_state.raw = 0;
+    CHECK_NOTHROW(standalone.Emit(input));
 }
 
 TEST_CASE("Software actual demanded sampling and fixed helper ownership", "[software][software-sampling]") {

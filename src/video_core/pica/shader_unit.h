@@ -90,6 +90,11 @@ private:
 struct Handlers {
     VertexHandler vertex_handler;
     WindingSetter winding_setter;
+    // CodexAstraLocal TEST-ONLY LOG: Optional Software producer observations
+    // live outside the JIT-visible unit/emitter layout. Remove after the FEA
+    // producer is reconstructed; these callbacks never submit or repair work.
+    std::function<void(bool)> invocation_observer;
+    std::function<void(const AttributeBuffer&, u32, bool)> emit_observer;
 };
 
 /// This structure contains state information for primitive emitting in geometry shader.
@@ -109,7 +114,9 @@ public:
 
     u32 output_mask;
     std::array<AttributeBuffer, 3> buffer;
-    Handlers* handlers;
+    // CodexAstraLocal: Non-publishing standalone emits need no handlers; make
+    // optional observation's absence explicit without changing the unit layout.
+    Handlers* handlers{};
 
 private:
     friend class boost::serialization::access;

@@ -218,7 +218,8 @@ struct PicaCore::ParallelVertexState {
 u32 PicaCore::SoftwareProducerMask() const {
     // CodexAstraLocal TEST-ONLY LOG: Reuse the pixel consumer's six-stage demand,
     // including its stage0 alpha behavior, then remove physically unused units.
-    // Only draw setup pays this work; remove after FEA producer reconstruction.
+    // Draw setup/armed GS invocation and publication pay this work; remove
+    // after FEA producer reconstruction.
     if (!software_producer_diagnostics || software_producer_attempted) return 0;
     using Semantic = RasterizerRegs::VSOutputAttributes;
     using Texture = TexturingRegs::TextureConfig;
@@ -266,7 +267,8 @@ u32 PicaCore::SoftwareInvalidSemantics(u32 mask, const OutputVertex& output) {
 PicaCore::SoftwareProducerSnapshot PicaCore::MakeSoftwareProducerSnapshot(
     u32 mask, u32 invalid, const OutputVertex& output, ShaderSetup& setup,
     const ShaderUnit& unit, u32 index, u32 vertex, const char* route,
-    bool fresh_unit, bool post_shader, u64 title) const {
+    bool fresh_unit, bool post_shader, u64 title,
+    const SoftwareGeometryEntry* geometry_entry, const AttributeBuffer* geometry_slot) const {
     // CodexAstraLocal TEST-ONLY LOG: Existing save serializers retain exact input,
     // both output banks, post-unit carry, source/uniforms and semantic mapping.
     // They do not serialize generated pointers. No guest memory is reread.
@@ -275,8 +277,24 @@ PicaCore::SoftwareProducerSnapshot PicaCore::MakeSoftwareProducerSnapshot(
     {
         oarchive archive{stream};
         archive << regs.internal.reg_array << setup << unit << output;
+        // CodexAstraLocal TEST-ONLY LOG: Schema 2 appends the actual GS entry,
+        // including both carried output banks. Entry is captured before Run;
+        // the current setup remains unchanged until this EMIT callback returns.
+        if (geometry_entry) {
+            // CodexAstraLocal: Unwritten slot attributes are evidence bytes,
+            // not floating-point values that this observer may interpret.
+            std::array<u8, sizeof(AttributeBuffer)> raw_slot;
+            std::memcpy(raw_slot.data(), geometry_slot, raw_slot.size());
+            archive << geometry_entry->unit << raw_slot;
+        }
     }
     SoftwareProducerSnapshot snapshot;
+    snapshot.schema = geometry_entry ? 2 : 1;
+    snapshot.title = title;
+    if (geometry_slot) {
+        snapshot.geometry_slot_bytes.emplace();
+        std::memcpy(snapshot.geometry_slot_bytes->data(), geometry_slot, sizeof(*geometry_slot));
+    }
     snapshot.payload = stream.str();
     if (snapshot.payload.size() > 64 * 1024) throw std::runtime_error{"producer payload bound"};
     const bool no_gs = regs.internal.pipeline.use_gs == PipelineRegs::UseGS::No;
@@ -297,7 +315,7 @@ PicaCore::SoftwareProducerSnapshot PicaCore::MakeSoftwareProducerSnapshot(
     // CodexAstraLocal: The extern revision has unknown array extent here; own
     // its text before JSON's compatible-type deduction rather than deducing char[].
     nlohmann::json metadata{
-        {"schema", 1}, {"author", "CodexAstraLocal"}, {"build", std::string{Common::g_scm_rev}},
+        {"schema", snapshot.schema}, {"author", "CodexAstraLocal"}, {"build", std::string{Common::g_scm_rev}},
         {"title", fmt::format("{:016X}", title)}, {"route", route},
         {"engine", shader_engine->EngineName()}, {"submitted_index", index}, {"vertex_id", vertex},
         {"semantic_mask", mask}, {"nonfinite_mask", invalid}, {"fresh_unit", fresh_unit},
@@ -315,6 +333,28 @@ PicaCore::SoftwareProducerSnapshot PicaCore::MakeSoftwareProducerSnapshot(
         {"replay_limit", "same backend/FP controls; bounded offline shader values only; no live replay; pre-FP-status and full draw/texture/assembler state absent"},
         {"initial_state", snapshot.replay_qualified ? "zero unit plus captured actual input registers" : "unavailable: do not replace pre-carry with captured post-state"},
         {"payload_bytes", snapshot.payload.size()}};
+    if (geometry_entry) {
+        // CodexAstraLocal TEST-ONLY LOG: Newly emitted values now have exact
+        // invocation/entry ownership. Do not turn this into full GS/frame replay:
+        // prior primitive buffers, execution bounds and upstream VS provenance
+        // are not in the archive; mid-JIT condition/address fields may be stale.
+        metadata["payload"] = "Boost native binary archive: RegsInternal.reg_array, ShaderSetup, ShaderUnit(mid-emit), OutputVertex(slot at emit), ShaderUnit(entry), array<u8,256>(raw slot)";
+        metadata["unit_state"] = "mid_geometry_emit_with_separate_actual_entry";
+        metadata["unit_correspondence"] = "written packed prefix belongs to this invocation; remaining raw slot attributes are carried/unqualified";
+        metadata["initial_state"] = "captured actual GS entry; never substitute mid-emit carry";
+        metadata["geometry"] = {{"invocation", geometry_entry->invocation},
+            {"emit_ordinal", geometry_entry->emit}, {"slot", vertex},
+            {"entry", geometry_entry->entry}, {"entry_emit_state", geometry_entry->emit_state},
+            {"entry_output_mask", geometry_entry->output_mask},
+            {"current_emit_state", gs_unit.emitter.emit_state.raw},
+            {"written_attribute_count", std::popcount(geometry_entry->output_mask)},
+            {"mapped_attribute_count", regs.internal.rasterizer.vs_output_total.Value()},
+            {"unwritten_attribute_limit", "only the packed written prefix belongs to this EMIT; remaining raw slot attributes are carried/unqualified"}};
+        metadata["replay_limit"] = "GS whole invocation/frame unqualified: prior emitted buffers and termination proof absent; entry arithmetic/carry and newly written output exact; upstream VS source of GS input/uniforms not reconstructed; same backend/FP controls required; no live replay";
+        metadata["mid_state_limit"] = "JIT condition/address registers may be host-resident until END; use appended entry state";
+        metadata["fp_status_scope"] = "after observer semantic conversion, not pre-invocation flags";
+        metadata["continuity_scope"] = "no emulator savestate load between observed emit and publication";
+    }
 #if defined(__aarch64__) && (defined(__GNUC__) || defined(__clang__))
     metadata["host"] = "aarch64";
     metadata["fp_control"] = fp.control;
@@ -354,42 +394,168 @@ void PicaCore::ObserveSoftwareProducer(u32 mask, const OutputVertex& output, Sha
         if (system.IsPoweredOn()) (void)system.GetAppLoader().ReadProgramId(title);
         const auto snapshot = MakeSoftwareProducerSnapshot(mask, invalid, output, setup, unit,
             index, vertex, route, fresh_unit, post_shader, title);
-        const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
-        const std::string path = FileUtil::GetUserPath(FileUtil::UserPath::DumpDir) +
-            fmt::format("software_producer_{:016X}_{}.usp", title, stamp);
-        bool written = false;
-        // Match the existing capture's exclusive raw-filesystem contract. A
-        // provider that strips 'x' must not overwrite an earlier incident.
-#if !defined(_WIN32) && !defined(HAVE_LIBRETRO_VFS)
-#if defined(ANDROID)
-        const bool raw_filesystem = AndroidUtils::CanUseRawFS();
-#else
-        const bool raw_filesystem = true;
-#endif
-        if (raw_filesystem && !FileUtil::Exists(path) && FileUtil::CreateFullPath(path)) {
-            FileUtil::IOFile file{path, "wbx"};
-            std::array<u8, 16> header{'U', 'B', 'S', 'W', 'P', '0', '0', '1'};
-            for (u32 i = 0; i < 4; ++i) {
-                header[8 + i] = static_cast<u8>(snapshot.metadata.size() >> (8 * i));
-                header[12 + i] = static_cast<u8>(snapshot.payload.size() >> (8 * i));
-            }
-            written = file.IsOpen() && file.WriteBytes(header.data(), header.size()) == header.size() &&
-                file.WriteBytes(snapshot.metadata.data(), snapshot.metadata.size()) == snapshot.metadata.size() &&
-                file.WriteBytes(snapshot.payload.data(), snapshot.payload.size()) == snapshot.payload.size();
-            written &= file.Flush();
-            written &= file.Close();
-        }
-#endif
-        LOG_ERROR(Render_Software,
-            "Software producer candidate: schema=1 written={} title={:016X} route={} engine={} "
-            "index={} vertex={} semantic_mask={:#x} nonfinite_mask={:#x} replay_qualified={} path={}",
-            written, title, route, shader_engine->EngineName(), index, vertex, mask, invalid,
-            snapshot.replay_qualified, path);
+        WriteSoftwareProducerSnapshot(snapshot, route, mask, invalid, index, vertex);
     } catch (...) {
         // Diagnostic allocation, serialization and filesystem errors cannot mask
         // a later sampler failure or create a new renderer failure themselves.
         try { LOG_WARNING(Render_Software, "Software producer candidate unavailable: route={} index={} vertex={}",
                           route, index, vertex); } catch (...) {}
+    }
+}
+
+void PicaCore::WriteSoftwareProducerSnapshot(const SoftwareProducerSnapshot& snapshot,
+    const char* route, u32 mask, u32 invalid, u32 index, u32 vertex) const {
+    // CodexAstraLocal TEST-ONLY LOG: Common exclusive writer consumes an
+    // immutable snapshot. In the GS path, retention waits for publication
+    // but never rereads the later publisher's shader/entry as its producer.
+    const u64 title = snapshot.title;
+    const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+    const std::string path = FileUtil::GetUserPath(FileUtil::UserPath::DumpDir) +
+        fmt::format("software_producer_{:016X}_{}.usp", title, stamp);
+    bool written = false;
+    // Match the existing capture's exclusive raw-filesystem contract. A
+    // provider that strips 'x' must not overwrite an earlier incident.
+#if !defined(_WIN32) && !defined(HAVE_LIBRETRO_VFS)
+#if defined(ANDROID)
+    const bool raw_filesystem = AndroidUtils::CanUseRawFS();
+#else
+    const bool raw_filesystem = true;
+#endif
+    if (raw_filesystem && !FileUtil::Exists(path) && FileUtil::CreateFullPath(path)) {
+        FileUtil::IOFile file{path, "wbx"};
+        std::array<u8, 16> header{'U', 'B', 'S', 'W', 'P', '0', '0', '1'};
+        for (u32 i = 0; i < 4; ++i) {
+            header[8 + i] = static_cast<u8>(snapshot.metadata.size() >> (8 * i));
+            header[12 + i] = static_cast<u8>(snapshot.payload.size() >> (8 * i));
+        }
+        written = file.IsOpen() && file.WriteBytes(header.data(), header.size()) == header.size() &&
+            file.WriteBytes(snapshot.metadata.data(), snapshot.metadata.size()) == snapshot.metadata.size() &&
+            file.WriteBytes(snapshot.payload.data(), snapshot.payload.size()) == snapshot.payload.size();
+        written &= file.Flush();
+        written &= file.Close();
+    }
+#endif
+    LOG_ERROR(Render_Software,
+        "Software producer candidate: schema={} written={} title={:016X} route={} engine={} "
+        "index={} vertex={} semantic_mask={:#x} nonfinite_mask={:#x} replay_qualified={} path={}",
+        snapshot.schema, written, title, route, shader_engine->EngineName(), index, vertex, mask, invalid,
+        snapshot.replay_qualified, path);
+}
+
+void PicaCore::BeginSoftwareGeometry(SoftwareGeometryEntry& entry, bool begin) noexcept {
+    // CodexAstraLocal TEST-ONLY LOG: About 1 KiB of value state per armed GS
+    // invocation buys exact carry ownership; no hashing, archive or file I/O is
+    // done for finite demanded output. Stop after the first retained candidate. Remove
+    // after the FEA producer is reconstructed and fixed.
+    entry.semantic_mask = begin ? SoftwareProducerMask() : 0;
+    if (!entry.semantic_mask) return;
+    entry.unit = static_cast<const ShaderUnit&>(gs_unit);
+    entry.unit.emitter_ptr = nullptr;
+    entry.entry = gs_setup.entry_point;
+    entry.output_mask = gs_unit.emitter.output_mask;
+    // Retain raw emitter-control bytes as evidence, not an assertion about
+    // initial hardware state or the contents of previously buffered vertices.
+    std::memcpy(&entry.emit_state, &gs_unit.emitter.emit_state, sizeof(entry.emit_state));
+    ++entry.invocation;
+    entry.emit = 0;
+}
+
+std::optional<PicaCore::SoftwareProducerSnapshot> PicaCore::SoftwareGeometryCandidate(
+    SoftwareGeometryEntry& entry, const AttributeBuffer& buffer, u32 slot, bool publishing) {
+    if (!entry.semantic_mask || software_producer_attempted || slot >= entry.pending.size())
+        return std::nullopt;
+    const auto output = OutputVertex{regs.internal.rasterizer, buffer};
+    // CodexAstraLocal TEST-ONLY LOG: Unused NaNs must not repeatedly serialize
+    // shaders. Capture only current-demand candidates, with at most three
+    // immutable slots, each cleared on any overwrite. A later demand/mapping
+    // change uses the explicit untracked fallback below, never false ownership.
+    const u32 mask = publishing ? SoftwareProducerMask() : entry.semantic_mask;
+    const u32 invalid = SoftwareInvalidSemantics(mask, output);
+    if (!publishing) {
+        ++entry.emit;
+        entry.pending[slot].reset();
+        if (!invalid) return std::nullopt;
+    } else if (!invalid) {
+        return std::nullopt;
+    }
+    u64 title{};
+    auto& system = Core::System::GetInstance();
+    if (system.IsPoweredOn()) (void)system.GetAppLoader().ReadProgramId(title);
+    if (!publishing) {
+        entry.pending[slot] = MakeSoftwareProducerSnapshot(mask, invalid, output,
+            gs_setup, gs_unit, std::numeric_limits<u32>::max(), slot, "geometry_new_emit",
+            false, false, title, &entry, &buffer);
+        return std::nullopt;
+    }
+    auto& pending = entry.pending[slot];
+    // CodexAstraLocal TEST-ONLY LOG: A detectably changed or untracked slot must
+    // not inherit pending ownership. Identical-byte savestate replacement is
+    // outside this diagnostic's stated no-savestate-load scope. Preserve a
+    // clearly unqualified observation instead of inventing an earlier producer.
+    if (!pending || !pending->geometry_slot_bytes ||
+        std::memcmp(pending->geometry_slot_bytes->data(), &buffer, sizeof(buffer)) != 0) {
+        auto fallback = MakeSoftwareProducerSnapshot(mask, invalid, output, gs_setup, gs_unit,
+            std::numeric_limits<u32>::max(), slot, "geometry_published_untracked_slot",
+            false, false, title);
+        return fallback;
+    }
+    auto result = std::move(*pending);
+    pending.reset();
+    auto metadata = nlohmann::json::parse(result.metadata);
+    metadata["emit_semantic_mask"] = metadata["semantic_mask"];
+    metadata["emit_nonfinite_mask"] = metadata["nonfinite_mask"];
+    metadata["semantic_mask"] = mask;
+    metadata["nonfinite_mask"] = invalid;
+    std::array<u32, 7> mapping{};
+    for (u32 i = 0; i < mapping.size(); ++i)
+        mapping[i] = regs.internal.rasterizer.vs_output_attributes[i].raw;
+    metadata["publication"] = {{"invocation", entry.invocation}, {"emit_ordinal", entry.emit},
+        {"slot", slot}, {"vs_output_total", regs.internal.rasterizer.vs_output_total.Value()},
+        {"vs_output_attributes", mapping}};
+    // CodexAstraLocal TEST-ONLY LOG: A later draw can publish an older slot
+    // under different TEV/mapping/cull state. Keep that actual consumer state
+    // separately; the first archive must remain the original producer's state.
+    metadata["publication_archive_offset"] = result.payload.size();
+    metadata["publication_payload"] = "second Boost native binary archive: RegsInternal.reg_array, OutputVertex(at publication)";
+    std::ostringstream publication_stream{std::ios::out | std::ios::binary};
+    {
+        oarchive archive{publication_stream};
+        archive << regs.internal.reg_array << output;
+    }
+    result.payload += publication_stream.str();
+    if (result.payload.size() > 64 * 1024) throw std::runtime_error{"producer payload bound"};
+    metadata["payload_bytes"] = result.payload.size();
+    metadata["scope"] = "first published demanded nonfinite source candidate before clipping; pending emit overwritten before publication is discarded; not proof of a failing covered pixel";
+    result.metadata = metadata.dump();
+    if (result.metadata.size() > 4096) throw std::runtime_error{"producer metadata bound"};
+    return result;
+}
+
+void PicaCore::ObserveSoftwareGeometry(SoftwareGeometryEntry& entry,
+                                      const AttributeBuffer& buffer, u32 slot, bool publishing) noexcept {
+    if (!entry.semantic_mask || software_producer_attempted) return;
+    // CodexAstraLocal TEST-ONLY LOG: Semantic conversion may touch FP flags even
+    // on an unused color lane. Restore the entire observer boundary, including
+    // conversion, so this earlier EMIT observation cannot change guest output.
+    const auto fp = Common::Uberhar::ParallelFloatEnvironment::Capture();
+    SCOPE_EXIT({ fp.Apply(); });
+    try {
+        auto candidate = SoftwareGeometryCandidate(entry, buffer, slot, publishing);
+        if (!candidate) return;
+        software_producer_attempted = true;
+        entry.pending = {};
+        const auto output = OutputVertex{regs.internal.rasterizer, buffer};
+        const u32 mask = entry.semantic_mask;
+        WriteSoftwareProducerSnapshot(*candidate,
+            candidate->schema == 2 ? "geometry_new_emit" : "geometry_published_untracked_slot",
+            mask, SoftwareInvalidSemantics(mask, output), std::numeric_limits<u32>::max(), slot);
+    } catch (...) {
+        // CodexAstraLocal TEST-ONLY LOG: One failed diagnostic attempt also
+        // closes the budget; repeated NaNs cannot create an allocation/log storm.
+        software_producer_attempted = true;
+        entry.pending = {};
+        try { LOG_WARNING(Render_Software, "Software geometry producer candidate unavailable: slot={}", slot); }
+        catch (...) {}
     }
 }
 
@@ -420,18 +586,29 @@ PicaCore::PicaCore(Memory::MemorySystem& memory_, std::shared_ptr<DebugContext> 
             rasterizer->AddTriangle(v0, v1, v2);
         };
         const auto vertex = OutputVertex(regs.internal.rasterizer, buffer);
-        if (software_producer_diagnostics && regs.internal.pipeline.use_gs != PipelineRegs::UseGS::No) {
-            // CodexAstraLocal TEST-ONLY LOG: This is an actual GS emitter callback,
-            // not a completed VS invocation; preserve that replay limitation.
-            ObserveSoftwareProducer(SoftwareProducerMask(), vertex, gs_setup, gs_unit,
-                std::numeric_limits<u32>::max(), std::numeric_limits<u32>::max(),
-                "geometry_emit", false, false);
-        }
         primitive_assembler.SubmitVertex(vertex, add_triangle);
     };
 
     gs_unit.SetVertexHandlers(submit_vertex, [this]() { primitive_assembler.SetWinding(); });
     geometry_pipeline.SetVertexHandler(submit_vertex);
+    if (software_producer_diagnostics) {
+        // CodexAstraLocal TEST-ONLY LOG: Optional callbacks own one entry slot
+        // outside JIT/savestate layouts. Allocation failure disables evidence,
+        // never rendering. Remove once the FEA producer is fixed/reproduced.
+        try {
+            auto entry = std::make_shared<SoftwareGeometryEntry>();
+            gs_unit.emitter.handlers->invocation_observer = [this, entry](bool begin) noexcept {
+                BeginSoftwareGeometry(*entry, begin);
+            };
+            gs_unit.emitter.handlers->emit_observer =
+                [this, entry](const AttributeBuffer& buffer, u32 slot, bool publishing) noexcept {
+                    ObserveSoftwareGeometry(*entry, buffer, slot, publishing);
+                };
+        } catch (...) {
+            gs_unit.emitter.handlers->invocation_observer = {};
+            gs_unit.emitter.handlers->emit_observer = {};
+        }
+    }
 
     primitive_assembler.Reconfigure(PipelineRegs::TriangleTopology::List);
 
@@ -454,6 +631,10 @@ PicaCore::~PicaCore() {
     // CodexAstraLocal: Join published work before any shader/guest owner dies.
     // A previously reported terminal error must not escape this destructor.
     try { ReconcileDeferredVertices(); } catch (const VideoCore::ShaderRecoveryError&) {}
+    // CodexAstraLocal TEST-ONLY LOG: Release the owned diagnostic entry before
+    // its PICA owner dies, independent of the inherited emitter-handler lifetime.
+    gs_unit.emitter.handlers->invocation_observer = {};
+    gs_unit.emitter.handlers->emit_observer = {};
     if (Settings::values.uberhar_test_mode.GetValue() != Settings::UberharTestMode::Custom)
         ReportVirtualVertices("totals", std::chrono::steady_clock::now());
 }
