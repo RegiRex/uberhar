@@ -38,7 +38,7 @@ struct SoftwareRendererTestAccess {
     static bool Safe(RasterizerSoftware& raster, const Pica::RegsInternal& regs) {
         std::array<RasterizerSoftware::PreparedTexture, 3> prepared;
         return raster.PrepareTextures(regs.texturing.GetTextures(), prepared,
-            TextureDemandMask(regs.texturing.GetTevStages(), regs.lighting));
+            TextureDemandMask(regs.texturing, regs.lighting));
     }
     static unsigned Workers(const RasterizerSoftware& raster) { return raster.sw_workers.CreatedWorkers(); }
     static unsigned Available(const RasterizerSoftware& raster) { return raster.sw_workers.Available(); }
@@ -47,7 +47,7 @@ struct SoftwareRendererTestAccess {
     static auto Sample(RasterizerSoftware& raster, const Pica::RegsInternal& regs, float u,
                        float v, float w, bool footprint) {
         std::array<RasterizerSoftware::PreparedTexture, 3> prepared;
-        const auto demand = TextureDemandMask(regs.texturing.GetTevStages(), regs.lighting);
+        const auto demand = TextureDemandMask(regs.texturing, regs.lighting);
         raster.PrepareTextures(regs.texturing.GetTextures(), prepared, demand);
         std::array<Common::Vec2<Pica::f24>, 3> uv{};
         uv[0] = {Pica::f24::FromFloat32(u), Pica::f24::FromFloat32(v)};
@@ -315,14 +315,23 @@ TEST_CASE("Software shadow PCF compares depth before filtering", "[software][sof
     }
 }
 
-TEST_CASE("Software texture demand follows consumed TEV and lighting operands", "[software][software-sampling]") {
+TEST_CASE("Software texture demand follows consumed TEV and lighting operands", "[software][software-sampling][software-liveness]") {
     // CodexAstraLocal: Reserved/unused operand fields cannot map guest texture
     // bytes. Keep Software's existing stage0 alpha Previous behavior explicit.
     using Stage = Pica::TexturingRegs::TevStageConfig;
     using Source = Stage::Source;
     std::array<Stage, 6> stages{};
+    // CodexAstraLocal: Earlier-stage expectations require an actual chain to
+    // final output; a later Replace would deliberately make them dead.
+    for (u32 i = 1; i < stages.size(); ++i) {
+        stages[i].color_source1.Assign(Source::Previous);
+        stages[i].alpha_source1.Assign(Source::Previous);
+    }
     Pica::LightingRegs lighting{}; lighting.disable.Assign(1);
-    const auto mask = [&] { return SwRenderer::TextureDemandMask(stages, lighting); };
+    using Policy = Pica::TevLiveness::Stage0Policy;
+    const auto demand = [&] { return SwRenderer::GetFragmentDemand(
+        Pica::TevLiveness::Analyze(stages, 0, 0, Policy::Software), lighting); };
+    const auto mask = [&] { return demand().textures; };
     auto& s = stages[0];
     s.color_source2.Assign(Source::Texture1); s.color_source3.Assign(Source::Texture2);
     s.alpha_source2.Assign(Source::Texture3);
@@ -344,15 +353,86 @@ TEST_CASE("Software texture demand follows consumed TEV and lighting operands", 
     // CodexAstraLocal: Enabled but unconsumed lighting cannot request its
     // shadow/bump inputs. A late executed operand must restore that demand.
     CHECK(mask() == 0);
-    CHECK(SwRenderer::GetFragmentDemand(stages, lighting).primary_color);
-    CHECK_FALSE(SwRenderer::GetFragmentDemand(stages, lighting).lighting);
+    CHECK(demand().primary_color);
+    CHECK_FALSE(demand().lighting);
     stages[5].alpha_source1.Assign(Source::SecondaryFragmentColor);
     CHECK(mask() == 8);
-    CHECK(SwRenderer::GetFragmentDemand(stages, lighting).lighting);
+    CHECK(demand().lighting);
     lighting.config0.bump_mode.Assign(Pica::LightingRegs::LightingBumpMode::NormalMap);
     lighting.config0.bump_selector.Assign(1); CHECK(mask() == 10);
     lighting.disable.Assign(1); CHECK(mask() == 0);
     stages[5].color_source1.Assign(Source::Texture2); CHECK(mask() == 4);
+
+    // CodexAstraLocal: Pure backward dependencies preserve independent channel
+    // paths and the two-stage buffer delay. No value-based zero/NaN folding.
+    const auto reset = [&] {
+        for (auto& stage : stages) {
+            stage = {};
+            stage.color_source1.Assign(Source::Constant);
+            stage.alpha_source1.Assign(Source::Constant);
+        }
+    };
+    const auto analyze = [&](u32 rgb = 0, u32 alpha = 0, Policy policy = Policy::Software) {
+        return Pica::TevLiveness::Analyze(stages, rgb, alpha, policy);
+    };
+    reset();
+    stages[0].color_source1.Assign(Source::Texture0);
+    stages[0].alpha_source1.Assign(Source::Texture1);
+    CHECK(analyze().external_sources == 0); // Later constant replaces both.
+    stages[5].color_source1.Assign(Source::PreviousBuffer);
+    CHECK(analyze(1).Uses(Source::Texture0));
+    CHECK_FALSE(analyze(1).Uses(Source::Texture1));
+    stages[5].color_modifier1.Assign(Stage::ColorModifier::SourceAlpha);
+    CHECK_FALSE(analyze(1, 1).Uses(Source::Texture0));
+    CHECK(analyze(1, 1).Uses(Source::Texture1));
+    stages[5].alpha_source1.Assign(Source::PreviousBuffer);
+    stages[5].alpha_modifier1.Assign(Stage::AlphaModifier::SourceRed);
+    CHECK(analyze(1, 1).Uses(Source::Texture0));
+    stages[3].alpha_source1.Assign(Source::Texture2);
+    CHECK(analyze(1, 9).Uses(Source::Texture2));
+    CHECK_FALSE(analyze(1, 9).Uses(Source::Texture1)); // Latest alpha write wins.
+    reset();
+    stages[0].color_source1.Assign(Source::Texture0);
+    stages[1].color_source1.Assign(Source::PreviousBuffer);
+    for (u32 i = 2; i < stages.size(); ++i) stages[i].color_source1.Assign(Source::Previous);
+    CHECK_FALSE(analyze(1).Uses(Source::Texture0)); // Stage1 sees initial buffer.
+    stages[2].color_source1.Assign(Source::PreviousBuffer);
+    CHECK(analyze(1).Uses(Source::Texture0)); // Stage2 sees stage0's write.
+    reset();
+    stages[4].color_op.Assign(Stage::Operation::Dot3_RGBA);
+    stages[4].color_source1.Assign(Source::Texture0);
+    stages[4].color_source2.Assign(Source::Texture1);
+    stages[4].alpha_source1.Assign(Source::Texture2);
+    stages[5].alpha_source1.Assign(Source::Previous);
+    auto live = analyze();
+    CHECK_FALSE(live.stages[4].rgb);
+    CHECK(live.stages[4].alpha);
+    CHECK(live.Uses(Source::Texture0)); CHECK(live.Uses(Source::Texture1));
+    CHECK_FALSE(live.Uses(Source::Texture2));
+    reset();
+    stages[4].alpha_source1.Assign(Source::Texture3);
+    stages[5].color_source1.Assign(Source::Previous);
+    stages[5].color_modifier1.Assign(Stage::ColorModifier::SourceAlpha);
+    CHECK(analyze().Uses(Source::Texture3));
+    CHECK_FALSE(analyze().stages[4].rgb);
+    stages[4].color_source1.Assign(Source::Texture2);
+    stages[5].alpha_source1.Assign(Source::Previous);
+    stages[5].alpha_modifier1.Assign(Stage::AlphaModifier::SourceRed);
+    CHECK(analyze().Uses(Source::Texture2));
+    reset();
+    for (u32 i = 1; i < stages.size(); ++i) stages[i].alpha_source1.Assign(Source::Previous);
+    stages[0].alpha_source1.Assign(Source::Previous);
+    stages[0].alpha_source3.Assign(Source::Texture0);
+    CHECK_FALSE(analyze().Uses(Source::Texture0));
+    CHECK(analyze(0, 0, Policy::GeneratedGlsl).Uses(Source::Texture0));
+    // CodexAstraLocal: A captured live texture chain remains demanded even if
+    // another captured program overwrites it. No game-specific admission exists.
+    reset();
+    stages[0].sources_raw = 0x00030003;
+    stages[0].ops_raw = 0x00010001;
+    for (u32 i = 1; i < stages.size(); ++i) stages[i].sources_raw = 0x000f000f;
+    CHECK(analyze(2, 2).Uses(Source::Texture0));
+    CHECK(analyze(2, 2).Uses(Source::PrimaryColor));
 }
 
 TEST_CASE("Software cube filtering crosses edges with owned face identity", "[software]") {
@@ -509,6 +589,14 @@ TEST_CASE("Software producer capsule preserves demanded inputs and carry limits"
     const auto nan = std::bit_cast<Pica::f24>(0x7fc12345U);
     semantic.tc0.x = nan;
     CHECK(Access::Invalid(Access::Mask(pica), semantic) == 0);
+    // CodexAstraLocal: Keep stage0 connected to final output so the producer
+    // fixture observes genuinely consumed attributes, not overwritten values.
+    for (auto* stage : {&regs.texturing.tev_stage1, &regs.texturing.tev_stage2,
+                       &regs.texturing.tev_stage3, &regs.texturing.tev_stage4,
+                       &regs.texturing.tev_stage5}) {
+        stage->color_source1.Assign(Stage::Source::Previous);
+        stage->alpha_source1.Assign(Stage::Source::Previous);
+    }
     regs.texturing.tev_stage0.color_source1.Assign(Stage::Source::Texture0);
     regs.texturing.main_config.texture0_enable.Assign(1);
     regs.texturing.texture0.address.Assign(Memory::VRAM_PADDR / 8);
@@ -661,6 +749,14 @@ TEST_CASE("Software geometry capsule owns the producing emit and entry carry",
                        &regs.texturing.tev_stage4, &regs.texturing.tev_stage5}) {
         stage->color_source1.Assign(Stage::Source::Constant);
         stage->alpha_source1.Assign(Stage::Source::Constant);
+    }
+    // CodexAstraLocal: Keep stage0 connected to final output so the producer
+    // fixture observes genuinely consumed attributes, not overwritten values.
+    for (auto* stage : {&regs.texturing.tev_stage1, &regs.texturing.tev_stage2,
+                       &regs.texturing.tev_stage3, &regs.texturing.tev_stage4,
+                       &regs.texturing.tev_stage5}) {
+        stage->color_source1.Assign(Stage::Source::Previous);
+        stage->alpha_source1.Assign(Stage::Source::Previous);
     }
     regs.texturing.tev_stage0.color_source1.Assign(Stage::Source::Texture0);
     regs.texturing.main_config.texture0_enable.Assign(1);
@@ -884,6 +980,14 @@ TEST_CASE("Software actual demanded sampling and fixed helper ownership", "[soft
     for (u32 y = 0; y < 16; ++y) for (u32 x = 0; x < 16; ++x)
         Put(bytes, layout, 0, x, y, {41,82,123,255});
     using Source = Pica::TexturingRegs::TevStageConfig::Source;
+    // CodexAstraLocal: A chain to the final stage keeps this sampler control
+    // live after backward TEV preparation; unused malformed units stay dead.
+    for (auto* stage : {&regs.texturing.tev_stage1, &regs.texturing.tev_stage2,
+                       &regs.texturing.tev_stage3, &regs.texturing.tev_stage4,
+                       &regs.texturing.tev_stage5}) {
+        stage->color_source1.Assign(Source::Previous);
+        stage->alpha_source1.Assign(Source::Previous);
+    }
     regs.texturing.tev_stage0.color_source1.Assign(Source::Texture0);
     regs.texturing.main_config.texture1_enable.Assign(1);
     regs.texturing.texture1.address.Assign((Memory::VRAM_PADDR + 0x20000) / 8); // zero invalid dimensions
@@ -1115,6 +1219,19 @@ TEST_CASE("Software prepared fragment demand preserves actual triangle outputs",
     }
     stages[3]->color_modifier3.Assign(Stage::ColorModifier::SourceAlpha);
     CHECK(draw() == Color{16, 38, 68, 110});
+    // CodexAstraLocal: Alpha-only Dot3_RGBA needs its RGB inputs, but takes the
+    // dot result before color scaling. Neither the dead alpha source nor dead
+    // final RGB from that stage may add a texture/lighting dependency.
+    reset();
+    stages[4]->color_op.Assign(Stage::Operation::Dot3_RGBA);
+    stages[4]->color_source1.Assign(Source::Constant);
+    stages[4]->color_source2.Assign(Source::Constant);
+    stages[4]->alpha_source1.Assign(Source::Texture1);
+    stages[4]->color_scale.Assign(1);
+    constant(*stages[4], {160, 160, 160, 0});
+    stages[5]->color_source1.Assign(Source::Constant);
+    constant(*stages[5], {21, 73, 149, 205});
+    CHECK(draw() == Color{21, 73, 149, 51});
     // CodexAstraLocal: Complete Copy may omit destination reads; any channel
     // mask, non-Copy logic or blend must still consume the seeded destination.
     reset();
@@ -1138,6 +1255,124 @@ TEST_CASE("Software prepared fragment demand preserves actual triangle outputs",
         target.color_format.Assign(static_cast<Pica::FramebufferRegs::ColorFormat>(format));
         CHECK(draw() == encoded[format]);
     }
+}
+
+TEST_CASE("Software backward TEV liveness removes only overwritten texture work",
+          "[software][software-liveness]") {
+    // CodexAstraLocal: The retained failing triangle has a finite position plane
+    // and one NaN UV vertex. Its six captured TEV stages finish with Replace
+    // PrimaryColor, so that texture cannot affect RGBA. This executes actual
+    // AddTriangle with those position/UV bits and TEV registers, controlled
+    // identical primary colors, and local attachments (no title/shader fixture).
+    const auto old_workers = Settings::values.software_renderer_workers.GetValue();
+    struct Restore { u32 value; ~Restore() { Settings::values.software_renderer_workers = value; } }
+        restore{old_workers};
+    Settings::values.software_renderer_workers = 1;
+    Core::System system;
+    Memory::MemorySystem memory{system};
+    Pica::PicaCore pica{memory, {}};
+    auto& regs = pica.regs.internal;
+    regs = {};
+    regs.lighting.disable.Assign(1);
+    regs.rasterizer.viewport_size_x.Assign(0x45e000);
+    regs.rasterizer.viewport_size_y.Assign(0x469000);
+    regs.rasterizer.viewport_depth_range.Assign(0xbf0000);
+    regs.rasterizer.depthmap_enable.Assign(Pica::RasterizerRegs::DepthBuffering::ZBuffering);
+    auto& target = regs.framebuffer.framebuffer;
+    target.width.Assign(256); target.height.Assign(255);
+    target.color_format.Assign(Pica::FramebufferRegs::ColorFormat::RGBA8);
+    target.color_buffer_address.Assign((Memory::VRAM_PADDR + 0x40000) / 8);
+    target.allow_color_write.Assign(15);
+    auto& merger = regs.framebuffer.output_merger;
+    merger.logic_op.Assign(Pica::FramebufferRegs::LogicOp::Copy);
+    merger.red_enable.Assign(1); merger.green_enable.Assign(1);
+    merger.blue_enable.Assign(1); merger.alpha_enable.Assign(1);
+    auto* color = memory.GetPhysicalPointer(target.GetColorBufferPhysicalAddress());
+    SwRenderer::Framebuffer observed{memory, regs.framebuffer};
+    observed.Bind();
+    SwRenderer::RasterizerSoftware raster{memory, pica};
+    using Stage = Pica::TexturingRegs::TevStageConfig;
+    using Source = Stage::Source;
+    const std::array<Stage*, 6> stages{&regs.texturing.tev_stage0, &regs.texturing.tev_stage1,
+        &regs.texturing.tev_stage2, &regs.texturing.tev_stage3, &regs.texturing.tev_stage4,
+        &regs.texturing.tev_stage5};
+    const std::array<std::array<u32, 5>, 6> captured{{
+        {0x0e300e30, 0, 0, 0x80000000, 0},
+        {0x0eef0eef, 0, 0, 0xffffffff, 0},
+        {0x0ee30ee3, 0, 0x00030001, 0x00eff4f6, 0x00010000},
+        {0x0fff0fff, 0x20, 1, 0xffffffff, 0},
+        {0x0e300f3f, 0x200, 0x00010004, 0xffffffff, 0x00010000},
+        {0x0f300ff0, 0, 0, 0, 0}}};
+    const auto reset = [&] {
+        for (u32 i = 0; i < stages.size(); ++i) {
+            stages[i]->sources_raw = captured[i][0];
+            stages[i]->modifiers_raw = captured[i][1];
+            stages[i]->ops_raw = captured[i][2];
+            stages[i]->const_color = captured[i][3];
+            stages[i]->scales_raw = captured[i][4];
+        }
+        regs.texturing.tev_combiner_buffer_input.update_mask_rgb.Assign(0);
+        regs.texturing.tev_combiner_buffer_input.update_mask_a.Assign(0);
+    };
+    const auto bits = [](u32 value) { return std::bit_cast<Pica::f24>(value); };
+    std::array<Pica::OutputVertex, 3> triangle{};
+    const std::array<std::array<u32, 4>, 3> position{{
+        {0x402b15b5, 0xc02ff908, 0xc12d0f2e, 0x41746806},
+        {0x400a7f5b, 0xbeeaa180, 0xc12d0f34, 0x4174680b},
+        {0x400a7f5b, 0xc02ff908, 0xc12d0f34, 0x4174680b}}};
+    for (u32 i = 0; i < triangle.size(); ++i) {
+        auto& v = triangle[i];
+        for (u32 lane = 0; lane < 4; ++lane) v.pos[lane] = bits(position[i][lane]);
+        v.color = {bits(0), bits(0), bits(0), bits(0x3f3fbfc0)};
+        v.quat.w = Pica::f24::One();
+        v.tc0 = v.tc1 = v.tc2 = i == 2
+            ? Common::Vec2{bits(0x7fc00000), bits(0x7fc00000)}
+            : Common::Vec2{Pica::f24::Zero(), Pica::f24::One()};
+        v.tc0_w = Pica::f24::One();
+    }
+    regs.texturing.main_config.texture0_enable.Assign(1);
+    regs.texturing.texture0 = Sampler(128);
+    regs.texturing.texture0.height.Assign(512);
+    regs.texturing.texture0.address.Assign((Memory::VRAM_PADDR + 0x10000) / 8);
+    regs.texturing.texture0_format.Assign(Format::RGBA4);
+    const auto draw = [&] {
+        std::memset(color, 0x6d, 256 * 256 * 4);
+        raster.AddTriangle(triangle[0], triangle[1], triangle[2]);
+    };
+    reset();
+    auto live = Pica::TevLiveness::Analyze(regs.texturing, Pica::TevLiveness::Stage0Policy::Software);
+    CHECK(live.external_sources == (1U << static_cast<u32>(Source::PrimaryColor)));
+    for (u32 i = 0; i < 5; ++i) CHECK_FALSE((live.stages[i].rgb || live.stages[i].alpha));
+    REQUIRE_NOTHROW(draw());
+    CHECK(observed.GetPixel(137, 176) == Color{0, 0, 0, 191});
+    CHECK(observed.GetPixel(0, 0) == Color{109, 109, 109, 109});
+
+    // CodexAstraLocal: A final alpha-only texture, a color operand reading
+    // source alpha, and a live delayed buffer write must restore the real NaN
+    // refusal. This proves the repair does not mask or replace bad coordinates.
+    stages[5]->alpha_source1.Assign(Source::Texture0);
+    CHECK_THROWS_AS(draw(), VideoCore::ShaderRecoveryError);
+    reset();
+    stages[5]->color_source1.Assign(Source::Texture0);
+    stages[5]->color_modifier1.Assign(Stage::ColorModifier::SourceAlpha);
+    CHECK_THROWS_AS(draw(), VideoCore::ShaderRecoveryError);
+    reset();
+    stages[0]->color_source1.Assign(Source::Texture0);
+    stages[5]->color_source1.Assign(Source::PreviousBuffer);
+    regs.texturing.tev_combiner_buffer_input.update_mask_rgb.Assign(1);
+    CHECK_THROWS_AS(draw(), VideoCore::ShaderRecoveryError);
+    regs.texturing.tev_combiner_buffer_input.update_mask_rgb.Assign(0);
+    REQUIRE_NOTHROW(draw()); // Initial buffer constant is independent of UVs.
+    CHECK(observed.GetPixel(137, 176) == Color{0, 0, 0, 191});
+    // Live sampling with finite UVs still returns the actual texture bytes.
+    reset();
+    stages[5]->color_source1.Assign(Source::Texture0);
+    for (auto& v : triangle) v.tc0 = {Pica::f24::Zero(), Pica::f24::Zero()};
+    const auto layout = SwRenderer::MakeTextureLayout(regs.texturing.texture0, Format::RGBA4, false);
+    std::span<u8> texels{memory.GetPhysicalPointer(regs.texturing.texture0.GetPhysicalAddress()), layout.bytes};
+    std::fill(texels.begin(), texels.end(), 0xff);
+    REQUIRE_NOTHROW(draw());
+    CHECK(observed.GetPixel(137, 176) == Color{255, 255, 255, 191});
 }
 
 TEST_CASE("Software repeated lighting vectors preserve distinct light LUT results",

@@ -26,6 +26,9 @@ struct PreparedTevConfig;
 class RasterizerSoftware : public VideoCore::RasterizerInterface {
 public:
     explicit RasterizerSoftware(Memory::MemorySystem& memory, Pica::PicaCore& pica);
+    // CodexAstraLocal TEST-ONLY LOG: Final adaptive-worker evidence on ordinary
+    // renderer teardown; remove the report after Software tuning is qualified.
+    ~RasterizerSoftware() override;
 
     void AddTriangle(const Pica::OutputVertex& v0, const Pica::OutputVertex& v1,
                      const Pica::OutputVertex& v2) override;

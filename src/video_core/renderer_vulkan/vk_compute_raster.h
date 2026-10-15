@@ -15,6 +15,7 @@ class Instance;
 class Scheduler;
 class DescriptorUpdateQueue;
 class Surface;
+class ComputeFailurePacket;
 
 // CodexAstraLocal: This owner joins real cache resources to ordered
 // compute rasterization. It neither selects a graphics fallback nor treats an
@@ -35,6 +36,9 @@ public:
         vk::Buffer buffer;
         vk::DeviceSize bytes;
         u32 first_word{};
+        // CodexAstraLocal: Pin original evidence through deferred command
+        // execution and final-use retirement, not only the caller's stack.
+        std::shared_ptr<ComputeFailurePacket> failure;
     };
 
     ComputeRasterizer(const Instance& instance, Scheduler& scheduler,

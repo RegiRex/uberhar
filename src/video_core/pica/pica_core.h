@@ -156,12 +156,19 @@ private:
 
     void DrawArrays(bool is_indexed);
 
+    // CodexAstraLocal: A draw-local preparation bridges a refused capture and
+    // synchronous execution without retaining mutable data across draws.
     // AstraEH: Reuse the enclosing draw timestamp for sparse diagnostic admission.
-    void LoadVertices(bool is_indexed, std::chrono::steady_clock::time_point batch_start);
+    struct PreparedVertexDraw;
+    void LoadVertices(bool is_indexed, std::chrono::steady_clock::time_point batch_start,
+                      PreparedVertexDraw* preparation = nullptr);
     // CodexAstraLocal: Owned complete-list CPU work may overlap renderer
     // preparation; all guest-visible boundaries reconcile on this owner.
-    bool TryDeferredVertices(bool is_indexed, std::chrono::steady_clock::time_point batch_start);
-    void ReconcileDeferredVertices();
+    bool TryDeferredVertices(bool is_indexed, std::chrono::steady_clock::time_point batch_start,
+                             PreparedVertexDraw& preparation);
+    // CodexAstraLocal: Polling retires only the ready ordered prefix; guest-visible
+    // boundaries retain the default blocking reconciliation of every packet.
+    void ReconcileDeferredVertices(bool wait = true);
     // AstraEH: Aggregate progress, including the engine actually in use.
     void ReportVirtualVertices(const char* kind, std::chrono::steady_clock::time_point now);
     // AstraPro: GPU-heavy runs must not starve route progress diagnostics.

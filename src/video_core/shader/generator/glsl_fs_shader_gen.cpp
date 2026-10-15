@@ -80,6 +80,53 @@ bool SupportsDynamicTev(const FSConfig& config, const UserConfig& user) {
 // Sampling reuses actual typed samplers and caller-provided quad coordinates;
 // the ordered merger separately owns shadow writes. Reserved procedural state,
 // gas and custom-shader domains remain refusals, never approximations or fallback.
+// CodexAstraLocal: Share the exact backwards dependency graph while retaining
+// this generator's stage-zero Previous remap. Graphics source is unchanged.
+static bool IsPassThroughTevStage(const Pica::TexturingRegs::TevStageConfig& stage);
+static Pica::TevLiveness::Plan ComputeTevPlan(const FSConfig& config) {
+    std::array<TexturingRegs::TevStageConfig,6> stages;
+    for (u32 i=0;i<6;++i) stages[i]=config.texture.tev_stages[i];
+    // CodexAstraLocal: This generated consumer skips an entire identity stage.
+    // Stage zero then preserves initial zero; it never performs Previous->source3.
+    // Software executes that stage, so keep this adjustment local to compute GLSL.
+    if(IsPassThroughTevStage(stages[0])) {
+        stages[0].color_source3.Assign(TexturingRegs::TevStageConfig::Source::Previous);
+        stages[0].alpha_source3.Assign(TexturingRegs::TevStageConfig::Source::Previous);
+    }
+    return Pica::TevLiveness::Analyze(stages,config.texture.combiner_buffer_input&15U,
+        config.texture.combiner_buffer_input>>4,Pica::TevLiveness::Stage0Policy::GeneratedGlsl);
+}
+u32 ComputeLiveSemanticMask(const FSConfig& config) {
+    using Source=TexturingRegs::TevStageConfig::Source;
+    const auto plan=ComputeTevPlan(config);
+    u32 mask=15U; // Homogeneous position is always mandatory.
+    u32 textures=0;
+    if(plan.Uses(Source::PrimaryColor))mask|=15U<<8;
+    for(u32 i=0;i<4;++i)
+        if(plan.Uses(static_cast<Source>(static_cast<u32>(Source::Texture0)+i)))textures|=1U<<i;
+    const bool lighting=config.lighting.enable &&
+        (plan.Uses(Source::PrimaryFragmentColor)||plan.Uses(Source::SecondaryFragmentColor));
+    if(lighting) {
+        mask|=(15U<<4)|(7U<<18);
+        if(config.lighting.bump_mode!=LightingRegs::LightingBumpMode::None)
+            textures|=1U<<config.lighting.bump_selector.Value();
+        if(config.lighting.enable_shadow)textures|=1U<<config.lighting.shadow_selector.Value();
+    }
+    const auto coordinate=[&](u32 coord) {
+        if(coord==0)mask|=3U<<12;
+        else if(coord==1)mask|=3U<<14;
+        else if(coord==2)mask|=3U<<22;
+    };
+    if((textures&1U)&&config.texture.texture0_type!=TextureType::Disabled) {
+        coordinate(0);
+        if(config.texture.texture0_type!=TextureType::Texture2D)mask|=1U<<16;
+    }
+    if(textures&2U)coordinate(1);
+    if(textures&4U)coordinate(config.texture.texture2_use_coord1?1:2);
+    if((textures&8U)&&config.proctex.enable)coordinate(config.proctex.coord);
+    return mask;
+}
+
 ComputeFragmentSupport CheckComputeFragmentSupport(const FSConfig& config, const UserConfig& user,
                                                    const Profile& profile) {
     if (!profile.is_vulkan)
@@ -408,6 +455,7 @@ FragmentModule::FragmentModule(const FSConfig& config_, const UserConfig& user_,
            (!dynamic_tev && CheckComputeFragmentSupport(config, user, profile) ==
                                 ComputeFragmentSupport::Ready));
     config.ApplyProfile(profile_);
+    if (compute_evaluator) compute_liveness = ComputeTevPlan(config);
     out.reserve(RESERVE_SIZE);
     DefineExtensions();
     DefineInterface();
@@ -486,7 +534,9 @@ vec4 secondary_fragment_color = vec4(0.0);
     WriteDepth();
 
     // Write shader source to emulate all enabled PICA lights
-    WriteLighting();
+    using TevSource = TexturingRegs::TevStageConfig::Source;
+    if (!compute_evaluator || compute_liveness.Uses(TevSource::PrimaryFragmentColor) ||
+        compute_liveness.Uses(TevSource::SecondaryFragmentColor)) WriteLighting();
 
     out += "vec4 combiner_buffer = vec4(0.0);\n"
            "vec4 next_combiner_buffer = tev_combiner_buffer_color;\n"
@@ -510,7 +560,8 @@ vec4 secondary_fragment_color = vec4(0.0);
         WriteDynamicTevLoop();
     } else {
         for (u32 index = 0; index < config.texture.tev_stages.size(); index++) {
-            WriteTevStage(index);
+            if (compute_evaluator) WriteComputeTevStage(index);
+            else WriteTevStage(index);
         }
     }
 
@@ -884,6 +935,53 @@ void FragmentModule::WriteTevStage(u32 index) {
     if (config.TevStageUpdatesCombinerBufferAlpha(index)) {
         out += "next_combiner_buffer.a = combiner_output.a;\n";
     }
+}
+
+// CodexAstraLocal: Compute evaluates only operands with a path to final
+// output. Dead NaN UVs remain original semantic data but cannot trigger texture
+// operations. Live formulas, byteround-before-scale and delayed writes stay exact.
+void FragmentModule::WriteComputeTevStage(u32 index) {
+    using Operation = TexturingRegs::TevStageConfig::Operation;
+    const TexturingRegs::TevStageConfig stage=config.texture.tev_stages[index];
+    const auto live=compute_liveness.stages[index];
+    if(!IsPassThroughTevStage(stage)) {
+        if(live.NeedsColor(stage.color_op)) {
+            for(u32 operand=0;operand<Pica::TevLiveness::OperandCount(stage.color_op);++operand) {
+                out+=fmt::format("color_results_{} = ",operand+1);
+                AppendColorModifier(static_cast<TexturingRegs::TevStageConfig::ColorModifier>(
+                    (stage.modifiers_raw>>(4*operand))&15U),
+                    static_cast<TexturingRegs::TevStageConfig::Source>((stage.sources_raw>>(4*operand))&15U),index);
+                out+=";\n";
+            }
+            out+=fmt::format("vec3 color_output_{} = byteround(",index);
+            AppendColorCombiner(stage.color_op);out+=");\n";
+        }
+        if(live.alpha) {
+            if(stage.color_op==Operation::Dot3_RGBA) {
+                out+=fmt::format("float alpha_output_{0} = color_output_{0}[0];\n",index);
+            } else {
+                for(u32 operand=0;operand<Pica::TevLiveness::OperandCount(stage.alpha_op);++operand) {
+                    out+=fmt::format("alpha_results_{} = ",operand+1);
+                    AppendAlphaModifier(static_cast<TexturingRegs::TevStageConfig::AlphaModifier>(
+                        (stage.modifiers_raw>>(12+4*operand))&7U),
+                        static_cast<TexturingRegs::TevStageConfig::Source>((stage.sources_raw>>(16+4*operand))&15U),index);
+                    out+=";\n";
+                }
+                out+=fmt::format("float alpha_output_{} = byteround(",index);
+                AppendAlphaCombiner(stage.alpha_op);out+=");\n";
+            }
+            out+=fmt::format("combiner_output.a = clamp(alpha_output_{} * {}.0,0.0,1.0);\n",
+                             index,stage.GetAlphaMultiplier());
+        }
+        if(live.rgb)out+=fmt::format(
+            "combiner_output.rgb = clamp(color_output_{} * {}.0,vec3(0.0),vec3(1.0));\n",
+            index,stage.GetColorMultiplier());
+    }
+    out+="combiner_buffer = next_combiner_buffer;\n";
+    if(live.rgb&&config.TevStageUpdatesCombinerBufferColor(index))
+        out+="next_combiner_buffer.rgb = combiner_output.rgb;\n";
+    if(live.alpha&&config.TevStageUpdatesCombinerBufferAlpha(index))
+        out+="next_combiner_buffer.a = combiner_output.a;\n";
 }
 
 void FragmentModule::DefineDynamicState() {

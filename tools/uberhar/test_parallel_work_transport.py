@@ -2,7 +2,7 @@
 """CodexAstraLocal: Bound actual sleeping-transport/clock/lifetime controls.
 
 Native Linux by default; --compiler <NDK clang++> --qemu <qemu-aarch64> executes
-the same controls as Android/API33 A64. No device, scheduling or policy changes.
+the same controls as Android/API33 A64. No device or host policy changes.
 The production header is never edited. Synthetic syscall outcomes and one
 delayed-notification seam exist only in retained child include shadows.
 """
@@ -60,9 +60,13 @@ def main():
     args.output.mkdir(parents=True, exist_ok=True)
     out = Path(tempfile.mkdtemp(prefix='run-', dir=args.output.resolve()))
     header = repo/'src/common/uberhar_parallel_work.h'
+    # CodexAstraLocal: Bind the actual shared budget/controller dependency and
+    # its finite concurrency/adaptation controls, including copied mutations.
+    budget_header = repo/'src/common/uberhar_cpu_work_budget.h'
+    budget_fixture = repo/'tools/uberhar/test_parallel_work_budget.cpp'
     regression = repo/'tools/uberhar/test_parallel_work.cpp'
     fixture = Path(__file__).with_suffix('.cpp')
-    inputs = [header, regression, fixture, Path(__file__).resolve()]
+    inputs = [header, budget_header, budget_fixture, regression, fixture, Path(__file__).resolve()]
     proof = {'author':'CodexAstraLocal', 'scope':__doc__,
              'source_sha256':{str(p.relative_to(repo)):sha(p) for p in inputs},
              'compiler_sha256':sha(compiler), 'commands':[], 'variants':{}}
@@ -102,17 +106,20 @@ def main():
             require(process.stderr == stderr, name+': unexpected diagnostic')
         return process
 
-    def build(name, text, source):
+    def build(name, text, source, budget_text=None):
         directory = out/name
         (directory/'common').mkdir(parents=True)
         shadow = directory/'common/uberhar_parallel_work.h'
         shadow.write_text(text)
+        budget_shadow = directory/'common/uberhar_cpu_work_budget.h'
+        budget_shadow.write_text(budget_header.read_text() if budget_text is None else budget_text)
         argv = [str(compiler), '-std=c++20', '-O2', '-pthread', *flags,
                 '-I'+str(directory), '-I'+str(repo/'src')]
         binary = directory/'fixture'
         argv += [str(source), '-o', str(binary)]
         command(name+'-compile', argv, stderr=None)
-        proof['variants'][name] = {'header_sha256':sha(shadow), 'binary_sha256':sha(binary)}
+        proof['variants'][name] = {'header_sha256':sha(shadow),
+                                  'budget_sha256':sha(budget_shadow), 'binary_sha256':sha(binary)}
         save()
         return launcher+[str(binary)]
 
@@ -165,7 +172,7 @@ def main():
     # CodexAstraLocal: Each defect must fail a named behavior, not compile, crash
     # or time out. These never modify the source or the host's syscall policy.
     clock_defect = replace_once(counted,
-        'const auto owner_start = measure ? FutexTest::ReadClock()\n'
+        'const auto owner_start = timed ? FutexTest::ReadClock()\n'
         '                                         : std::chrono::steady_clock::time_point{};',
         'const auto owner_start = FutexTest::ReadClock();')
     child = build('unconditional_clock', clock_defect, fixture)
@@ -184,13 +191,42 @@ def main():
     child = build('ignored_terminal_error', error_defect, fixture)
     command('ignored-wait-error-run', child+['permanent-wait'], expected=78, stdout=b'', timeout=10)
     command('ignored-wake-error-run', child+['permanent-wake'], expected=78, stdout=b'', timeout=10)
+
+    # CodexAstraLocal: Run real simultaneous pools/reserved coordinator/nesting
+    # and the same pure measured-window controller on both production transports.
+    # Defects must fail their named invariant, never a timeout or compiler error.
+    budget_result = b'shared budget PASS: execution, reserved progress, nesting, output, adaptive rollback\n'
+    for name in ('actual', 'cv'):
+        child = build('budget-'+name, variants[name], budget_fixture)
+        command('budget-'+name+'-run', child, stdout=budget_result, timeout=30)
+    budget_raw = budget_header.read_text()
+    capacity_defect = replace_once(budget_raw,
+        'if (HasPermit()) return {};\n        auto observed = state.load(std::memory_order_relaxed);\n'
+        '        while (static_cast<unsigned>(observed) + (observed >> 32) < capacity) {',
+        'if (HasPermit()) return {};\n        auto observed = state.load(std::memory_order_relaxed);\n'
+        '        while (static_cast<unsigned>(observed) + (observed >> 32) < capacity + 4) {')
+    child = build('budget-overcommit', raw, budget_fixture, capacity_defect)
+    command('budget-overcommit-run', child, expected=1, stdout=b'',
+            stderr=b'single CPU capacity\n', timeout=30)
+    nested_defect = replace_once(raw, 'const bool nested = AuxiliaryBudget::HasPermit();',
+                                'const bool nested = false;')
+    child = build('budget-nested', nested_defect, budget_fixture)
+    command('budget-nested-run', child, expected=1, stdout=b'',
+            stderr=b'nested work escaped existing token\n', timeout=30)
+    rollback_defect = replace_once(budget_raw,
+        'desired = prior;\n                direction = -direction;',
+        'direction = -direction;')
+    child = build('budget-no-rollback', raw, budget_fixture, rollback_defect)
+    command('budget-no-rollback-run', child, expected=1, stdout=b'',
+            stderr=b'regressing trial not rolled back\n', timeout=30)
     for path in inputs:
         require(sha(path) == proof['source_sha256'][str(path.relative_to(repo))],
                 'source changed during transport gate')
     proof['passed'] = True
     save()
     print('PASS: four 738-job transports, 28 race/syscall assertions, denied/terminal controls, '
-          '12 real and 12 counted timing cases, four behavior-sensitive defect outcomes; '+str(out))
+          '12 real and 12 counted timing cases, four transport defects, shared budgets on both '
+          'transports and three budget/controller defects; '+str(out))
 
 
 if __name__ == '__main__':

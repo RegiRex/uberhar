@@ -8,9 +8,11 @@
 #include <cstring>
 #include <limits>
 #include <map>
+#include <memory>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <system_error>
 #include <vector>
 #include <fmt/format.h>
 #include "common/vector_math.h"
@@ -60,7 +62,10 @@ u64 Number(const Fields& f, const char* key) { return std::stoull(f.at(key)); }
 
 // CodexAstraLocal: Only resource handles and renderer commands are modeled;
 // state masks, rectangle geometry, observation, and reporting remain production.
-namespace vk { enum class Format { eR8G8B8A8Unorm, Other }; }
+namespace vk {
+enum class Format { eR8G8B8A8Unorm, Other };
+class SystemError : public std::system_error { using std::system_error::system_error; };
+}
 namespace VideoCore { enum class PixelFormat { RGBA8, Other }; }
 namespace Vulkan {
 enum class SurfaceType { Color, Depth };
@@ -181,10 +186,20 @@ struct Fixture {
 // The actual DrawComputeBatch body decides ownership, whole-batch commit,
 // terminal propagation and counters; the real Vulkan owner check is separate.
 struct CaptureEndpoint { unsigned calls{}; bool fail{}; };
-struct CapturedInput {};
+struct ComputeVertexInput {};
+// CodexAstraLocal: Diagnostic endpoints are deliberately inactive in this
+// census gate. The real body still retires/captures/commits in production order;
+// packet bytes and Vulkan failures have their separate actual-owner controls.
+enum class ComputeFailureStage { Admission, Capture, ResourcePreparation };
+struct ComputeFailurePacket {
+    void Stage(ComputeFailureStage) {}
+    void Input(std::shared_ptr<const ComputeVertexInput>, bool) {}
+    void Failure(const char*, int = 0) {}
+};
 template<class Flush>
-CapturedInput CaptureComputeVertexInput(CaptureEndpoint& memory, int, bool, bool,
-    const Pica::ComputeAssemblyState&, Flush&& flush, const Pica::AttributeBuffer*) {
+ComputeVertexInput CaptureComputeVertexInput(CaptureEndpoint& memory, int, bool, bool,
+    const Pica::ComputeAssemblyState&, Flush&& flush, const Pica::AttributeBuffer*,
+    const std::shared_ptr<ComputeFailurePacket>&) {
     ++memory.calls;
     if(memory.fail) throw VideoCore::ShaderRecoveryError("capture refusal");
     flush(0x1000,16); return {};
@@ -192,7 +207,10 @@ CapturedInput CaptureComputeVertexInput(CaptureEndpoint& memory, int, bool, bool
 struct ComputeVertexProducer {
     struct Batch { unsigned count; Pica::ComputeAssemblyResult assembly; };
     unsigned count{6}, calls{}, marks{}; bool fail{};
-    Batch Produce(const CapturedInput&, bool) {
+    void RetireBeforeCapture() {}
+    std::shared_ptr<ComputeFailurePacket> BeginFailurePacket(int, bool,
+        const Pica::ComputeAssemblyState&, const Pica::AttributeBuffer*) { return {}; }
+    Batch Produce(const ComputeVertexInput&, bool, const std::shared_ptr<ComputeFailurePacket>&) {
         ++calls;
         if(fail) throw VideoCore::ShaderRecoveryError("producer refusal");
         Batch out{count,{}};out.assembly.state.words[0]=91;out.assembly.written_mask=1;return out;
@@ -208,6 +226,9 @@ struct StrictFixture {
     struct {unsigned flushes{};void FlushRegion(PAddr,u32){++flushes;}}res_cache;
     struct {unsigned ended{};void EndRendering(){++ended;}}renderpass_cache;
     struct {struct Profile {unsigned vk_disable_spirv_optimizer{1};};Profile ShaderProfile(){return {};}}pipeline_cache;
+    struct { int RecordComputeFailure(const std::shared_ptr<ComputeFailurePacket>& packet) {
+        Check(!packet,"census diagnostic endpoint remains null"); return 0;
+    }} scheduler;
 #include "strict_stats.inc"
     StrictComputeStats strict_compute_stats;
     unsigned raster_calls{};bool consumer_failure{};

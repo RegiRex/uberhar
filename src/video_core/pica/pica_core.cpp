@@ -6,6 +6,7 @@
 #include <limits> // AstraPro: Checked index address arithmetic.
 #include <chrono> // AstraEH: Bounded virtual-PICA stage timing.
 #include <system_error> // CodexAstraLocal: Optional coordinator startup resource refusal.
+#include <optional> // CodexAstraLocal: Reuse preparation only within the current draw.
 #include <sstream> // CodexAstraLocal: Reuse bounded native shader serialization only on first fault.
 #include <json.hpp> // CodexAstraLocal: Self-describing producer evidence, never per-draw transport.
 #include "common/arch.h"
@@ -38,6 +39,19 @@
 
 namespace Pica {
 
+// CodexAstraLocal: A refused asynchronous attempt can lend its loader layout and
+// completed shader/geometry setup to this draw's synchronous path. No guest
+// pointers or mutable data survive the draw; reconciliation only publishes the
+// preceding primitive tail and cannot invalidate this register-derived setup.
+struct PicaCore::PreparedVertexDraw {
+    std::optional<VertexLoader> loader;
+    bool semantics_validated{};
+    bool batch_setup_ready{};
+    // CodexAstraLocal TEST-ONLY LOG: Sparse whole refused-path timing and reuse
+    // counts qualify preparation savings; remove after hardware qualification.
+    bool sample_refused_path{};
+};
+
 // CodexAstraLocal: Capacity is fixed in bytes/packets, while actual worker count
 // follows the process's logical CPUs. Reserving owner bookkeeping before dispatch
 // prevents an allocation failure from orphaning a published task.
@@ -52,6 +66,11 @@ struct PicaCore::DeferredVertexState {
     // CodexAstraLocal TEST-ONLY LOG: Remove these diagnostic counters after the
     // redundant-reset experiment is qualified; they do not schedule any work.
     u64 deferred_topology_resets{}, deferred_primitive_resets{};
+    // CodexAstraLocal TEST-ONLY LOG: Track actual preparation reuse and ordered
+    // ready-prefix retirement at the existing reporting cadence; remove once
+    // grouped scheduling and preparation savings are hardware-qualified.
+    u64 preparation_attempts{}, preparation_reuses{}, refused_path_samples{}, refused_path_ns{};
+    u64 ready_prefix_packets{}, fallback_boundaries{};
     explicit DeferredVertexState(unsigned processors)
         : executor{processors, PacketLimit, 8 * 1024 * 1024,
                    +[] { Common::SetCurrentThreadName("PICA draw pool"); }} {
@@ -224,7 +243,7 @@ u32 PicaCore::SoftwareProducerMask() const {
     using Semantic = RasterizerRegs::VSOutputAttributes;
     using Texture = TexturingRegs::TextureConfig;
     const auto& state = regs.internal;
-    const auto demand = SwRenderer::GetFragmentDemand(state.texturing.GetTevStages(), state.lighting);
+    const auto demand = SwRenderer::GetFragmentDemand(state.texturing, state.lighting);
     const auto lanes = [](u32 first, u32 count) { return ((1U << count) - 1) << first; };
     u32 mask = lanes(Semantic::POSITION_X, 4);
     if (demand.primary_color) mask |= lanes(Semantic::COLOR_R, 4);
@@ -646,6 +665,16 @@ void PicaCore::ReportVirtualVertices(const char* kind, std::chrono::steady_clock
     const auto delivery = std::strcmp(kind, "progress") == 0
                               ? Common::Log::Delivery::Diagnostic
                               : Common::Log::Delivery::Reliable;
+    // CodexAstraLocal TEST-ONLY LOG: Existing five-second/final cadence observes
+    // the shared helper budget without treating sleeping thread count as CPU
+    // load. Active is an instant, peak/denials are cumulative. Remove after
+    // shared-budget contention is qualified on supported hardware.
+    const auto cpu_budget = Common::Uberhar::AuxiliaryBudget::Global().GetStatistics();
+    LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
+        "Uberhar CPU work budget {}: schema=1 capacity={} active={} peak={} "
+        "reserved_progress={} denials={} scope=participating_auxiliaries_not_process_threads",
+        kind, cpu_budget.capacity, cpu_budget.active, cpu_budget.peak,
+        cpu_budget.reservations, cpu_budget.denials);
     if (deferred_vertices) {
         const auto& deferred = *deferred_vertices;
         const auto statistics = deferred.executor.GetStatistics();
@@ -653,13 +682,20 @@ void PicaCore::ReportVirtualVertices(const char* kind, std::chrono::steady_clock
         // experiment is qualified. Reuse bounded progress/final reports.
         // Owner capture/submit wall is not total CPU work or GPU execution time.
         LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
-            "Uberhar deferred CPU draws {}: schema=1 completed={} inputs={} invocations={} "
+            "Uberhar deferred CPU draws {}: schema=2 completed={} inputs={} invocations={} "
             "hits={} queued={} worker_completed={} failed={} waves={} max_wave={} peak_threads={} "
             "coordinator_packets={} auxiliary_packets={} resident_packets={} resident_bytes={} "
             "capacity_drains={} boundaries={} capture_attempts={} refused={} work_refused={} "
             "capture_submit_ms={:.3f} capture_submit_max_ms={:.3f} "
             "deferred_topology_resets={} deferred_primitive_resets={} "
-            "scope=complete_list_or_shader_no_gs min_misses=96 max_vertices=255 min_arithmetic=35 "
+            "early_refused={} group_candidates={} seed_submitted={} group_submitted={} "
+            "group_lost={} copy_refused={} grouped_waves={} work_grains={} "
+            "adaptive_helpers={} adaptive_samples={} adaptive_rejected={} adaptive_trials={} "
+            "adaptive_accepted={} adaptive_reverted={} "
+            "preparation_reuses={} refused_path_samples={} refused_path_ms={:.3f} "
+            "ready_prefix_packets={} fallback_boundaries={} "
+            "scope=complete_list_or_shader_no_gs seed_min_misses=96 max_vertices=255 min_arithmetic=35 "
+            "group_policy=ready_seed_aggregate_work "
             "max_copy_bytes_per_miss=70 timing=owner_capture_submit_not_frame_time",
             kind, deferred.completed, deferred.inputs, deferred.invocations, deferred.hits,
             statistics.submitted, statistics.completed, statistics.failed, statistics.waves,
@@ -668,7 +704,15 @@ void PicaCore::ReportVirtualVertices(const char* kind, std::chrono::steady_clock
             deferred.capacity_drains, deferred.synchronous_boundaries, statistics.captures,
             statistics.refused, statistics.work_refused, deferred.capture_submit_ns / 1e6,
             deferred.capture_submit_max_ns / 1e6, deferred.deferred_topology_resets,
-            deferred.deferred_primitive_resets);
+            deferred.deferred_primitive_resets, statistics.early_refused,
+            statistics.group_candidates, statistics.seed_submitted, statistics.group_submitted,
+            statistics.group_lost, statistics.copy_refused, statistics.grouped_waves,
+            statistics.work_grains, statistics.scheduling.desired, statistics.scheduling.samples,
+            statistics.scheduling.rejected, statistics.scheduling.trials,
+            statistics.scheduling.accepted, statistics.scheduling.reverted,
+            deferred.preparation_reuses, deferred.refused_path_samples,
+            deferred.refused_path_ns / 1e6, deferred.ready_prefix_packets,
+            deferred.fallback_boundaries);
     }
     // AstraPro: Existing five-second/final reporting gate. Periodic
     // samples can alias recurring draw patterns; never extrapolate a GPU budget.
@@ -750,6 +794,15 @@ void PicaCore::ReportVirtualVertices(const char* kind, std::chrono::steady_clock
                 status != ParallelVertexStatus::OutputCarry)
                 other_refusals += parallel.admissions[i];
         }
+        // CodexAstraLocal TEST-ONLY LOG: Read only on this pool's owner thread.
+        // The counters show whether adaptation actually found comparable work;
+        // remove after tuning, without changing the scheduling mechanism.
+        const auto scheduling = parallel.batch.Scheduling();
+        LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
+            "Uberhar vertex scheduling {}: schema=1 helpers={} samples={} rejected={} "
+            "trials={} accepted={} reverted={} scope=sampled_pool_work_not_frames",
+            kind, scheduling.desired, scheduling.samples, scheduling.rejected,
+            scheduling.trials, scheduling.accepted, scheduling.reverted);
         LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
             "Uberhar CPU parallel {}: schema=3 available={} created_workers={} peak_threads={} "
             "checks={} batches={} chunks={} owner_invocations={} worker_invocations={} "
@@ -1775,19 +1828,31 @@ void PicaCore::DrawImmediate() {
     // lifetime, but shares the actual PICA primitive tail with array draws.
     // Only original command attributes cross this entry; no CPU shader runs.
     if (Settings::RequiresComputeOnly(Settings::values.uberhar_test_mode.GetValue())) {
+        const auto before = primitive_assembler.ExportComputeState();
+        // CodexAstraLocal TEST-ONLY LOG: Refusals before renderer entry retain
+        // command state without reading unsafe guest spans or running shaders.
+        // Remove after first-fault admission regressions have corrected replay.
+        const auto refuse = [&](const char* reason) -> void {
+            rasterizer->ReportComputeFailure(reason,false,before,nullptr,&immediate.input_vertex);
+            throw VideoCore::ShaderRecoveryError(reason);
+        };
+
         if (debug_context || regs.internal.pipeline.use_gs != PipelineRegs::UseGS::No ||
             primitive_assembler.GetTopology() != regs.internal.pipeline.triangle_topology)
-            throw VideoCore::ShaderRecoveryError(
+            refuse(
                 "Calculated immediate input requires a matching topology without guest geometry");
         if (Core::System::GetInstance().HasConcurrentGuestMemoryWriters())
-            throw VideoCore::ShaderRecoveryError(
+            refuse(
                 "Calculated immediate snapshot requires no concurrent guest memory writer");
         if (immediate.reset_geometry_pipeline) geometry_pipeline.Reconfigure();
-        const auto before = primitive_assembler.ExportComputeState();
         ComputeAssemblyResult completed;
-        if (!rasterizer->DrawComputeBatch(false, before, completed, &immediate.input_vertex) ||
-            !primitive_assembler.CommitComputeState(completed))
-            throw VideoCore::ShaderRecoveryError("Calculated immediate backend/state unavailable");
+        if (!rasterizer->DrawComputeBatch(false,before,completed,&immediate.input_vertex))
+            refuse("Calculated immediate backend/state unavailable");
+        if (!primitive_assembler.CommitComputeState(completed)) {
+            rasterizer->ReportComputeFailure("Calculated immediate state commit invalid",false,
+                before,&completed,&immediate.input_vertex);
+            throw VideoCore::ShaderRecoveryError("Calculated immediate state commit invalid");
+        }
         immediate.reset_geometry_pipeline = false;
         immediate.current_attribute = 0;
         return;
@@ -1899,22 +1964,34 @@ void PicaCore::DrawArrays(bool is_indexed) {
     // Persistent List/Strip/Fan/Shader state is snapshotted and committed only
     // after whole-batch success. No refusal reaches LoadVertices or Native.
     if (Settings::RequiresComputeOnly(Settings::values.uberhar_test_mode.GetValue())) {
+        const auto before = primitive_assembler.ExportComputeState();
+        // CodexAstraLocal TEST-ONLY LOG: Refusals before renderer entry retain
+        // command state without reading unsafe guest spans or running shaders.
+        // Remove after first-fault admission regressions have corrected replay.
+        const auto refuse = [&](const char* reason) -> void {
+            rasterizer->ReportComputeFailure(reason,is_indexed,before,nullptr,nullptr);
+            throw VideoCore::ShaderRecoveryError(reason);
+        };
+
         ReconcileDeferredVertices();
         const auto topology = primitive_assembler.GetTopology();
         if (debug_context || regs.internal.pipeline.use_gs != PipelineRegs::UseGS::No ||
             topology != regs.internal.pipeline.triangle_topology)
-            throw VideoCore::ShaderRecoveryError(
+            refuse(
                 "Calculated requires a matching persistent topology without guest geometry");
         if (Core::System::GetInstance().HasConcurrentGuestMemoryWriters())
-            throw VideoCore::ShaderRecoveryError(
+            refuse(
                 "Calculated original input snapshot requires no concurrent guest memory writer");
         if (!regs.internal.pipeline.num_vertices) return;
         geometry_pipeline.Reconfigure();
-        const auto before = primitive_assembler.ExportComputeState();
         ComputeAssemblyResult completed;
-        if (!rasterizer->DrawComputeBatch(is_indexed, before, completed) ||
-            !primitive_assembler.CommitComputeState(completed))
-            throw VideoCore::ShaderRecoveryError("Calculated original-input backend unavailable");
+        if (!rasterizer->DrawComputeBatch(is_indexed,before,completed))
+            refuse("Calculated original-input backend unavailable");
+        if (!primitive_assembler.CommitComputeState(completed)) {
+            rasterizer->ReportComputeFailure("Calculated persistent state commit invalid",is_indexed,
+                before,&completed,nullptr);
+            throw VideoCore::ShaderRecoveryError("Calculated persistent state commit invalid");
+        }
         return;
     }
 
@@ -1978,9 +2055,18 @@ void PicaCore::DrawArrays(bool is_indexed) {
     // CodexAstraLocal: Only an independently published owned packet bypasses the
     // ordinary LoadVertices/DrawTriangles pair. Every refusal remains one serial
     // draw after earlier deferred assembler state has been reconciled.
-    if (TryDeferredVertices(is_indexed, virtual_start))
+    // CodexAstraLocal: Preserve successful preparation even when an optional
+    // capture policy refuses; repeating layout and shader setup adds owner work.
+    PreparedVertexDraw preparation;
+    if (TryDeferredVertices(is_indexed, virtual_start, preparation))
         return;
+    // CodexAstraLocal TEST-ONLY LOG: Classify the refusal-to-synchronous barrier
+    // without a per-draw clock read; remove after grouping coverage is qualified.
+    if (deferred_vertices && !deferred_vertices->pending.empty())
+        ++deferred_vertices->fallback_boundaries;
     ReconcileDeferredVertices();
+    if (preparation.batch_setup_ready)
+        ++deferred_vertices->preparation_reuses;
 
     // AstraEH: A bridge replaces a draw that already met the hardware path's
     // empty-assembler/no-GS contract. Isolate strip/fan expansion to preserve that
@@ -1988,16 +2074,24 @@ void PicaCore::DrawArrays(bool is_indexed) {
     // This does not fix upstream's documented cross-draw strip/fan limitation.
     if (accelerate_draw && rasterizer->HasPreparedCpuVertexBridge()) {
         ASSERT(regs.internal.pipeline.use_gs == PipelineRegs::UseGS::No);
-        primitive_assembler.RunIsolatedBatch([&] { LoadVertices(is_indexed, virtual_start); });
+        primitive_assembler.RunIsolatedBatch(
+            [&] { LoadVertices(is_indexed, virtual_start, &preparation); });
     } else {
         // Ordinary CPU rendering retains persistent assembly and partial primitives.
-        LoadVertices(is_indexed, virtual_start);
+        LoadVertices(is_indexed, virtual_start, &preparation);
     }
 
     if (virtual_test) {
         const auto now = std::chrono::steady_clock::now();
         const u64 elapsed =
             std::chrono::duration_cast<std::chrono::nanoseconds>(now - virtual_start).count();
+        // CodexAstraLocal TEST-ONLY LOG: Includes attempt, reconciliation and
+        // synchronous vertex work, so savings cannot be inferred from the
+        // successful-capture-only timer. Remove after preparation qualification.
+        if (preparation.sample_refused_path) {
+            ++deferred_vertices->refused_path_samples;
+            deferred_vertices->refused_path_ns += elapsed;
+        }
         if (virtual_window_start == std::chrono::steady_clock::time_point{})
             virtual_window_start = virtual_start;
         ++virtual_vertex_batches;
@@ -2035,34 +2129,48 @@ void PicaCore::DrawArrays(bool is_indexed) {
 // List/Shader work, so adopting its final buffered pair reproduces SubmitOrdered without
 // re-emitting triangles. Keep asynchronous counts separate from synchronous stage
 // timings rather than claiming the off-thread arithmetic cost disappeared.
-void PicaCore::ReconcileDeferredVertices() {
+void PicaCore::ReconcileDeferredVertices(bool wait) {
     if (!deferred_vertices || deferred_vertices->pending.empty())
         return;
     auto& state = *deferred_vertices;
-    ++state.synchronous_boundaries;
-    state.executor.Drain();
+    if (wait) {
+        ++state.synchronous_boundaries;
+        state.executor.Drain();
+    }
     for (; state.reconciled < state.pending.size(); ++state.reconciled) {
         const auto& packet = state.pending[state.reconciled];
-        // CodexAstraLocal: One completion lock supplies both owner consumers.
-        const auto result = packet->CompletedResult();
+        // CodexAstraLocal: Never publish a later tail before an unfinished
+        // predecessor. Nonblocking collection observes errors through the same
+        // typed result path; synchronous boundaries still wait for all work.
+        CpuDrawPacket::Completion result;
+        if (wait)
+            result = packet->CompletedResult();
+        else if (!packet->TryCompletedResult(result))
+            break;
         primitive_assembler.AdoptCompletedTriangleTail(result.last_pair);
         const auto counts = result.counts;
         ++state.completed;
         state.inputs += packet->VertexCount();
         state.invocations += counts.invocations;
         state.hits += counts.hits;
+        if (!wait)
+            ++state.ready_prefix_packets;
     }
-    state.pending.clear();
+    // CodexAstraLocal: Remove only committed entries. This releases their owner
+    // references without waiting for a later packet or disturbing renderer leases.
+    state.pending.erase(state.pending.begin(), state.pending.begin() + state.reconciled);
     state.reconciled = 0;
 }
 
 bool PicaCore::TryDeferredVertices(bool is_indexed,
-                                   std::chrono::steady_clock::time_point batch_start) {
+                                   std::chrono::steady_clock::time_point batch_start,
+                                   PreparedVertexDraw& preparation) {
     const auto mode = Settings::values.uberhar_test_mode.GetValue();
     const auto& pipeline = regs.internal.pipeline;
-    // CodexAstraLocal: First admission targets small draws that the existing
-    // per-draw pool runs serially. Host complete-path controls reject tiny/light
-    // packets: require at least 96 inputs and four available logical processors;
+    // CodexAstraLocal: Independent whole draws retain the original >=96-miss
+    // policy unless they join an actual pending cost-qualified seeded group.
+    // The executor rechecks that group under Submit's lock, so a vanished
+    // opportunity stays synchronous without publishing or waiting to fill work.
     // Capture additionally checks actual FIFO misses, arithmetic and copy volume.
     // Preserve the >=256-input parallel route;
     // do not silently serialize one large draw inside a whole-packet worker.
@@ -2071,7 +2179,7 @@ bool PicaCore::TryDeferredVertices(bool is_indexed,
     // winding request or topology mismatch always retains synchronous assembly.
     if ((mode != Settings::UberharTestMode::Native && !Settings::UsesReadyGpuVertices(mode)) ||
         deferred_allocation_failed || debug_context || vertex_timing ||
-        pipeline.use_gs != PipelineRegs::UseGS::No || pipeline.num_vertices < 96 ||
+        pipeline.use_gs != PipelineRegs::UseGS::No || pipeline.num_vertices < 3 ||
         pipeline.num_vertices % 3 || pipeline.num_vertices >= 256 ||
         (primitive_assembler.GetTopology() != PipelineRegs::TriangleTopology::List &&
          primitive_assembler.GetTopology() != PipelineRegs::TriangleTopology::Shader) ||
@@ -2083,6 +2191,12 @@ bool PicaCore::TryDeferredVertices(bool is_indexed,
         !Core::System::GetInstance().IsHostFpStatusIsolated() ||
         Core::System::GetInstance().HasConcurrentGuestMemoryWriters() ||
         !Common::Uberhar::ParallelFloatEnvironment::AllowsParallel())
+        return false;
+    // CodexAstraLocal: Pure tiny streams retain their original cheap serial
+    // route. The hint only rejects early; exact cost/seed ownership is rechecked
+    // before capture and under Submit's lock, since a seed can start meanwhile.
+    if (pipeline.num_vertices < 96 &&
+        (!deferred_vertices || !deferred_vertices->executor.HasPendingSeed()))
         return false;
     // CodexAstraLocal: Avoid an affinity syscall for every small draw. The pool
     // uses the title's initial process allowance; OS scheduling handles core/SMT
@@ -2107,6 +2221,10 @@ bool PicaCore::TryDeferredVertices(bool is_indexed,
             }
         }
         auto& state = *deferred_vertices;
+        // CodexAstraLocal TEST-ONLY LOG: Reuse the already-read batch timestamp;
+        // sample at most one refused path in 1024 attempted captures.
+        preparation.sample_refused_path = (++state.preparation_attempts & 1023U) == 0;
+        ReconcileDeferredVertices(false);
         if (state.pending.size() == DeferredVertexState::PacketLimit) {
             ++state.capacity_drains;
             ReconcileDeferredVertices();
@@ -2124,18 +2242,29 @@ bool PicaCore::TryDeferredVertices(bool is_indexed,
         const u32 width = pipeline.index_array.format ? 2 : 1;
         if (is_indexed && u64(pipeline.num_vertices) * width > indices.GetSize())
             return false;
-        const VertexLoader loader{memory, pipeline};
+        // CodexAstraLocal: Layout is immutable for this draw. Keep it on refusal
+        // instead of constructing the same twelve-loader mapping twice.
+        preparation.loader.emplace(memory, pipeline);
+        const auto& loader = *preparation.loader;
         const u32 requested = regs.internal.vs.max_input_attribute_index + 1;
         if (requested > 16 || requested > static_cast<u32>(loader.GetNumTotalAttributes()))
             return false;
         regs.internal.rasterizer.ValidateSemantics();
+        preparation.semantics_validated = true;
         shader_engine->SetupBatch(vs_setup, regs.internal.vs.main_offset);
         // CodexAstraLocal: Preserve the original no-GS geometry backend reset
         // and its serialized state before choosing the asynchronous CPU route.
         geometry_pipeline.Reconfigure();
         geometry_pipeline.Setup(shader_engine.get());
+        preparation.batch_setup_ready = true;
         auto lease = shader_engine->LeaseForDraw(vs_setup);
         if (!lease)
+            return false;
+        // CodexAstraLocal: Consult the immutable shader policy before copying
+        // uniforms/defaults or mapping attributes. Capture still validates actual
+        // FIFO misses and byte ownership; a refusal reuses this draw's setup.
+        if (!state.executor.AllowsShaderWork(
+                lease, ParallelVertexBooleanUniforms(vs_setup.uniforms), pipeline.num_vertices))
             return false;
         CpuDrawCapture source;
         source.shader_lease = std::move(lease);
@@ -2205,7 +2334,8 @@ bool PicaCore::TryDeferredVertices(bool is_indexed,
     }
 }
 
-void PicaCore::LoadVertices(bool is_indexed, std::chrono::steady_clock::time_point batch_start) {
+void PicaCore::LoadVertices(bool is_indexed, std::chrono::steady_clock::time_point batch_start,
+                            PreparedVertexDraw* draw_preparation) {
     // CodexAstraLocal: Reuse the existing batch wall timestamp; a terminal or
     // absent owner performs no new clock or phase reads on the ordinary path.
     if (vertex_timing && vertex_timing->Polling()) {
@@ -2220,8 +2350,15 @@ void PicaCore::LoadVertices(bool is_indexed, std::chrono::steady_clock::time_poi
     // Read and validate vertex information from the loaders
     const auto& pipeline = regs.internal.pipeline;
     const PAddr base_address = pipeline.vertex_attributes.GetPhysicalBaseAddress();
-    const auto loader = VertexLoader(memory, pipeline);
-    regs.internal.rasterizer.ValidateSemantics();
+    // CodexAstraLocal: Use same-attempt setup only; callers without an admitted
+    // preparation retain the original loader/validation/index-check ordering.
+    PreparedVertexDraw local_preparation;
+    auto& preparation = draw_preparation ? *draw_preparation : local_preparation;
+    if (!preparation.loader)
+        preparation.loader.emplace(memory, pipeline);
+    const auto& loader = *preparation.loader;
+    if (!preparation.semantics_validated)
+        regs.internal.rasterizer.ValidateSemantics();
 
     // Locate index buffer.
     const auto& index_info = pipeline.index_array;
@@ -2239,11 +2376,14 @@ void PicaCore::LoadVertices(bool is_indexed, std::chrono::steady_clock::time_poi
 
     // Compile the vertex shader for this batch.
     ShaderUnit shader_unit;
-    shader_engine->SetupBatch(vs_setup, regs.internal.vs.main_offset);
-
-    // Setup geometry pipeline in case we are using a geometry shader.
-    geometry_pipeline.Reconfigure();
-    geometry_pipeline.Setup(shader_engine.get());
+    // CodexAstraLocal: A completed refused-attempt setup has not executed any
+    // guest shader. Reuse it without resetting geometry a second time; all
+    // other paths retain shader setup followed by geometry reconfiguration.
+    if (!preparation.batch_setup_ready) {
+        shader_engine->SetupBatch(vs_setup, regs.internal.vs.main_offset);
+        geometry_pipeline.Reconfigure();
+        geometry_pipeline.Setup(shader_engine.get());
+    }
     ASSERT(!geometry_pipeline.NeedIndexInput() || is_indexed);
     // CodexAstraLocal TEST-ONLY LOG: Choose Software observation once per draw;
     // other modes retain their uninstrumented per-invocation loops.

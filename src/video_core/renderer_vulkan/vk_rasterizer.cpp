@@ -978,6 +978,33 @@ void RasterizerVulkan::DrawTriangles() {
 // CodexAstraLocal: Snapshot original memory with live cache visibility, execute
 // guest shading/assembly/clipping in compute, then use real target resources.
 // Only touched semantic slots and state cross back; the raster stream stays GPU-owned.
+// CodexAstraLocal TEST-ONLY LOG: These PICA-owned terminal edges never retry
+// input capture; an unsafe/unavailable original span remains explicitly absent.
+// Remove after actual admission/state failures have retained corrected replay.
+void RasterizerVulkan::ReportComputeFailure(const char* reason,bool indexed,
+    const Pica::ComputeAssemblyState& entry,const Pica::ComputeAssemblyResult* attempted,
+    const Pica::AttributeBuffer* immediate) noexcept {
+    if(!strict_compute || !compute_vertices)return;
+    try {
+        auto failure=attempted ? compute_vertices->FailurePacket() :
+            compute_vertices->BeginFailurePacket(pica,indexed,entry,immediate);
+        if(!failure)return;
+        if(attempted) {
+            failure->Value("assembly.rejected_commit.native_abi",*attempted);
+            failure->Label("publication","renderer may have enqueued; no rollback or retry");
+            failure->Failure(ComputeFailureStage::AssemblyState,reason);
+        } else {
+            auto input=std::make_shared<ComputeVertexInput>();
+            input->program=pica.vs_setup.GetProgramCode();
+            input->swizzles=pica.vs_setup.GetSwizzleData();
+            input->sanitize_mul=accurate_mul;
+            failure->Input(std::move(input),false);
+            failure->Unavailable("input.raw","pre-entry admission; unsafe spans are not reread");
+            failure->Failure(ComputeFailureStage::Admission,reason);
+        }
+    } catch(...) { /* Diagnostic retention cannot replace the original refusal. */ }
+}
+
 bool RasterizerVulkan::DrawComputeBatch(bool is_indexed,
                                       const Pica::ComputeAssemblyState& assembly,
                                       Pica::ComputeAssemblyResult& completed,
@@ -986,17 +1013,33 @@ bool RasterizerVulkan::DrawComputeBatch(bool is_indexed,
     // CodexAstraLocal: Count each original-input call once, including producer
     // failure and successful state-only batches. No per-vertex instrumentation.
     ++strict_compute_stats.attempts;
+    // CodexAstraLocal TEST-ONLY LOG: This context starts before admission and is
+    // retained by every command using the packet. Remove after captured actual
+    // producer/resource failures have corrected replay controls.
+    std::shared_ptr<ComputeFailurePacket> failure;
     try {
+        // Capturing the next guest span can flush cached GPU work. Retire A
+        // before B is created so a failed dependency never impersonates B.
+        compute_vertices->RetireBeforeCapture();
+        failure=compute_vertices->BeginFailurePacket(pica,is_indexed,assembly,immediate);
+        if (failure) failure->Stage(ComputeFailureStage::Admission);
         if (!vertex_batch.empty() || !assembly.Valid())
             throw VideoCore::ShaderRecoveryError("Calculated original-input ownership is inconsistent");
-        const auto input = CaptureComputeVertexInput(memory, pica, is_indexed, accurate_mul, assembly,
-            [this](PAddr address, u32 bytes) { res_cache.FlushRegion(address, bytes); }, immediate);
+        if (failure) failure->Stage(ComputeFailureStage::Capture);
+        auto input = CaptureComputeVertexInput(memory, pica, is_indexed, accurate_mul, assembly,
+            [this](PAddr address, u32 bytes) { res_cache.FlushRegion(address, bytes); }, immediate, failure);
+        // One owned packet feeds execution and retention; no reread of guest
+        // memory or copy of raw attributes is deferred until an error occurs.
+        const auto owned_input = std::make_shared<ComputeVertexInput>(std::move(input));
+        if (failure) failure->Input(owned_input, true);
         renderpass_cache.EndRendering();
-        const auto batch = compute_vertices->Produce(input,
-            pipeline_cache.ShaderProfile().vk_disable_spirv_optimizer != 0);
+        const auto batch = compute_vertices->Produce(*owned_input,
+            pipeline_cache.ShaderProfile().vk_disable_spirv_optimizer != 0, failure);
         // CodexAstraLocal: Fully clipped or partial-primitive batches execute
         // guest work and return valid persistent state without demanding targets.
         if (batch.count) {
+            const auto recording=scheduler.RecordComputeFailure(failure);
+            if (failure) failure->Stage(ComputeFailureStage::ResourcePreparation);
             Draw(false, false, {}, &batch);
             compute_vertices->MarkRasterUse();
             ++strict_compute_stats.rasterized;
@@ -1006,8 +1049,17 @@ bool RasterizerVulkan::DrawComputeBatch(bool is_indexed,
         completed = batch.assembly;
         ++strict_compute_stats.computed;
         return true;
+    } catch (const vk::SystemError& error) {
+        ++strict_compute_stats.terminal_failures;
+        if (failure) failure->Failure(error.what(), error.code().value());
+        throw VideoCore::ShaderRecoveryError("Calculated Vulkan resource preparation failed");
+    } catch (const std::exception& error) {
+        ++strict_compute_stats.terminal_failures;
+        if (failure) failure->Failure(error.what());
+        throw;
     } catch (...) {
         ++strict_compute_stats.terminal_failures;
+        if (failure) failure->Failure("non-standard Calculated owner exception");
         throw;
     }
 }

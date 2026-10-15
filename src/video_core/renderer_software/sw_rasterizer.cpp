@@ -87,6 +87,7 @@ struct PreparedTevConfig {
         Config::Operation color_op, alpha_op;
         u32 color_count, alpha_count, color_multiplier, alpha_multiplier;
         bool update_color, update_alpha;
+        Pica::TevLiveness::Stage live;
     };
     std::array<Stage, 6> stages;
     Common::Vec4<u8> initial_buffer;
@@ -94,13 +95,21 @@ struct PreparedTevConfig {
 
     PreparedTevConfig(const TexturingRegs& texturing, const Pica::LightingRegs& lighting) {
         const auto config = texturing.GetTevStages();
-        demand = GetFragmentDemand(config, lighting);
+        // CodexAstraLocal: One backward plan drives both sampler admission and
+        // execution. Overwritten TEV intermediates cannot request dead textures,
+        // while delayed buffer producers and cross-channel inputs stay live.
+        const auto live = Pica::TevLiveness::Analyze(
+            config, texturing.tev_combiner_buffer_input.update_mask_rgb,
+            texturing.tev_combiner_buffer_input.update_mask_a,
+            Pica::TevLiveness::Stage0Policy::Software);
+        demand = GetFragmentDemand(live, lighting);
         const auto& buffer = texturing.tev_combiner_buffer_color;
         initial_buffer = {static_cast<u8>(buffer.r.Value()), static_cast<u8>(buffer.g.Value()),
                           static_cast<u8>(buffer.b.Value()), static_cast<u8>(buffer.a.Value())};
         for (u32 i = 0; i < stages.size(); ++i) {
             const auto& source = config[i];
             auto& stage = stages[i];
+            stage.live = live.stages[i];
             stage.color_sources = {source.color_source1, source.color_source2, source.color_source3};
             stage.alpha_sources = {source.alpha_source1, source.alpha_source2, source.alpha_source3};
             // CodexAstraLocal: Only Software's first two RGB inputs remap
@@ -183,6 +192,18 @@ RasterizerSoftware::RasterizerSoftware(Memory::MemorySystem& memory_, Pica::Pica
     // CodexAstraLocal: Permanent effective configuration, emitted once per renderer.
     LOG_INFO(Render_Software, "CPU Software rendering participants={} (owner included), wait={}",
              sw_workers.Available(), sw_workers.WaitTransport());
+}
+
+// CodexAstraLocal TEST-ONLY LOG: Software's joined pool has no outstanding draw
+// at teardown. Capture its owner-only counters once, including after a contained
+// game failure; remove after adaptive Software participation is qualified.
+RasterizerSoftware::~RasterizerSoftware() {
+    const auto scheduling = sw_workers.Scheduling();
+    LOG_INFO(Render_Software,
+        "Uberhar software scheduling totals: schema=1 helpers={} samples={} rejected={} "
+        "trials={} accepted={} reverted={} scope=sampled_pool_work_not_frames",
+        scheduling.desired, scheduling.samples, scheduling.rejected,
+        scheduling.trials, scheduling.accepted, scheduling.reverted);
 }
 
 void RasterizerSoftware::AddTriangle(const Pica::OutputVertex& v0, const Pica::OutputVertex& v1,
@@ -1103,21 +1124,27 @@ Common::Vec4<u8> RasterizerSoftware::WriteTevConfig(
          *       combiner_output.rgb(), but instead store it in a temporary variable until
          *       alpha combining has been done.
          **/
-        // CodexAstraLocal: Resolve only the operation's consumed operands.
-        // The shared arity also governs sampling/lighting admission; the
-        // existing combiner functions and per-stage quantization stay intact.
-        std::array<Common::Vec3<u8>, 3> color_result{};
-        for (u32 input = 0; input < tev_stage.color_count; ++input) {
-            color_result[input] = GetColorModifier(tev_stage.color_modifiers[input],
-                                                  get_source(tev_stage.color_sources[input]));
+        // CodexAstraLocal: Resolve only operands with a path to the final
+        // fragment. Both channels read the preceding stage before either is
+        // written; Dot3_RGBA retains its unscaled alpha dependency. No arithmetic
+        // or quantization changes for a live value, and buffer advancement stays
+        // unconditional even when this stage produces no consumed value.
+        Common::Vec3<u8> color_output{};
+        if (tev_stage.live.NeedsColor(tev_stage.color_op)) {
+            std::array<Common::Vec3<u8>, 3> color_result{};
+            for (u32 input = 0; input < tev_stage.color_count; ++input) {
+                color_result[input] = GetColorModifier(tev_stage.color_modifiers[input],
+                                                      get_source(tev_stage.color_sources[input]));
+            }
+            color_output = ColorCombine(tev_stage.color_op, color_result);
         }
-        const Common::Vec3<u8> color_output = ColorCombine(tev_stage.color_op, color_result);
 
-        u8 alpha_output;
-        if (tev_stage.color_op == TexturingRegs::TevStageConfig::Operation::Dot3_RGBA) {
+        u8 alpha_output{};
+        if (tev_stage.live.alpha &&
+            tev_stage.color_op == TexturingRegs::TevStageConfig::Operation::Dot3_RGBA) {
             // result of Dot3_RGBA operation is also placed to the alpha component
             alpha_output = color_output.x;
-        } else {
+        } else if (tev_stage.live.alpha) {
             // alpha combiner
             std::array<u8, 3> alpha_result{};
             for (u32 input = 0; input < tev_stage.alpha_count; ++input) {
@@ -1127,20 +1154,24 @@ Common::Vec4<u8> RasterizerSoftware::WriteTevConfig(
             alpha_output = AlphaCombine(tev_stage.alpha_op, alpha_result);
         }
 
-        combiner_output[0] = std::min(255U, color_output.r() * tev_stage.color_multiplier);
-        combiner_output[1] = std::min(255U, color_output.g() * tev_stage.color_multiplier);
-        combiner_output[2] = std::min(255U, color_output.b() * tev_stage.color_multiplier);
-        combiner_output[3] = std::min(255U, alpha_output * tev_stage.alpha_multiplier);
+        if (tev_stage.live.rgb) {
+            combiner_output[0] = std::min(255U, color_output.r() * tev_stage.color_multiplier);
+            combiner_output[1] = std::min(255U, color_output.g() * tev_stage.color_multiplier);
+            combiner_output[2] = std::min(255U, color_output.b() * tev_stage.color_multiplier);
+        }
+        if (tev_stage.live.alpha) {
+            combiner_output[3] = std::min(255U, alpha_output * tev_stage.alpha_multiplier);
+        }
 
         combiner_buffer = next_combiner_buffer;
 
-        if (tev_stage.update_color) {
+        if (tev_stage.update_color && tev_stage.live.rgb) {
             next_combiner_buffer.r() = combiner_output.r();
             next_combiner_buffer.g() = combiner_output.g();
             next_combiner_buffer.b() = combiner_output.b();
         }
 
-        if (tev_stage.update_alpha) {
+        if (tev_stage.update_alpha && tev_stage.live.alpha) {
             next_combiner_buffer.a() = combiner_output.a();
         }
     }

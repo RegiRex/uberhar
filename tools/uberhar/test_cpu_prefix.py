@@ -24,7 +24,7 @@ def main():
         parts.append(function(text,signature).replace('RasterizerAccelerated::','AppendSink::',1))
     (out/'actual_append.inc').write_text('\n'.join(parts))
     inputs=[source,Path(__file__).resolve(),Path(__file__).with_suffix('.cpp')]+[
-        root/'src'/p for p in ['common/uberhar_parallel_work.h',
+        root/'src'/p for p in ['common/uberhar_parallel_work.h','common/uberhar_cpu_work_budget.h',
         'video_core/pica/uberhar_vertex_parallel_batch.h','video_core/pica/uberhar_vertex_append.h',
         'video_core/pica/primitive_assembly.h','video_core/pica/primitive_assembly.cpp']]
     proof={'author':'CodexAstraLocal','inputs':{str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in inputs},'runs':[]}

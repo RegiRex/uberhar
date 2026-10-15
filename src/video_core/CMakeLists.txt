@@ -219,6 +219,9 @@ if (ENABLE_VULKAN)
         renderer_vulkan/uberhar_compute_shadow.h
         renderer_vulkan/vk_compute_vertex.cpp
         renderer_vulkan/vk_compute_vertex.h
+        # CodexAstraLocal: Actual Calculated terminal paths share one owned packet writer.
+        renderer_vulkan/compute_failure_packet.cpp
+        renderer_vulkan/compute_failure_packet.h
         # CodexAstraLocal: Default-off fixed scratch comparison shares actual
         # compute commands but owns its request, pipelines, queries and readbacks.
         renderer_vulkan/uberhar_compute_benchmark.h

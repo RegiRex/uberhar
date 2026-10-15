@@ -1,3 +1,34 @@
+# Uberhar progress — 0.1.48 CPU scheduling and failure correction
+
+<!-- CodexAstraLocal: Owner-approved .48 implementation supersedes historical build pauses below; separate measured .47 failures from unqualified candidate behavior. -->
+0.1.47 is published and the owner's capture batch is complete. Native/Combo
+observations identify serial-owner pressure in Sonic and GPU pressure in some
+Dark Moon sections. No runaway Wi-Fi scanner was observed in the examined Sonic
+intervals. These are workload-specific bottlenecks; core occupancy alone is not
+an acceptance target. The target remains correct 99%+ normal speed at 4x with
+empty shader caches and no draw skipping.
+
+0.1.48 adds same-draw preparation reuse, cost-qualified groups of independent CPU
+draw packets, ordered ready-prefix collection and a shared auxiliary execution
+budget with gradual per-pool participation trials. Existing GPU placement and
+guest-visible ordering remain. See [release notes](releases/0.1.48.md). Hardware
+speed/pacing effects remain unmeasured; owner testing follows the gated build.
+
+CPU Software's captured Fire Emblem failure exposed texture calculations that
+were overwritten before final output. Backward consumer liveness avoids that
+unused work while preserving live-input validation. Calculated receives the
+consumer correction and first-failure archives with exact retained input and
+submission ownership. These changes do not establish game startup success;
+Dark Moon's live invalid input and the Calculated midpoint discrepancy remain.
+
+<!-- CodexAstraLocal: Root owns integration and release; agents stop on completion and yield during automation. Hardware remains owner-controlled. -->
+Use the existing RegiRex/uberhar release gates. Preserve private reports, original
+captures, saves and app data. No automatic install or gameplay test is part of
+this submission. Report changed behavior, validation, limitations and next owner
+checks; avoid repeated unaffected test runs or open-ended analysis.
+
+## Earlier 0.1.45 / 0.1.46 checkpoint
+
 # Uberhar progress — 0.1.45 tested; 0.1.46 rendering preparation
 
 <!-- CodexAstraLocal: Latest owner feedback and authorized build-submission stop supersede historical status below. -->

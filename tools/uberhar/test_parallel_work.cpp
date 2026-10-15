@@ -22,13 +22,17 @@ static void Require(bool condition, const char* message) {
 
 int main() {
     using Common::Uberhar::ParallelWork;
+    // CodexAstraLocal: Virtual 17-participant transport/FP barriers deliberately
+    // test that capacity independent of the CI host's allowed CPU count. The
+    // shared real-capacity/admission behavior has its own concurrent fixture.
+    Common::Uberhar::AuxiliaryBudget fixture_budget{17};
     const auto original = Common::Uberhar::ParallelFloatEnvironment::Capture();
     Require(Common::Uberhar::AvailableProcessors() >= 1, "processor discovery");
     // CodexAstraLocal: A naming failure must not strand joined work. Enabled
     // traps must keep even a large job entirely on the owner, without executing
     // faulting arithmetic in this test. Restore controls before assertions.
     {
-        ParallelWork pool{2, +[] { throw std::runtime_error("name unavailable"); }};
+        ParallelWork pool{2, +[] { throw std::runtime_error("name unavailable"); }, fixture_budget};
         std::atomic<unsigned> done{};
         const auto result = pool.Run(2048, 32, [&](unsigned first, unsigned last) {
             done += last - first;
@@ -58,7 +62,7 @@ int main() {
     // FE_ALL_EXCEPT bits clear, exposing the old portable-mask omission.
 #if defined(__i386__) || defined(__x86_64__)
     {
-        ParallelWork pool{2};
+        ParallelWork pool{2, nullptr, fixture_budget};
         const auto owner = std::this_thread::get_id();
         for (bool sse : {true, false}) {
             original.Apply();
@@ -93,7 +97,7 @@ int main() {
     // performs no arithmetic, so a missing raw FPSR merge cannot pass by chance.
 #if defined(__aarch64__) && (defined(__GNUC__) || defined(__clang__))
     {
-        ParallelWork pool{2};
+        ParallelWork pool{2, nullptr, fixture_budget};
         const auto owner = std::this_thread::get_id();
         for (bool denormal : {true, false}) {
             const std::uint64_t control = denormal ? (1ULL << 24) : 0;
@@ -126,7 +130,7 @@ int main() {
 #endif
     unsigned jobs = 0;
     for (unsigned cores : {1U, 2U, 6U, 8U, 12U, 17U}) {
-        ParallelWork pool{cores};
+        ParallelWork pool{cores, nullptr, fixture_budget};
         Require(pool.CreatedWorkers() == 0, "workers created without work");
         auto zero = pool.Run(0, 32, [](auto, auto) { throw std::runtime_error("empty callback"); });
         Require(zero.owner_items == 0 && zero.worker_items == 0, "empty accounting");

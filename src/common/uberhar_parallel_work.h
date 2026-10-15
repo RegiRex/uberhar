@@ -18,6 +18,7 @@
 #include <type_traits>
 #include <utility> // CodexAstraLocal: Forward optional owner hooks without copies.
 #include <vector>
+#include "common/uberhar_cpu_work_budget.h"
 #if defined(__linux__)
 #include <sched.h>
 #include <linux/futex.h>
@@ -29,22 +30,6 @@
 #endif
 
 namespace Common::Uberhar {
-
-// CodexAstraLocal: Size useful CPU work from the caller's allowed processors on
-// Linux/Android, including cpuset restrictions. Other hosts use their standard
-// concurrency query as fallback; a zero answer means owner-only execution.
-inline unsigned AvailableProcessors() {
-#if defined(__linux__)
-    cpu_set_t allowed;
-    CPU_ZERO(&allowed);
-    if (sched_getaffinity(0, sizeof(allowed), &allowed) == 0) {
-        const int count = CPU_COUNT(&allowed);
-        if (count > 0)
-            return static_cast<unsigned>(count);
-    }
-#endif
-    return std::max(1U, std::thread::hardware_concurrency());
-}
 
 // CodexAstraLocal: Workers must execute with the owner's rounding/flush controls,
 // not their last job's environment. ARM64 captures the complete FPCR/FPSR so
@@ -203,16 +188,20 @@ public:
         std::uint32_t owner_items{}, worker_items{};
         unsigned working_threads{};
         // CodexAstraLocal: Optional owner-side wall fields have exactly the
-        // timing-only pool scope. Unmeasured jobs perform no clock reads.
+        // timing-only pool scope. Internal adaptive samples do not populate
+        // these caller-requested fields; ordinary unsampled jobs read no clocks.
         std::uint64_t owner_process_ns{}, join_ns{};
         // CodexAstraLocal: Speculative CPU append is measured apart from the
         // subsequent join so overlap is never mislabeled as sleeping time.
         std::uint64_t owner_hook_ns{};
     };
     explicit ParallelWork(unsigned processors = AvailableProcessors(),
-                          void (*worker_start)() = nullptr)
+                          void (*worker_start)() = nullptr,
+                          AuxiliaryBudget& shared_budget = AuxiliaryBudget::Global(),
+                          AuxiliaryBudget::ProgressLane* progress = nullptr)
         : available{std::max(1U, processors)}, worker_limit{available - 1},
-          on_worker_start{worker_start} {}
+          on_worker_start{worker_start}, budget{shared_budget}, progress_lane{progress},
+          participation{available - 1} {}
     ParallelWork(const ParallelWork&) = delete;
     ParallelWork& operator=(const ParallelWork&) = delete;
 
@@ -243,6 +232,9 @@ public:
     unsigned Available() const { return available; }
     unsigned CreatedWorkers() const { return static_cast<unsigned>(workers.size()); }
     unsigned StartupFailures() const { return startup_failures; }
+    // CodexAstraLocal: Owner-only reporting exposes whether sampled policy
+    // actually changed participation, without logging per draw or per worker.
+    AdaptiveParticipation::Statistics Scheduling() const { return participation.GetStatistics(); }
     // CodexAstraLocal: Report the immutable runtime choice at the existing
     // cadence; a compiled Linux target can still select CV after a denied probe.
     const char* WaitTransport() const {
@@ -274,26 +266,48 @@ private:
     template <bool HasHook, typename Function, typename Prepare, typename Hook>
     Result RunImpl(std::uint32_t count, std::uint32_t grain, Function&& function,
                    Prepare&& prepare, Hook&& hook, bool measure) {
-        // CodexAstraLocal: Small jobs remain on the owner. Worker count grows
-        // only when enough independent items exist; no fixed six/eight-core cap.
+        // CodexAstraLocal: A helper's nested job stays within its current token.
+        // Owners never wait for capacity; denied auxiliaries leave ready grains
+        // for the owner. Persistent slots remain asleep when admission shrinks.
         grain = std::max(1U, grain);
-        const unsigned requested = ParallelFloatEnvironment::AllowsParallel()
+        const bool nested = AuxiliaryBudget::HasPermit();
+        const unsigned helper_capacity = budget.HelperCapacity();
+        participation.Limit(std::min(available - 1, helper_capacity));
+        participation.Prepare(count, grain, HasHook);
+        const unsigned requested = !nested && ParallelFloatEnvironment::AllowsParallel()
             ? std::min(available, std::max(1U, count / grain)) : 1U;
-        EnsureWorkers(requested - 1);
-        const unsigned active = std::min(requested - 1, CreatedWorkers());
+        const unsigned wanted = std::min({requested - 1, participation.Desired(), helper_capacity});
+        const bool sample = requested > 1 && participation.SelectSample(count, grain);
+        const bool timed = measure || sample;
+        EnsureWorkers(wanted);
+        const unsigned active = std::min(wanted, CreatedWorkers());
         if (active == 0) {
-            const auto start = measure ? std::chrono::steady_clock::now()
+            const auto start = timed ? std::chrono::steady_clock::now()
                                        : std::chrono::steady_clock::time_point{};
-            if (count != 0)
-                function(0, count);
-            const auto elapsed = measure ? Elapsed(start, std::chrono::steady_clock::now()) : 0;
-            return {count, 0, count != 0 ? 1U : 0U, elapsed, 0};
+            // CodexAstraLocal: A reserved coordinator lane counts only actual
+            // packet execution. Its RAII token unwinds before error delivery.
+            try {
+                auto permit = progress_lane && !nested ? progress_lane->Enter() : AuxiliaryBudget::Permit{};
+                if (count != 0) function(0, count);
+            } catch (...) {
+                if (sample) participation.Observe({.failed = true});
+                throw;
+            }
+            const auto elapsed = timed ? Elapsed(start, std::chrono::steady_clock::now()) : 0;
+            if (sample) participation.Observe({count, grain, count, 0, 0, elapsed, elapsed, 0, 0,
+                wanted != participation.Desired(), false});
+            return {count, 0, count != 0 ? 1U : 0U, measure ? elapsed : 0, 0};
         }
 
         // CodexAstraLocal: Small jobs and failed worker startup returned above;
         // they take no transaction snapshot or readiness-publication overhead.
         bool prepared = false;
         if constexpr (HasHook) prepared = prepare();
+        // CodexAstraLocal: Sample dispatch through completed work, excluding
+        // thread creation/transaction preparation and all caller pacing. Normal
+        // explicit timing retains its original three endpoints and public scope.
+        const auto dispatch_start = sample ? std::chrono::steady_clock::now()
+                                           : std::chrono::steady_clock::time_point{};
 
         // CodexAstraLocal: Publication is unchanged except for its synchronizer:
         // release generations for futex workers or the original shared mutex
@@ -334,14 +348,19 @@ private:
             for (unsigned i = 0; i < active; ++i)
                 workers[i]->wake.notify_one();
         }
-        const auto owner_start = measure ? std::chrono::steady_clock::now()
+        const auto owner_start = timed ? std::chrono::steady_clock::now()
                                          : std::chrono::steady_clock::time_point{};
-        Result result{Process(), 0, 0};
-        const auto owner_end = measure ? std::chrono::steady_clock::now()
+        Result result{};
+        {
+            auto permit = progress_lane ? progress_lane->Enter() : AuxiliaryBudget::Permit{};
+            result.owner_items = Process();
+        }
+        const auto owner_end = timed ? std::chrono::steady_clock::now()
                                        : std::chrono::steady_clock::time_point{};
         result.working_threads = result.owner_items != 0 ? 1U : 0U;
         std::exception_ptr hook_error;
         ParallelFloatEnvironment::Status hook_flags{};
+        bool hook_ran{};
         if constexpr (HasHook) {
             // CodexAstraLocal: One finite attempt while borrowers remain. Ready
             // result bytes do not release worker, FP or resource ownership.
@@ -353,6 +372,7 @@ private:
                 return remaining;
             };
             if (prepared && pending() != 0 && !failed.load(std::memory_order_acquire)) {
+                hook_ran = true;
                 const auto owner_fp = ParallelFloatEnvironment::Capture();
                 try { hook(); } catch (...) { hook_error = std::current_exception(); }
                 hook_flags = ParallelFloatEnvironment::Flags();
@@ -361,25 +381,38 @@ private:
                 owner_fp.Apply();
             }
         }
-        const auto join_start = measure && HasHook ? std::chrono::steady_clock::now() : owner_end;
+        const auto join_start = timed && HasHook ? std::chrono::steady_clock::now() : owner_end;
         if constexpr (HasHook) {
             if (measure) result.owner_hook_ns = Elapsed(owner_end, join_start);
         }
         ParallelFloatEnvironment::Status extra{};
         std::exception_ptr exception;
         auto collect = [&] {
+            const auto end = timed ? std::chrono::steady_clock::now()
+                                   : std::chrono::steady_clock::time_point{};
             if (measure) {
                 result.owner_process_ns = Elapsed(owner_start, owner_end);
-                result.join_ns = Elapsed(join_start, std::chrono::steady_clock::now());
+                result.join_ns = Elapsed(join_start, end);
             }
+            bool denied{};
             for (unsigned i = 0; i < active; ++i) {
                 result.worker_items += workers[i]->items;
                 result.working_threads += workers[i]->items != 0;
                 extra |= workers[i]->flags;
+                denied |= workers[i]->denied;
             }
             exception = error;
             task = nullptr;
             invoke = nullptr;
+            // CodexAstraLocal: Never learn from failed or capacity-contended
+            // work. Hook work is separately compared so a different amount of
+            // useful prefix append cannot masquerade as a faster shader batch.
+            if (sample) participation.Observe({count, grain, result.owner_items,
+                result.worker_items, active, Elapsed(dispatch_start, end),
+                Elapsed(owner_start, owner_end), Elapsed(join_start, end),
+                hook_ran ? Elapsed(owner_end, join_start) : 0,
+                denied || active != std::min(requested - 1, participation.Desired()),
+                bool(exception) || bool(hook_error)});
         };
 #if defined(__linux__) && (defined(__GNUC__) || defined(__clang__)) && defined(SYS_futex)
         if (use_futex) {
@@ -421,6 +454,7 @@ private:
         std::condition_variable wake;
         std::thread thread;
         bool ready{};
+        bool denied{};
         std::uint32_t items{};
         ParallelFloatEnvironment::Status flags{};
 #if defined(__linux__) && (defined(__GNUC__) || defined(__clang__)) && defined(SYS_futex)
@@ -486,11 +520,24 @@ private:
                     return;
                 slot.ready = false;
             }
-            const auto previous = ParallelFloatEnvironment::Capture();
-            environment.Apply();
-            const auto done = Process();
-            const auto flags = ParallelFloatEnvironment::Flags();
-            previous.Apply();
+            std::uint32_t done{};
+            ParallelFloatEnvironment::Status flags{};
+            {
+                // CodexAstraLocal: Acquire only after waking to executable work.
+                // A denied helper retires its participation without claiming a
+                // grain, and releases any token before completion/next sleep.
+                const bool work_ready = next.load(std::memory_order_relaxed) < item_count &&
+                                        !failed.load(std::memory_order_relaxed);
+                auto permit = work_ready ? budget.TryAcquire() : AuxiliaryBudget::Permit{};
+                slot.denied = work_ready && !permit;
+                if (permit) {
+                    const auto previous = ParallelFloatEnvironment::Capture();
+                    environment.Apply();
+                    done = Process();
+                    flags = ParallelFloatEnvironment::Flags();
+                    previous.Apply();
+                }
+            }
 #if defined(__linux__) && (defined(__GNUC__) || defined(__clang__)) && defined(SYS_futex)
             if (use_futex) {
                 slot.items = done;
@@ -537,6 +584,9 @@ private:
     const unsigned available;
     unsigned worker_limit;
     void (*on_worker_start)();
+    AuxiliaryBudget& budget;
+    AuxiliaryBudget::ProgressLane* progress_lane;
+    AdaptiveParticipation participation;
     unsigned startup_failures{};
     std::vector<std::unique_ptr<Worker>> workers;
     std::mutex mutex;

@@ -63,6 +63,10 @@ public:
     bool DrawComputeBatch(bool is_indexed, const Pica::ComputeAssemblyState& assembly,
                           Pica::ComputeAssemblyResult& completed,
                           const Pica::AttributeBuffer* immediate = nullptr) override;
+    void ReportComputeFailure(const char* reason, bool indexed,
+                              const Pica::ComputeAssemblyState& entry,
+                              const Pica::ComputeAssemblyResult* attempted,
+                              const Pica::AttributeBuffer* immediate) noexcept override;
     // CodexAstraLocal: Ordered state preparation and independently owned CPU
     // vertices meet only at the final coherent upload command.
     DeferredHardwareWriter PrepareDeferredVertices(u32 count) const override;

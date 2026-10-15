@@ -53,6 +53,9 @@ def main():
     parser.add_argument('--qemu', type=Path)
     # CodexAstraLocal: Local changed-behavior check; CI retains the full gate.
     parser.add_argument('--reset-only', action='store_true')
+    # CodexAstraLocal: Focus new grouping/publication/ready-prefix behavior in
+    # local checks; the default CI invocation still runs every older control.
+    parser.add_argument('--groups-only', action='store_true')
     args = parser.parse_args()
     root = args.root.resolve()
     source_root = (args.source_root or root / 'src').resolve()
@@ -64,7 +67,8 @@ def main():
     fixture_source = Path(__file__).with_suffix('.cpp').resolve()
     logical = ['video_core/pica/uberhar_cpu_draw_queue.h', 'video_core/pica/uberhar_cpu_draw_queue.cpp',
                'video_core/pica/uberhar_parallel_vertex.h',
-               'video_core/pica/primitive_assembly.h']
+               'video_core/pica/primitive_assembly.h',
+               'common/uberhar_parallel_work.h', 'common/uberhar_cpu_work_budget.h']
     inputs = [Path(__file__).resolve(), fixture_source,
               root / 'tools/uberhar/test_parallel_vertex_observable_cases.h',
               root / 'src/video_core/rasterizer_accelerated.cpp']
@@ -88,8 +92,8 @@ def main():
         return change(branch, '        break;', '')
     topology = reset_branch('triangle_topology', 'restart_primitive')
     restart = reset_branch('restart_primitive', 'vs_default_attributes_setup.index')
-    reconcile = body(pica, 'void PicaCore::ReconcileDeferredVertices()').replace('PicaCore::', 'ResetOwner::')
-    reconcile = change(reconcile, '    state.executor.Drain();', '    Gate(true);\n    state.executor.Drain();')
+    reconcile = body(pica, 'void PicaCore::ReconcileDeferredVertices(bool wait)').replace('PicaCore::', 'ResetOwner::')
+    reconcile = change(reconcile, '        state.executor.Drain();', '        Gate(true);\n        state.executor.Drain();')
     owner = '''// CodexAstraLocal: Source-extracted owner operations, real queue and assembler.
 struct ResetOwner {
     struct DeferredState {
@@ -98,11 +102,12 @@ struct ResetOwner {
         std::size_t reconciled{};
         u64 synchronous_boundaries{}, completed{}, inputs{}, invocations{}, hits{};
         u64 deferred_topology_resets{}, deferred_primitive_resets{};
+        u64 ready_prefix_packets{};
     };
     std::unique_ptr<DeferredState> deferred_vertices = std::make_unique<DeferredState>();
     PrimitiveAssembler primitive_assembler;
     struct { struct { struct { PipelineRegs::TriangleTopology triangle_topology; } pipeline; } internal; } regs;
-    void ReconcileDeferredVertices();
+    void ReconcileDeferredVertices(bool wait = true);
     void Topology(PipelineRegs::TriangleTopology next) {
         regs.internal.pipeline.triangle_topology = next;
 ''' + topology + '''
@@ -241,8 +246,44 @@ inline struct { Setting uberhar_test_mode; } values;
         ('stale_work_bound',instrumented,change(header,'    if (work) *work = {};',
             '    if (work) {}'),'work','refusal reused stale work'),
     ]
+    # CodexAstraLocal: These defects challenge real admission/publication and
+    # completed-prefix behavior, with actual JIT bytes rather than mock results.
+    grouped_variants = [
+        ('missing_pending_seed', change(instrumented,
+            'pending_seed && !pending.empty()', 'true'), header,
+            'groups', 'unseeded small admission'),
+        ('missing_member_charge', change(instrumented,
+            'pending_work + work >= GroupWorkUnit * (pending.size() + 1)',
+            'pending_work + work >= GroupWorkUnit'), header,
+            'groups', 'aggregate work charge omitted'),
+        ('missing_submit_recheck', change(instrumented,
+            'if (packet->impl->requires_group && !impl->PendingGroupFits(packet->impl->guaranteed_work))',
+            'if (false)'), header, 'groups', 'lost seed published small packet'),
+        ('group_inputs_as_work', change(instrumented,
+            'const u64 guaranteed_work = u64(misses) * effect.minimum_arithmetic;',
+            'const u64 guaranteed_work = u64(source.count) * effect.minimum_arithmetic;'), header,
+            'groups', 'group used inputs instead of misses'),
+        ('unweighted_tiny_claims', change(instrumented,
+            'if (work >= GroupWorkUnit)', 'if (work)'), header,
+            'groups', 'weighted grain accounting'),
+        ('group_copy_limit', change(instrumented,
+            'if (raw_size > u64(misses) * 70)', 'if (raw_size > u64(misses) * 700)'), header,
+            'groups', 'group copy bound escaped'),
+        ('missing_ready_error', change(instrumented,
+            'if (impl->error)\n        throw VideoCore::ShaderRecoveryError{"Uberhar deferred CPU draw failed"};\n    result =',
+            'if (false)\n        throw VideoCore::ShaderRecoveryError{"Uberhar deferred CPU draw failed"};\n    result ='),
+            header, 'groups', 'ready error skipped or replayed'),
+        ('missing_progress_reservation', change(instrumented,
+            'asynchronous{processors > 1 && bool(progress_lane)}',
+            'asynchronous{processors > 1}'), header,
+            'groups', 'no-lane publication failed synchronous progress'),
+    ]
     if args.reset_only:
         variants = [('positive', instrumented, header, 'resets', None)]
+    elif args.groups_only:
+        variants = [('positive', instrumented, header, 'groups', None)] + grouped_variants
+    else:
+        variants += grouped_variants
     try:
         common = [compile_one(p,p.stem) for p in actual]
         fixture = compile_one(source / 'fixture.cpp','fixture')
@@ -261,7 +302,7 @@ inline struct { Setting uberhar_test_mode; } values;
             run(name+'-link',flags+[selected_fixture,queue,*common,*link_flags,'-o',binary])
             result = json.loads(run(name+'-run',[*prefix,binary,selected],0 if expected is None else 1).stdout)
             if expected is None:
-                minimum = 4 if args.reset_only else (1024 if args.a64 else 512)
+                minimum = 4 if args.reset_only else 9 if args.groups_only else (1024 if args.a64 else 512)
                 if result.get('passed') is not True or result.get('comparisons',0) < minimum:
                     raise RuntimeError('Incomplete positive population')
                 proof['result'] = result
@@ -283,13 +324,19 @@ inline struct { Setting uberhar_test_mode; } values;
                 '        primitive_assembler.AdoptCompletedTriangleTail(result.last_pair);', ''),
                 'reset saved pair differs'),
         ]
+        if not args.reset_only:
+            controls.append(('skip_nonready_prefix', change(owner,
+                'else if (!packet->TryCompletedResult(result))\n            break;',
+                'else if (!packet->TryCompletedResult(result))\n            continue;'),
+                'nonready predecessor skipped'))
         for name, mutated_owner, expected in controls:
             owner_path.write_text(mutated_owner)
             (out / (name + '-owner.h')).write_text(mutated_owner)
             fixture_obj = compile_one(source / 'fixture.cpp', name + '-fixture')
             binary = out / name
             run(name + '-link', flags + [fixture_obj, queue_obj, *common, *link_flags, '-o', binary])
-            result = json.loads(run(name + '-run', [*prefix, binary, 'resets'], 1).stdout)
+            selected = 'groups' if name == 'skip_nonready_prefix' else 'resets'
+            result = json.loads(run(name + '-run', [*prefix, binary, selected], 1).stdout)
             if result.get('passed') is not False or result.get('error') != expected:
                 raise RuntimeError('Wrong reset negative-control failure: ' + str(result))
             proof['variants'].append({'name': name, 'owner_sha256': sha(owner_path),

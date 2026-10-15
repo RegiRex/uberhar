@@ -15,6 +15,7 @@
 #include "common/logging/log.h"
 #include "common/scm_rev.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
+#include "video_core/renderer_vulkan/compute_failure_packet.h"
 #include "video_core/shader_recovery_error.h"
 
 namespace Vulkan {
@@ -109,7 +110,8 @@ struct ComputePipelineObjects {
 // the existing terminal renderer error; no pipeline retry or graphics fallback.
 inline ComputePipelineObjects CreateComputePipeline(
     const Instance& instance, vk::PipelineLayout layout, std::string_view source,
-    std::span<const u32> code, bool disable_optimizer, ComputePipelineRole role, bool& reported) {
+    std::span<const u32> code, bool disable_optimizer, ComputePipelineRole role, bool& reported,
+    ComputeFailurePacket* failure = nullptr) {
     std::string_view operation = "create_shader_module";
     try {
         const auto device = instance.GetDevice();
@@ -122,6 +124,14 @@ inline ComputePipelineObjects CreateComputePipeline(
                     .pName = "main"}, .layout = layout}).value;
         return result;
     } catch (const vk::SystemError& error) {
+        // CodexAstraLocal: The draw packet carries exact creation outcome along
+        // with original inputs. The older module-only sidecar remains available
+        // to initialization callers that do not yet have a guest draw.
+        if(failure) {
+            failure->Label("pipeline_role",ComputePipelineRoleName(role));
+            failure->Label("pipeline_operation",operation);
+            failure->Number("pipeline_result_signed_bits",static_cast<u32>(error.code().value()));
+        }
         RecordComputePipelineFailure(instance, role, source, code, disable_optimizer,
                                      operation, error, reported);
         // CodexAstraLocal: Bound formatting in this failure path without an

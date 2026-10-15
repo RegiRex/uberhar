@@ -1,10 +1,12 @@
 // Copyright 2026 Uberhar contributors
 // Licensed under GPLv2 or any later version. Refer to license.txt.
 #include <algorithm>
+#include <bit>
 #include <cstring>
 #include <limits>
 #include <vector>
 #include "common/alignment.h"
+#include "video_core/renderer_vulkan/compute_failure_packet.h"
 #include "video_core/renderer_vulkan/uberhar_compute_pipeline.h"
 #include "video_core/renderer_vulkan/uberhar_compute_shadow.h"
 #include "video_core/renderer_vulkan/uberhar_compute_target_format.h"
@@ -59,6 +61,7 @@ struct ComputeRasterizer::Impl {
         vk::UniqueShaderModule module;
         vk::UniquePipeline pipeline;
         u64 tick{};
+        std::shared_ptr<const ComputeModuleEvidence> evidence;
     };
 
     Impl(const Instance& instance_, Scheduler& scheduler_, DescriptorUpdateQueue& updates_)
@@ -97,12 +100,17 @@ struct ComputeRasterizer::Impl {
              .pushConstantRangeCount = 1, .pPushConstantRanges = &push});
     }
 
-    Program& Pipeline(const FSConfig& config, const UserConfig& user, const Profile& profile) {
+    Program& Pipeline(const FSConfig& config, const UserConfig& user, const Profile& profile,
+                      const std::shared_ptr<ComputeFailurePacket>& failure) {
         auto found = std::find_if(programs.begin(), programs.end(), [&](const Program& program) {
             return program.config == config && program.user.raw == user.raw &&
                    program.profile == profile;
         });
-        if (found != programs.end()) return *found;
+        if (found != programs.end()) {
+            if (failure) failure->Module(found->evidence);
+            return *found;
+        }
+        if (failure) failure->Stage(ComputeFailureStage::RasterCompile);
         const auto evaluator = GLSL::GenerateComputeFragmentEvaluator(config, user, profile);
         if (!evaluator)
             throw VideoCore::ShaderRecoveryError("Calculated fragment configuration unsupported");
@@ -119,18 +127,28 @@ struct ComputeRasterizer::Impl {
                             std::string{ComputeTargetFormat::KernelFunctions} +
                             std::string{ComputeShadow::KernelFunctions} +
                             std::string{ComputeRasterKernel};
+        auto evidence = std::make_shared<ComputeModuleEvidence>();
+        evidence->role = "raster"; evidence->source = source;
+        evidence->optimizer_disabled = profile.vk_disable_spirv_optimizer != 0;
+        if (failure) failure->Module(evidence);
         const auto code = CompileGLSL(source, vk::ShaderStageFlagBits::eCompute, "",
                                      profile.vk_disable_spirv_optimizer != 0);
+        // CodexAstraLocal: A queued failure may already hold the source-only
+        // snapshot. Replace it atomically; never mutate published module vectors.
+        evidence=std::make_shared<ComputeModuleEvidence>(*evidence);
+        evidence->spirv=code;
+        if(failure)failure->Module(evidence);
         if (code.empty())
             throw VideoCore::ShaderRecoveryError("Calculated compute module compilation failed");
-        Program program{config, user, profile, {}, {}, 0};
+        Program program{config, user, profile, {}, {}, 0, evidence};
         // CodexAstraLocal: This compute owner does not concurrently mutate
         // the legacy worker-owned driver cache; a private pipeline has no saved-
         // cache dependency and cannot cause graphics pipeline selection.
+        if (failure) failure->Stage(ComputeFailureStage::RasterPipeline);
         auto objects = CreateComputePipeline(
             instance, *layout, source, code,
             profile.vk_disable_spirv_optimizer != 0, ComputePipelineRole::Raster,
-            reported_creation_failure);
+            reported_creation_failure, failure.get());
         program.module = std::move(objects.module);
         program.pipeline = std::move(objects.pipeline);
         programs.push_back(std::move(program));
@@ -159,8 +177,12 @@ struct ComputeRasterizer::Impl {
     // CodexAstraLocal: Byte packing is a separate GPU buffer transform. One
     // invocation owns each packed word; no CPU pixel conversion or cross-pixel
     // atomic read/modify/write enters the native-format merger.
-    void PrepareTransfer() {
-        if (pack_pipeline) return;
+    void PrepareTransfer(const std::shared_ptr<ComputeFailurePacket>& failure) {
+        if (pack_pipeline) {
+            if (failure) { failure->Module(expand_evidence); failure->Module(pack_evidence); }
+            return;
+        }
+        if (failure) failure->Stage(ComputeFailureStage::TransferCompile);
         constexpr auto stage = vk::ShaderStageFlagBits::eCompute;
         const std::array bindings{
             vk::DescriptorSetLayoutBinding{0, vk::DescriptorType::eStorageBuffer, 1, stage},
@@ -174,21 +196,33 @@ struct ComputeRasterizer::Impl {
              .pushConstantRangeCount = 1, .pPushConstantRanges = &range});
         const auto compile = [&](ComputePipelineRole role, std::string_view source,
                                  vk::UniqueShaderModule& module,
-                                 vk::UniquePipeline& pipeline) {
+                                 vk::UniquePipeline& pipeline,
+                                 std::shared_ptr<const ComputeModuleEvidence>& retained) {
+            auto evidence = std::make_shared<ComputeModuleEvidence>();
+            evidence->role = role == ComputePipelineRole::Expand ? "expand" : "pack";
+            evidence->source = source; evidence->optimizer_disabled = true;
+            if (failure) { failure->Stage(ComputeFailureStage::TransferCompile); failure->Module(evidence); }
             const auto code = CompileGLSL(std::string{source}, stage, "", true);
+            // CodexAstraLocal: A queued failure may already hold the source-only
+            // snapshot. Replace it atomically; never mutate published module vectors.
+            evidence=std::make_shared<ComputeModuleEvidence>(*evidence);
+            evidence->spirv=code;
+            if(failure)failure->Module(evidence);
             if (code.empty())
                 throw VideoCore::ShaderRecoveryError("Calculated target transfer compilation failed");
             // CodexAstraLocal: Transfer kernels have the same terminal contract
             // as guest/raster kernels; tag their exact independent role.
+            if (failure) failure->Stage(ComputeFailureStage::TransferPipeline);
             auto objects = CreateComputePipeline(instance, *transfer_layout, source, code, true,
-                                                  role, reported_creation_failure);
+                                                  role, reported_creation_failure, failure.get());
             module = std::move(objects.module);
             pipeline = std::move(objects.pipeline);
+            retained = std::move(evidence);
         };
         compile(ComputePipelineRole::Expand, ComputeTargetFormat::ExpandTransferKernel,
-                expand_module, expand_pipeline);
+                expand_module, expand_pipeline, expand_evidence);
         compile(ComputePipelineRole::Pack, ComputeTargetFormat::PackTransferKernel,
-                pack_module, pack_pipeline);
+                pack_module, pack_pipeline, pack_evidence);
     }
 
     void Draw(Surface* color, Surface* depth, vk::ImageView inactive_color_view,
@@ -196,6 +230,32 @@ struct ComputeRasterizer::Impl {
               const Profile& profile, const FSUniformData& fragment,
               const TextureBindings& texture_bindings, const LutBindings& luts,
               GpuVertices vertices) {
+        const auto& failure = vertices.failure;
+        // CodexAstraLocal TEST-ONLY LOG: Preserve actual resolved configuration,
+        // ABI bytes and binding identities before they can change. Image pixels
+        // are explicitly unavailable rather than reading unsafe GPU state during
+        // unwinding. Remove after resource incidents have corrected replay cases.
+        if (failure) {
+            failure->Stage(ComputeFailureStage::ResourcePreparation);
+            failure->Value("raster.config.native_abi", config);
+            failure->Value("raster.user.native_abi", user);
+            failure->Value("raster.profile.native_abi", profile);
+            failure->Unavailable("raster.fragment_uniforms.native_abi",
+                "available to synchronous owner failure only; not copied on success");
+            failure->Value("raster.texture_bindings.native_abi", texture_bindings);
+            failure->Value("raster.lut_bindings.native_abi", luts);
+            failure->Unavailable("raster.image_pixels", "GPU-only sampled/target contents not read after failure");
+            const auto surface = [&](const char* name, Surface* value) {
+                if (!value) { failure->Label(name, "absent"); return; }
+                const std::array<u64, 7> description{
+                    static_cast<u64>(value->pixel_format), static_cast<u64>(value->traits.native),
+                    value->RealExtent().width, value->RealExtent().height,
+                    value->traits.transfer_support, value->traits.storage_support,
+                    std::bit_cast<u64>(static_cast<VkImage>(value->Image()))};
+                failure->Value(name, description);
+            };
+            surface("raster.color_target.u64", color); surface("raster.depth_target.u64", depth);
+        }
         using Encoding = ComputeTargetFormat::Encoding;
         const auto color_format = color ? ComputeTargetFormat::Describe(color->pixel_format,
                                                     color->traits.native) : std::nullopt;
@@ -241,13 +301,14 @@ struct ComputeRasterizer::Impl {
         if (!vertices.buffer || vertices.bytes > limits.maxStorageBufferRange ||
             vk::DeviceSize{vertices.first_word} * 4 + vk::DeviceSize{push.extent[2]} * 88 > vertices.bytes)
             throw VideoCore::ShaderRecoveryError("Calculated GPU vertex range invalid");
-        auto& program = Pipeline(config, user, profile);
+        auto& program = Pipeline(config, user, profile, failure);
+        if (failure) failure->Stage(ComputeFailureStage::Allocation);
         EnsureScratch(depth_scratch, storage_bytes);
         EnsureScratch(color_scratch, color_bytes);
         const bool needs_transfer = buffered_color || packed_depth;
         if (needs_transfer) {
             EnsureScratch(transfer_scratch, transfer_bytes);
-            PrepareTransfer();
+            PrepareTransfer(failure);
         }
         // CodexAstraLocal: All potentially flushing allocation/compilation/Map
         // preparation precedes every descriptor stamp. Only uniforms cross the
@@ -256,6 +317,7 @@ struct ComputeRasterizer::Impl {
         if (upload_size > upload.Capacity())
             throw VideoCore::ShaderRecoveryError("Calculated upload exceeds allocated ring capacity");
         const u64 alignment = std::max<u64>(16, limits.minUniformBufferOffsetAlignment);
+        if (failure) failure->Stage(ComputeFailureStage::Upload);
         const auto [mapped, offset, _] = upload.Map(upload_size, alignment);
         std::memcpy(mapped, &fragment, sizeof(fragment));
         push.geometry[2] = vertices.first_word;
@@ -265,6 +327,12 @@ struct ComputeRasterizer::Impl {
         push.reserved[0] = static_cast<u32>(color_format ? color_format->encoding : Encoding::Rgba8);
         push.reserved[1] = static_cast<u32>(depth_format ? depth_format->encoding : Encoding::D24);
         push.reserved[3] = static_cast<u32>(config.proctex.coord.Value());
+        if (failure) {
+            failure->Value("raster.push.native_abi", push);
+            failure->Number("raster.vertex_buffer_bytes", vertices.bytes);
+            failure->Number("raster.vertex_first_word", vertices.first_word);
+            failure->Stage(ComputeFailureStage::Descriptors);
+        }
         upload.Commit(upload_size);
         const std::array sets{uniforms->Commit(), textures->Commit(), raster->Commit()};
         updates.AddBuffer(sets[0], 2, upload.Handle(), offset, sizeof(fragment),
@@ -317,7 +385,7 @@ struct ComputeRasterizer::Impl {
         // access after this owner uses an image, even when its format is packed.
         if (color) color->is_compute = true;
         if (depth) depth->is_compute = true;
-        scheduler.Record([push, sets, pipeline = *program.pipeline, view_layout = *layout,
+        scheduler.Record([failure, push, sets, pipeline = *program.pipeline, view_layout = *layout,
                           depth_image, color_image, depth_buffer, raw_buffer, stencil,
                           depth_bytes, depth_offset, packed_depth, buffered_color,
                           transfer_sets, color_bpp, depth_bpp,
@@ -325,6 +393,8 @@ struct ComputeRasterizer::Impl {
                           expand = needs_transfer ? *expand_pipeline : vk::Pipeline{},
                           pack = needs_transfer ? *pack_pipeline : vk::Pipeline{},
                           group_limit = limits.maxComputeWorkGroupCount[0]](vk::CommandBuffer cmd) {
+            auto stage = ComputeFailureStage::RasterBind;
+            try {
             constexpr auto general = vk::ImageLayout::eGeneral;
             constexpr auto memory = vk::AccessFlagBits::eMemoryRead | vk::AccessFlagBits::eMemoryWrite;
             constexpr auto compute_access = vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eShaderWrite;
@@ -370,6 +440,7 @@ struct ComputeRasterizer::Impl {
             cmd.bindPipeline(vk::PipelineBindPoint::eCompute, pipeline);
             cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, view_layout, 0, sets, {});
             cmd.pushConstants(view_layout, vk::ShaderStageFlagBits::eCompute, 0, sizeof(push), &push);
+            stage = ComputeFailureStage::RasterDispatch;
             cmd.dispatch((push.extent[0] + 7) / 8, (push.extent[1] + 7) / 8, 1);
             if (buffered_color || packed_depth) {
                 MemoryBarrier(cmd, vk::PipelineStageFlagBits::eComputeShader,
@@ -391,7 +462,15 @@ struct ComputeRasterizer::Impl {
             MemoryBarrier(cmd, vk::PipelineStageFlagBits::eComputeShader | vk::PipelineStageFlagBits::eTransfer,
                           vk::PipelineStageFlagBits::eAllCommands,
                           vk::AccessFlagBits::eShaderWrite | vk::AccessFlagBits::eTransferWrite, memory);
+            } catch (const vk::SystemError& error) {
+                if (failure) failure->Notice(stage, error.what(), error.code().value());
+                throw VideoCore::ShaderRecoveryError("Calculated raster command recording failed");
+            } catch (const std::exception& error) {
+                if (failure) failure->Notice(stage, error.what());
+                throw;
+            }
         });
+        if (failure) failure->Number("raster_recorded_tick", scheduler.CurrentTick());
         program.tick = depth_scratch->tick = color_scratch->tick = scheduler.CurrentTick();
         if (needs_transfer) transfer_scratch->tick = scheduler.CurrentTick();
         upload.MarkDrawUse();
@@ -407,6 +486,7 @@ struct ComputeRasterizer::Impl {
     vk::UniquePipelineLayout transfer_layout;
     vk::UniqueShaderModule expand_module, pack_module;
     vk::UniquePipeline expand_pipeline, pack_pipeline;
+    std::shared_ptr<const ComputeModuleEvidence> expand_evidence, pack_evidence;
     std::unique_ptr<Scratch> depth_scratch, color_scratch, transfer_scratch;
     std::vector<Program> programs;
     bool reported_creation_failure{};
@@ -421,7 +501,22 @@ void ComputeRasterizer::DrawGpu(Surface* color, Surface* depth, vk::ImageView in
     const ComputeRasterPush& push, const FSConfig& config, const UserConfig& user,
     const Profile& profile, const FSUniformData& uniforms, const TextureBindings& textures,
     const LutBindings& luts, const GpuVertices& vertices) {
-    impl->Draw(color, depth, inactive_color_view, push, config, user, profile, uniforms, textures,
-               luts, vertices);
+    const auto recording=impl->scheduler.RecordComputeFailure(vertices.failure);
+    try {
+        impl->Draw(color, depth, inactive_color_view, push, config, user, profile, uniforms, textures,
+                   luts, vertices);
+    } catch (const vk::SystemError& error) {
+        if (vertices.failure) {
+            vertices.failure->Value("raster.fragment_uniforms.native_abi", uniforms);
+            vertices.failure->Failure(error.what(), error.code().value());
+        }
+        throw VideoCore::ShaderRecoveryError("Calculated raster preparation failed");
+    } catch (const std::exception& error) {
+        if (vertices.failure) {
+            vertices.failure->Value("raster.fragment_uniforms.native_abi", uniforms);
+            vertices.failure->Failure(error.what());
+        }
+        throw;
+    }
 }
 } // namespace Vulkan

@@ -30,6 +30,15 @@ if (ENABLE_SOFTWARE_RENDERER)
     target_sources(tests PRIVATE video_core/software_renderer.cpp)
 endif()
 
+# CodexAstraLocal: Exercise the real bounded incident writer without a Vulkan
+# device. The separate owner check covers GPU status/refusal call sites.
+if (ENABLE_VULKAN)
+    target_sources(tests PRIVATE video_core/compute_failure_packet.cpp)
+    # CodexAstraLocal: The retained input type includes Vulkan handle declarations;
+    # expose headers to this test target without requiring a Vulkan device.
+    target_link_libraries(tests PRIVATE vulkan-headers)
+endif()
+
 if (BSD STREQUAL "NetBSD")
     include(DisablePaxMprotect)
     disable_pax_mprotect(tests)

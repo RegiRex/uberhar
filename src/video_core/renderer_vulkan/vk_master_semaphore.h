@@ -5,6 +5,7 @@
 
 #include <atomic>
 #include <condition_variable>
+#include <memory>
 #include <queue>
 #include "common/common_types.h"
 #include "common/polyfill_thread.h"
@@ -14,6 +15,7 @@ namespace Vulkan {
 
 class Instance;
 class Scheduler;
+class ComputeFailureTracker;
 
 class MasterSemaphore {
 public:
@@ -44,10 +46,16 @@ public:
     /// Submits the provided command buffer for execution
     virtual void SubmitWork(vk::CommandBuffer cmdbuf, vk::Semaphore wait, vk::Semaphore signal,
                             u64 signal_value) = 0;
+    // CodexAstraLocal: Shared ownership outlives the fence thread. Null keeps
+    // all existing Native/Combo behavior and adds no diagnostic allocation.
+    void SetComputeFailureTracker(std::shared_ptr<ComputeFailureTracker> tracker) {
+        compute_failures.store(std::move(tracker));
+    }
 
 protected:
     std::atomic<u64> gpu_tick{0};     ///< Current known GPU tick.
     std::atomic<u64> current_tick{1}; ///< Current logical tick.
+    std::atomic<std::shared_ptr<ComputeFailureTracker>> compute_failures;
 };
 
 class MasterSemaphoreTimeline : public MasterSemaphore {

@@ -101,6 +101,12 @@ def main():
                  'UploadUniforms(', 'BindPipeline(', 'stream_buffer.Map(', 'cmdbuf.draw('):
         assert call not in prefix and call in draw[boundary:], call
     batch = block(rasterizer, 'bool RasterizerVulkan::DrawComputeBatch(').replace('RasterizerVulkan::', 'StrictFixture::')
+    # CodexAstraLocal: The recording adapter remains null, but extraction must
+    # preserve previous-packet retirement before a new diagnostic capture and
+    # keep the one immutable input shared by execution and failure retention.
+    assert batch.index('RetireBeforeCapture()') < batch.index('BeginFailurePacket(') < batch.index('CaptureComputeVertexInput(')
+    assert 'std::make_shared<ComputeVertexInput>(std::move(input))' in batch
+    assert 'failure->Input(owned_input, true)' in batch
     assert batch.index('CaptureComputeVertexInput(') < batch.index('->Produce(') < batch.index('Draw(false, false, {}, &batch)')
     assert batch.index('Draw(false, false, {}, &batch)') < batch.index('completed = batch.assembly')
     # Original entry refusal must precede CPU shading/loading and cannot silently

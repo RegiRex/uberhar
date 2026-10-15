@@ -68,6 +68,12 @@ public:
     virtual bool DrawComputeBatch(bool, const Pica::ComputeAssemblyState&,
                                   Pica::ComputeAssemblyResult&,
                                   const Pica::AttributeBuffer* = nullptr) { return false; }
+    // CodexAstraLocal TEST-ONLY LOG: Admission/commit occur outside the draw
+    // body. Retain their original state without shading/retry/fallback. Remove
+    // after the diagnosed failures have corrected replay controls.
+    virtual void ReportComputeFailure(const char*, bool, const Pica::ComputeAssemblyState&,
+                                      const Pica::ComputeAssemblyResult*,
+                                      const Pica::AttributeBuffer*) noexcept {}
 
     // CodexAstraLocal: Opt-in has no renderer side effects. Unknown backends
     // retain synchronous rendering. An admitted packet is independently running

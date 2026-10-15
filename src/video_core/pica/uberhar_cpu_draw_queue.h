@@ -56,6 +56,10 @@ public:
     // CodexAstraLocal: Owner reconciliation takes one completion wait/lock for
     // both counters and retained primitive bytes, without repeating conversion.
     Completion CompletedResult() const;
+    // CodexAstraLocal: A ready prefix may retire without waiting for unrelated
+    // later packets. Acquire publication protects all result bytes; a ready
+    // failure remains terminal and cannot be skipped by owner reconciliation.
+    bool TryCompletedResult(Completion& result) const;
     u32 VertexCount() const noexcept;
 
 private:
@@ -70,9 +74,16 @@ public:
     struct Statistics {
         u64 captures{}, refused{};
         u64 work_refused{};
+        // CodexAstraLocal: Separate preparation avoidance, real grouped
+        // admissions, and lost pre-publication opportunities from throughput.
+        u64 early_refused{}, group_candidates{}, seed_submitted{}, group_submitted{};
+        u64 group_lost{}, copy_refused{}, grouped_waves{}, work_grains{};
         u64 submitted{}, completed{}, failed{}, waves{}, coordinator_packets{}, auxiliary_packets{};
         u32 maximum_wave{}, peak_threads{};
         std::size_t resident_packets{}, resident_bytes{};
+        // CodexAstraLocal: The coordinator publishes its controller snapshot
+        // after joined work; main-thread reporting never reads live pool state.
+        Common::Uberhar::AdaptiveParticipation::Statistics scheduling{};
     };
     // CodexAstraLocal: Reserve the emulator owner while sizing the independent
     // CPU coordinator/pool from allowed logical processors. This is a capacity
@@ -85,11 +96,21 @@ public:
     CpuDrawExecutor(const CpuDrawExecutor&) = delete;
     CpuDrawExecutor& operator=(const CpuDrawExecutor&) = delete;
 
+    // CodexAstraLocal: Owner-only policy before uniform/default/raw capture.
+    // Success is only an upper-bound opportunity; Capture checks exact FIFO
+    // misses/copies and Submit rechecks the still-pending group atomically.
+    // A refusal counts one capture/refusal; success is counted by Capture only.
+    bool AllowsShaderWork(const ShaderRunLease& lease, u16 booleans, u32 input_count);
+    // CodexAstraLocal: Advisory only, before small-draw preparation/allocation.
+    // A stale false merely misses an opportunity; locked admission stays final.
+    bool HasPendingSeed() const noexcept;
+
     // CodexAstraLocal: Capture performs exact effect/flow proof and all owned
     // allocation before a task is published. Refusal returns empty; allocation
     // exceptions retain the caller's existing before-dispatch recovery path.
-    // The first cost-qualified policy requires 96 original misses, 35 arithmetic
-    // instructions on every path, and at most 70 captured raw bytes per miss.
+    // Individual seeds retain 96 misses/35 guaranteed arithmetic operations and
+    // <=70 raw bytes/miss. Smaller packets require an existing pending seed and
+    // aggregate work >=96*35 per member; this is a work proxy, not target timing.
     std::shared_ptr<CpuDrawPacket> Capture(const CpuDrawCapture& source,
                                          CpuDrawHardwareWriter writer,
                                          u32 hardware_stride = 88);
@@ -98,7 +119,8 @@ public:
     bool LastCaptureAtCapacity() const noexcept;
     // CodexAstraLocal: Successful Submit guarantees independent progress before
     // a Vulkan Record may dispatch its waiting command. Capture already owns
-    // byte/count credit; false means an unsubmitted lifecycle/duplicate refusal.
+    // byte/count credit; false also covers a small packet whose pending group
+    // disappeared. No task is published on false, so the owner can run serially.
     bool Submit(const std::shared_ptr<CpuDrawPacket>& packet);
     void Drain();
     Statistics GetStatistics() const;

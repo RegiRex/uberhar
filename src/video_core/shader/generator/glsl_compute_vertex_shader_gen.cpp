@@ -25,6 +25,9 @@ struct Uniforms { uint b; uvec4 i[4]; };
 Uniforms uniforms;
 vec4 input_regs[16];
 vec4 output_regs[16];
+// CodexAstraLocal TEST-ONLY LOG: Three scalars select the first rejected lane;
+// one terminal epilogue writes registers. Remove after exact FEA reconstruction.
+uint nonfinite_semantic,nonfinite_source,nonfinite_bits;
 uint word_at(uint p);
 vec4 compute_uniform(uint index) {
     uint p=meta[10]+index*16u;
@@ -55,7 +58,7 @@ uint vertex_at(uint ordinal) {
 }
 bool fits(uint offset,uint bytes) { return offset<=meta[6] && bytes<=meta[6]-offset; }
 bool valid_input() {
-    if (meta.length()!=193 || meta[0]!=0x43565231u || meta[1]==0u || meta[1]>4096u ||
+    if (meta.length()!=194 || meta[0]!=0x43565231u || meta[1]==0u || meta[1]>4096u ||
         meta[3]<meta[2] || meta[3]>65535u || meta[4]==0u || meta[4]>16u || meta[5]>1u ||
         meta[6]>uint(raw.length())*4u || meta[14]>3u ||
         meta[15]!=COMPUTE_ENTRY) return false;
@@ -68,7 +71,7 @@ bool valid_input() {
         if(meta[136]>1u||(meta[14]==2u&&meta[137]!=0u&&meta[136]!=1u))return false;
         live=meta[137]!=0u?3u:meta[136]!=0u?1u:0u;
     }
-    if(meta[139]!=live || uint(result.length())!=hardware_base()+triangle_capacity()*24u*22u ||
+    if(meta[139]!=live || uint(result.length())!=hardware_base()+triangle_capacity()*24u*22u+256u ||
        meta[188]>1u) return false;
     if(meta[188]!=0u)for(uint c=0u;c<4u;++c)
         if(isnan(uintBitsToFloat(meta[189u+c]))||isinf(uintBitsToFloat(meta[189u+c])))return false;
@@ -115,7 +118,12 @@ bool store_vertex(uint ordinal) {
         uint source=meta[112u+c];
         float value=source==64u?1.0:output_regs[source/4u][source%4u];
         if(c>=8u&&c<12u) { value=abs(value); value=value<1.0?value:1.0; }
-        if(c!=17u&&c!=21u&&!finite_value(value))return false;
+        // CodexAstraLocal: Optional fields remain raw in persistent tails.
+        // The completing draw, possibly a later draw, determines their consumers.
+        if(c<4u&&!finite_value(value)) {
+            nonfinite_semantic=c;nonfinite_source=source;nonfinite_bits=floatBitsToUint(value);
+            return false;
+        }
         result[semantic_word(ordinal+2u)+c]=floatBitsToUint(value);
     }
     return true;
@@ -126,6 +134,9 @@ bool store_vertex(uint ordinal) {
 constexpr std::string_view ClipBody = R"glsl(// CodexAstraLocal: Quaternion sign correction precedes homogeneous clipping,
 // exactly where the accelerated 88-byte transport applies it to each triangle.
 const uint hardware_source[22]=uint[](0,1,2,3,8,9,10,11,12,13,14,15,22,23,16,4,5,6,7,18,19,20);
+bool live_lane(uint lane) {
+    return lane<4u || meta[193]==0u || (meta[193]&(1u<<hardware_source[lane]))!=0u;
+}
 struct ClipVertex { float lane[22]; float custom_distance; };
 ClipVertex hardware_vertex(uint reference,uint first) {
     bool flip=false;
@@ -253,7 +264,7 @@ bool intersection(ClipVertex a,ClipVertex b,uint plane,uint count,uint cursor,ou
     for(uint lane=0u;lane<22u;++lane) {
         precise float left=a.lane[lane]*inverse,right=b.lane[lane]*t;
         precise float sum=left+right;
-        if(!finite_value(sum)) {
+        if(live_lane(lane)&&!finite_value(sum)) {
             // CodexAstraLocal: A non-position varying can fail too; retain its
             // lane and both original operands instead of only position words.
             result[51]=lane;result[52]=floatBitsToUint(a.lane[lane]);
@@ -294,6 +305,16 @@ bool clip_triangle(uvec3 references,inout uint cursor) {
     // pixels. Preserve its semantic assembly and every other triangle. W==0
     // with nonzero XYZ is not this case: it can clip into visible geometry.
     if(homogeneous_origin){++clip_ordinal;return true;}
+    // CodexAstraLocal: Do not replace nonfinite data. A live varying stops the
+    // whole batch; dead varyings cannot sample a texture in the paired evaluator.
+    for(uint i=0u;i<3u;++i)for(uint lane=0u;lane<22u;++lane) {
+        if(live_lane(lane)&&!finite_value(polygon[i].lane[lane])) {
+            result[51]=lane;result[52]=floatBitsToUint(polygon[i].lane[lane]);
+            result[53]=hardware_source[lane];result[54]=references[i];result[55]=meta[193];
+            return fail_clip(CLIP_LIVE_SEMANTIC,7u,count,cursor,CLIP_POSITION(polygon[i]),CLIP_POSITION(polygon[i]),
+                polygon[i].custom_distance,polygon[i].custom_distance,0.0,0.0,0.0,0.0);
+        }
+    }
     for(uint plane=0u;plane<6u+meta[188];++plane) {
         if(count==0u){++clip_ordinal;return true;}
         ClipVertex next_polygon[10];uint next_count=0u;
@@ -379,7 +400,10 @@ constexpr std::string_view GuestMain = R"glsl(void main() {
                 result[semantic_word(ordinal+2u)+c]=result[semantic_word(reference+2u)+c];
         } else {
             ++misses;load_vertex(key);exec_shader();
-            if(!store_vertex(ordinal)){result[1]=2u;return;}
+            if(!store_vertex(ordinal)) {
+                finish_nonfinite_vertex(ordinal,key,misses,hits);
+                result[1]=2u;return;
+            }
             if(meta[5]!=0u){keys[cursor]=key;references[cursor]=ordinal;cursor=(cursor+1u)%64u;size=min(64u,size+1u);}
         }
     }
@@ -443,6 +467,29 @@ std::string BuildGuestSource(std::string_view translated,u32 entry) {
     source+="\nvoid reset_compute_temporaries() {\n";
     for(u32 i=0;i<16;++i)source+=fmt::format("reg_tmp{}=vec4(0);\n",i);
     source+="}\n";
+    // CodexAstraLocal TEST-ONLY LOG: Keep one terminal reconstruction function,
+    // rather than copying banks at each shader invocation or inlining a large
+    // body into every arithmetic branch. Initial draw state is zero by the
+    // unchanged reset below; later entry carry is reconstructed from the packet.
+    // Remove this sideband after the real nonfinite producer is reproduced/fixed.
+    source+=R"glsl(void finish_nonfinite_vertex(uint ordinal,uint key,uint misses,uint hits) {
+        uint base=uint(result.length())-256u;
+        result[base]=0x434E4631u;result[base+1u]=1u;
+        result[base+2u]=ordinal;result[base+3u]=key;
+        result[base+4u]=nonfinite_semantic;result[base+5u]=nonfinite_source;
+        result[base+6u]=nonfinite_bits;result[base+7u]=misses;result[base+8u]=hits;
+        result[base+9u]=uint(address_registers.x);result[base+10u]=uint(address_registers.y);
+        result[base+11u]=uint(address_registers.z);
+        result[base+12u]=uint(conditional_code.x)|(uint(conditional_code.y)<<1u);
+        for(uint r=0u;r<16u;++r)for(uint c=0u;c<4u;++c) {
+            result[base+32u+r*4u+c]=floatBitsToUint(input_regs[r][c]);
+            result[base+96u+r*4u+c]=floatBitsToUint(output_regs[r][c]);
+        }
+)glsl";
+    for(u32 i=0;i<16;++i)
+        source+=fmt::format("for(uint c=0u;c<4u;++c)result[base+{}u+c]=floatBitsToUint(reg_tmp{}[c]);\n",
+                            160+i*4,i);
+    source+="}\n";
     source+=fmt::format("const uint COMPUTE_ENTRY={}u;\n",entry);
     source+=CommonBody;source+=InputBody;source+=GuestMain;
     return source;
@@ -473,6 +520,7 @@ std::string GenerateComputeAssembly() {
         {"RECIPROCAL", ComputeClipFailure::Reciprocal},
         {"OUTSIDE_PLANE", ComputeClipFailure::OutsidePlane},
         {"OUTPUT_CAPACITY", ComputeClipFailure::OutputCapacity},
+        {"LIVE_SEMANTIC", ComputeClipFailure::LiveSemantic},
     };
     for (const auto& [name, failure] : failures)
         source += fmt::format("const uint CLIP_{}={}u;\n", name, static_cast<u32>(failure));

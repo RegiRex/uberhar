@@ -91,14 +91,18 @@ public:
         // CodexAstraLocal TEST-ONLY LOG: Cumulative owner-only counters qualify
         // real decode work and sampled costs; remove after texture placement is
         // qualified on Thor. These durations are wall time, not worker CPU time.
+        const auto scheduling = pool.Scheduling();
         LOG_INFO(Render, "Uberhar texture decode: final={} enabled={} calls={} input_bytes={} "
                  "serial={} parallel={} parallel_owner_tiles={} worker_tiles={} peak_threads={} "
                  "serial_samples={} parallel_samples={} serial_ns={} parallel_ns={} "
-                 "owner_ns={} join_ns={} budget={} created={} startup_failures={}",
+                 "owner_ns={} join_ns={} budget={} created={} startup_failures={} "
+                 "adaptive_helpers={} adaptive_samples={} adaptive_rejected={} "
+                 "adaptive_trials={} adaptive_accepted={} adaptive_reverted={}",
                  final, enabled, calls, input_bytes, serial_calls, parallel_calls, owner_tiles,
                  worker_tiles, peak_threads, serial_samples, parallel_samples, serial_ns,
                  parallel_ns, owner_ns, join_ns, pool.Available(), pool.CreatedWorkers(),
-                 pool.StartupFailures());
+                 pool.StartupFailures(), scheduling.desired, scheduling.samples,
+                 scheduling.rejected, scheduling.trials, scheduling.accepted, scheduling.reverted);
     }
 
 private:

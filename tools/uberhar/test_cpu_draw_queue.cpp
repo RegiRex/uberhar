@@ -564,6 +564,178 @@ void WorkFloor(const std::vector<CarryChallenge::Case>& programs) {
     Need(!work.valid&&work.minimum_arithmetic==0,"refusal reused stale work");
 }
 
+// CodexAstraLocal: Real immutable JIT packets exercise pending-only grouping.
+// The fixture pauses coordinator entry, not production admission, so the exact
+// seeded group and the loss of that opportunity are deterministic and bounded.
+CarryChallenge::Case WorkProgram(u32 arithmetic) {
+    using namespace CarryChallenge;
+    Builder b("group_work");
+    for (u32 n = 0; n < arithmetic; ++n)
+        b.Arithmetic(Op::ADD, Dst::MakeTemporary(0), 15,
+                     n ? Src::MakeTemporary(0) : Src::MakeInput(0), Src::MakeInput(0));
+    b.Arithmetic(Op::MOV, Dst::MakeOutput(0), 15, Src::MakeTemporary(0));
+    return b.Finish();
+}
+void Groups(const std::vector<CarryChallenge::Case>& programs) {
+    Shader::JitEngine engine; ShaderSetup setup;
+    const auto heavy = WorkProgram(140), floor = WorkProgram(35);
+    const auto heavy_lease = Lease(engine, setup, heavy);
+    const auto floor_lease = Lease(engine, setup, floor);
+    const auto carry_lease = Lease(engine, setup, programs[1]);
+    const auto environment = Env(0);
+    {
+        Gate(false); CpuDrawExecutor queue{4, 8, 8 * 1024 * 1024, Start};
+        struct ReleaseGate { ~ReleaseGate() { Gate(true); } } release;
+        Need(!queue.HasPendingSeed(), "empty seed hint");
+        Need(!queue.AllowsShaderWork(heavy_lease, 0, 93), "unseeded small admission");
+        auto stats = queue.GetStatistics();
+        Need(stats.captures == 1 && stats.refused == 1 && stats.early_refused == 1,
+             "early refusal counted twice");
+        Need(queue.AllowsShaderWork(heavy_lease, 0, 255), "old seed early refusal");
+        Need(queue.GetStatistics().captures == 1, "successful policy counted capture");
+        { std::lock_guard lock{flags_mutex}; flag_count = 0; }
+        std::vector<std::shared_ptr<CpuDrawPacket>> packets;
+        std::vector<Expected> expected;
+        for (u32 n = 0; n < 4; ++n) {
+            const u32 sizes[]{255, 3, 18, 93};
+            Live live{n ? carry_lease : heavy_lease, n ? programs[1] : heavy,
+                      sizes[n], n + 1, false};
+            environment.Apply(); expected.push_back(Serial(live)); environment.Apply();
+            Need(queue.AllowsShaderWork(live.source.shader_lease, 0, sizes[n]),
+                 "seeded small early refusal");
+            auto packet = queue.Capture(live.source, ObservedWriter);
+            Need(bool(packet) && queue.Submit(packet), "seeded small publication refused");
+            packets.push_back(packet); live.Mutate();
+            Need(queue.HasPendingSeed(), "pending seed hint absent");
+        }
+        CpuDrawPacket::Completion result;
+        Need(!packets[0]->TryCompletedResult(result), "pending result reported ready");
+        Live wide{carry_lease, programs[1], 18, 7, false};
+        wide.source.base_vertex = 0; wide.source.available_attributes = 10;
+        wide.source.shader.max_input_attribute_index.Assign(9);
+        for (u32 n = 0; n < 9; ++n)
+            wide.source.attributes[n] = {n * 8, 71, n == 8 ? 3U : 4U,
+                                         PipelineRegs::VertexAttributeFormat::SHORT, false};
+        wide.source.attributes[9] = {70, 71, 1, PipelineRegs::VertexAttributeFormat::UBYTE, false};
+        Need(!queue.Capture(wide.source, VideoCore::ActualWriter), "group copy bound escaped");
+        Need(queue.GetStatistics().copy_refused == 1, "group copy refusal accounting");
+        Gate(true); queue.Drain();
+        for (u32 n = 0; n < packets.size(); ++n) Equal(*packets[n], expected[n]);
+        stats = queue.GetStatistics();
+        Need(stats.seed_submitted == 1 && stats.group_candidates == 3 && stats.group_submitted == 3 &&
+             stats.group_lost == 0 && stats.grouped_waves == 1 && stats.maximum_wave == 4,
+             "group admission accounting");
+        Need(stats.work_grains == 2 && stats.coordinator_packets + stats.auxiliary_packets == 4,
+             "weighted grain accounting");
+        Need(!queue.HasPendingSeed(), "executing seed stayed pending");
+        packets.clear(); Need(queue.GetStatistics().resident_packets == 0, "group credit leaked");
+    }
+    {
+        Gate(false); CpuDrawExecutor queue{4, 8, 8 * 1024 * 1024, Start};
+        struct ReleaseGate { ~ReleaseGate() { Gate(true); } } release;
+        Live seed{floor_lease, floor, 96, 1, false};
+        auto packet = queue.Capture(seed.source, VideoCore::ActualWriter);
+        Need(packet && queue.Submit(packet), "exact baseline seed publication");
+        Need(!queue.AllowsShaderWork(floor_lease, 0, 3), "aggregate work charge omitted");
+        Live indexed{floor_lease, floor, 192, 1, true};
+        for (u32 n = 0; n < indexed.indices.size(); ++n) indexed.indices[n] = n % 64;
+        Need(queue.AllowsShaderWork(floor_lease, 0, 192), "upper-bound policy required raw indices");
+        Need(!queue.Capture(indexed.source, VideoCore::ActualWriter), "group used inputs instead of misses");
+        Gate(true); queue.Drain();
+    }
+    {
+        Gate(false); CpuDrawExecutor queue{4, 8, 8 * 1024 * 1024, Start};
+        struct ReleaseGate { ~ReleaseGate() { Gate(true); } } release;
+        Live seed{heavy_lease, heavy, 255, 1, false};
+        auto packet = queue.Capture(seed.source, VideoCore::ActualWriter);
+        Need(packet && queue.Submit(packet), "race seed publication");
+        Live small{carry_lease, programs[1], 18, 9, false};
+        auto canceled = queue.Capture(small.source, VideoCore::ActualWriter);
+        Need(bool(canceled), "race small capture");
+        Gate(true); queue.Drain();
+        Need(!queue.Submit(canceled), "lost seed published small packet");
+        CpuDrawPacket::Completion result;
+        Need(!canceled->TryCompletedResult(result), "unpublished lost group reported ready");
+        Need(queue.GetStatistics().group_lost == 1 && queue.GetStatistics().group_submitted == 0,
+             "lost group accounting");
+        canceled.reset(); packet.reset();
+        Need(queue.GetStatistics().resident_packets == 0, "lost group retained credit");
+    }
+    {
+        // CodexAstraLocal: Exhaust capacity reservations without executing any
+        // helper. No lane means synchronous publication, with no queue deadlock.
+        auto& budget = Common::Uberhar::AuxiliaryBudget::Global();
+        std::vector<Common::Uberhar::AuxiliaryBudget::ProgressLane> lanes;
+        for (;;) { auto lane = budget.ReserveProgress(); if (!lane) break; lanes.push_back(std::move(lane)); }
+        Gate(false); CpuDrawExecutor queue{4, 8, 8 * 1024 * 1024, Start};
+        struct ReleaseGate { ~ReleaseGate() { Gate(true); } } release;
+        Live live{heavy_lease, heavy, 96, 4, false};
+        environment.Apply(); const auto expected = Serial(live); environment.Apply();
+        auto packet = queue.Capture(live.source, VideoCore::ActualWriter);
+        Need(packet && queue.Submit(packet), "no-lane synchronous publication");
+        CpuDrawPacket::Completion result;
+        Need(packet->TryCompletedResult(result), "no-lane publication failed synchronous progress");
+        const auto bytes = packet->HardwareBytes();
+        Need(bytes.size() == expected.hardware.size() &&
+             !std::memcmp(bytes.data(), expected.hardware.data(), bytes.size()), "no-lane hardware differs");
+        ++comparisons;
+        Need(queue.GetStatistics().peak_threads == 1 && !queue.HasPendingSeed(), "no-lane async work");
+    }
+}
+
+// CodexAstraLocal: Read the actual PICA ordered-prefix implementation using real
+// packets in deliberately different readiness orders. Unpublished later work
+// represents an unavailable result; the reader must not drain or skip it.
+void ReadyPrefix(const std::vector<CarryChallenge::Case>& programs) {
+    Shader::JitEngine engine; ShaderSetup setup;
+    auto lease = Lease(engine, setup, programs[0]);
+    Gate(true); ResetOwner owner;
+    auto& state = *owner.deferred_vertices;
+    Live a{lease, programs[0], 96, 1, false}, b{lease, programs[0], 96, 2, false};
+    const auto expected_a = Serial(a), expected_b = Serial(b);
+    auto first = state.executor.Capture(a.source, VideoCore::ActualWriter);
+    auto second = state.executor.Capture(b.source, VideoCore::ActualWriter);
+    Need(first && second && state.executor.Submit(second), "prefix readiness setup");
+    second->Wait(); state.pending = {first, second};
+    owner.ReconcileDeferredVertices(false);
+    Need(state.completed == 0 && state.pending.size() == 2 && state.synchronous_boundaries == 0,
+         "nonready predecessor skipped");
+    Need(state.executor.Submit(first), "prefix first publication"); first->Wait();
+    owner.ReconcileDeferredVertices(false);
+    PrimitiveAssembler expected;
+    expected.AdoptCompletedTriangleTail(expected_b.pair);
+    Need(state.completed == 2 && state.ready_prefix_packets == 2 && state.pending.empty() &&
+         SavedAssembly(owner.primitive_assembler) == SavedAssembly(expected), "ready prefix order differs");
+    auto third = state.executor.Capture(a.source, VideoCore::ActualWriter);
+    auto fourth = state.executor.Capture(b.source, VideoCore::ActualWriter);
+    Need(third && fourth && state.executor.Submit(third), "prefix partial setup"); third->Wait();
+    state.pending = {third, fourth};
+    owner.ReconcileDeferredVertices(false);
+    expected.AdoptCompletedTriangleTail(expected_a.pair);
+    Need(state.completed == 3 && state.pending.size() == 1 && state.pending[0] == fourth &&
+         state.synchronous_boundaries == 0 && SavedAssembly(owner.primitive_assembler) == SavedAssembly(expected),
+         "ready prefix waited for later work");
+    Need(state.executor.Submit(fourth), "prefix final publication"); fourth->Wait();
+    owner.ReconcileDeferredVertices(false);
+    expected.AdoptCompletedTriangleTail(expected_b.pair);
+    const auto before_error = SavedAssembly(owner.primitive_assembler);
+    auto failed = state.executor.Capture(a.source, VideoCore::ActualWriter);
+    auto later = state.executor.Capture(b.source, VideoCore::ActualWriter);
+    PacketProbe::fail_packet = true;
+    Need(failed && later && state.executor.Submit(failed), "prefix error publication");
+    Need(WaitTerminal(*failed, "prefix error incomplete"), "prefix error not typed");
+    Need(state.executor.Submit(later), "prefix later publication"); later->Wait();
+    state.pending = {failed, later};
+    for (u32 retry = 0; retry < 2; ++retry) {
+        bool terminal{};
+        try { owner.ReconcileDeferredVertices(false); }
+        catch (const VideoCore::ShaderRecoveryError&) { terminal = true; }
+        Need(terminal && state.completed == 4 && state.pending.size() == 2 && state.reconciled == 0 &&
+             SavedAssembly(owner.primitive_assembler) == before_error, "ready error skipped or replayed");
+    }
+    state.executor.Drain();
+}
+
 int main(int argc, char** argv) try {
     const auto original = Environment::Capture(); const auto programs = Programs();
     const std::string selected = argc > 1 ? argv[1] : "all";
@@ -571,7 +743,8 @@ int main(int argc, char** argv) try {
     if (selected == "all" || selected == "bounds") Boundaries(programs);
     if (selected == "all" || selected == "failures") Failures(programs);
     if (selected == "all" || selected == "work") WorkFloor(programs);
-    if (selected == "all" || selected == "resets") Resets(programs);
+    if (selected == "all" || selected == "resets" || selected == "groups") Resets(programs);
+    if (selected == "all" || selected == "groups") { Groups(programs); ReadyPrefix(programs); }
     original.Apply();
     std::cout << Json{{"passed", true}, {"checks", checks}, {"comparisons", comparisons},
         {"programs", programs.size()}, {"fp_modes", ModeCount},

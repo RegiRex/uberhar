@@ -17,6 +17,8 @@
 #include <queue>
 #include <stdexcept>
 #include <string>
+#include <string_view>
+#include <system_error>
 #include <tuple>
 #include <type_traits>
 #include <utility>
@@ -26,7 +28,14 @@ using u8 = std::uint8_t;
 using u32 = std::uint32_t;
 using u64 = std::uint64_t;
 using s32 = std::int32_t;
-namespace VideoCore { struct ShaderRecoveryError : std::runtime_error { ShaderRecoveryError():std::runtime_error("modeled typed failure"){} }; }
+// CodexAstraLocal: Match both existing fixture failures and the production
+// scheduler's typed conversion signature without executing a Vulkan driver.
+namespace VideoCore {
+struct ShaderRecoveryError : std::runtime_error {
+    ShaderRecoveryError() : std::runtime_error("modeled typed failure") {}
+    explicit ShaderRecoveryError(const char* message) : std::runtime_error(message) {}
+};
+}
 static unsigned checks{};
 
 void Require(bool condition, const char* reason) {
@@ -85,6 +94,12 @@ struct Driver {
 // CodexAstraLocal: These types only satisfy the extracted command signatures.
 // Their checks are not a substitute for Vulkan validation or memory visibility.
 namespace vk {
+// CodexAstraLocal: The extracted wait/submit bodies name this error even on
+// their healthy path. No modeled command raises a Vulkan error in this gate.
+struct SystemError : std::runtime_error {
+    using std::runtime_error::runtime_error;
+    std::error_code code() const { return std::make_error_code(std::errc::io_error); }
+};
 using Semaphore = void*;
 using Buffer = u64;
 using DeviceMemory = u64;
@@ -229,11 +244,36 @@ struct Instance {
     void RecordRawStreamFree(u64) const {}
 };
 
+// CodexAstraLocal: These ordering cases model Native/ordinary CPU draws with no
+// Calculated diagnostic tracker. Fail loudly if a new extraction activates it;
+// packet ownership/serialization and fatal-wait capture have their own tests.
+enum class ComputeFailureStage { QueueSubmit, FinalUseWait };
+struct ComputeFailurePacket {
+    void Unavailable(std::string_view, std::string_view) { Unexpected(); }
+    void Failure(ComputeFailureStage, std::string_view, int) { Unexpected(); }
+    void Notice(ComputeFailureStage, std::string_view, int) { Unexpected(); }
+    void Number(std::string_view, u64) { Unexpected(); }
+    void FlushNotices() { Unexpected(); }
+    [[noreturn]] static void Unexpected() {
+        throw std::runtime_error{"unexpected diagnostic packet in null-tracker stream fixture"};
+    }
+};
+struct ComputeFailureTracker {
+    void Retire(u64) { ComputeFailurePacket::Unexpected(); }
+    std::shared_ptr<ComputeFailurePacket> Submitted(u64) {
+        ComputeFailurePacket::Unexpected();
+    }
+    std::shared_ptr<ComputeFailurePacket> Attempt(u64, u64) {
+        ComputeFailurePacket::Unexpected();
+    }
+};
+
 // CodexAstraLocal: Submission and completion are explicit deterministic events.
 // Real scheduler method bodies run, while queue draining and OS waiting do not.
 struct Master {
     u64 current = 1, gpu{}, submitted{};
     u64 CurrentTick() const { return current; }
+    u64 KnownGpuTick() const { return gpu; }
     bool IsFree(u64 tick) const { return gpu >= tick; }
     u64 NextTick() { return current++; }
     void Refresh() {}
@@ -271,6 +311,7 @@ class Scheduler {
 public:
     Driver& driver;
     std::unique_ptr<Master> master_semaphore = std::make_unique<Master>();
+    std::shared_ptr<ComputeFailureTracker> compute_failures;
     Failure shader_failure;
     bool use_worker_thread = true;
     std::unique_ptr<Chunk> chunk = std::make_unique<Chunk>();
@@ -295,6 +336,14 @@ public:
     void Record(F&& f) {
         auto owned=std::make_shared<std::decay_t<F>>(std::forward<F>(f));
         chunk->commands.emplace_back([owned](vk::CommandBuffer cb){(*owned)(cb);});
+    }
+    // CodexAstraLocal: SubmitExecution now binds the submitted tick explicitly.
+    // Its null observer uses the same ordered callback queue as all old cases;
+    // this adapter does not model or silently accept a Calculated packet.
+    template <class F>
+    void RecordBound(F&& f, const std::shared_ptr<ComputeFailurePacket>& failure) {
+        if (failure) ComputeFailurePacket::Unexpected();
+        Record(std::forward<F>(f));
     }
     void AcquireNewChunk() { chunk = std::make_unique<Chunk>(); }
     void Drain() {

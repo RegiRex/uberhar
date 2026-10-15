@@ -205,6 +205,9 @@ python3 tools/uberhar/test_shader_jit_lease.py
 # CodexAstraLocal: Whole-draw queues own inputs and make independent progress;
 # synthetic JIT/FIFO/assembly/work-floor controls guard order and terminal failure.
 python3 tools/uberhar/test_cpu_draw_queue.py
+# CodexAstraLocal: Same-draw reuse must preserve invalid-index/setup ordering
+# and reload input memory after an asynchronous refusal and reconciliation.
+python3 tools/uberhar/test_vertex_preparation.py
 # CodexAstraLocal: Actual DSP/RPC ownership and pending async-job lifetimes must
 # refuse parallel guest-memory reads; configured settings alone cannot admit them.
 python3 tools/uberhar/test_parallel_memory.py --mutants

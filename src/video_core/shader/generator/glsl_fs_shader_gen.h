@@ -5,6 +5,7 @@
 #pragma once
 
 #include <optional>
+#include "video_core/pica/uberhar_tev_liveness.h"
 #include "video_core/shader/generator/pica_fs_config.h"
 
 namespace Pica::Shader::Generator::GLSL {
@@ -98,6 +99,10 @@ enum class ComputeFragmentSupport {
 };
 ComputeFragmentSupport CheckComputeFragmentSupport(const FSConfig& config, const UserConfig& user,
                                                    const Profile& profile);
+// CodexAstraLocal: Only fields consumed by the completing fragment state need
+// finite interpolation. Position remains mandatory; raw semantic tails retain
+// every original word for a later draw with different consumers.
+u32 ComputeLiveSemanticMask(const FSConfig& config);
 
 class FragmentModule {
 public:
@@ -158,6 +163,7 @@ private:
 
     /// Writes the code to emulate the specified TEV stage
     void WriteTevStage(u32 index);
+    void WriteComputeTevStage(u32 index);
 
     /// AstraEH: Vulkan experiment: interpret TEV registers supplied in push constants.
     void DefineDynamicTev();
@@ -203,6 +209,7 @@ private:
     // CodexAstraLocal: Select an explicit callable compute interface; graphics
     // callers keep the original entry point and output-merger behavior.
     bool compute_evaluator{};
+    Pica::TevLiveness::Plan compute_liveness{};
     bool use_blend_fallback{};
     bool use_fragment_shader_interlock{};
     bool use_fragment_shader_barycentric{};

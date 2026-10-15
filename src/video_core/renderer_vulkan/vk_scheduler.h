@@ -13,6 +13,7 @@
 #include "video_core/renderer_vulkan/vk_master_semaphore.h"
 #include "video_core/renderer_vulkan/vk_resource_pool.h"
 #include "video_core/shader_build_failure.h" // CodexAstraUlt-2: Terminal worker handoff.
+#include "video_core/renderer_vulkan/compute_failure_packet.h"
 
 namespace Vulkan {
 
@@ -57,20 +58,43 @@ public:
     // recorder. A future synchronous scheduler must retain ordinary draws.
     bool HasWorkerThread() const noexcept { return use_worker_thread; }
 
+    // CodexAstraLocal TEST-ONLY LOG: Only Calculated installs this recorder.
+    // Scope lifetime covers preparation-triggered submissions; closed pending
+    // work keeps its exact tick association until submit/completion. Remove the
+    // diagnostic observer after actual failure regressions are resolved.
+    struct ComputeRecordingScope {
+        std::shared_ptr<ComputeFailureTracker> tracker;
+        std::shared_ptr<ComputeFailurePacket> packet;
+        ~ComputeRecordingScope() { if(tracker)tracker->End(packet); }
+    };
+    ComputeRecordingScope RecordComputeFailure(std::shared_ptr<ComputeFailurePacket> packet) noexcept;
+
     /// Records the command to the current chunk.
     template <typename T>
     void Record(T&& command) {
+        const auto failure=compute_failures ? compute_failures->Recording(CurrentTick()) : nullptr;
+        RecordBound(std::forward<T>(command),failure);
+    }
+
+private:
+    // Submission callbacks belong to the tick they submit, not the next
+    // CurrentTick. Bypass scope lookup so an empty future tick stays unarmed.
+    template <typename T>
+    void RecordBound(T&& command,const std::shared_ptr<ComputeFailurePacket>& failure) {
         if (shader_failure.Failed()) {
             shader_failure.Check();
             return;
         }
+        if(failure)chunk->failure=failure;
         if (chunk->Record(command)) {
             return;
         }
         DispatchWork();
+        if(failure)chunk->failure=failure;
         (void)chunk->Record(command);
     }
 
+public:
     /// Marks the provided state as non dirty
     void MarkStateNonDirty(StateFlags flag) noexcept {
         state |= flag;
@@ -157,6 +181,7 @@ private:
 
     class CommandChunk final {
     public:
+        std::shared_ptr<ComputeFailurePacket> failure;
         ~CommandChunk() { Discard(); }
         void ExecuteAll(vk::CommandBuffer cmdbuf);
         // CodexAstraUlt-2: Destroy captured owners without executing canceled work.
@@ -232,6 +257,7 @@ private:
     VideoCore::ShaderFailureState shader_failure;
     std::jthread worker_thread;
     bool use_worker_thread;
+    std::shared_ptr<ComputeFailureTracker> compute_failures;
 };
 
 } // namespace Vulkan

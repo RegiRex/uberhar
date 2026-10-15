@@ -46,6 +46,9 @@ public:
     unsigned StartupFailures() const { return pool.StartupFailures(); }
     // CodexAstraLocal: Expose the selected sleeping mechanism at the ordinary log cadence.
     const char* WaitTransport() const { return pool.WaitTransport(); }
+    // CodexAstraLocal TEST-ONLY LOG: Owner-cadence scheduling evidence; remove
+    // this diagnostic accessor after adaptive participation is qualified.
+    auto Scheduling() const { return pool.Scheduling(); }
     const Work& LastWork() const { return work; }
 
     bool Prepare(u32 inputs) {

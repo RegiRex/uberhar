@@ -100,6 +100,7 @@ add_library(citra_common STATIC EXCLUDE_FROM_ALL
     timer.cpp
     timer.h
     uberhar_parallel_work.h # CodexAstraLocal: Joined, affinity-sized CPU shader workers.
+    uberhar_cpu_work_budget.h # CodexAstraLocal: Shared auxiliary admission and measured pool participation.
     unique_function.h
     vector_math.h
     web_util.cpp

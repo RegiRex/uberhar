@@ -43,6 +43,12 @@
         android:banner="@mipmap/ic_launcher"
         android:requestLegacyExternalStorage="true">
 
+        <!-- CodexAstraLocal: Permit explicit shell profiling of optimized test builds
+             so serial emulation hotspots can be measured without a debuggable build.
+             This starts no recorder. Disable after performance qualification if
+             production releases no longer need owner-directed native profiling. -->
+        <profileable android:shell="true" />
+
         <!-- AstraEH: Each flavor has a unique authority; only explicit read grants share logs. -->
         <provider
             android:name="org.citra.citra_emu.utils.LogFileProvider"
