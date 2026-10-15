@@ -7,6 +7,7 @@
 #include <condition_variable>
 #include <memory>
 #include <queue>
+#include <utility>
 #include "common/common_types.h"
 #include "common/polyfill_thread.h"
 #include "video_core/renderer_vulkan/vk_common.h"
@@ -49,13 +50,21 @@ public:
     // CodexAstraLocal: Shared ownership outlives the fence thread. Null keeps
     // all existing Native/Combo behavior and adds no diagnostic allocation.
     void SetComputeFailureTracker(std::shared_ptr<ComputeFailureTracker> tracker) {
-        compute_failures.store(std::move(tracker));
+        std::atomic_store_explicit(&compute_failures, std::move(tracker), std::memory_order_seq_cst);
     }
 
 protected:
+    // CodexAstraLocal: NDK27 libc++ has the atomic shared_ptr free functions,
+    // but not atomic<shared_ptr>. Keep the original seq_cst publication and
+    // return a retained owner before any fence-thread/error-path use. Every
+    // access to this slot uses these atomic functions, including replacement.
+    std::shared_ptr<ComputeFailureTracker> GetComputeFailureTracker() const {
+        return std::atomic_load_explicit(&compute_failures, std::memory_order_seq_cst);
+    }
+
     std::atomic<u64> gpu_tick{0};     ///< Current known GPU tick.
     std::atomic<u64> current_tick{1}; ///< Current logical tick.
-    std::atomic<std::shared_ptr<ComputeFailureTracker>> compute_failures;
+    std::shared_ptr<ComputeFailureTracker> compute_failures;
 };
 
 class MasterSemaphoreTimeline : public MasterSemaphore {

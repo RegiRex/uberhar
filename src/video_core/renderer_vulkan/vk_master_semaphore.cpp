@@ -65,7 +65,7 @@ void MasterSemaphoreTimeline::Wait(u64 tick) {
         // failure capture instead of retrying a permanent device error forever.
         // Unarmed Native/Combo waits retain their prior behavior.
         if (static_cast<int>(result) < 0) {
-            if (auto tracker = compute_failures.load(); tracker && tracker->Submitted(tick)) {
+            if (auto tracker = GetComputeFailureTracker(); tracker && tracker->Submitted(tick)) {
                 throw vk::SystemError{vk::make_error_code(result), "Calculated timeline wait"};
             }
         }
@@ -113,7 +113,7 @@ void MasterSemaphoreTimeline::SubmitWork(vk::CommandBuffer cmdbuf, vk::Semaphore
     } catch (vk::DeviceLostError& err) {
         // CodexAstraLocal: Let the Calculated submit owner persist after its
         // submit/execution locks unwind. Unarmed Native/Combo behavior stays fatal.
-        if(auto tracker=compute_failures.load(); tracker && tracker->Submitted(signal_value))throw;
+        if(auto tracker=GetComputeFailureTracker(); tracker && tracker->Submitted(signal_value))throw;
         UNREACHABLE_MSG("Device lost during submit: {}", err.what());
     }
 }
@@ -166,7 +166,7 @@ void MasterSemaphoreFence::SubmitWork(vk::CommandBuffer cmdbuf, vk::Semaphore wa
     try {
         instance.GetGraphicsQueue().submit(submit_info, fence);
     } catch (vk::DeviceLostError& err) {
-        if(auto tracker=compute_failures.load(); tracker && tracker->Submitted(signal_value))throw;
+        if(auto tracker=GetComputeFailureTracker(); tracker && tracker->Submitted(signal_value))throw;
         UNREACHABLE_MSG("Device lost during submit: {}", err.what());
     }
 
@@ -197,14 +197,14 @@ void MasterSemaphoreFence::WaitThread(std::stop_token token) {
         try {
         result = device.waitForFences(fence, true, WAIT_TIMEOUT);
         if (result != vk::Result::eSuccess) {
-            if(auto tracker=compute_failures.load())tracker->FatalWait(signal_value,
+            if(auto tracker=GetComputeFailureTracker())tracker->FatalWait(signal_value,
                 "fence wait returned non-success",static_cast<int>(result));
             UNREACHABLE_MSG("Fence wait failed with error {}", vk::to_string(result));
         }
 
         device.resetFences(fence);
         } catch(const vk::SystemError& error) {
-            if(auto tracker=compute_failures.load())
+            if(auto tracker=GetComputeFailureTracker())
                 tracker->FatalWait(signal_value,error.what(),error.code().value());
             throw; // Preserve the original fatal-thread contract after retention.
         }

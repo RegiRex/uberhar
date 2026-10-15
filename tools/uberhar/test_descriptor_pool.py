@@ -38,6 +38,22 @@ def declaration(text, name, start=0):
     raise ValueError(f"unclosed binding declaration {name}")
 
 
+def owner_definition(text, signature):
+    # CodexAstraLocal: Diagnostic parameters can change without changing the
+    # heap contract. Bind the unique actual method body, so its declaration and
+    # allocation must still belong to the same owner rather than a later method.
+    if text.count(signature) != 1:
+        raise ValueError(f"ambiguous or missing owner definition {signature}")
+    begin = text.index(signature)
+    brace = text.index("{", begin)
+    depth = 0
+    for pos in range(brace, len(text)):
+        depth += (text[pos] == "{") - (text[pos] == "}")
+        if depth == 0:
+            return text[begin:pos + 1]
+    raise ValueError(f"unclosed owner definition {signature}")
+
+
 def owner_contracts(root):
     base = root / "src/video_core/renderer_vulkan"
     inputs = {}
@@ -46,11 +62,11 @@ def owner_contracts(root):
                      "vk_blit_helper.cpp", "renderer_vulkan.cpp", "vk_compute_rect.cpp"):
         path = base / filename
         inputs[str(path.relative_to(root))] = digest(path)
-    def add(filename, name, hint, expected, call, start=0, template=False):
-        source = (base / filename).read_text()
+    def add(filename, name, hint, expected, call, template=False, owner=None):
+        source = owner if owner is not None else (base / filename).read_text()
         if not re.search(call, source):
             raise ValueError(f"actual heap caller changed: {filename}/{name}")
-        body = declaration(source, name, start)
+        body = declaration(source, name)
         if template:
             assert body.count("NumTex0") == 1
             body = body.replace("NumTex0", "1")
@@ -61,9 +77,10 @@ def owner_contracts(root):
     for name in ("uniform_bindings", "texture_bindings", "raster_bindings"):
         add("vk_compute_raster.cpp", name, 32, 128,
             r"make_unique<DescriptorHeap>\(instance, scheduler.GetMasterSemaphore\(\),\s*" + name + r", 32\)")
-    transfer = (base / "vk_compute_raster.cpp").read_text().index("void PrepareTransfer()")
+    transfer = owner_definition((base / "vk_compute_raster.cpp").read_text(),
+                                "void PrepareTransfer(")
     add("vk_compute_raster.cpp", "bindings", 32, 128,
-        r"make_unique<DescriptorHeap>\(instance, scheduler.GetMasterSemaphore\(\),\s*bindings, 32\)", transfer)
+        r"make_unique<DescriptorHeap>\(instance, scheduler.GetMasterSemaphore\(\),\s*bindings, 32\)", owner=transfer)
     for name, hint in (("BUFFER_BINDINGS", 32), ("TEXTURE_BINDINGS", 1024), ("UTILITY_BINDINGS", 32)):
         call = (r"DescriptorHeap\{instance, scheduler.GetMasterSemaphore\(\), TEXTURE_BINDINGS<1>\}"
                 if name == "TEXTURE_BINDINGS" else
