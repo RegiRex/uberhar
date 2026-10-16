@@ -137,7 +137,9 @@ def main():
     need("std::array<u64, 5> native_input_recipe_invocations{};" in core_header,
          "five-bucket owner storage changed")
     load = block(core, "void PicaCore::LoadVertices(")
-    need(load.count("native_input_recipe_invocations[") == 1, "accounting is not once per draw")
+    # CodexAstraLocal: The single post-draw aggregate partitions traced generic
+    # reads and ordinary recipe reads; neither statement belongs in the FIFO loop.
+    need(load.count("native_input_recipe_invocations[") == 2, "trace partition accounting changed")
     hot = load[load.index("            u64 escaped_input_vertices = 0;"):
                load.index("            // AstraPro: Separate recovered invocation coverage")]
     need("native_input_recipe_invocations" not in hot and "RecipeSlot" not in hot,
@@ -157,11 +159,18 @@ def main():
     # prior checkout, retained game payload or private historical header is needed.
     candidate = replace_once(header, "private:\n", "private:\n    friend class InputPlanInspector;\n")
     reference = candidate.replace("NativeVertexInputPlan", "NativeVertexInputPlanReference")
-    attribute = block(reference, "struct NativeInputAttribute") + ";"
-    reference = replace_once(reference, attribute, "")
-    baseline_aggregate = aggregate.replace(
-        "                native_input_recipe_invocations[input_plan.RecipeSlot()] += prepared_invocations;\n", "")
-    need(baseline_aggregate != aggregate, "reference accounting seam changed")
+    # CodexAstraLocal: Candidate and reference share descriptor/provenance types;
+    # derive only a second plan, avoiding duplicate actual-read trace definitions.
+    for anchor in ("struct NativeInputAttribute", "struct NativeInputReadTrace"):
+        shared_type = block(reference, anchor) + ";"
+        reference = replace_once(reference, shared_type, "")
+    # CodexAstraLocal: Only the candidate collects recipe buckets. The generic
+    # reference still executes identical fused/legacy post-FIFO accounting.
+    trace_partition = (
+        "                const u64 traced=software_trace_loads-trace_loads_before;\n"
+        "                native_input_recipe_invocations[0]+=traced;\n"
+        "                native_input_recipe_invocations[input_plan.RecipeSlot()]+=prepared_invocations-traced;\n")
+    baseline_aggregate = replace_once(aggregate, trace_partition, "")
     hardware_fields = block(raster_header, "    struct HardwareVertex") + ";\n"
     hardware = "\n\n".join(block(raster, anchor) for anchor in (
         "RasterizerAccelerated::HardwareVertex::HardwareVertex(",
@@ -233,7 +242,7 @@ def main():
              "disabled prepare retained stale recipe"),
             ("ignored_default", replace_once(header, "ops[index].is_default || ", ""), aggregate, report,
              "default invalidates tag"),
-            ("missing_w", replace_once(header, "component == 3 ? f24::One() : f24::Zero()", "f24::Zero()"),
+            ("missing_w", replace_once(header, "component==3 ? f24::One() : f24::Zero()", "f24::Zero()"),
              aggregate, report, "conversion/W fill"),
             ("wrong_live_offset", replace_once(header,
                 "op.data + static_cast<std::size_t>(op.stride) * vertex);\n    }\n    template <class... E>",
@@ -243,17 +252,27 @@ def main():
             ("wrong_tag", replace_once(header, "recipe_slot = 3;", "recipe_slot = 4;"), aggregate, report,
              "slot tracks actual successful preparation"),
             ("missing_bucket", header, replace_once(aggregate,
-                "native_input_recipe_invocations[input_plan.RecipeSlot()] += prepared_invocations;",
-                "native_input_recipe_invocations[input_plan.RecipeSlot()] += 0;"), report,
+                "native_input_recipe_invocations[input_plan.RecipeSlot()]+=prepared_invocations-traced;",
+                "native_input_recipe_invocations[input_plan.RecipeSlot()]+=0;"), report,
              "actual prepared invocations only"),
             ("included_escapes", header, replace_once(aggregate,
-                "native_input_recipe_invocations[input_plan.RecipeSlot()] += prepared_invocations;",
-                "native_input_recipe_invocations[input_plan.RecipeSlot()] += counts.invocations;"), report,
+                "native_input_recipe_invocations[input_plan.RecipeSlot()]+=prepared_invocations-traced;",
+                "native_input_recipe_invocations[input_plan.RecipeSlot()]+=counts.invocations-traced;"), report,
              "actual prepared invocations only"),
             ("recognition_as_use", header, replace_once(aggregate,
-                "native_input_recipe_invocations[input_plan.RecipeSlot()] += prepared_invocations;",
-                "native_input_recipe_invocations[input_plan.RecipeSlot()] += 1;"), report,
+                "native_input_recipe_invocations[input_plan.RecipeSlot()]+=prepared_invocations-traced;",
+                "native_input_recipe_invocations[input_plan.RecipeSlot()]+=1;"), report,
              "actual prepared invocations only"),
+            # CodexAstraLocal: Actual traced reads bypass recipes. Missing their
+            # generic bucket or counting them twice must fail the new partition.
+            ("missing_trace_bucket", header, replace_once(aggregate,
+                "native_input_recipe_invocations[0]+=traced;",
+                "native_input_recipe_invocations[0]+=0;"), report,
+             "traced reads use generic transport"),
+            ("trace_double_count", header, replace_once(aggregate,
+                "native_input_recipe_invocations[input_plan.RecipeSlot()]+=prepared_invocations-traced;",
+                "native_input_recipe_invocations[input_plan.RecipeSlot()]+=prepared_invocations;"), report,
+             "traced reads use generic transport"),
             ("legacy_in_bucket", header, replace_once(aggregate,
                 "native_input_legacy_vertices += counts.invocations;",
                 "native_input_legacy_vertices += counts.invocations; native_input_recipe_invocations[0] += counts.invocations;"),
