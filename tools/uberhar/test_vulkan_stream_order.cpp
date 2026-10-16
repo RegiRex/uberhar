@@ -2,6 +2,7 @@
 // with recording endpoints. No Vulkan driver, device, shader or pixel executes.
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <condition_variable>
 #include <cstdint>
 #include <cstring>
@@ -75,14 +76,22 @@ struct DrawObservation {
     u32 vertices{};
     bool pass{}, pipeline{}, bytes{};
 };
+// CodexAstraLocal: Preserve the exact attachment and source access selected by
+// the actual pass-ending method, rather than recording only a barrier count.
+struct BarrierObservation {
+    u64 image{};
+    u32 aspect{}, source_access{}, destination_access{}, source_stages{};
+};
 struct Driver {
     unsigned next{};
     std::map<unsigned, Observation> states;
     std::vector<std::string> events;
     std::vector<DrawObservation> draws;
+    std::vector<BarrierObservation> barriers;
     std::vector<std::pair<u8, u32>> expected;
     std::vector<u64> draw_ticks, query_begin_ticks, query_end_ticks;
     unsigned selections{}, completions{};
+    unsigned profile_pass_begins{}, profile_pass_ends{};
     std::vector<u8>* data{};
     u64 vertex_offset{};
 
@@ -201,8 +210,19 @@ struct CommandBuffer {
         state.pass = false;
         d->Event(id, "end-renderpass");
     }
-    template <class... T>
-    void pipelineBarrier(T&&...) { d->Event(id, "barrier"); }
+    // CodexAstraLocal: This endpoint checks actual captured old/new attachment
+    // metadata; it does not model GPU visibility or execute a driver barrier.
+    void pipelineBarrier(PipelineStageFlags source, PipelineStageFlags,
+                         DependencyFlagBits, u32, const void*, u32, const void*,
+                         u32 count, const ImageMemoryBarrier* barriers) {
+        if (d->states[id].pass) throw std::runtime_error("attachment barrier inside pass");
+        for (u32 i = 0; i < count; ++i) {
+            const auto& b = barriers[i];
+            d->barriers.push_back({b.image, b.subresourceRange.aspectMask,
+                                  b.srcAccessMask, b.dstAccessMask, source});
+        }
+        d->Event(id, "barrier");
+    }
     void bindPipeline(PipelineBindPoint, u64) {
         d->states[id].pipeline = true;
         d->Event(id, "bind-pipeline");
@@ -232,6 +252,14 @@ struct CommandBuffer {
 } // namespace vk
 
 namespace Vulkan {
+#include "profile-types.inc"
+// CodexAstraLocal: Profiling is an ordered endpoint here, not another query
+// simulator. The separate WorkProfile gate executes its complete production
+// state machine; this gate preserves render-pass and submission call ordering.
+struct ProfileEndpoint {
+    void Wait(HostWait, u64) {}
+    void Submitted(u64, u64) {}
+};
 enum class StateFlags { AllDirty = 0, Pipeline = 1, DescriptorSets = 2, FragmentConstants = 4 };
 StateFlags operator|(StateFlags a, StateFlags b) { return StateFlags(int(a) | int(b)); }
 StateFlags operator&(StateFlags a, StateFlags b) { return StateFlags(int(a) & int(b)); }
@@ -313,6 +341,7 @@ public:
     std::unique_ptr<Master> master_semaphore = std::make_unique<Master>();
     std::shared_ptr<ComputeFailureTracker> compute_failures;
     Failure shader_failure;
+    ProfileEndpoint work_profile;
     bool use_worker_thread = true;
     std::unique_ptr<Chunk> chunk = std::make_unique<Chunk>();
     std::queue<std::unique_ptr<Chunk>> work_queue;
@@ -359,6 +388,16 @@ public:
     void DispatchWork();
     void SubmitExecution(vk::Semaphore, vk::Semaphore);
     void AllocateWorkerCommandBuffers();
+    void BeginGpuPass(vk::CommandBuffer command, GpuWork) {
+        if (command.d->states[command.id].pass)
+            throw std::runtime_error("GPU profile begins outside render pass");
+        ++driver.profile_pass_begins;
+    }
+    void EndGpuPass(vk::CommandBuffer command) {
+        if (command.d->states[command.id].pass)
+            throw std::runtime_error("GPU profile ends outside render pass");
+        ++driver.profile_pass_ends;
+    }
     u64 CurrentTick() const { return master_semaphore->CurrentTick(); }
     void MarkStateNonDirty(StateFlags flag) noexcept { state |= flag; }
     bool IsStateDirty(StateFlags flag) const noexcept { return False(state & flag); }
@@ -368,10 +407,12 @@ public:
 struct Framebuffer {
     bool shadow_rendering{};
     u64 handle{1};
+    std::array<u64, 2> images{1, 2};
+    std::array<u32, 2> aspects{1, 2};
     u64 Handle() const { return handle; }
     u64 RenderPass() const { return 2; }
-    std::array<u64, 2> Images() const { return {1, 2}; }
-    std::array<u32, 2> Aspects() const { return {1, 2}; }
+    std::array<u64, 2> Images() const { return images; }
+    std::array<u32, 2> Aspects() const { return aspects; }
 };
 constexpr u32 MinDrawsToFlush = 20;
 class RenderManager {
@@ -384,7 +425,7 @@ public:
     RenderPass pass{};
     u32 num_draws{};
     void BeginRendering(const Framebuffer*, Common::Rectangle<u32>);
-    void BeginRendering(const RenderPass&);
+    void BeginRendering(const RenderPass&, GpuWork = GpuWork::Utility);
     void EndRendering();
 };
 enum class BufferType : u32 { Upload, Download, Stream };
@@ -555,6 +596,71 @@ struct Raster {
 };
 } // namespace Vulkan
 
+// CodexAstraLocal: Run the real framebuffer/pass overloads across two ownership
+// transitions. The old assignment order misattributes the first barrier and
+// loses the second pass's attachments; same-pass merges must still avoid splits.
+void AttachmentTransitions() {
+    using namespace Vulkan;
+    const unsigned prior_checks = checks;
+    for (bool old_shadow : {false, true}) {
+        Driver driver;
+        Instance instance;
+        Scheduler scheduler(driver);
+        RenderManager manager{instance, scheduler};
+        Framebuffer previous;
+        previous.handle = 11;
+        previous.images = old_shadow ? std::array<u64, 2>{31, 0}
+                                     : std::array<u64, 2>{11, 12};
+        previous.aspects = {1, 2};
+        previous.shadow_rendering = old_shadow;
+        Framebuffer next;
+        next.handle = 22;
+        next.images = old_shadow ? std::array<u64, 2>{0, 42}
+                                 : std::array<u64, 2>{21, 0};
+        next.aspects = {1, 2};
+        next.shadow_rendering = !old_shadow;
+        const Common::Rectangle<u32> rect{0, 32, 32, 0};
+        manager.BeginRendering(&previous, rect);
+        manager.BeginRendering(&previous, rect);
+        Require(manager.num_draws == 1, "same pass remains merged");
+        manager.BeginRendering(&next, rect);
+        manager.EndRendering();
+        scheduler.DispatchWork();
+        scheduler.Drain();
+        std::size_t cursor{};
+        for (const auto* expected : {&previous, &next}) {
+            u32 stages{};
+            for (u32 i = 0; i < 2; ++i) {
+                if (!expected->images[i]) continue;
+                stages |= (expected->aspects[i] & 1)
+                    ? (expected->shadow_rendering ? 1U : 2U) : (4U | 8U);
+            }
+            for (u32 i = 0; i < 2; ++i) {
+                if (!expected->images[i]) continue;
+                Require(cursor < driver.barriers.size(), "each ended attachment has a barrier");
+                const auto& barrier = driver.barriers[cursor++];
+                Require(barrier.image == expected->images[i],
+                        expected == &previous ? "previous pass barrier retains its image"
+                                              : "new pass barrier retains its image");
+                Require(barrier.aspect == expected->aspects[i], "barrier retains attachment aspect");
+                const u32 access = (expected->aspects[i] & 1)
+                    ? (expected->shadow_rendering ? 1U : 2U) : 4U;
+                Require(barrier.source_access == access, "barrier retains normal/shadow write access");
+                Require(barrier.destination_access == (8U | 16U), "barrier retains read visibility");
+                Require(barrier.source_stages == stages, "barrier retains old/new stage union");
+            }
+        }
+        Require(cursor == driver.barriers.size(), "no extra attachment barriers");
+        Require(driver.profile_pass_begins == 2 && driver.profile_pass_ends == 2,
+                "profiling preserves two natural passes and same-pass merge");
+        Require(manager.images == std::array<u64, 2>{} &&
+                    manager.aspects == std::array<u32, 2>{} && !manager.shadow_rendering,
+                "closed pass clears attachment ownership");
+    }
+    std::cout << "METADATA checks=" << checks - prior_checks << '\n';
+    std::cout << "PASS metadata_cases=2\n";
+}
+
 // CodexAstraLocal: Preserve every draw in six wrap/pass situations with both
 // sampled and optional-owner states; two source-derived defects must fail.
 int main(int argc, char** argv) {
@@ -563,6 +669,10 @@ int main(int argc, char** argv) {
         const int mutant = argc > 1 ? std::stoi(argv[1]) : 0;
         // CodexAstraLocal: Execute each intended defect on both independent routes.
         const int route = argc > 2 ? std::stoi(argv[2]) : 0;
+        if (route == 3) {
+            AttachmentTransitions();
+            return 0;
+        }
         unsigned cases{};
         // CodexAstraLocal: Keep all prior ordinary sample/owner combinations;
         // permanent-state deferred admission has no GPU sample query.
@@ -629,6 +739,7 @@ int main(int argc, char** argv) {
             }
         }
         std::cout << "PASS cases=" << cases << " checks=" << checks << '\n';
+        if (route == 0) AttachmentTransitions();
     } catch (const std::exception& error) {
         std::cerr << "FAIL " << error.what() << '\n';
         return 1;

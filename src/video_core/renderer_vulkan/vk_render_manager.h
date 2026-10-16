@@ -8,6 +8,7 @@
 
 #include "common/math_util.h"
 #include "video_core/renderer_vulkan/vk_common.h"
+#include "video_core/renderer_vulkan/vk_work_profile.h" // CodexAstraLocal: Natural-pass attribution.
 
 namespace VideoCore {
 enum class PixelFormat : u32;
@@ -46,7 +47,7 @@ public:
     void BeginRendering(const Framebuffer* framebuffer, Common::Rectangle<u32> draw_rect);
 
     /// Begins a new renderpass with the provided render state.
-    void BeginRendering(const RenderPass& new_pass);
+    void BeginRendering(const RenderPass& new_pass, GpuWork kind = GpuWork::Utility);
 
     /// Exits from any currently active renderpass instance
     void EndRendering();

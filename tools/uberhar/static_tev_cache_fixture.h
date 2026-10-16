@@ -201,6 +201,9 @@ vk::ShaderModule CompileSPV(const std::vector<u32> &, vk::Device) {
 // producer mutation can be adversarial.
 struct CommandsState {
   u64 pipeline{};
+  // CodexAstraLocal: Preserve actual worker-selected route with each recorded
+  // binding; the fixture must not silently swallow the profiler integration.
+  u32 gpu_route{~0U};
   std::array<u32, 3> offsets{};
   std::array<vk::DescriptorSet, 3> descriptors{};
   std::array<std::byte, 128> constants{};
@@ -277,6 +280,12 @@ struct Scheduler {
   CommandsState current{};
   std::vector<CommandsState> completed;
   std::vector<std::function<void(RecordingCommands)>> records;
+  std::array<u64, 5> gpu_routes{};
+  void RecordGpuRoute(u32 route) {
+    if (route >= gpu_routes.size()) throw std::runtime_error("invalid GPU route");
+    current.gpu_route = route;
+    ++gpu_routes[route];
+  }
   template <class F> void Record(F &&f) {
     records.emplace_back(std::forward<F>(f));
   }
@@ -350,6 +359,12 @@ public:
   // CodexAstraLocal: Bind the production lazy transport owner in extracted route tests.
   std::optional<FSConfig> pending_tev_transport;
   DynamicTevPreparation dynamic_tev_preparation;
+  // CodexAstraLocal: Arithmetic-input output is a controlled endpoint here;
+  // actual route/lifetime decisions remain extracted production methods.
+  struct { u64 attempts{}, failures{}, samples{}; } fragment_evidence;
+  void SampleFragmentEvidence(const Pica::RegsInternal&, const FSConfig&, bool) {
+    ++fragment_evidence.samples;
+  }
   ExactPushConstants<TevPushConstants> tev_push_constants;
   std::unordered_map<u64, std::unique_ptr<Shader>> tev_shaders;
   std::unordered_map<u64, std::unique_ptr<GraphicsPipeline>> tev_pipelines,

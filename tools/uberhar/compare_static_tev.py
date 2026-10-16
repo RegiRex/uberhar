@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CodexAstraLocal: Compare actual partial/generic/specialized TEV and independent fetch counts."""
+"""CodexAstraLocal: Compare full/generic/static against inherited TEV and a forward fetch oracle."""
 import argparse
 import ast
 import hashlib
@@ -44,7 +44,7 @@ def main():
     state_start = dynamic.index("layout(push_constant)")
     state_end = dynamic.index("} uber_tev;", state_start) + len("} uber_tev;")
     helpers = (dynamic[state_start:state_end] + "\n"
-               + dynamic[dynamic.index("// AstraEH: TEV interpreter helpers begin."):dynamic.index("void main()")])
+               + dynamic[dynamic.index("// CodexAstraLocal: Shared color-sample helpers begin."):dynamic.index("void main()")])
     helpers = helpers.replace("layout(push_constant) uniform UberTev",
                               "layout(std430, binding=1) readonly buffer UberTev")
     rounding = dynamic[dynamic.index("float byteround("):dynamic.index("float getLod(")]
@@ -69,13 +69,16 @@ void main() {
     secondary_fragment_color=inputs[base+2u];
     for(uint i=0u;i<6u;++i) const_color[i]=inputs[base+7u+i];
     tev_combiner_buffer_color=inputs[base+13u];
-    outputs[id*5u]=uvec4(round(specialized()*255.0));
-    fetch_counts=uvec4(0u);
-    outputs[id*5u+1u]=uvec4(round(interpreted()*255.0));
-    outputs[id*5u+2u]=fetch_counts;
-    fetch_counts=uvec4(0u);
-    outputs[id*5u+3u]=uvec4(round(partial()*255.0));
-    outputs[id*5u+4u]=fetch_counts;
+    outputs[id*7u]=uvec4(round(reference()*255.0));
+    reset_and_light();
+    outputs[id*7u+1u]=uvec4(round(specialized()*255.0));
+    outputs[id*7u+2u]=fetch_counts;
+    reset_and_light();
+    outputs[id*7u+3u]=uvec4(round(interpreted()*255.0));
+    outputs[id*7u+4u]=fetch_counts;
+    reset_and_light();
+    outputs[id*7u+5u]=uvec4(round(partial()*255.0));
+    outputs[id*7u+6u]=fetch_counts;
 }
 '''
     samples = 256
@@ -91,49 +94,65 @@ void main() {
     inputs.bind_to_storage_buffer(0)
     instructions = ctx.buffer(reserve=128)
     instructions.bind_to_storage_buffer(1)
-    outputs = ctx.buffer(reserve=samples * 5 * 16)
+    outputs = ctx.buffer(reserve=samples * 7 * 16)
     outputs.bind_to_storage_buffer(2)
     files = sorted(cases.glob("*.bin"), key=lambda p: int(p.stem))
     if [int(file.stem) for file in files] != list(range(816)):
         raise AssertionError("Expected all816 TEV cases exactly once")
     report = {"author": "CodexAstraLocal", "renderer": ctx.info["GL_RENDERER"],
               "scope": "host GL extracted TEV; production formulas with synthetic samples",
-              "defect": args.defect, "cases": 0, "three_way_rgba_vectors": 0,
+              "defect": args.defect, "cases": 0, "four_way_rgba_vectors": 0,
               "fetch_vectors_per_candidate": 0, "source_sha256": {str(original): digest(original),
               str(Path(__file__).resolve()): digest(Path(__file__).resolve())}, "case_artifacts": {}}
     # CodexAstraLocal: Finite defects alter the actual emitted candidate body or
     # its selected plan; they must fail an output/count assertion, not compilation.
     for file in files:
         index = int(file.stem)
-        reference = file.with_suffix(".frag")
+        reference = file.with_suffix(".reference")
+        full = file.with_suffix(".frag")
         candidate = cases / f"{(index + 1) % 816 if args.defect == 'wrong_plan' else index}-partial.frag"
         body = tev_body(candidate.read_text())
         if args.defect == "missing_buffer_advance":
             body = body.replace("combiner_buffer = next_combiner_buffer;", "")
         elif args.defect == "duplicate_fetch":
             for unit in range(4):
-                needle = f"vec4 uber_static_texel{unit} = sampleTexUnit{unit}();"
+                helper = f"uber_shared_tex{unit}" if unit < 3 else f"sampleTexUnit{unit}"
+                needle = f"vec4 uber_static_texel{unit} = {helper}();"
                 body = body.replace(needle, f"sampleTexUnit{unit}();\n" + needle)
-        source = (header + rounding + helpers
-                  + "vec4 specialized(){\n" + tev_body(reference.read_text()) + "}\n"
+        # CodexAstraLocal: First 64 cases seed identical ordinary-unit reads at
+        # a lighting-like first-use site. Later TEV must reuse those exact values;
+        # each candidate invocation gets fresh flags, including consecutive draws.
+        lighting_mask = index % 8 if index < 64 else 0
+        reset = "void reset_and_light(){fetch_counts=uvec4(0u);uber_shared_sampled=0u;uber_sampled=0u;\n"
+        reset += "".join(f"uber_shared_tex{unit}();\n" for unit in range(3) if lighting_mask & (1 << unit))
+        reset += "}\n"
+        source = (header + rounding + helpers + reset
+                  + "vec4 reference(){\n" + tev_body(reference.read_text()) + "}\n"
+                  + "vec4 specialized(){\n" + tev_body(full.read_text()) + "}\n"
                   + "vec4 interpreted(){\n" + tev_body(dynamic) + "}\n"
                   + "vec4 partial(){\n" + body + "}\n" + tail)
         shader = ctx.compute_shader(source)
         constants = file.read_bytes()
         raw = file.with_suffix(".raw").read_bytes()
-        if len(constants) != 128 or len(raw) != 96:
+        if len(constants) != 128 or len(raw) != 100:
             raise AssertionError("Invalid source transport sizes")
         instructions.write(constants)
         shader.run(group_x=samples // 64)
         ctx.memory_barrier()
         result = outputs.read()
         rows = list(struct.iter_unpack("<4I", result))
-        fetches = expected_fetches(raw)
+        # CodexAstraLocal: A demand is one fetch, not the numeric value of its bit.
+        fetches = tuple(int(bool(v or lighting_mask & (1 << unit)))
+                        for unit, v in enumerate(expected_fetches(raw)))
         for sample in range(samples):
-            specialized, generic, generic_fetches, partial, partial_fetches = rows[sample*5:sample*5+5]
-            if specialized != generic or generic != partial or generic_fetches != fetches or partial_fetches != fetches:
+            baseline, specialized, full_fetches, generic, generic_fetches, partial, partial_fetches = rows[sample*7:sample*7+7]
+            # CodexAstraLocal: Full graphics memoizes ordinary units only;
+            # procedural sampling keeps its original independent-call semantics.
+            if (baseline != specialized or specialized != generic or generic != partial or
+                    generic_fetches != fetches or partial_fetches != fetches or full_fetches[:3] != fetches[:3]):
                 failure = {"case":index,"sample":sample,"specialized":specialized,
-                           "generic":generic,"partial":partial,"expected_fetches":fetches,
+                           "baseline":baseline,"generic":generic,"partial":partial,"expected_fetches":fetches,
+                           "full_fetches":full_fetches,
                            "generic_fetches":generic_fetches,"partial_fetches":partial_fetches}
                 (out / "failure.json").write_text(json.dumps(failure,indent=2)+"\n")
                 (out / "failed.comp").write_text(source)
@@ -141,16 +160,16 @@ void main() {
                 raise AssertionError(f"TEV output/fetch mismatch: {failure}")
         shader.release()
         report["cases"] += 1
-        report["three_way_rgba_vectors"] += samples
+        report["four_way_rgba_vectors"] += samples
         report["fetch_vectors_per_candidate"] += samples
-        report["case_artifacts"][str(index)] = {"reference":digest(reference),"partial":digest(candidate),
+        report["case_artifacts"][str(index)] = {"reference":digest(reference),"full":digest(full),"partial":digest(candidate),
                                                "state":digest(file),"raw":digest(file.with_suffix('.raw')),
                                                "executed_source":hashlib.sha256(source.encode()).hexdigest(),
                                                "output":hashlib.sha256(result).hexdigest()}
         if index % 48 == 47:
-            print(f"Compared {index+1}/816 three-way TEV programs",flush=True)
+            print(f"Compared {index+1}/816 four-way TEV programs",flush=True)
     (out / "report.json").write_text(json.dumps(report,indent=2)+"\n")
-    print(f"PASS {report['cases']} programs / {report['three_way_rgba_vectors']} exact three-way RGBA vectors",flush=True)
+    print(f"PASS {report['cases']} programs / {report['four_way_rgba_vectors']} exact four-way RGBA vectors",flush=True)
     if args.defect:
         raise AssertionError("Intentional defect escaped")
 

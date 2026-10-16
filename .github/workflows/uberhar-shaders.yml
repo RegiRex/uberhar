@@ -174,12 +174,14 @@ jobs:
       # CodexAstraLocal: Retain allocation and terminal worker-boundary controls.
       # CodexAstraLocal: Retain descriptor pixels, sources and failure controls.
       # CodexAstraLocal: Preserve proof-cache extraction and compiler failures.
+      # CodexAstraLocal: Retain bounded GPU-query ownership and injected-failure evidence.
       - name: Upload CPU coordination contract evidence
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: uberhar-host-coordination-proof-${{ github.run_number }}
           path: |
+            build/uberhar-probe/work-profile/**
             build/uberhar-probe/parallel-transport/**/provenance.json
             build/uberhar-probe/parallel-transport/**/*.stdout
             build/uberhar-probe/parallel-transport/**/*.stderr

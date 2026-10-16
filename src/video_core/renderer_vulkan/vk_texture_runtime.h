@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include <chrono> // CodexAstraLocal: Bounded transfer-cost reporting cadence.
+
 #include <span>
 #include "video_core/rasterizer_cache/framebuffer_base.h"
 #include "video_core/rasterizer_cache/rasterizer_cache_base.h"
@@ -160,6 +162,9 @@ public:
 
     /// Returns true if the provided pixel format needs convertion
     bool NeedsConversion(const Surface& surface) const;
+    // CodexAstraLocal TEST-ONLY LOG: Owner-only savings census, removed after
+    // exact-copy/feedback reuse qualification; periodic delivery is nonblocking.
+    void ReportTransferSavings(bool final = false) noexcept;
 
 private:
     /// Clears a partial texture rect using a clear rectangle
@@ -173,6 +178,8 @@ private:
     StreamBuffer upload_buffer;
     StreamBuffer download_buffer;
     u32 num_swapchain_images;
+    u64 copy_regions{}, identity_regions{}, identity_blits{}, feedback_requests{}, feedback_reuses{};
+    std::chrono::steady_clock::time_point transfer_report_time{std::chrono::steady_clock::now()};
 };
 
 class Surface : public VideoCore::SurfaceBase {
@@ -285,6 +292,10 @@ public:
     Scheduler& scheduler;
     FormatTraits traits;
     std::array<Handle, Type::Num> handles;
+    // CodexAstraLocal: Reuse only within an unchanged recorder epoch and exact
+    // source/copy allocations. This is not a cross-draw content-generation cache.
+    vk::Image snapshot_source{}, snapshot_dest{};
+    u64 snapshot_epoch{};
     Type current{};
     vk::UniqueImageView depth_view;
     vk::UniqueImageView stencil_view;

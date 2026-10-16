@@ -6,6 +6,7 @@
 #include <array>
 #include <chrono>
 #include <cstdint>
+#include <cstring> // CodexAstraLocal: Joined raw copies reuse the existing tile workers.
 #include <limits>
 #include <span>
 #include "common/logging/log.h"
@@ -52,6 +53,9 @@ public:
             if (decode) {
                 admitted = true;
                 const u32 count = static_cast<u32>(pixels / 64);
+                // CodexAstraLocal: Keep adaptive history specific to the codec;
+                // raw transfer jobs below must not teach a texture decode policy.
+                pool.SetWorkIdentity(0x200U + format + (convert ? 0x100U : 0U));
                 work = pool.Run(count, Grain, [&](u32 first, u32 last) {
                     decode(info.width, info.height, source, dest, first, last);
                 }, measure);
@@ -84,6 +88,31 @@ public:
         }
     }
 
+    // CodexAstraLocal: Caller proves complete current nonaliasing guest spans
+    // and excludes concurrent writers. Reuse this pool, join before publishing
+    // the guest transfer, and leave tiny copies to the ordinary libc path.
+    void CopyCurrentBytes(std::span<const u8> source, std::span<u8> dest) {
+        const auto start = Clock::now();
+        constexpr u32 block = 64 * 1024;
+        Common::Uberhar::ParallelWork::Result result{};
+        ++copy_calls;
+        copy_bytes += source.size();
+        if (enabled && source.size() >= 512 * 1024) {
+            pool.SetWorkIdentity(0x100);
+            const auto count = static_cast<u32>((source.size() + block - 1) / block);
+            result = pool.Run(count, 1, [&](u32 first, u32 last) {
+                const auto begin = static_cast<std::size_t>(first) * block;
+                const auto end = std::min(source.size(), static_cast<std::size_t>(last) * block);
+                std::memcpy(dest.data() + begin, source.data() + begin, end - begin);
+            }, true);
+        } else {
+            std::memcpy(dest.data(), source.data(), source.size());
+        }
+        copy_ns += Elapsed(start);
+        copy_worker_blocks += result.worker_items;
+        copy_join_ns += result.join_ns;
+    }
+
     void Report(bool final = false) {
         const auto now = Clock::now();
         if (!final && now - last_report < std::chrono::seconds{5}) return;
@@ -103,6 +132,19 @@ public:
                  parallel_ns, owner_ns, join_ns, pool.Available(), pool.CreatedWorkers(),
                  pool.StartupFailures(), scheduling.desired, scheduling.samples,
                  scheduling.rejected, scheduling.trials, scheduling.accepted, scheduling.reverted);
+        // CodexAstraLocal TEST-ONLY LOG: Explain why learning retained or refused
+        // evidence; counters remain bounded and are removed after qualification.
+        LOG_INFO_DIAGNOSTIC(Render, "Uberhar texture adaptation: history_hits={} history_misses={} "
+            "history_evictions={} capacity_resets={} unkeyed={} rejected_invalid={} rejected_cost={} rejected_helpers={}",
+            scheduling.history_hits, scheduling.history_misses, scheduling.evictions,
+            scheduling.capacity_resets, scheduling.unkeyed, scheduling.rejected_invalid,
+            scheduling.rejected_cost, scheduling.rejected_helpers);
+        // CodexAstraLocal TEST-ONLY LOG: Compare transfer cost including joins
+        // against actual future uploads; remove after CPU placement qualification.
+        LOG_INFO_WITH_DELIVERY(Render, final ? Common::Log::Delivery::Reliable :
+            Common::Log::Delivery::Diagnostic, "Uberhar CPU raw copy: final={} enabled={} calls={} bytes={} "
+                 "wall_ns={} worker_blocks={} join_ns={} block_bytes=65536 no_new_readback=true",
+                 final, enabled, copy_calls, copy_bytes, copy_ns, copy_worker_blocks, copy_join_ns);
     }
 
 private:
@@ -177,5 +219,6 @@ private:
     u64 calls{}, input_bytes{}, serial_calls{}, parallel_calls{}, owner_tiles{}, worker_tiles{};
     u64 serial_samples{}, parallel_samples{}, serial_ns{}, parallel_ns{}, owner_ns{}, join_ns{};
     unsigned peak_threads{};
+    u64 copy_calls{}, copy_bytes{}, copy_ns{}, copy_worker_blocks{}, copy_join_ns{};
 };
 } // namespace VideoCore

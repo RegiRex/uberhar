@@ -6,6 +6,7 @@
 #include <stdexcept>
 #include <vector>
 #include "video_core/rasterizer_cache/texture_decode_work.h"
+#include "video_core/rasterizer_cache/uberhar_cpu_transfer_policy.h" // CodexAstraLocal: Raw transfer boundaries.
 
 namespace Common::Log {
 void Stop() {}
@@ -62,6 +63,36 @@ void Case(PixelFormat format, bool converted, u32 width, u32 height,
 
 int main() try {
     unsigned cases{};
+    // CodexAstraLocal: New CPU-transfer admission must reject aliases, gap
+    // semantics and address overflow. Adjacency remains a valid disjoint copy.
+    Need(CpuRawTransferShape(0x100000, 0x104000, 16384, 0, 0), "adjacent copy refused");
+    Need(!CpuRawTransferShape(0x100000, 0x103fff, 16384, 0, 0), "overlap accepted");
+    Need(!CpuRawTransferShape(0x100000, 0x100000, 16384, 0, 0), "self copy accepted");
+    Need(!CpuRawTransferShape(0xfffff000, 0x100000, 16384, 0, 0), "wrapped range accepted");
+    Need(!CpuRawTransferShape(0x100000, 0x200000, 16384, 1, 0), "input gap accepted");
+    Need(!CpuRawTransferShape(0x100000, 0x200000, 16384, 0, 1), "output gap accepted");
+    Need(!CpuRawTransferShape(0x100000, 0x200000, 8192, 0, 0), "small copy admitted");
+    for (bool enabled : {false, true}) {
+        ParallelTextureDecoder decoder{enabled, 8};
+        for (std::size_t size : {16384U, 524287U, 524288U, 1048592U}) {
+            std::vector<u8> input(size + 64, 0xC9), output(size + 64, 0xA7);
+            for (unsigned generation = 0; generation < 3; ++generation) {
+                for (std::size_t i = 32; i < size + 32; ++i)
+                    input[i] = static_cast<u8>(i * 31 + generation * 17);
+                const auto before = input;
+                decoder.CopyCurrentBytes(std::span<const u8>{input}.subspan(32, size),
+                                         std::span{output}.subspan(32, size));
+                Need(std::equal(input.begin() + 32, input.end() - 32, output.begin() + 32),
+                     "raw copy differs from exact current bytes");
+                Need(input == before, "raw copy modified source");
+                Need(std::all_of(output.begin(), output.begin() + 32, [](u8 b) { return b == 0xA7; }) &&
+                     std::all_of(output.end() - 32, output.end(), [](u8 b) { return b == 0xA7; }),
+                     "raw copy damaged guards or partial last block");
+                ++cases;
+            }
+        }
+        Need((decoder.CreatedWorkers() != 0) == enabled, "raw copy ignored worker toggle");
+    }
     for (u32 format = 0; format < 14; ++format) {
         for (bool converted : {false, true}) {
             if (converted && format >= 5) continue;

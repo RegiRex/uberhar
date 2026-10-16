@@ -187,6 +187,10 @@ private:
     // CodexAstraLocal: Materialize only for a live generic/static consumer; a
     // ready full fragment must not pay for controls it cannot read.
     void EnsureDynamicTevState();
+    // CodexAstraLocal TEST-ONLY LOG: Sample original arithmetic inputs without
+    // changing rendering; remove after the pending CPU-precompute decision.
+    void SampleFragmentEvidence(const Pica::RegsInternal& regs,
+                                const Pica::Shader::FSConfig& config, bool preparing_gpu);
     // CodexAstraLocal: Last potentially flushing preparation precedes this resolve.
     void ResolveImageBindings();
     // CodexAstraUlt: One gate covers optional fragment warming, binding and transport;
@@ -332,6 +336,15 @@ private:
     // Pure reuse below owns its key separately; queued draws own their bytes.
     std::optional<Pica::Shader::FSConfig> pending_tev_transport;
     DynamicTevPreparation dynamic_tev_preparation;
+    // CodexAstraLocal TEST-ONLY LOG: Owner-only, fixed-size sampled evidence.
+    // Attempts may include refused GPU preparation; actual route counts stay
+    // worker-owned in the GPU profiler. No numerical replacement is enabled.
+    struct FragmentEvidenceCounters {
+        u64 attempts{}, samples{}, host_ns{}, max_host_ns{}, failures{};
+        u64 dead_rgb{}, dead_alpha{}, dead_lighting{}, alpha_never{}, sample_overlap{};
+        u64 constant_rgb{}, constant_alpha{}, directional_slots{}, zero_direction{}, nonfinite_direction{};
+        u64 constant_captures{}, directional_captures{}, capture_capped{};
+    } fragment_evidence;
     // AstraEH: This state belongs to ordered command execution, not draw preparation.
     ExactPushConstants<TevPushConstants> tev_push_constants;
     // AstraEH: Snapshot before application-cache loading; never infer opaque driver hits.

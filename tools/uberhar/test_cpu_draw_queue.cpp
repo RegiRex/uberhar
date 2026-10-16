@@ -514,7 +514,9 @@ void WorkFloor(const std::vector<CarryChallenge::Case>& programs) {
             b.Arithmetic(Op::ADD,Dst::MakeTemporary(0),15,
                 n ? Src::MakeTemporary(0) : Src::MakeInput(0),Src::MakeInput(0));
         b.Arithmetic(Op::MOV,Dst::MakeOutput(0),15,Src::MakeTemporary(0));
-        const auto c=b.Finish(); Live live{Lease(engine,setup,c),c,96,1,false,3};
+        // CodexAstraLocal: The rejected 34-instruction case must independently
+        // pay the work threshold, so removing the arithmetic floor is detectable.
+        const auto c=b.Finish(); Live live{Lease(engine,setup,c),c,arithmetic==34?102U:96U,1,false,3};
         const auto packet=queue.Capture(live.source,VideoCore::ActualWriter);
         Need(bool(packet)==(arithmetic==35),"arithmetic floor boundary");
     }
@@ -526,7 +528,9 @@ void WorkFloor(const std::vector<CarryChallenge::Case>& programs) {
     }
     auto source=live.source; source.indexed=false; source.base_vertex=0;
     source.count=93;
-    Need(!queue.Capture(source,VideoCore::ActualWriter)&&!queue.LastCaptureAtCapacity(),"miss floor accepted93");
+    // CodexAstraLocal: This fixture has 37 guaranteed arithmetic instructions;
+    // 93 misses now pay the 3360 work seed threshold despite the old count floor.
+    Need(bool(queue.Capture(source,VideoCore::ActualWriter)),"certified small seed refused93");
     source.count=96;
     Need(bool(queue.Capture(source,VideoCore::ActualWriter)),"miss floor rejected96");
     source.available_attributes=9; source.shader.max_input_attribute_index.Assign(8);
@@ -536,7 +540,9 @@ void WorkFloor(const std::vector<CarryChallenge::Case>& programs) {
     for(u32 n=0;n<9;++n)source.attributes[n].stride=71;
     source.attributes[9]={70,71,1,PipelineRegs::VertexAttributeFormat::UBYTE,false};
     Need(!queue.Capture(source,VideoCore::ActualWriter)&&!queue.LastCaptureAtCapacity(),"raw copy floor accepted71");
-    Need(queue.GetStatistics().work_refused>=5,"work refusal accounting");
+    // CodexAstraLocal: Only the 34-instruction, two low-miss and 71-byte
+    // cases refuse work now; the certified 93-miss seed is intentionally accepted.
+    Need(queue.GetStatistics().work_refused==4,"work refusal accounting");
 
     // A long branch cannot inflate a guaranteed work floor; a Boolean snapshot
     // fixes the choice, while per-invocation condition branches retain minimum0.
@@ -586,8 +592,9 @@ void Groups(const std::vector<CarryChallenge::Case>& programs) {
     {
         Gate(false); CpuDrawExecutor queue{4, 8, 8 * 1024 * 1024, Start};
         struct ReleaseGate { ~ReleaseGate() { Gate(true); } } release;
-        Need(!queue.HasPendingSeed(), "empty seed hint");
-        Need(!queue.AllowsShaderWork(heavy_lease, 0, 93), "unseeded small admission");
+        // CodexAstraLocal: Assert actual admission/publication behavior instead
+        // of the obsolete production advisory mirror; all functional guards remain.
+        Need(!queue.AllowsShaderWork(floor_lease, 0, 93), "unseeded small admission");
         auto stats = queue.GetStatistics();
         Need(stats.captures == 1 && stats.refused == 1 && stats.early_refused == 1,
              "early refusal counted twice");
@@ -597,7 +604,7 @@ void Groups(const std::vector<CarryChallenge::Case>& programs) {
         std::vector<std::shared_ptr<CpuDrawPacket>> packets;
         std::vector<Expected> expected;
         for (u32 n = 0; n < 4; ++n) {
-            const u32 sizes[]{255, 3, 18, 93};
+            const u32 sizes[]{255, 12, 18, 90};
             Live live{n ? carry_lease : heavy_lease, n ? programs[1] : heavy,
                       sizes[n], n + 1, false};
             environment.Apply(); expected.push_back(Serial(live)); environment.Apply();
@@ -606,7 +613,6 @@ void Groups(const std::vector<CarryChallenge::Case>& programs) {
             auto packet = queue.Capture(live.source, ObservedWriter);
             Need(bool(packet) && queue.Submit(packet), "seeded small publication refused");
             packets.push_back(packet); live.Mutate();
-            Need(queue.HasPendingSeed(), "pending seed hint absent");
         }
         CpuDrawPacket::Completion result;
         Need(!packets[0]->TryCompletedResult(result), "pending result reported ready");
@@ -627,7 +633,6 @@ void Groups(const std::vector<CarryChallenge::Case>& programs) {
              "group admission accounting");
         Need(stats.work_grains == 2 && stats.coordinator_packets + stats.auxiliary_packets == 4,
              "weighted grain accounting");
-        Need(!queue.HasPendingSeed(), "executing seed stayed pending");
         packets.clear(); Need(queue.GetStatistics().resident_packets == 0, "group credit leaked");
     }
     {
@@ -638,7 +643,7 @@ void Groups(const std::vector<CarryChallenge::Case>& programs) {
         Need(packet && queue.Submit(packet), "exact baseline seed publication");
         Need(!queue.AllowsShaderWork(floor_lease, 0, 3), "aggregate work charge omitted");
         Live indexed{floor_lease, floor, 192, 1, true};
-        for (u32 n = 0; n < indexed.indices.size(); ++n) indexed.indices[n] = n % 64;
+        for (u32 n = 0; n < indexed.indices.size(); ++n) indexed.indices[n] = n % 3;
         Need(queue.AllowsShaderWork(floor_lease, 0, 192), "upper-bound policy required raw indices");
         Need(!queue.Capture(indexed.source, VideoCore::ActualWriter), "group used inputs instead of misses");
         Gate(true); queue.Drain();
@@ -679,7 +684,56 @@ void Groups(const std::vector<CarryChallenge::Case>& programs) {
         Need(bytes.size() == expected.hardware.size() &&
              !std::memcmp(bytes.data(), expected.hardware.data(), bytes.size()), "no-lane hardware differs");
         ++comparisons;
-        Need(queue.GetStatistics().peak_threads == 1 && !queue.HasPendingSeed(), "no-lane async work");
+        Need(queue.GetStatistics().peak_threads == 1, "no-lane async work");
+    }
+    // CodexAstraLocal: Actual FIFO work, not input count, admits heavy small
+    // seeds. Cached negative policy creates no coordinator/reservation; a same-
+    // key accepted proof is reused through owned capture before lazy startup.
+    {
+        const auto reservations = Common::Uberhar::AuxiliaryBudget::Global().GetStatistics().reservations;
+        CpuDrawExecutor queue{4};
+        Need(!queue.CachedShaderWork(floor_lease,0,3).has_value(),"unknown cached policy invented");
+        Need(!queue.AllowsShaderWork(floor_lease,0,3),"tiny floor policy admitted");
+        const auto built=queue.GetStatistics().effect_builds;
+        Need(queue.CachedShaderWork(floor_lease,0,3)==std::optional<bool>{false},"negative policy not cached");
+        Need(queue.GetStatistics().effect_builds==built && queue.GetStatistics().start_requests==0 &&
+             Common::Uberhar::AuxiliaryBudget::Global().GetStatistics().reservations==reservations,
+             "negative policy reserved progress");
+        Need(!queue.CachedShaderWork(floor_lease,1,3).has_value(),"cached Boolean identity aliased");
+        Live live{heavy_lease,heavy,48,1,false};
+        const auto expected=Serial(live);
+        Need(queue.AllowsShaderWork(heavy_lease,0,48),"work qualified small seed rejected");
+        auto packet=queue.Capture(live.source,VideoCore::ActualWriter);
+        auto before=queue.GetStatistics();
+        Need(packet && before.effect_reuses==1 && before.work_seeded==0 && before.start_requests==0,
+             "accepted proof or lazy capture contract");
+        Need(queue.Submit(packet),"small seed publication"); queue.Drain();
+        const auto bytes=packet->HardwareBytes();
+        Need(bytes.size()==expected.hardware.size() &&
+             !std::memcmp(bytes.data(),expected.hardware.data(),bytes.size()),"small seed hardware differs");
+        ++comparisons;
+        Need(queue.GetStatistics().start_requests==1 && queue.GetStatistics().work_seeded==1,
+             "lazy progress startup count");
+    }
+    // CodexAstraLocal: Aggregate work alone cannot admit an unpartitionable
+    // cheap tail. Exercise both the member bound and per-member dispatch charge.
+    for (u32 member_size : {12U,30U}) {
+        Gate(false); CpuDrawExecutor queue{4,8,8*1024*1024,Start};
+        struct ReleaseGate { ~ReleaseGate() { Gate(true); } } release;
+        Live seed{heavy_lease,heavy,48,1,false};
+        auto first=queue.Capture(seed.source,VideoCore::ActualWriter);
+        Need(first&&queue.Submit(first),"partition seed publication");
+        std::vector<std::shared_ptr<CpuDrawPacket>> packets{first};
+        for (unsigned i=0;i<3;++i) {
+            Live member{floor_lease,floor,member_size,i+1,false};
+            auto packet=queue.Capture(member.source,VideoCore::ActualWriter);
+            Need(packet&&queue.Submit(packet),"valid four-member partition refused"); packets.push_back(packet);
+        }
+        Live tail{floor_lease,floor,member_size,7,false};
+        Need(!queue.Capture(tail.source,VideoCore::ActualWriter),
+             member_size==12 ? "oversized grain admitted" : "member charge omitted");
+        Gate(true); queue.Drain();
+        Need(queue.GetStatistics().work_grains==1,"partition dispatch disagreed with admission");
     }
 }
 

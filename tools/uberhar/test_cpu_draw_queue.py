@@ -56,6 +56,10 @@ def main():
     # CodexAstraLocal: Focus new grouping/publication/ready-prefix behavior in
     # local checks; the default CI invocation still runs every older control.
     parser.add_argument('--groups-only', action='store_true')
+    # CodexAstraLocal: Resume an interrupted local gate without repeating passed
+    # controls; default CI still checks the full positive population and defects.
+    parser.add_argument('--start-variant')
+    parser.add_argument('--positive-scope', choices=('all', 'work'), default='all')
     args = parser.parse_args()
     root = args.root.resolve()
     source_root = (args.source_root or root / 'src').resolve()
@@ -210,8 +214,8 @@ inline struct { Setting uberhar_test_mode; } values;
     header = header_path.read_text()
     instrumented = '// CodexAstraLocal: Test-only deterministic exceptional boundaries.\n' + \
         'namespace PacketProbe { void BeforeWave(); void BeforeInvocation(); }\n' + original
-    instrumented = change(instrumented, '                const auto result = pool.Run(',
-        '                PacketProbe::BeforeWave();\n                const auto result = pool.Run(')
+    instrumented = change(instrumented, '                const auto result = pool->Run(',
+        '                PacketProbe::BeforeWave();\n                const auto result = pool->Run(')
     instrumented = change(instrumented, '                    context.Run(unit);',
         '                    PacketProbe::BeforeInvocation();\n                    context.Run(unit);')
     variants = [
@@ -235,7 +239,9 @@ inline struct { Setting uberhar_test_mode; } values;
             'bounds','late external effect escaped proof'),
         ('missing_arithmetic_floor',change(instrumented,'if (effect.minimum_arithmetic < 35)',
             'if (effect.minimum_arithmetic < 0)'),header,'work','arithmetic floor boundary'),
-        ('input_count_as_misses',change(instrumented,'if (misses < 96)','if (source.count < 96)'),
+        ('input_count_as_misses',change(instrumented,
+            'const u64 guaranteed_work = u64(misses) * effect.minimum_arithmetic;',
+            'const u64 guaranteed_work = u64(source.count) * effect.minimum_arithmetic;'),
             header,'work','FIFO miss floor boundary'),
         ('missing_copy_floor',change(instrumented,'if (raw_size > u64(misses) * 70)',
             'if (raw_size > u64(misses) * 700)'),header,'work','raw copy floor accepted71'),
@@ -250,21 +256,24 @@ inline struct { Setting uberhar_test_mode; } values;
     # completed-prefix behavior, with actual JIT bytes rather than mock results.
     grouped_variants = [
         ('missing_pending_seed', change(instrumented,
-            'pending_seed && !pending.empty()', 'true'), header,
+            'return policy.broader_groups && asynchronous && !stopping && !terminal &&\n'
+            '               pending_seed && !pending.empty() && Partition(pending, work);',
+            'return work >= MemberWorkUnit;'), header,
             'groups', 'unseeded small admission'),
         ('missing_member_charge', change(instrumented,
-            'pending_work + work >= GroupWorkUnit * (pending.size() + 1)',
-            'pending_work + work >= GroupWorkUnit'), header,
-            'groups', 'aggregate work charge omitted'),
+            'work >= GroupWorkUnit + MemberWorkUnit * (members - 1)',
+            'work >= GroupWorkUnit'), header,
+            'groups', 'member charge omitted'),
+        # CodexAstraLocal: A large seed cannot sponsor an oversized cheap tail.
+        ('missing_group_bound', change(instrumented,
+            'MaxGroupMembers = 4, MaxPackets = 64', 'MaxGroupMembers = 8, MaxPackets = 64'),
+            header, 'groups', 'oversized grain admitted'),
         ('missing_submit_recheck', change(instrumented,
             'if (packet->impl->requires_group && !impl->PendingGroupFits(packet->impl->guaranteed_work))',
             'if (false)'), header, 'groups', 'lost seed published small packet'),
-        ('group_inputs_as_work', change(instrumented,
-            'const u64 guaranteed_work = u64(misses) * effect.minimum_arithmetic;',
-            'const u64 guaranteed_work = u64(source.count) * effect.minimum_arithmetic;'), header,
-            'groups', 'group used inputs instead of misses'),
         ('unweighted_tiny_claims', change(instrumented,
-            'if (work >= GroupWorkUnit)', 'if (work)'), header,
+            'prior[end] = static_cast<int>(end - members); break;',
+            'prior[end] = static_cast<int>(end - 1); break;'), header,
             'groups', 'weighted grain accounting'),
         ('group_copy_limit', change(instrumented,
             'if (raw_size > u64(misses) * 70)', 'if (raw_size > u64(misses) * 700)'), header,
@@ -274,8 +283,7 @@ inline struct { Setting uberhar_test_mode; } values;
             'if (false)\n        throw VideoCore::ShaderRecoveryError{"Uberhar deferred CPU draw failed"};\n    result ='),
             header, 'groups', 'ready error skipped or replayed'),
         ('missing_progress_reservation', change(instrumented,
-            'asynchronous{processors > 1 && bool(progress_lane)}',
-            'asynchronous{processors > 1}'), header,
+            'if (!*progress_lane)', 'if (false)'), header,
             'groups', 'no-lane publication failed synchronous progress'),
     ]
     if args.reset_only:
@@ -284,6 +292,14 @@ inline struct { Setting uberhar_test_mode; } values;
         variants = [('positive', instrumented, header, 'groups', None)] + grouped_variants
     else:
         variants += grouped_variants
+    if args.positive_scope != 'all':
+        variants[0] = ('positive', instrumented, header, args.positive_scope, None)
+    if args.start_variant:
+        names = [variant[0] for variant in variants]
+        if args.start_variant not in names[1:]:
+            raise ValueError('Unknown negative-control resume point: ' + args.start_variant)
+        variants = variants[:1] + variants[names.index(args.start_variant):]
+    proof['selection'] = {'positive_scope': variants[0][3], 'start_variant': args.start_variant}
     try:
         common = [compile_one(p,p.stem) for p in actual]
         fixture = compile_one(source / 'fixture.cpp','fixture')
@@ -302,8 +318,8 @@ inline struct { Setting uberhar_test_mode; } values;
             run(name+'-link',flags+[selected_fixture,queue,*common,*link_flags,'-o',binary])
             result = json.loads(run(name+'-run',[*prefix,binary,selected],0 if expected is None else 1).stdout)
             if expected is None:
-                minimum = 4 if args.reset_only else 9 if args.groups_only else (1024 if args.a64 else 512)
-                if result.get('passed') is not True or result.get('comparisons',0) < minimum:
+                minimum = 0 if selected == 'work' else 4 if args.reset_only else 9 if args.groups_only else (1024 if args.a64 else 512)
+                if result.get('passed') is not True or result.get('comparisons',0) < minimum or result.get('checks',0) == 0:
                     raise RuntimeError('Incomplete positive population')
                 proof['result'] = result
             elif result.get('passed') is not False or result.get('error') != expected:

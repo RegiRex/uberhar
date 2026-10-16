@@ -4,6 +4,8 @@
 Actual ring/lease, scheduler submit/dispatch, render-pass and rasterizer setup/draw
 seams execute with recording driver/packet/selection endpoints. All original ordinary cases remain; only non-sampled
 deferred draws are added because permanent compute rejection cannot reserve a query.
+The actual pass methods also preserve old/new attachment barrier metadata and
+natural profiling boundaries, with an executed old-order defect control.
 The scheduler's optional Calculated tracker stays null; adapters reject activation.
 No Vulkan execution, pixels, executor behavior, diagnostic packet behavior or full
 cached-UBO/LUT proof follows.
@@ -64,6 +66,12 @@ def main():
         read(source_root/'src/video_core/renderer_vulkan/compute_failure_packet.h')
         render=read(ROOT/'src/video_core/renderer_vulkan/vk_render_manager.cpp')
         render_header=read(ROOT/'src/video_core/renderer_vulkan/vk_render_manager.h')
+        # CodexAstraLocal: Reuse the real category declarations; timing/query
+        # behavior belongs to the separate complete WorkProfile method gate.
+        profile_header=read(ROOT/'src/video_core/renderer_vulkan/vk_work_profile.h')
+        (output/'profile-types.inc').write_text('\n'.join(
+            function(profile_header,sig)+';' for sig in
+            ['enum class GpuWork : u32', 'enum class HostWait : u32'])+'\n')
         pipeline=read(ROOT/'src/video_core/renderer_vulkan/vk_pipeline_cache.cpp')
         raster=read(source_root/'src/video_core/renderer_vulkan/vk_rasterizer.cpp')
         # CodexAstraLocal: Keep complete production bodies; adapters only provide
@@ -82,7 +90,21 @@ def main():
             'void Scheduler::AllocateWorkerCommandBuffers()']:parts.append(function(schedule,sig))
         for sig in ['void RenderManager::BeginRendering(const Framebuffer*',
             'void RenderManager::BeginRendering(const RenderPass&',
-            'void RenderManager::EndRendering()']:parts.append(function(render,sig))
+            'void RenderManager::EndRendering()']:
+            body=function(render,sig)
+            if sig.endswith('const Framebuffer*'):
+                # CodexAstraLocal: Recreate only the former metadata ordering;
+                # the old/new barrier assertion must detect it at execution.
+                invoke='    BeginRendering(new_pass, GpuWork::Graphics);\n'
+                metadata=('    images = framebuffer->Images();\n'
+                          '    aspects = framebuffer->Aspects();\n'
+                          '    shadow_rendering = framebuffer->shadow_rendering;')
+                old_order=replace(body,invoke,'')
+                old_order=replace(old_order,metadata,metadata+'\n'+invoke.rstrip())
+                parts.append('#if defined(UBERHAR_OLD_ATTACHMENT_ORDER)\n'+old_order+
+                             '\n#else\n'+body+'\n#endif')
+            else:
+                parts.append(body)
         (output/'production.inc').write_text('\n\n'.join(parts)+'\n')
         (output/'renderpass.inc').write_text(section(render_header,'struct RenderPass {','\n};')+'\n};\n')
         (output/'bind-commands.inc').write_text(section(pipeline,
@@ -148,8 +170,26 @@ def main():
             if error:need(result.returncode==1 and result.stderr==error,'Unexpected defect result: '+name)
             # CodexAstraLocal: Each actual CPU draw also checks the new final-tick
             # cached-buffer hook; all original geometry/order cases are retained.
-            else:need(result.returncode==0 and result.stdout.endswith(b'PASS cases=36 checks=1252\n'),'Candidate population/result')
+            else:need(result.returncode==0 and b'PASS cases=36 checks=1252\n' in result.stdout
+                      and result.stdout.endswith(b'PASS metadata_cases=2\n'),
+                      'Candidate population/result')
             print(name+': PASS',flush=True)
+        # CodexAstraLocal: Preserve all four existing order controls, and add
+        # one isolated attachment regression without rerunning other populations.
+        old_argv=argv[:-1]+[str(output/'old-attachment-order'),'-DUBERHAR_OLD_ATTACHMENT_ORDER']
+        old_built=subprocess.run(old_argv,cwd=ROOT,capture_output=True,timeout=90)
+        (output/'old-attachment-order.compile.stdout').write_bytes(old_built.stdout)
+        (output/'old-attachment-order.compile.stderr').write_bytes(old_built.stderr)
+        proof['old_attachment_compile']={'argv':old_argv,'returncode':old_built.returncode}
+        need(old_built.returncode==0,'Old attachment order control did not compile')
+        old_run=subprocess.run([str(output/'old-attachment-order'),'0','3'],cwd=ROOT,
+                               capture_output=True,timeout=20)
+        (output/'old-attachment-order.stdout').write_bytes(old_run.stdout)
+        (output/'old-attachment-order.stderr').write_bytes(old_run.stderr)
+        proof['variants'].append({'name':'old_attachment_order','returncode':old_run.returncode})
+        need(old_run.returncode==1 and old_run.stderr==
+             b'FAIL previous pass barrier retains its image\n','Old attachment order was not detected')
+        print('old_attachment_order: PASS',flush=True)
         proof['passed']=True
     finally:
         proof['inputs_after']={rel:sha(ROOT/rel) for rel in proof['inputs']}

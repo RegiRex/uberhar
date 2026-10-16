@@ -235,6 +235,9 @@ public:
     // CodexAstraLocal: Owner-only reporting exposes whether sampled policy
     // actually changed participation, without logging per draw or per worker.
     AdaptiveParticipation::Statistics Scheduling() const { return participation.GetStatistics(); }
+    // CodexAstraLocal: The owner identifies exact executable work generations;
+    // zero opts mixed/unidentified jobs out of adaptation, not out of execution.
+    void SetWorkIdentity(std::uint64_t identity) { work_identity = identity; }
     // CodexAstraLocal: Report the immutable runtime choice at the existing
     // cadence; a compiled Linux target can still select CV after a denied probe.
     const char* WaitTransport() const {
@@ -273,7 +276,7 @@ private:
         const bool nested = AuxiliaryBudget::HasPermit();
         const unsigned helper_capacity = budget.HelperCapacity();
         participation.Limit(std::min(available - 1, helper_capacity));
-        participation.Prepare(count, grain, HasHook);
+        participation.Prepare(count, grain, HasHook, work_identity);
         const unsigned requested = !nested && ParallelFloatEnvironment::AllowsParallel()
             ? std::min(available, std::max(1U, count / grain)) : 1U;
         const unsigned wanted = std::min({requested - 1, participation.Desired(), helper_capacity});
@@ -587,6 +590,9 @@ private:
     AuxiliaryBudget& budget;
     AuxiliaryBudget::ProgressLane* progress_lane;
     AdaptiveParticipation participation;
+    // CodexAstraLocal: Fixed-purpose pools retain their own domain; shader pools
+    // replace this identity with an exact retained proof generation per draw.
+    std::uint64_t work_identity{1};
     unsigned startup_failures{};
     std::vector<std::unique_ptr<Worker>> workers;
     std::mutex mutex;

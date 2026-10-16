@@ -221,6 +221,10 @@ void FourRouteBindings() {
     Require(rows.size()==4 && rows[0].pipeline!=partial->Handle() &&
             rows[1].pipeline==partial->Handle() && rows[2].pipeline==full->Handle() &&
             rows[3].pipeline==partial->Handle(),"generic partial full partial owner sequence");
+    // CodexAstraLocal: Exercise all CPU-layout route tags through the actual
+    // queued selector, not a separately implemented classification function.
+    Require(rows[0].gpu_route==0 && rows[1].gpu_route==1 && rows[2].gpu_route==2 &&
+            rows[3].gpu_route==1,"generic partial full partial profiler sequence");
     Require(rows[1].pushes==rows[0].pushes+1 && rows[2].pushes==rows[1].pushes &&
             rows[3].pushes==rows[2].pushes+1 &&
             std::memcmp(rows[3].constants.data(),&values[3],128)==0,
@@ -378,6 +382,8 @@ void LazyTransportAndExactReuse() {
     alternative.scheduler.WaitWorker();
     Require(std::memcmp(alternative.scheduler.completed.back().constants.data(), &alternative_bytes, 128) == 0,
             "late generic winner retains original queued transport");
+    Require(alternative.scheduler.completed.back().gpu_route == 0,
+            "late generic winner overrides prepared profiler route");
     Settings::values.uberhar_test_mode.value = Settings::UberharTestMode::Automatic;
 }
 

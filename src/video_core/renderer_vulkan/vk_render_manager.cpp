@@ -40,20 +40,25 @@ void RenderManager::BeginRendering(const Framebuffer* framebuffer,
         .clear = {},
         .do_clear = false,
     };
+    BeginRendering(new_pass, GpuWork::Graphics);
+    // CodexAstraLocal: Close the previous pass with its own attachments before
+    // installing the new metadata; EndRendering clears the previous ownership.
     images = framebuffer->Images();
     aspects = framebuffer->Aspects();
     shadow_rendering = framebuffer->shadow_rendering;
-    BeginRendering(new_pass);
 }
 
-void RenderManager::BeginRendering(const RenderPass& new_pass) {
+void RenderManager::BeginRendering(const RenderPass& new_pass, GpuWork kind) {
     if (pass == new_pass) [[likely]] {
         num_draws++;
         return;
     }
 
     EndRendering();
-    scheduler.Record([info = new_pass](vk::CommandBuffer cmdbuf) {
+    scheduler.Record([this, info = new_pass, kind](vk::CommandBuffer cmdbuf) {
+        // CodexAstraLocal TEST-ONLY LOG: Reset/write queries outside the existing
+        // render pass. Identical passes still merge, with no diagnostic split.
+        scheduler.BeginGpuPass(cmdbuf, kind);
         const vk::RenderPassBeginInfo renderpass_begin_info = {
             .renderPass = info.render_pass,
             .framebuffer = info.framebuffer,
@@ -72,7 +77,7 @@ void RenderManager::EndRendering() {
         return;
     }
 
-    scheduler.Record([images = images, aspects = aspects,
+    scheduler.Record([this, images = images, aspects = aspects,
                       shadow_rendering = shadow_rendering](vk::CommandBuffer cmdbuf) {
         u32 num_barriers = 0;
         vk::PipelineStageFlags pipeline_flags{};
@@ -113,6 +118,7 @@ void RenderManager::EndRendering() {
             };
         }
         cmdbuf.endRenderPass();
+        scheduler.EndGpuPass(cmdbuf);
         if (num_barriers == 0) {
             return;
         }

@@ -23,7 +23,7 @@ static void Need(bool value, const char* reason) {
 static void ProgressAndNesting() {
     AuxiliaryBudget single{1};
     Need(!single.ReserveProgress() && !single.TryAcquire(), "single CPU capacity");
-    AuxiliaryBudget budget{3};
+    AuxiliaryBudget budget{3, true}; // CodexAstraLocal: Explicit diagnostic census qualification.
     {
         auto lane = budget.ReserveProgress();
         Need(bool(lane) && budget.Active() == 0 && budget.HelperCapacity() == 1,
@@ -84,7 +84,7 @@ static void ProgressAndNesting() {
 // remain independent. Check exact output and each helper's live token; short
 // sleeps widen this correctness overlap and are not benchmark observations.
 static void ConcurrentPools() {
-    AuxiliaryBudget budget{4};
+    AuxiliaryBudget budget{4, true}; // CodexAstraLocal: Optional census must not alter real admission.
     const auto capacity = budget.GetStatistics().capacity;
     std::barrier start{4};
     std::atomic<unsigned> active{}, peak{}, helpers{}, errors{};
@@ -174,8 +174,11 @@ static void Adaptation() {
     Need(changed.Desired()==2, "shape control missing trial");
     changed.Prepare(2048,16);
     Need(changed.Desired()==3, "unsampled shape inherited trial cap");
-    changed.Prepare(1024,16); window(changed,base);
-    Need(changed.Desired()==2, "restored shape baseline");
+    // CodexAstraLocal: Intervening exact shapes no longer destroy a retained
+    // trial, and their own jobs never inherit that trial's smaller cap.
+    changed.Prepare(1024,16);
+    Need(changed.Desired()==2, "restored shape lost trial");
+    window(changed,lower);
     changed.Prepare(1024,16,true);
     Need(changed.Desired()==3, "changed hook inherited trial cap");
     const auto counters=policy.GetStatistics();
@@ -190,10 +193,45 @@ static void Adaptation() {
     const auto flags=ParallelFloatEnvironment::Flags();
     before.Apply(); const auto expected=ParallelFloatEnvironment::Flags(); fp.Apply();
     Need(flags==expected, "adaptive arithmetic altered FP status");
+
+    // CodexAstraLocal: Alternating exact identities each accumulate a stable
+    // window; eviction/capacity changes roll back rather than alias old trials.
+    AdaptiveParticipation alternating{3};
+    for (unsigned i=0;i<8;++i) for (unsigned identity : {11U,22U}) {
+        alternating.Prepare(1024,16,false,identity); alternating.Observe(base);
+    }
+    alternating.Prepare(1024,16,false,11);
+    Need(alternating.Desired()==2,"alternating history never trials");
+    alternating.Prepare(1024,16,false,22);
+    Need(alternating.Desired()==2,"work identity lost independent trial");
+    alternating.Prepare(1024,16,false,0);
+    Need(alternating.Desired()==3 && !alternating.SelectSample(1024,16),"mixed work inherited trial");
+    for (unsigned identity : {33U,44U,55U,66U}) alternating.Prepare(1024,16,false,identity);
+    alternating.Prepare(1024,16,false,11);
+    Need(alternating.Desired()==3 && alternating.GetStatistics().evictions!=0,
+         "evicted identity reused trial");
+    alternating.Limit(1);
+    alternating.Prepare(1024,16,false,22);
+    Need(alternating.Desired()==1 && alternating.GetStatistics().capacity_resets==1,
+         "capacity epoch retained stale trial");
+    Need(alternating.GetStatistics().history_hits>=2 && alternating.GetStatistics().unkeyed==1,
+         "history qualification counters");
+}
+
+// CodexAstraLocal: Disabling diagnostic-only atomics must preserve the same
+// hard admission/nesting/lifetime behavior; absent census is explicitly labeled.
+static void WithoutCensus() {
+    AuxiliaryBudget budget{2};
+    { auto permit=budget.TryAcquire(); Need(bool(permit)&&!budget.TryAcquire(),"uncounted admission"); }
+    auto lane=budget.ReserveProgress();
+    Need(bool(lane)&&budget.HelperCapacity()==0&&!budget.TryAcquire(),"uncounted reservation bound");
+    const auto stats=budget.GetStatistics();
+    Need(!stats.execution_census && stats.active==0 && stats.peak==0 && stats.reservations==1,
+         "absent execution census mislabeled");
 }
 
 int main() try {
-    ProgressAndNesting(); ConcurrentPools(); Adaptation();
+    ProgressAndNesting(); ConcurrentPools(); Adaptation(); WithoutCensus();
     std::cout << "shared budget PASS: execution, reserved progress, nesting, output, adaptive rollback\n";
     return 0;
 } catch (const std::exception& error) {

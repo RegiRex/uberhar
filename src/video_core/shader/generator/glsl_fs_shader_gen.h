@@ -26,9 +26,17 @@ enum class LightingFamilyKey { Current, Alpha13, Alpha14 };
 FSConfig MakeDynamicTevFamilyConfig(const FSConfig& config, const Profile& profile,
                                     LightingFamilyKey lighting_key = LightingFamilyKey::Current);
 
-// AstraEH: Version 7 of the private Vulkan fallback ABI. Fit Vulkan's
-// 128-byte minimum push-constant limit; specialized/disk shader layouts are unchanged.
-inline constexpr u32 DynamicTevAbiVersion = 7;
+// CodexAstraLocal: ABI 8 adds backwards RGB/alpha liveness in spare instruction
+// bits and live external-source demand in buffer_mask, retaining Vulkan's
+// 128-byte minimum. Source-derived disk identities also invalidate old modules.
+inline constexpr u32 DynamicTevAbiVersion = 8;
+inline constexpr u32 TevLiveRgb = 1U << 8;
+inline constexpr u32 TevLiveAlpha = 1U << 9;
+inline constexpr u32 TevLiveLighting = 1U << 11;
+// CodexAstraLocal: Neither liveness flags nor source demand overlap the legacy
+// decoded color/alpha operations, delayed writes, loop bound or stage activity.
+static_assert(((TevLiveRgb | TevLiveAlpha) & 0x000F000FU) == 0);
+static_assert(((TevLiveLighting | (15U << 12)) & (255U | (7U << 8) | (63U << 16))) == 0);
 // AstraEH: Prepared instructions are deliberately distinct from guest registers.
 // Source fields retain their nibble positions, with stage-0 Previous resolved once.
 // Color modifiers encode (component << 1) | invert: RGBA=0..3, RGB=4, zero=5.
@@ -42,7 +50,8 @@ struct DynamicTevStage {
 static_assert(sizeof(DynamicTevStage) == 16);
 struct DynamicTevState {
     std::array<DynamicTevStage, 6> stages;
-    // AstraEH: Buffer writes [0:7], loop end [8:10], active stages [16:21].
+    // CodexAstraLocal: Buffer writes [0:7], loop end [8:10], live lighting [11],
+    // live TEV texture units [12:15], and non-passthrough stages [16:21].
     u32 buffer_mask;
     u32 framebuffer; // alpha function [0:2], scissor [3:4], W buffering [5].
     u32 texture;     // border axes [0:5], coord2 [6], fog [7], flip [8], tex0 type [10:12].
@@ -73,6 +82,20 @@ static_assert(offsetof(DynamicTevState, lighting_ops_hi) == 124);
 
 /// AstraEH: Capture effective runtime state before family canonicalization removes it.
 DynamicTevState MakeDynamicTevState(const FSConfig& config, const Profile& profile);
+// CodexAstraLocal: Original-config analysis is shared by generation and bounded
+// evidence; callers must never analyze a canonical generic family as a guest draw.
+Pica::TevLiveness::Plan GraphicsTevLiveness(const FSConfig& config);
+
+// CodexAstraLocal TEST-ONLY LOG: Structural evidence for Native/Combo candidate
+// qualification. Remove with its bounded reporter after hardware acceptance;
+// these counts never authorize arithmetic substitutions or estimate GPU time.
+struct FragmentWorkEvidence {
+    u32 live_rgb{}, live_alpha{}, dead_rgb{}, dead_alpha{};
+    u32 live_textures{}, lighting_texture_overlap{}, constant_rgb{}, constant_alpha{};
+    u32 directional_slots{};
+    bool lighting_dead{}, alpha_never{};
+};
+FragmentWorkEvidence AnalyzeFragmentWork(const FSConfig& config, const Profile& profile);
 
 // CodexAstraLocal: Own the exact prepared TEV structure while leaving framebuffer,
 // textures, lighting controls and uniform values in the existing runtime ABI.
@@ -196,6 +219,10 @@ private:
     void DefineShadowHelpers();
     void DefineProcTexSampler();
     void DefineTexUnitSampler(u32 i);
+    // CodexAstraLocal: Reuse only the same ordinary color unit at its first use;
+    // typed shadow/procedural/custom domains keep their original accessors.
+    void DefineSharedTextureSamples();
+    std::string TextureSample(u32 unit) const;
 
 private:
     FSConfig config;
@@ -210,6 +237,9 @@ private:
     // callers keep the original entry point and output-merger behavior.
     bool compute_evaluator{};
     Pica::TevLiveness::Plan compute_liveness{};
+    // CodexAstraLocal: Keep OpenGL/custom and Calculated generation unchanged;
+    // Vulkan graphics uses the same proven dependency semantics independently.
+    bool graphics_optimizations{};
     bool use_blend_fallback{};
     bool use_fragment_shader_interlock{};
     bool use_fragment_shader_barycentric{};

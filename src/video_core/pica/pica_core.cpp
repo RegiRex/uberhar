@@ -145,6 +145,7 @@ struct PicaCore::ParallelVertexState {
         bool valid{};
         Key key;
         ParallelVertexCertificate result;
+        u64 identity{}; // CodexAstraLocal: Monotonic owner-local executable proof generation.
     };
     struct Program {
         bool valid{};
@@ -162,6 +163,7 @@ struct PicaCore::ParallelVertexState {
     u64 revision{};
     u32 cursor{};
     u64 proof_hits{}, proof_builds{}, code_compares{}, checks{}, parallel_batches{};
+    u64 work_identity{}; // CodexAstraLocal: Selected exact proof, never a truncated shader hash.
     u64 small{}, observer{}, context_missing{}, input_bounds{}, single_core{}, allocation_failures{};
     u64 float_traps{}; // CodexAstraLocal: Preserve owner-thread exception delivery.
     u64 concurrent_memory{}; // CodexAstraLocal: Retain serial live-memory observers.
@@ -220,6 +222,7 @@ struct PicaCore::ParallelVertexState {
         for (const auto& proof : current->proofs) {
             if (proof.valid && proof.key == key) {
                 ++proof_hits;
+                work_identity = proof.identity;
                 return proof.result;
             }
         }
@@ -230,6 +233,7 @@ struct PicaCore::ParallelVertexState {
                                              key.entry, key.booleans, key.outputs, key.contract);
         proof.valid = true;
         ++proof_builds;
+        work_identity = proof.identity = proof_builds;
         return proof.result;
     }
 };
@@ -671,10 +675,22 @@ void PicaCore::ReportVirtualVertices(const char* kind, std::chrono::steady_clock
     // shared-budget contention is qualified on supported hardware.
     const auto cpu_budget = Common::Uberhar::AuxiliaryBudget::Global().GetStatistics();
     LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
-        "Uberhar CPU work budget {}: schema=1 capacity={} active={} peak={} "
-        "reserved_progress={} denials={} scope=participating_auxiliaries_not_process_threads",
+        "Uberhar CPU work budget {}: schema=2 capacity={} active={} peak={} "
+        "reserved_progress={} denials={} execution_census={} "
+        "scope=participating_auxiliaries_not_process_threads inactive_census_values=unavailable",
         kind, cpu_budget.capacity, cpu_budget.active, cpu_budget.peak,
-        cpu_budget.reservations, cpu_budget.denials);
+        cpu_budget.reservations, cpu_budget.denials, cpu_budget.execution_census);
+    // CodexAstraLocal TEST-ONLY LOG: Retained-history and conservative refusal
+    // reasons distinguish no evidence from a real trial; remove after .49 qualification.
+    const auto report_history = [&](const char* domain, const auto& scheduling) {
+        LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
+            "Uberhar CPU adaptive history {}: schema=1 domain={} hits={} misses={} evictions={} "
+            "capacity_resets={} unkeyed={} rejected_invalid={} rejected_cost={} rejected_helpers={} "
+            "timing=complete_cpu_work_not_helper_only",
+            kind, domain, scheduling.history_hits, scheduling.history_misses, scheduling.evictions,
+            scheduling.capacity_resets, scheduling.unkeyed, scheduling.rejected_invalid,
+            scheduling.rejected_cost, scheduling.rejected_helpers);
+    };
     if (deferred_vertices) {
         const auto& deferred = *deferred_vertices;
         const auto statistics = deferred.executor.GetStatistics();
@@ -682,7 +698,7 @@ void PicaCore::ReportVirtualVertices(const char* kind, std::chrono::steady_clock
         // experiment is qualified. Reuse bounded progress/final reports.
         // Owner capture/submit wall is not total CPU work or GPU execution time.
         LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
-            "Uberhar deferred CPU draws {}: schema=2 completed={} inputs={} invocations={} "
+            "Uberhar deferred CPU draws {}: schema=3 completed={} inputs={} invocations={} "
             "hits={} queued={} worker_completed={} failed={} waves={} max_wave={} peak_threads={} "
             "coordinator_packets={} auxiliary_packets={} resident_packets={} resident_bytes={} "
             "capacity_drains={} boundaries={} capture_attempts={} refused={} work_refused={} "
@@ -694,8 +710,8 @@ void PicaCore::ReportVirtualVertices(const char* kind, std::chrono::steady_clock
             "adaptive_accepted={} adaptive_reverted={} "
             "preparation_reuses={} refused_path_samples={} refused_path_ms={:.3f} "
             "ready_prefix_packets={} fallback_boundaries={} "
-            "scope=complete_list_or_shader_no_gs seed_min_misses=96 max_vertices=255 min_arithmetic=35 "
-            "group_policy=ready_seed_aggregate_work "
+            "scope=complete_list_or_shader_no_gs seed_min_work=3360 max_vertices=255 min_arithmetic=35 "
+            "group_policy=exact_pending_partition max_group_members=4 member_min_work=420 "
             "max_copy_bytes_per_miss=70 timing=owner_capture_submit_not_frame_time",
             kind, deferred.completed, deferred.inputs, deferred.invocations, deferred.hits,
             statistics.submitted, statistics.completed, statistics.failed, statistics.waves,
@@ -713,6 +729,23 @@ void PicaCore::ReportVirtualVertices(const char* kind, std::chrono::steady_clock
             deferred.preparation_reuses, deferred.refused_path_samples,
             deferred.refused_path_ns / 1e6, deferred.ready_prefix_packets,
             deferred.fallback_boundaries);
+        // CodexAstraLocal TEST-ONLY LOG: Price real accepted waves and policy
+        // reuse separately from owner capture; remove after .49 qualification.
+        LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
+            "Uberhar CPU draw features {}: schema=1 cached_checks={} cached_hits={} cached_negative={} "
+            "cached_misses={} effect_hits={} effect_builds={} effect_reuses={} work_seeded={} "
+            "start_requests={} start_refused={} start_failed={} async_starts={} "
+            "cost_samples={} cost_packets={} wave_ms={:.3f} owner_ms={:.3f} join_ms={:.3f} "
+            "wave_max_ms={:.3f} drain_calls={} drain_samples={} drain_ms={:.3f} "
+            "timing=sampled_complete_wave_and_owner_drain_not_frame_time",
+            kind, statistics.cached_checks, statistics.cached_hits, statistics.cached_negative,
+            statistics.cached_misses, statistics.effect_hits, statistics.effect_builds,
+            statistics.effect_reuses, statistics.work_seeded, statistics.start_requests,
+            statistics.start_refused, statistics.start_failed, statistics.async_starts,
+            statistics.cost_samples, statistics.cost_packets, statistics.wave_ns / 1e6,
+            statistics.owner_ns / 1e6, statistics.join_ns / 1e6, statistics.wave_max_ns / 1e6,
+            statistics.drain_calls, statistics.drain_samples, statistics.drain_ns / 1e6);
+        report_history("draw_queue", statistics.scheduling);
     }
     // AstraPro: Existing five-second/final reporting gate. Periodic
     // samples can alias recurring draw patterns; never extrapolate a GPU budget.
@@ -798,6 +831,7 @@ void PicaCore::ReportVirtualVertices(const char* kind, std::chrono::steady_clock
         // The counters show whether adaptation actually found comparable work;
         // remove after tuning, without changing the scheduling mechanism.
         const auto scheduling = parallel.batch.Scheduling();
+        report_history("direct_vertices", scheduling);
         LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
             "Uberhar vertex scheduling {}: schema=1 helpers={} samples={} rejected={} "
             "trials={} accepted={} reverted={} scope=sampled_pool_work_not_frames",
@@ -875,9 +909,12 @@ void PicaCore::ReportVirtualVertices(const char* kind, std::chrono::steady_clock
     // not vertex-cache hits or a measured speedup. No game data is retained.
     // CodexAstraUlt Log Line: Replace AstraPro's blocking progress enqueue; totals stay reliable.
     LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
-             "Uberhar native plan {}: schema=1 hits={} builds={} capacity=1 "
+             // CodexAstraLocal TEST-ONLY LOG: Distinguish adjacent/history hits;
+             // remove expanded census after .49 mapping reuse qualification.
+             "Uberhar native plan {}: schema=2 hits={} builds={} history_hits={} evictions={} capacity=4 "
              "scope=pica_lifetime reuse=register_semantics_only",
-             kind, native_plan_cache.Hits(), native_plan_cache.Builds());
+             kind, native_plan_cache.Hits(), native_plan_cache.Builds(),
+             native_plan_cache.HistoryHits(), native_plan_cache.Evictions());
     virtual_window_start = now;
     virtual_last_ns = virtual_vertex_ns;
     virtual_last_inputs = virtual_vertex_inputs;
@@ -2167,8 +2204,8 @@ bool PicaCore::TryDeferredVertices(bool is_indexed,
                                    PreparedVertexDraw& preparation) {
     const auto mode = Settings::values.uberhar_test_mode.GetValue();
     const auto& pipeline = regs.internal.pipeline;
-    // CodexAstraLocal: Independent whole draws retain the original >=96-miss
-    // policy unless they join an actual pending cost-qualified seeded group.
+    // CodexAstraLocal: Whole draws require certified FIFO work sufficient for
+    // dispatch or an actual pending cost-qualified bounded group.
     // The executor rechecks that group under Submit's lock, so a vanished
     // opportunity stays synchronous without publishing or waiting to fill work.
     // Capture additionally checks actual FIFO misses, arithmetic and copy volume.
@@ -2192,21 +2229,12 @@ bool PicaCore::TryDeferredVertices(bool is_indexed,
         Core::System::GetInstance().HasConcurrentGuestMemoryWriters() ||
         !Common::Uberhar::ParallelFloatEnvironment::AllowsParallel())
         return false;
-    // CodexAstraLocal: Pure tiny streams retain their original cheap serial
-    // route. The hint only rejects early; exact cost/seed ownership is rechecked
-    // before capture and under Submit's lock, since a seed can start meanwhile.
-    if (pipeline.num_vertices < 96 &&
-        (!deferred_vertices || !deferred_vertices->executor.HasPendingSeed()))
-        return false;
     // CodexAstraLocal: Avoid an affinity syscall for every small draw. The pool
     // uses the title's initial process allowance; OS scheduling handles core/SMT
     // placement without a Thor-specific count or affinity modification.
     if (!deferred_processors)
         deferred_processors = Common::Uberhar::AvailableProcessors();
     if (deferred_processors < 4)
-        return false;
-    const auto writer = rasterizer->PrepareDeferredVertices(pipeline.num_vertices);
-    if (!writer)
         return false;
     bool published_current = false; // CodexAstraLocal: Only this draw determines replay safety.
     try {
@@ -2224,6 +2252,20 @@ bool PicaCore::TryDeferredVertices(bool is_indexed,
         // CodexAstraLocal TEST-ONLY LOG: Reuse the already-read batch timestamp;
         // sample at most one refused path in 1024 attempted captures.
         preparation.sample_refused_path = (++state.preparation_attempts & 1023U) == 0;
+        // CodexAstraLocal: A still-current JIT lease proves code revision and
+        // allocation ownership; explicitly match the requested entry before a
+        // cached-only negative gate. Unknown/stale bindings retain original
+        // loader/setup/error order. A negative skips only queue-specific work;
+        // LoadVertices still performs required live reads and setup exactly once.
+        const auto early_lease = shader_engine->LeaseForDraw(vs_setup);
+        const auto early_booleans = ParallelVertexBooleanUniforms(vs_setup.uniforms);
+        std::optional<bool> early_policy;
+        if (early_lease && early_lease.EntryPoint() == regs.internal.vs.main_offset)
+            early_policy = state.executor.CachedShaderWork(early_lease, early_booleans,
+                                                          pipeline.num_vertices);
+        if (early_policy && !*early_policy) return false;
+        const auto writer = rasterizer->PrepareDeferredVertices(pipeline.num_vertices);
+        if (!writer) return false;
         ReconcileDeferredVertices(false);
         if (state.pending.size() == DeferredVertexState::PacketLimit) {
             ++state.capacity_drains;
@@ -2263,8 +2305,14 @@ bool PicaCore::TryDeferredVertices(bool is_indexed,
         // CodexAstraLocal: Consult the immutable shader policy before copying
         // uniforms/defaults or mapping attributes. Capture still validates actual
         // FIFO misses and byte ownership; a refusal reuses this draw's setup.
-        if (!state.executor.AllowsShaderWork(
-                lease, ParallelVertexBooleanUniforms(vs_setup.uniforms), pipeline.num_vertices))
+        // CodexAstraLocal: Positive early lookup can bypass the second scan only
+        // while exact lease/entry/boolean identity still matches after setup.
+        const auto booleans = ParallelVertexBooleanUniforms(vs_setup.uniforms);
+        const bool policy_ready = early_policy && *early_policy &&
+            early_lease.OwnerIdentity() == lease.OwnerIdentity() &&
+            early_lease.EntryPoint() == lease.EntryPoint() && early_booleans == booleans;
+        if (!policy_ready && !state.executor.AllowsShaderWork(
+                lease, booleans, pipeline.num_vertices))
             return false;
         CpuDrawCapture source;
         source.shader_lease = std::move(lease);
@@ -2666,6 +2714,9 @@ void PicaCore::LoadVertices(bool is_indexed, std::chrono::steady_clock::time_poi
                 // CodexAstraLocal: Keep early output private and reversible;
                 // the batch joins every borrower before GPU work or return.
                 VertexAppendTransaction append{primitive_assembler, *rasterizer, triangle};
+                // CodexAstraLocal: Retained shape history is isolated by exact
+                // code/entry/boolean/output-contract proof generation.
+                parallel.batch.SetWorkIdentity(parallel.work_identity);
                 counts = parallel.batch.Run(pipeline.num_vertices, is_indexed, vertex_at,
                     [&](std::span<const NativeParallelBatch::Invocation> inputs,
                         std::span<OutputVertex> outputs) {

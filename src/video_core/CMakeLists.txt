@@ -259,6 +259,9 @@ if (ENABLE_VULKAN)
         renderer_vulkan/uberhar_vertex_capture_policy.h
         renderer_vulkan/vk_rasterizer_cache.cpp
         renderer_vulkan/vk_scheduler.cpp
+        # CodexAstraLocal: Bounded asynchronous Native/Combo GPU attribution.
+        renderer_vulkan/vk_work_profile.cpp
+        renderer_vulkan/vk_work_profile.h
         renderer_vulkan/vk_scheduler.h
         renderer_vulkan/vk_resource_pool.cpp
         renderer_vulkan/vk_resource_pool.h

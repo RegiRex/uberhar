@@ -4,6 +4,7 @@
 
 #include <array>
 #include <memory>
+#include <optional> // CodexAstraLocal: Cached-only early policy distinguishes unknown from refusal.
 #include <span>
 #include "common/uberhar_parallel_work.h"
 #include "video_core/pica/shader_setup.h"
@@ -38,6 +39,13 @@ struct CpuDrawCapture {
 using CpuDrawHardwareWriter = void (*)(std::span<const OutputVertex>, std::span<u8>) noexcept;
 
 class CpuDrawExecutor;
+// CodexAstraLocal: Immutable construction policy supports bounded qualification
+// without UI/config reads in the draw path. Hard ownership/byte limits never vary.
+struct CpuDrawPolicy {
+    bool cached_precheck{true};
+    bool broader_groups{true};
+    bool sampled_costs{true};
+};
 class CpuDrawPacket {
 public:
     struct Completion {
@@ -78,6 +86,13 @@ public:
         // admissions, and lost pre-publication opportunities from throughput.
         u64 early_refused{}, group_candidates{}, seed_submitted{}, group_submitted{};
         u64 group_lost{}, copy_refused{}, grouped_waves{}, work_grains{};
+        // CodexAstraLocal TEST-ONLY LOG: Remove feature/cost qualification fields
+        // after .49 hardware acceptance; none authorizes publication or replay.
+        u64 cached_checks{}, cached_hits{}, cached_negative{}, cached_misses{};
+        u64 effect_hits{}, effect_builds{}, effect_reuses{}, work_seeded{};
+        u64 start_requests{}, start_refused{}, start_failed{}, async_starts{};
+        u64 cost_samples{}, cost_packets{}, wave_ns{}, owner_ns{}, join_ns{}, wave_max_ns{};
+        u64 drain_calls{}, drain_samples{}, drain_ns{};
         u64 submitted{}, completed{}, failed{}, waves{}, coordinator_packets{}, auxiliary_packets{};
         u32 maximum_wave{}, peak_threads{};
         std::size_t resident_packets{}, resident_bytes{};
@@ -91,7 +106,8 @@ public:
     explicit CpuDrawExecutor(unsigned processors = Common::Uberhar::AvailableProcessors(),
                              std::size_t max_packets = 64,
                              std::size_t max_bytes = 8 * 1024 * 1024,
-                             void (*worker_start)() = nullptr);
+                             void (*worker_start)() = nullptr,
+                             CpuDrawPolicy policy = {});
     ~CpuDrawExecutor();
     CpuDrawExecutor(const CpuDrawExecutor&) = delete;
     CpuDrawExecutor& operator=(const CpuDrawExecutor&) = delete;
@@ -101,16 +117,18 @@ public:
     // misses/copies and Submit rechecks the still-pending group atomically.
     // A refusal counts one capture/refusal; success is counted by Capture only.
     bool AllowsShaderWork(const ShaderRunLease& lease, u16 booleans, u32 input_count);
-    // CodexAstraLocal: Advisory only, before small-draw preparation/allocation.
-    // A stale false merely misses an opportunity; locked admission stays final.
-    bool HasPendingSeed() const noexcept;
+    // CodexAstraLocal: Owner-only, no analysis/allocation on a miss. The caller
+    // must first validate its current lease/revision/entry; unknown keeps setup.
+    std::optional<bool> CachedShaderWork(const ShaderRunLease& lease, u16 booleans, u32 input_count);
 
     // CodexAstraLocal: Capture performs exact effect/flow proof and all owned
     // allocation before a task is published. Refusal returns empty; allocation
     // exceptions retain the caller's existing before-dispatch recovery path.
-    // Individual seeds retain 96 misses/35 guaranteed arithmetic operations and
-    // <=70 raw bytes/miss. Smaller packets require an existing pending seed and
-    // aggregate work >=96*35 per member; this is a work proxy, not target timing.
+    // CodexAstraLocal: Work-qualified seeds pay 96*35 actual FIFO arithmetic
+    // units, including high-cost draws below96misses. Joining members pay at least
+    // 12*35 units and belong to a certified1–4-member contiguous cost grain;
+    // every extra member adds12*35 units to the3360 dispatch threshold. These are
+    // conservative policy proxies, not measured capture costs. Copies stay<=70B/miss.
     std::shared_ptr<CpuDrawPacket> Capture(const CpuDrawCapture& source,
                                          CpuDrawHardwareWriter writer,
                                          u32 hardware_stride = 88);
@@ -123,6 +141,8 @@ public:
     // disappeared. No task is published on false, so the owner can run serially.
     bool Submit(const std::shared_ptr<CpuDrawPacket>& packet);
     void Drain();
+    // CodexAstraLocal: Owner-only; diagnostic fields merge without adding
+    // rejection-path synchronization. Callers may not race capture/submit.
     Statistics GetStatistics() const;
 
 private:

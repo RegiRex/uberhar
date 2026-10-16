@@ -29,6 +29,15 @@ int main() {
     Pica::ShaderUnit actual, expected;
     Pica::AttributeBuffer input, packed;
     unsigned checks = 0;
+    // CodexAstraLocal: Exact recurring layouts reuse one bounded history while
+    // a fifth layout evicts; payload changes remain separately exercised below.
+    for (u32 i=0;i<4;++i) { shader.output_mask.Assign(1U<<i); cache.Get(shader,raster); }
+    const auto history_builds=cache.Builds();
+    for (u32 i=0;i<4;++i) { shader.output_mask.Assign(1U<<i); cache.Get(shader,raster); }
+    Check(cache.Builds()==history_builds && cache.HistoryHits()!=0,"recurring exact mapping rebuilt");
+    shader.output_mask.Assign(16); cache.Get(shader,raster);
+    Check(cache.Evictions()!=0,"mapping history unbounded");
+    cache.Reset();
     for (unsigned iteration = 0; iteration < 20000; ++iteration) {
         // Alternate changed plans and exact repeats, including invalid output
         // masks, aliased input registers, inactive maps and restored old shapes.
@@ -79,7 +88,16 @@ int main() {
             const auto before = cache.Builds();
             raster.vs_output_attributes[i].raw ^= 1;
             cache.Get(shader, raster);
-            Check(cache.Builds() == before + 1, "active map edit not observed");
+            // CodexAstraLocal: The edited exact map may already be retained;
+            // compare its actual conversion rather than requiring a cache miss.
+            const Pica::NativeVertexPlan edited{shader,raster};
+            const auto& changed=cache.Get(shader,raster);
+            Check(changed.Supported()==edited.Supported() &&
+                  cache.Builds()>=before,"active map edit not observed");
+            if(edited.Supported()) {
+                const auto a=changed.Convert(actual), b=edited.Convert(actual);
+                Check(std::memcmp(&a,&b,sizeof(a))==0,"active cached semantic mapping stale");
+            }
             raster.vs_output_attributes[i].raw ^= 1;
             cache.Get(shader, raster);
             ++checks;

@@ -21,6 +21,7 @@
 #include "video_core/pica/regs_internal.h"
 #include "video_core/rasterizer_cache/rasterizer_cache_base.h"
 #include "video_core/rasterizer_cache/surface_base.h"
+#include "video_core/rasterizer_cache/uberhar_cpu_transfer_policy.h" // CodexAstraLocal: Exact bounded raw-copy shape.
 #include "video_core/renderer_base.h"
 #include "video_core/texture/texture_decode.h"
 
@@ -112,10 +113,29 @@ template <class T>
 RasterizerCache<T>::~RasterizerCache() {
     ClearAll(false);
     texture_decoder.Report(true); // CodexAstraLocal TEST-ONLY LOG: Final sampled decode costs.
+    ReportCpuTransfers(true);
+}
+
+template <class T>
+void RasterizerCache<T>::ReportCpuTransfers(bool final) noexcept {
+    try {
+    const auto now = std::chrono::steady_clock::now();
+    if (!final && now - cpu_transfer_report_time < std::chrono::seconds(10)) return;
+    cpu_transfer_report_time = now;
+    // CodexAstraLocal TEST-ONLY LOG: Preserve refusals even when no transfer
+    // qualifies; remove with raw-copy placement diagnostics after qualification.
+    LOG_INFO_WITH_DELIVERY(Render, final ? Common::Log::Delivery::Reliable : Common::Log::Delivery::Diagnostic, "Uberhar CPU transfer: attempts={} accepted={} bytes={} shape_refused={} "
+             "dirty_refused={} writer_refused={} mapping_refused={} admission_ns={} invalidation_ns={}",
+             cpu_transfer_stats.attempts, cpu_transfer_stats.accepted, cpu_transfer_stats.bytes,
+             cpu_transfer_stats.shape_refused, cpu_transfer_stats.dirty_refused,
+             cpu_transfer_stats.writer_refused, cpu_transfer_stats.mapping_refused,
+             cpu_transfer_stats.admission_ns, cpu_transfer_stats.invalidation_ns);
+    } catch (...) { /* CodexAstraLocal: Optional reporting cannot interrupt transfers or teardown. */ }
 }
 
 template <class T>
 void RasterizerCache<T>::TickFrame() {
+    ReportCpuTransfers();
     custom_tex_manager.TickFrame();
     RunGarbageCollector();
     texture_decoder.Report(); // CodexAstraLocal TEST-ONLY LOG: Bounded decode cadence, no per-tile logs.
@@ -231,6 +251,57 @@ bool RasterizerCache<T>::AccelerateTextureCopy(const Pica::DisplayTransferConfig
     }
     if (copy_size % output_width != 0) {
         return false;
+    }
+
+    // CodexAstraLocal: Take the exact raw-copy route before resolving surfaces
+    // can upload or download anything. Unsupported shapes retain GPU/legacy
+    // handling. Current RAM, complete pins, disjoint physical AND host spans,
+    // and no guest writer are mandatory; the caller retains normal IRQ order.
+    const auto mode = Settings::values.uberhar_test_mode.GetValue();
+    if (Settings::values.graphics_api.GetValue() == Settings::GraphicsAPI::Vulkan &&
+        (mode == Settings::UberharTestMode::Native || Settings::UsesReadyGpuVertices(mode))) {
+        auto& stat = cpu_transfer_stats;
+        ++stat.attempts;
+        const u64 src = config.GetPhysicalInputAddress();
+        const u64 dst = config.GetPhysicalOutputAddress();
+        if (!CpuRawTransferShape(src, dst, copy_size, input_gap, output_gap)) {
+            ++stat.shape_refused;
+        } else {
+            const auto start = std::chrono::steady_clock::now();
+            const SurfaceInterval source_interval(static_cast<PAddr>(src), static_cast<PAddr>(src + copy_size));
+            const SurfaceInterval dest_interval(static_cast<PAddr>(dst), static_cast<PAddr>(dst + copy_size));
+            const auto source_dirty = dirty_regions.equal_range(source_interval);
+            const auto dest_dirty = dirty_regions.equal_range(dest_interval);
+            if (source_dirty.first != source_dirty.second || dest_dirty.first != dest_dirty.second) {
+                ++stat.dirty_refused;
+            } else if (Core::System::GetInstance().HasConcurrentGuestMemoryWriters()) {
+                ++stat.writer_refused;
+            } else {
+                auto source = memory.GetPhysicalRef(static_cast<PAddr>(src));
+                auto dest = memory.GetPhysicalRef(static_cast<PAddr>(dst));
+                const auto a = reinterpret_cast<std::uintptr_t>(source.GetPtr());
+                const auto b = reinterpret_cast<std::uintptr_t>(dest.GetPtr());
+                const bool separate = a <= b ? b - a >= copy_size : a - b >= copy_size;
+                if (!source || !dest || source.GetSize() < copy_size || dest.GetSize() < copy_size || !separate) {
+                    ++stat.mapping_refused;
+                } else {
+                    stat.admission_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(
+                        std::chrono::steady_clock::now() - start).count();
+                    const auto invalidation_start = std::chrono::steady_clock::now();
+                    // Size >8 avoids InvalidateRegion's tiny-write flush branch;
+                    // dirty destination was excluded, so no GPU readback occurs.
+                    InvalidateRegion(static_cast<PAddr>(dst), copy_size);
+                    stat.invalidation_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(
+                        std::chrono::steady_clock::now() - invalidation_start).count();
+                    texture_decoder.CopyCurrentBytes(source.GetReadBytes<u8>(copy_size), dest.GetWriteBytes(copy_size));
+                    ++stat.accepted;
+                    stat.bytes += copy_size;
+                    return true;
+                }
+            }
+            stat.admission_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now() - start).count();
+        }
     }
 
     SurfaceParams src_params;

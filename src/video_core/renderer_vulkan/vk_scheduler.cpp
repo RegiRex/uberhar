@@ -59,7 +59,7 @@ void Scheduler::CommandChunk::Discard() noexcept {
 
 Scheduler::Scheduler(const Instance& instance)
     : master_semaphore{MakeMasterSemaphore(instance)},
-      command_pool{instance, master_semaphore.get()}, use_worker_thread{true} {
+      command_pool{instance, master_semaphore.get()}, work_profile{instance}, use_worker_thread{true} {
     AllocateWorkerCommandBuffers();
     if (use_worker_thread) {
         AcquireNewChunk();
@@ -68,6 +68,14 @@ Scheduler::Scheduler(const Instance& instance)
 }
 
 Scheduler::~Scheduler() = default;
+
+void Scheduler::FinishWorkProfile() noexcept {
+    try {
+        std::scoped_lock lock{execution_mutex};
+        work_profile.Poll(~u64{});
+        work_profile.Report(true);
+    } catch (...) { /* CodexAstraLocal: Optional final diagnostics cannot fail teardown. */ }
+}
 
 Scheduler::ComputeRecordingScope Scheduler::RecordComputeFailure(
     std::shared_ptr<ComputeFailurePacket> packet) noexcept {
@@ -107,6 +115,9 @@ void Scheduler::WaitWorker() {
     }
 
     MICROPROFILE_SCOPE(Vulkan_WaitForWorker);
+    // CodexAstraLocal TEST-ONLY LOG: Measure actual owner recorder drainage,
+    // separately from GPU execution. Remove with the .49 work profiler.
+    const auto wait_start = std::chrono::steady_clock::now();
     // CodexAstraUlt-2: Drain captures even after failure; report only after the
     // worker no longer references them. Shutdown leaves the latch terminal.
     if (shader_failure.Failed())
@@ -123,6 +134,8 @@ void Scheduler::WaitWorker() {
     // Now wait for execution to finish.
     // This needs to be done in the same order as WorkerThread.
     std::scoped_lock el{execution_mutex};
+    work_profile.Wait(HostWait::Recorder, std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now() - wait_start).count());
     shader_failure.Check();
 }
 
@@ -133,6 +146,7 @@ void Scheduler::Wait(u64 tick) {
         if(compute_failures)compute_failures->Retire(master_semaphore->KnownGpuTick());
         return;
     }
+    const auto wait_start = std::chrono::steady_clock::now();
     if (tick >= master_semaphore->CurrentTick()) {
         // Make sure we are not waiting for the current tick without signalling
         Flush();
@@ -140,6 +154,10 @@ void Scheduler::Wait(u64 tick) {
     // CodexAstraUlt-2: A canceled submission never signals its Vulkan tick.
     if (shader_failure.WaitSubmitted(tick))
         master_semaphore->Wait(tick);
+    // CodexAstraLocal TEST-ONLY LOG: Includes submission readiness because it
+    // lies on this owner dependency; do not interpret this host span as GPU time.
+    work_profile.Wait(HostWait::GpuCompletion, std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now() - wait_start).count());
     if(compute_failures)compute_failures->Retire(master_semaphore->KnownGpuTick());
     } catch(const vk::SystemError& error) {
         if(compute_failures)if(auto packet=compute_failures->Submitted(tick)) {
@@ -285,6 +303,7 @@ void Scheduler::SubmitExecution(vk::Semaphore signal_semaphore, vk::Semaphore wa
 
     RecordBound([signal_semaphore, wait_semaphore, signal_value, failure, this](vk::CommandBuffer cmdbuf) {
         MICROPROFILE_SCOPE(Vulkan_Submit);
+        const auto submit_start = std::chrono::steady_clock::now();
         try {
         std::scoped_lock lock{submit_mutex};
         master_semaphore->SubmitWork(cmdbuf, wait_semaphore, signal_semaphore, signal_value);
@@ -295,6 +314,11 @@ void Scheduler::SubmitExecution(vk::Semaphore signal_semaphore, vk::Semaphore wa
             throw VideoCore::ShaderRecoveryError(error.what());
         }
         if(failure)failure->Number("submit_succeeded_tick",signal_value);
+        work_profile.Wait(HostWait::Submit, std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now() - submit_start).count());
+        // CodexAstraLocal: Queries are read only after their original successful
+        // tick is complete, and availability still guards driver readiness.
+        work_profile.Submitted(signal_value, master_semaphore->KnownGpuTick());
     },failure);
 
     master_semaphore->Refresh();

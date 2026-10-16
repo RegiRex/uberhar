@@ -45,6 +45,11 @@ void RealSelectionAndTransport() {
     Require(rows[0].pipeline == generic->Handle() && rows[1].pipeline == special->Handle() &&
             rows[2].pipeline == special->Handle() && rows[3].pipeline == generic->Handle(),
             "actual G/S/G pipeline identity");
+    // CodexAstraLocal: Tags must follow executed binding, including the actual
+    // draw snapshot between CPU-full and the following generic command.
+    Require(rows[0].gpu_route == 0 && rows[1].gpu_route == 2 &&
+            rows[2].gpu_route == 2 && rows[3].gpu_route == 0,
+            "actual G/S/G profiler route identity");
     Require(rows[0].offsets == std::array<u32,3>{1,2,3} &&
             rows[1].offsets == std::array<u32,3>{4,5,6} &&
             rows[3].offsets == std::array<u32,3>{7,8,9}, "queued offsets immutable");

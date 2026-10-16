@@ -99,6 +99,9 @@ python3 tools/uberhar/test_download_recovery.py
 # CodexAstraUlt: Verify real resource reuse/failed-allocation cleanup and event-only memory counters.
 python3 tools/uberhar/test_resource_pool_reuse.py
 python3 tools/uberhar/test_stream_buffer_ownership.py
+# CodexAstraLocal: Exercise the actual bounded query owner against deterministic
+# completion/failure endpoints; this does not claim driver timing or GPU pixels.
+python3 tools/uberhar/test_work_profile.py
 # CodexAstraLocal: A CPU upload wait must precede final pass/pipeline setup,
 # while Commit retains the final draw tick. Recording controls require both
 # late-Map and early-Commit defects to fail; this is not Vulkan/pixel execution.

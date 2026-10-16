@@ -14,6 +14,7 @@
 #include "video_core/renderer_vulkan/vk_resource_pool.h"
 #include "video_core/shader_build_failure.h" // CodexAstraUlt-2: Terminal worker handoff.
 #include "video_core/renderer_vulkan/compute_failure_packet.h"
+#include "video_core/renderer_vulkan/vk_work_profile.h" // CodexAstraLocal: Bounded worker-owned costs.
 
 namespace Vulkan {
 
@@ -57,6 +58,26 @@ public:
     // CodexAstraLocal: Deferred CPU uploads require an independent ordered
     // recorder. A future synchronous scheduler must retain ordinary draws.
     bool HasWorkerThread() const noexcept { return use_worker_thread; }
+    // CodexAstraLocal: Conservative owner-side content boundary. Every recorded
+    // command invalidates snapshot reuse, even harmless commands; never wrap.
+    u64 RecordedCommandEpoch() const noexcept { return recorded_command_epoch; }
+
+    // CodexAstraLocal TEST-ONLY LOG: These hooks execute only on the command
+    // worker. Existing commands retain ordering; no additional pass is created.
+    void RecordGpuRoute(u32 route) { work_profile.Route(route); }
+    void BeginGpuPass(vk::CommandBuffer command, GpuWork kind) { work_profile.BeginPass(command, kind); }
+    void EndGpuPass(vk::CommandBuffer command) { work_profile.EndPass(command); }
+    // CodexAstraLocal: Caller has already completed the existing device idle;
+    // serialize with the recorder without introducing a new Vulkan wait.
+    void FinishWorkProfile() noexcept;
+    template <typename T>
+    void RecordGpuWork(GpuWork kind, u64 logical_bytes, T&& command) {
+        Record([this, kind, logical_bytes, command = std::forward<T>(command)](vk::CommandBuffer buffer) {
+            const int sample = work_profile.Begin(buffer, kind, logical_bytes);
+            command(buffer);
+            work_profile.End(buffer, sample);
+        });
+    }
 
     // CodexAstraLocal TEST-ONLY LOG: Only Calculated installs this recorder.
     // Scope lifetime covers preparation-triggered submissions; closed pending
@@ -85,6 +106,7 @@ private:
             shader_failure.Check();
             return;
         }
+        if (recorded_command_epoch != ~u64{}) ++recorded_command_epoch;
         if(failure)chunk->failure=failure;
         if (chunk->Record(command)) {
             return;
@@ -248,6 +270,7 @@ private:
     std::vector<std::unique_ptr<CommandChunk>> chunk_reserve;
     vk::CommandBuffer current_cmdbuf;
     StateFlags state{};
+    u64 recorded_command_epoch{};
     std::function<void()> on_submit;
     std::function<void()> on_dispatch;
     std::mutex execution_mutex;
@@ -255,6 +278,10 @@ private:
     std::mutex queue_mutex;
     std::condition_variable_any event_cv;
     VideoCore::ShaderFailureState shader_failure;
+    // CodexAstraLocal: Declared before the worker so its final join precedes
+    // profiler reporting/query destruction. Renderer shutdown's existing device
+    // idle additionally protects query resources from in-flight GPU commands.
+    WorkProfile work_profile;
     std::jthread worker_thread;
     bool use_worker_thread;
     std::shared_ptr<ComputeFailureTracker> compute_failures;
