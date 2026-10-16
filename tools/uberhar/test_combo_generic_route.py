@@ -142,6 +142,22 @@ struct PipelineCache {
     std::array<u64,3> shader_hashes{};
     unsigned ready_fragment_preflight_deferred{}, tev_transport_prepared{},
              tev_transport_bypassed_gpu{}, tev_transport_skipped{};
+    // CodexAstraLocal: Record only the optional evidence boundary. The extracted
+    // production body still owns sampling cadence, failure isolation and routing;
+    // an injected reporter exception must not suppress mandatory recovery.
+    struct { u64 attempts{}, failures{}; } fragment_evidence;
+    unsigned evidence_calls{};
+    bool evidence_throws{}, evidence_preparing_gpu{}, evidence_supported{};
+    int evidence_input{}, evidence_config{};
+    void SampleFragmentEvidence(const Pica::RegsInternal& regs, const FSConfig& config,
+                                bool preparing_gpu) {
+        ++evidence_calls;
+        evidence_preparing_gpu = preparing_gpu;
+        evidence_supported = config.supported;
+        evidence_input = regs.transport;
+        evidence_config = config.transport;
+        if (evidence_throws) throw std::runtime_error("injected optional evidence failure");
+    }
     bool PreferReadySpecializedFragment(const Pica::Shader::UserConfig&) const;
     bool ReadyGpuFragmentPreflight(const Pica::RegsInternal&, const Pica::Shader::UserConfig&);
     void UseFragmentShader(const Pica::RegsInternal&, const Pica::Shader::UserConfig&, bool);
@@ -186,6 +202,13 @@ int main() try {
             cache.prepared_cpu_family = &previous;
             cache.pending_tev_transport = previous;
             cache.UseFragmentShader(regs,user,true);
+            // CodexAstraLocal: Sampling sees this draw's original GPU-attempt
+            // inputs; it cannot inherit the seeded previous-draw snapshot.
+            Check(cache.fragment_evidence.attempts == 1 && cache.evidence_calls == 1 &&
+                  cache.fragment_evidence.failures == 0 && cache.evidence_preparing_gpu &&
+                  cache.evidence_supported && cache.evidence_input == regs.transport &&
+                  cache.evidence_config == regs.transport,
+                  "first fragment evidence lost original input or attempt scope");
             Check(!cache.prepared_cpu_family, "stale CPU family survived new fragment setup");
             Check(cache.virtual_fs_config && !cache.current_shaders[FS],
                   "covered setup lost generic recovery snapshot");
@@ -206,7 +229,13 @@ int main() try {
             // at the consumer; a repeated consume must perform no further work.
             const auto optional_before = disk.optional_calls;
             regs.transport = 257;
+            // CodexAstraLocal: Jump to the exact sampling boundary without
+            // repeating 1,022 unchanged draws. Attempt 1,023 must stay unsampled.
+            cache.fragment_evidence.attempts = 1023;
             cache.UseFragmentShader(regs,user,false);
+            Check(cache.fragment_evidence.attempts == 1024 && cache.evidence_calls == 1 &&
+                  cache.fragment_evidence.failures == 0,
+                  "fragment evidence sampled before its 1,024-attempt boundary");
             Check(cache.virtual_fs_config && cache.pending_tev_transport &&
                   cache.pending_tev_transport->transport == 257 &&
                   cache.tev_transport_prepared == unsigned(!specialized),
@@ -222,7 +251,15 @@ int main() try {
             Check(cache.ReadyGpuFragmentPreflight(regs,user), "unsupported state blocked recovery");
             cache.prepared_cpu_family = &previous;
             cache.pending_tev_transport = previous;
+            // CodexAstraLocal: The next sampled attempt fails only its reporter.
+            // Existing assertions below must still reach exact mandatory recovery.
+            cache.evidence_throws = true;
             cache.UseFragmentShader(regs,user,false);
+            Check(cache.fragment_evidence.attempts == 1025 && cache.evidence_calls == 2 &&
+                  cache.fragment_evidence.failures == 1 && !cache.evidence_preparing_gpu &&
+                  !cache.evidence_supported && cache.evidence_input == 257 &&
+                  cache.evidence_config == 257,
+                  "sampled evidence failure lost CPU recovery input or escaped isolation");
             Check(!cache.prepared_cpu_family, "stale CPU family survived unsupported recovery");
             cache.EnsureDynamicTevState();
             Check(!cache.pending_tev_transport && cache.tev_constants == 257 &&

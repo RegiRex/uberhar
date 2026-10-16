@@ -117,8 +117,19 @@ def main():
 
     def command(argv, label, directory, timeout):
         start = time.monotonic()
-        run = subprocess.run(list(map(str, argv)), cwd=repo, capture_output=True,
-                             timeout=timeout, preexec_fn=no_core)
+        try:
+            run = subprocess.run(list(map(str, argv)), cwd=repo, capture_output=True,
+                                 timeout=timeout, preexec_fn=no_core)
+        except subprocess.TimeoutExpired as error:
+            # CodexAstraLocal: Preserve the last child evidence when a gate
+            # stalls; a timeout still raises and can never qualify a defect.
+            (directory / (label + '.stdout')).write_bytes(error.stdout or b'')
+            (directory / (label + '.stderr')).write_bytes(error.stderr or b'')
+            proof['commands'].append({'argv': list(map(str, argv)), 'label': label,
+                                      'exit': None, 'timed_out': True, 'timeout_seconds': timeout,
+                                      'seconds': time.monotonic() - start})
+            save()
+            raise
         (directory / (label + '.stdout')).write_bytes(run.stdout)
         (directory / (label + '.stderr')).write_bytes(run.stderr)
         proof['commands'].append({'argv': list(map(str, argv)), 'label': label,
