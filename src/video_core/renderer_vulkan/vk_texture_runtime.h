@@ -178,7 +178,17 @@ private:
     StreamBuffer upload_buffer;
     StreamBuffer download_buffer;
     u32 num_swapchain_images;
+    // CodexAstraLocal: Immutable owner controls; exact self-copy no-ops remain
+    // mandatory because overlapping identity copies are invalid Vulkan commands.
+    const bool feedback_reuse_enabled;
+    const bool transfer_diagnostics;
     u64 copy_regions{}, identity_regions{}, identity_blits{}, feedback_requests{}, feedback_reuses{};
+    u64 copy_image_refused{}, copy_subresource_refused{}, copy_coordinates_refused{}, blit_requests{};
+    u64 feedback_disabled{}, feedback_compute{}, feedback_missing{}, feedback_allocation{}, feedback_epoch{};
+    // CodexAstraLocal TEST-ONLY LOG: Sparse predicate cost excludes copy/visibility execution.
+    std::array<u64, 3> reuse_gate_samples{}, reuse_gate_ns{};
+    u64 transfer_sequence{};
+    u32 transfer_report_prescale{};
     std::chrono::steady_clock::time_point transfer_report_time{std::chrono::steady_clock::now()};
 };
 

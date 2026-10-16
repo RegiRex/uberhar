@@ -1191,4 +1191,32 @@
     <!-- CodexAstraLocal: Shader recovery also carries Software framebuffer and Calculated resource errors; describe the shared failure without misidentifying its cause. -->
     <string name="uberhar_renderer_stopped_description">Uberhar encountered a rendering error and stopped this game. Export the current text log to help investigate the failure. Additional evidence may be saved in log/crashes after restarting Uberhar.</string>
     <!-- AstraEH: Keep incident evidence off the ordinary current/previous/older log list. -->
+
+    <!-- CodexAstraLocal: Independent optimization and diagnostic comparisons, applied at game restart. -->
+    <string name="uberhar_cpu_queue_expanded_seeds">Allow small standalone CPU batches</string>
+    <string name="uberhar_cpu_queue_expanded_seeds_description">Compare expanded standalone queue admission. Off keeps useful small work inside existing groups. Restart the game after changing.</string>
+    <string name="uberhar_cpu_adaptive_participation">Adapt CPU worker participation</string>
+    <string name="uberhar_cpu_adaptive_participation_description">Learn worker participation from recurring comparable work while retaining fixed safety limits. Restart the game after changing.</string>
+    <string name="uberhar_cpu_execution_census">Collect detailed CPU worker counts</string>
+    <string name="uberhar_cpu_execution_census_description">Collect additional active-worker counters for diagnosis. This can add CPU overhead. Fully close and restart Uberhar after changing.</string>
+    <string name="uberhar_feature_diagnostics">Collect optimization diagnostics</string>
+    <string name="uberhar_feature_diagnostics_description">Record bounded counts, refusal reasons and sampled CPU costs for individual optimizations. Restart the game after changing.</string>
+    <string name="uberhar_fragment_memo">Reuse fragment texture samples</string>
+    <string name="uberhar_fragment_memo_description">Reuse identical ordinary texture samples within a pixel shader invocation. Restart the game after changing.</string>
+    <string name="uberhar_constant_tev">Prepare constant fragment results on CPU</string>
+    <string name="uberhar_constant_tev_description">Prepare qualified constant color-combiner results before fragment execution. Restart the game after changing.</string>
+    <string name="uberhar_directional_precompute">Prepare directional lighting on CPU</string>
+    <string name="uberhar_directional_precompute_description">Avoid qualified draw-invariant lighting calculations in the fragment shader. Restart the game after changing.</string>
+    <string name="uberhar_lit_specialization">Prioritize costly lighting shaders</string>
+    <string name="uberhar_lit_specialization_description">Reserve bounded specialization opportunities for recurring lighting work. Restart the game after changing.</string>
+    <string name="uberhar_fragment_liveness">Remove unused fragment work</string>
+    <string name="uberhar_fragment_liveness_description">Avoid fragment calculations whose results cannot affect the final output. Restart the game after changing.</string>
+    <string name="uberhar_alpha_never">Reject invisible alpha tests early</string>
+    <string name="uberhar_alpha_never_description">Avoid fragment work when the alpha test unconditionally rejects the pixel. Restart the game after changing.</string>
+    <string name="uberhar_gpu_timestamps">Collect GPU timing samples</string>
+    <string name="uberhar_gpu_timestamps_description">Measure sampled GPU command spans. Leave off for ordinary performance comparisons; timing can affect GPU performance. Restart the game after changing.</string>
+    <string name="uberhar_image_reuse">Reuse exact image copies</string>
+    <string name="uberhar_image_reuse_description">Reuse unchanged feedback snapshots when ownership is proven. Exact self-copies always remain safe no-ops. Restart the game after changing.</string>
+    <string name="uberhar_cpu_transfers">Copy current RAM on CPU</string>
+    <string name="uberhar_cpu_transfers_description">Use CPU workers for eligible copies already available in RAM without GPU readback. Restart the game after changing.</string>
 </resources>

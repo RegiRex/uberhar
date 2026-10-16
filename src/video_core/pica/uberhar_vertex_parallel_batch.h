@@ -38,8 +38,11 @@ public:
     static constexpr u32 Grain = 64;
 
     explicit NativeParallelBatch(unsigned processors = Common::Uberhar::AvailableProcessors(),
-                                 void (*worker_start)() = nullptr)
-        : pool{processors, worker_start} {}
+                                 void (*worker_start)() = nullptr,
+                                 bool adaptive = true, bool diagnostics = true)
+        // CodexAstraLocal: Explicit title-frozen policy reaches the real worker.
+        : pool{processors, worker_start, Common::Uberhar::AuxiliaryBudget::Global(),
+               nullptr, adaptive, diagnostics} {}
 
     unsigned Available() const { return pool.Available(); }
     unsigned CreatedWorkers() const { return pool.CreatedWorkers(); }

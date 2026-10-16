@@ -55,6 +55,9 @@ def main():
             'ready_vertex_worker=std::make_unique<Common::ThreadWorker>') in constructor
     fixture = r'''
 #include <array>
+#include <algorithm>
+#include <chrono>
+#include "common/scope_exit.h"
 #include <cstdio>
 #include <optional>
 #include <stdexcept>
@@ -73,6 +76,7 @@ struct FSConfig {
         : supported{regs.supported}, transport{regs.transport} {}
     bool supported{};
     int transport{};
+    bool UsesSpirvIncompatibleConfig() const { return false; }
     struct { std::array<int,6> tev_stages{}; struct { void Assign(int) {} } combiner_buffer_input; } texture;
 };
 }}
@@ -80,6 +84,11 @@ using Pica::Shader::FSConfig;
 namespace Vulkan {
 namespace GLSL {
 enum class DynamicTevSupport { Ready, Unsupported };
+// CodexAstraLocal: Arithmetic is a distinct endpoint here; actual raw-register
+// capture/cache/output is covered by runtime and ready-fragment qualifications.
+struct FragmentRuntimeValues {};
+inline FragmentRuntimeValues CaptureFragmentRuntimeValues(const Pica::RegsInternal&,
+                                                          const FSConfig&, int) { return {}; }
 inline DynamicTevSupport CheckDynamicTevSupport(const FSConfig& config, const Pica::Shader::UserConfig&) {
     return config.supported ? DynamicTevSupport::Ready : DynamicTevSupport::Unsupported;
 }
@@ -90,7 +99,7 @@ inline int MakeDynamicTevState(const FSConfig& config, int) { return config.tran
 // EnsureDynamicTevState below owns consumption, reset and accounting here.
 struct DynamicTevPreparation {
     unsigned calls{};
-    int Get(const FSConfig& config, int profile) {
+    int Get(const FSConfig& config, int profile, const GLSL::FragmentRuntimeValues&) {
         ++calls;
         return GLSL::MakeDynamicTevState(config, profile);
     }
@@ -127,7 +136,13 @@ struct PipelineCache {
           allow_ready_gpu_vertices{hybrid_tev && Settings::UsesReadyGpuVertices(mode)},
           ready_vertex_worker{allow_ready_gpu_vertices || allow_static_cpu_tev} {}
     Disk* curr_disk_cache{};
-    int profile{}, tev_constants{};
+    struct Profile { bool vk_use_spirv_generator{}; operator int() const { return 0; } } profile;
+    int tev_constants{};
+    bool feature_diagnostics = true, pending_fragment_cacheable{}, pending_recovery_glsl{};
+    GLSL::FragmentRuntimeValues pending_fragment_values;
+    std::optional<int> pending_fragment_evidence;
+    u64 fragment_prepare_samples{}, fragment_prepare_ns{}, fragment_prepare_max_ns{};
+    u64 fragment_runtime_samples{}, fragment_runtime_ns{}, fragment_runtime_max_ns{};
     bool tev_supported{};
     GLSL::DynamicTevSupport tev_support_reason{};
     std::optional<FSConfig> tev_family_config, virtual_fs_config;
@@ -152,6 +167,7 @@ struct PipelineCache {
     void SampleFragmentEvidence(const Pica::RegsInternal& regs, const FSConfig& config,
                                 bool preparing_gpu) {
         ++evidence_calls;
+        pending_fragment_evidence = config.transport;
         evidence_preparing_gpu = preparing_gpu;
         evidence_supported = config.supported;
         evidence_input = regs.transport;

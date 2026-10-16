@@ -3,6 +3,7 @@
 // Refer to the license.txt file included.
 
 #include "video_core/shader/generator/glsl_fs_shader_gen.h"
+#include <algorithm> // CodexAstraLocal: Exact endpoint evaluation clamps small signed integers.
 
 namespace Pica::Shader::Generator::GLSL {
 
@@ -96,6 +97,52 @@ Pica::TevLiveness::Plan GraphicsTevLiveness(const FSConfig& config) {
     return Pica::TevLiveness::Analyze(stages,config.texture.combiner_buffer_input&15U,
         config.texture.combiner_buffer_input>>4,Pica::TevLiveness::Stage0Policy::GeneratedGlsl);
 }
+// CodexAstraLocal: OFF restores demanded work without changing source semantics;
+// the independent Calculated consumer still owns its original liveness policy.
+static auto GraphicsPlan(const FSConfig& config, const Profile& profile) {
+    auto live = GraphicsTevLiveness(config);
+    if (!profile.fragment_liveness) {
+        live.stages.fill({true, true});
+        live.external_sources = 0xFFFFU;
+    }
+    return live;
+}
+
+// CodexAstraLocal: Count exact ordinary access sites, including live lighting,
+// rather than installing a second flag/cache for every TEV operand. This is a
+// structural reuse certificate, not a claim that any fragment actually runs.
+u32 FragmentMemoMask(const FSConfig& config, const Pica::TevLiveness::Plan& live) {
+    using Tev = TexturingRegs::TevStageConfig;
+    std::array<u32, 3> uses{};
+    const auto add = [&](u32 source) { if (source >= 3 && source <= 5) ++uses[source - 3]; };
+    for (u32 i = 0; i < 6; ++i) {
+        const Tev stage = config.texture.tev_stages[i];
+        if (IsPassThroughTevStage(stage)) continue;
+        const auto operands = [&](u32 offset, Tev::Operation op) {
+            for (u32 n = 0; n < Pica::TevLiveness::OperandCount(op); ++n) {
+                u32 source = (stage.sources_raw >> (offset + 4 * n)) & 15U;
+                if (i == 0 && source == 15) source = (stage.sources_raw >> (offset + 8)) & 15U;
+                add(source);
+            }
+        };
+        if (live.stages[i].NeedsColor(stage.color_op)) operands(0, stage.color_op);
+        if (live.stages[i].alpha && stage.color_op != Tev::Operation::Dot3_RGBA)
+            operands(16, stage.alpha_op);
+    }
+    if (config.lighting.enable && (live.Uses(Tev::Source::PrimaryFragmentColor) ||
+                                  live.Uses(Tev::Source::SecondaryFragmentColor))) {
+        if (config.lighting.bump_mode != LightingRegs::LightingBumpMode::None)
+            add(3 + config.lighting.bump_selector.Value());
+        if (config.lighting.enable_shadow) add(3 + config.lighting.shadow_selector.Value());
+    }
+    u32 mask = 0;
+    for (u32 i = 0; i < 3; ++i) if (uses[i] > 1) mask |= 1U << i;
+    if (config.texture.texture0_type != TextureType::Texture2D &&
+        config.texture.texture0_type != TextureType::Projection2D &&
+        config.texture.texture0_type != TextureType::TextureCube &&
+        config.texture.texture0_type != TextureType::Disabled) mask &= ~1U;
+    return mask;
+}
 u32 ComputeLiveSemanticMask(const FSConfig& config) {
     using Source=TexturingRegs::TevStageConfig::Source;
     const auto plan=GraphicsTevLiveness(config);
@@ -138,6 +185,7 @@ FragmentWorkEvidence AnalyzeFragmentWork(const FSConfig& original, const Profile
     config.ApplyProfile(profile);
     const auto live = GraphicsTevLiveness(config);
     FragmentWorkEvidence result{};
+    result.memo_mask = FragmentMemoMask(config, GraphicsPlan(config, profile));
     std::array<bool, 2> previous{true, true}, buffer{true, true}, next_buffer{true, true};
     for (u32 index = 0; index < 6; ++index) {
         const Config stage = config.texture.tev_stages[index];
@@ -409,7 +457,8 @@ DynamicTevState MakeDynamicTevState(const FSConfig& original, const Profile& pro
     state.buffer_mask = config.texture.combiner_buffer_input.Value();
     // CodexAstraLocal: Analyze original applied state, before generic-family
     // erasure. Do not infer deadness from uniform values or approximate arithmetic.
-    const auto live = GraphicsTevLiveness(config);
+    const auto live = GraphicsPlan(config, profile);
+    if (profile.fragment_memo) state.buffer_mask |= FragmentMemoMask(config, live) << TevMemoShift;
     using Source = TexturingRegs::TevStageConfig::Source;
     if (live.Uses(Source::PrimaryFragmentColor) || live.Uses(Source::SecondaryFragmentColor))
         state.buffer_mask |= TevLiveLighting;
@@ -433,7 +482,7 @@ DynamicTevState MakeDynamicTevState(const FSConfig& original, const Profile& pro
         prepared.sources = raw.sources_raw;
         // CodexAstraLocal: Spare bits carry independent output demand. Dot3_RGBA
         // still evaluates RGB when only alpha survives; the consumer owns that rule.
-        prepared.operations = (raw.ops_raw & ~(TevLiveRgb | TevLiveAlpha)) |
+        prepared.operations = (raw.ops_raw & ~(TevLiveRgb | TevLiveAlpha | TevConstantBits)) |
             (live.stages[i].rgb ? TevLiveRgb : 0U) |
             (live.stages[i].alpha ? TevLiveAlpha : 0U);
         prepared.multipliers = stage.GetColorMultiplier() | (stage.GetAlphaMultiplier() << 16);
@@ -514,10 +563,148 @@ DynamicTevState MakeDynamicTevState(const FSConfig& original, const Profile& pro
     return state;
 }
 
-// CodexAstraLocal: Copy the entire prepared structural prefix for exact optional
-// ownership and equality; runtime values are neither baked nor normalized here.
+// CodexAstraLocal: Copy original numeric register values before family reduction;
+// each queued draw owns its certificate, never a later uniform or guest-memory read.
+FragmentRuntimeValues CaptureFragmentRuntimeValues(const Pica::RegsInternal& regs,
+                                                   const FSConfig& config, const Profile& profile) {
+    FragmentRuntimeValues values{};
+    if (config.framebuffer.alpha_test_func != Pica::FramebufferRegs::CompareFunc::Never &&
+        (profile.fragment_constant_tev || profile.fragment_directional_precompute)) {
+        values.available = true;
+        if (profile.fragment_constant_tev) {
+            const auto stages = regs.texturing.GetTevStages();
+            for (u32 i = 0; i < stages.size(); ++i)
+                values.constants[i] = stages[i].const_color;
+            values.buffer = regs.texturing.tev_combiner_buffer_color.raw;
+        }
+        if (profile.fragment_directional_precompute && config.lighting.enable) {
+            for (u32 slot = 0; slot < std::min<u32>(config.lighting.src_num, 8); ++slot) {
+                const auto& control = config.lighting.lights[slot];
+                if (!control.directional) continue;
+                const u32 source = control.num;
+                const auto& light = regs.lighting.light[source];
+                values.light_positions[source] = u64{light.x.Value()} |
+                    (u64{light.y.Value()} << 16) | (u64{light.z.Value()} << 32);
+            }
+        }
+    }
+    return values;
+}
+
+// CodexAstraLocal: Evaluate only the exactly representable endpoint domain. A
+// nonendpoint or varying consumed scalar stays unknown, even if algebra could
+// hide it (0*NaN and an unchosen Lerp input must not be reinterpreted). Integer
+// operations below reproduce clamp/byteround/positive scale at each stage;
+// signed-half ties and arbitrary normalized floats are never CPU arithmetic.
+void ApplyFragmentRuntime(DynamicTevState& state, const Profile& profile,
+                          const FragmentRuntimeValues& values) {
+    for (auto& stage : state.stages) stage.operations &= ~TevConstantBits;
+    state.lighting_luts_hi &= 0x00FFFFFFU;
+    if (!values.available || (state.framebuffer & 7U) == 0) return;
+    if (profile.fragment_directional_precompute && (state.buffer_mask & TevLiveLighting)) {
+        const u32 count = std::min(state.lighting_ops_lo >> 28, 8U);
+        for (u32 slot = 0; slot < count; ++slot) {
+            const u32 word = slot < 4 ? state.lighting_ops_lo : state.lighting_ops_hi;
+            const u32 source = (state.lighting_sources >> (3 * slot)) & 7U;
+            if (((word >> (7 * (slot & 3))) & 1U) &&
+                values.light_positions[source] == (u64{0x3C00} << 32))
+                state.lighting_luts_hi |= 1U << (24 + slot);
+        }
+    }
+    if (!profile.fragment_constant_tev) return;
+    using Color = std::array<int, 4>;
+    constexpr Color unknown{-1, -1, -1, -1};
+    const auto endpoints = [](u32 rgba) {
+        Color color{};
+        for (u32 i = 0; i < 4; ++i) {
+            const u32 byte = (rgba >> (8 * i)) & 255U;
+            color[i] = byte == 0 ? 0 : byte == 255 ? 1 : -1;
+        }
+        return color;
+    };
+    Color previous{}, buffer{}, next_buffer = endpoints(values.buffer);
+    const auto combine = [](u32 op, const std::array<int, 3>& v) {
+        const u32 count = op == 0 ? 1U : op == 4 || op == 8 || op == 9 ? 3U : 2U;
+        for (u32 i = 0; i < count; ++i) if (v[i] < 0) return -1;
+        int result;
+        switch (op) {
+        case 0: result = v[0]; break;
+        case 1: result = v[0] * v[1]; break;
+        case 2: result = v[0] + v[1]; break;
+        case 4: result = v[1] * (1 - v[2]) + v[0] * v[2]; break;
+        case 5: result = v[0] - v[1]; break;
+        case 8: result = v[0] * v[1] + v[2]; break;
+        case 9: result = std::min(v[0] + v[1], 1) * v[2]; break;
+        default: return -1;
+        }
+        return std::clamp(result, 0, 1);
+    };
+    for (u32 index = 0; index < 6; ++index) {
+        auto& stage = state.stages[index];
+        if (state.buffer_mask & (1U << (16 + index))) {
+            const auto source = [&](u32 code) -> Color {
+                if (code == 13) return buffer;
+                if (code == 14) return endpoints(values.constants[index]);
+                if (code == 15) return previous;
+                return unknown;
+            };
+            const u32 color_op = stage.operations & 15U;
+            const u32 alpha_op = (stage.operations >> 16) & 15U;
+            std::array<std::array<int, 3>, 3> rgb{};
+            std::array<int, 3> alpha{};
+            for (u32 operand = 0; operand < 3; ++operand) {
+                const auto c = source((stage.sources >> (4 * operand)) & 15U);
+                const u32 modifier = (stage.modifiers >> (4 * operand)) & 15U;
+                const u32 component = modifier >> 1;
+                for (u32 channel = 0; channel < 3; ++channel) {
+                    const int value = component > 4 ? 0 : c[component == 4 ? channel : component];
+                    rgb[channel][operand] = value < 0 ? -1 :
+                        component <= 4 && (modifier & 1) ? 1 - value : value;
+                }
+                const auto a = source((stage.sources >> (16 + 4 * operand)) & 15U);
+                const u32 am = (stage.modifiers >> (12 + 4 * operand)) & 7U;
+                alpha[operand] = a[am >> 1] < 0 ? -1 : (am & 1) ? 1 - a[am >> 1] : a[am >> 1];
+            }
+            Color result = unknown;
+            if (color_op == 6 || color_op == 7) {
+                int dot = 0;
+                bool known = true;
+                for (u32 c = 0; c < 3; ++c) {
+                    known &= rgb[c][0] >= 0 && rgb[c][1] >= 0;
+                    dot += (2 * rgb[c][0] - 1) * (2 * rgb[c][1] - 1);
+                }
+                if (known) for (u32 c = 0; c < 3; ++c) result[c] = std::clamp(dot, 0, 1);
+            } else {
+                for (u32 c = 0; c < 3; ++c) result[c] = combine(color_op, rgb[c]);
+            }
+            result[3] = color_op == 7 ? result[0] : combine(alpha_op, alpha);
+            const bool need_rgb = (stage.operations & TevLiveRgb) ||
+                ((stage.operations & TevLiveAlpha) && color_op == 7);
+            if (need_rgb && result[0] >= 0 && result[1] >= 0 && result[2] >= 0) {
+                stage.operations |= TevConstantRgb;
+                for (u32 c = 0; c < 3; ++c) stage.operations |= u32(result[c]) << (12 + c);
+            }
+            if ((stage.operations & TevLiveAlpha) && result[3] >= 0)
+                stage.operations |= TevConstantAlpha | (u32(result[3]) << 15);
+            previous = result;
+        }
+        // CodexAstraLocal: A write at i is visible at i+2. Separate channel
+        // assignments preserve original pass-through and delayed-buffer state.
+        buffer = next_buffer;
+        if (index < 4) {
+            if (state.buffer_mask & (1U << index))
+                for (u32 c = 0; c < 3; ++c) next_buffer[c] = previous[c];
+            if (state.buffer_mask & (1U << (index + 4))) next_buffer[3] = previous[3];
+        }
+    }
+}
+
+// CodexAstraLocal: Numeric qualification/results stay in each command's push
+// snapshot; static equality includes every structural field but never uniforms.
 StaticTevPlan MakeStaticTevPlan(const DynamicTevState& state) {
-    return {state.stages, state.buffer_mask};
+    StaticTevPlan plan{state.stages, state.buffer_mask};
+    for (auto& stage : plan.stages) stage.operations &= ~TevConstantBits;
+    return plan;
 }
 
 FragmentModule::FragmentModule(const FSConfig& config_, const UserConfig& user_,
@@ -541,7 +728,10 @@ FragmentModule::FragmentModule(const FSConfig& config_, const UserConfig& user_,
     // independent Calculated evaluator retains its existing formulas and paths.
     graphics_optimizations = profile.is_vulkan && !compute_evaluator && user.IsCacheable();
     if (compute_evaluator || (graphics_optimizations && !dynamic_tev))
-        compute_liveness = GraphicsTevLiveness(config);
+        compute_liveness = compute_evaluator ? GraphicsTevLiveness(config) : GraphicsPlan(config, profile);
+    if (graphics_optimizations && profile.fragment_memo)
+        sample_memo_mask = static_tev ? (static_tev->buffer_mask >> TevMemoShift) & 7U :
+            dynamic_tev ? 7U : FragmentMemoMask(config, compute_liveness);
     out.reserve(RESERVE_SIZE);
     DefineExtensions();
     DefineInterface();
@@ -617,7 +807,8 @@ vec4 secondary_fragment_color = vec4(0.0);
     }
     // CodexAstraLocal: Alpha-Never is draw-uniform and has no surviving fragment
     // side effects. Reject before lighting/texture/TEV, without skipping guest draws.
-    if (dynamic_tev) out += "if ((uber_tev.framebuffer & 7u) == 0u) discard;\n";
+    if (dynamic_tev && profile.fragment_alpha_never)
+        out += "if ((uber_tev.framebuffer & 7u) == 0u) discard;\n";
 
     // Append the scissor and depth tests
     WriteScissor();
@@ -1088,7 +1279,7 @@ void FragmentModule::DefineDynamicState() {
     // AstraEH: std430 uvec4 array stride is 16 bytes; the mask follows at byte 96.
     // All branches depend on draw-uniform state, including texture selection.
     out += R"(
-// CodexAstraLocal: ABI 8 also carries separate RGB/alpha dependency flags.
+// CodexAstraLocal: ABI 9 carries endpoint certificates and canonical light slots.
 layout(push_constant) uniform UberTev {
     uvec4 stages[6];
     uint buffer_mask;
@@ -1112,19 +1303,25 @@ std::string FragmentModule::TextureSample(u32 unit) const {
         config.texture.texture0_type == TextureType::Projection2D ||
         config.texture.texture0_type == TextureType::TextureCube ||
         config.texture.texture0_type == TextureType::Disabled);
-    return fmt::format("{}{}()", graphics_optimizations && ordinary ? "uber_shared_tex" : "sampleTexUnit", unit);
+    return fmt::format("{}{}()", graphics_optimizations && ordinary &&
+        (sample_memo_mask & (1U << unit)) ? "uber_shared_tex" : "sampleTexUnit", unit);
 }
 
 void FragmentModule::DefineSharedTextureSamples() {
     // CodexAstraLocal: Lazy first use stays at the existing lighting/TEV site;
     // no read is hoisted before alpha/scissor rejection. Flags are invocation
     // private and every caller's selection is draw-uniform, preserving derivatives.
-    out += "\n// CodexAstraLocal: Shared color-sample helpers begin.\n"
-           "uint uber_shared_sampled = 0u;\n";
+    out += "\n// CodexAstraLocal: Shared color-sample helpers begin.\n";
+    if (sample_memo_mask) out += "uint uber_shared_sampled = 0u;\n";
     for (u32 unit = 0; unit < 3; ++unit) {
         if (TextureSample(unit) == fmt::format("sampleTexUnit{}()", unit)) continue;
+        out += fmt::format("vec4 uber_shared_value{0};\nvec4 uber_shared_tex{0}() {{\n", unit);
+        // CodexAstraLocal: The generic family cannot bake the original graph;
+        // its per-draw certificate bypasses memo bookkeeping for single readers.
+        if (dynamic_tev && !static_tev)
+            out += fmt::format("if ((uber_tev.buffer_mask & {0}u) == 0u) return sampleTexUnit{1}();\n",
+                               1U << (TevMemoShift + unit), unit);
         out += fmt::format(
-            "vec4 uber_shared_value{0};\nvec4 uber_shared_tex{0}() {{\n"
             "if ((uber_shared_sampled & {1}u) == 0u) {{\n"
             "uber_shared_value{0} = sampleTexUnit{0}(); uber_shared_sampled |= {1}u;\n"
             "}}\nreturn uber_shared_value{0};\n}}\n", unit, 1U << unit);
@@ -1181,13 +1378,17 @@ float uber_alpha_modifier(vec4 value, uint modifier) {
     return (modifier & 1u) == 0u ? selected : 1.0 - selected;
 }
 )";
-    // CodexAstraLocal: Keep the TEV-local procedural/typed cache, while ordinary
-    // color-unit reads join lighting's invocation-local first-use memo.
+    // CodexAstraLocal: Ordinary reads have exactly one invocation memo shared
+    // with lighting. Typed/procedural reads retain the old TEV-only cache. OFF
+    // retains that baseline cache and omits cross-consumer memo installation.
     for (u32 unit = 0; unit < 3; ++unit) {
         const auto original = fmt::format("sampleTexUnit{}()", unit);
         const auto replacement = TextureSample(unit);
-        const auto position = body.find(original);
-        if (position != std::string::npos) body.replace(position, original.size(), replacement);
+        if (replacement == original) continue;
+        const auto begin = body.find(fmt::format("    case {}u:", unit + 3));
+        const auto end = body.find("    case ", begin + 1);
+        body.replace(begin, end - begin,
+            fmt::format("    case {}u: return {};\n", unit + 3, replacement));
     }
     out += body;
 }
@@ -1211,6 +1412,14 @@ bool live_rgb = (instruction.z & 256u) != 0u;
 bool live_alpha = (instruction.z & 512u) != 0u;
 vec3 color_output = vec3(0.0);
 if (live_rgb || (live_alpha && color_op == 7u)) {
+)";
+    // CodexAstraLocal: Qualified endpoint results replace only their channel;
+    // unqualified runtime values execute the exact original GPU expression.
+    if (profile.fragment_constant_tev) out += R"(
+if ((instruction.z & 1024u) != 0u) {
+color_output = vec3(float((instruction.z >> 12u) & 1u),
+                    float((instruction.z >> 13u) & 1u), float((instruction.z >> 14u) & 1u));
+} else {
 )";
     for (u32 input = 0; input < 3; ++input) {
         // AstraEH: Replace consumes one operand; only Lerp, MultiplyThenAdd and
@@ -1239,10 +1448,13 @@ if (live_rgb || (live_alpha && color_op == 7u)) {
         out += "; break;\n";
     }
     out += "default: color_output = vec3(0.0); break;\n}\n"
-           "color_output = byteround(color_output);\n"
-           "}\nif (live_alpha) {\n"
-           "float alpha_output;\n"
-           "if (color_op == 7u) { alpha_output = color_output.r; } else {\n";
+           "color_output = byteround(color_output);\n";
+    if (profile.fragment_constant_tev) out += "}\n";
+    out += "}\nif (live_alpha) {\nfloat alpha_output;\n";
+    if (profile.fragment_constant_tev)
+        out += "if ((instruction.z & 2048u) != 0u) "
+               "alpha_output = float((instruction.z >> 15u) & 1u); else {\n";
+    out += "if (color_op == 7u) { alpha_output = color_output.r; } else {\n";
     for (u32 input = 0; input < 3; ++input) {
         if (input == 1) {
             out += "if (alpha_op != 0u) {\n";
@@ -1270,6 +1482,9 @@ default: alpha_output = 0.0; break;
 }
 alpha_output = byteround(alpha_output);
 }
+)";
+    if (profile.fragment_constant_tev) out += "}\n";
+    out += R"(
 combiner_output.a = clamp(alpha_output * alpha_multiplier, 0.0, 1.0);
 }
 if (live_rgb) combiner_output.rgb = clamp(color_output * color_multiplier, vec3(0.0), vec3(1.0));
@@ -1293,7 +1508,7 @@ if (tev_index < 4u) {
 // CodexAstraLocal: Emit each first consumed texture read at its original stage
 // and operand position. Static structure removes the runtime source/cache switch
 // without moving reads ahead of lighting or materializing unused operands.
-std::string FragmentModule::GetStaticTevSource(u32 source, u32 stage, u32& sampled) {
+std::string FragmentModule::GetStaticTevSource(u32 source, u32 stage) {
     switch (source) {
     case 0:
         return "rounded_primary_color";
@@ -1306,10 +1521,18 @@ std::string FragmentModule::GetStaticTevSource(u32 source, u32 stage, u32& sampl
     case 5:
     case 6: {
         const u32 unit = source - 3;
-        if ((sampled & (1U << unit)) == 0) {
-            out += fmt::format("vec4 uber_static_texel{} = {};\n", unit, TextureSample(unit));
-            sampled |= 1U << unit;
-        }
+        const bool ordinary = unit < 3 && (unit != 0 ||
+            config.texture.texture0_type == TextureType::Texture2D ||
+            config.texture.texture0_type == TextureType::Projection2D ||
+            config.texture.texture0_type == TextureType::TextureCube ||
+            config.texture.texture0_type == TextureType::Disabled);
+        // CodexAstraLocal: Repeated ordinary reads use the one shared cache;
+        // single readers are direct. Typed/proctex and control-OFF keep TEV-local
+        // first-use storage outside runtime arithmetic branch scopes.
+        if (profile.fragment_memo && ordinary) return TextureSample(unit);
+        out += fmt::format("if ((uber_static_sampled & {0}u) == 0u) {{ "
+            "uber_static_texel{1} = sampleTexUnit{1}(); uber_static_sampled |= {0}u; }}\n",
+            1U << unit, unit);
         return fmt::format("uber_static_texel{}", unit);
     }
     case 13:
@@ -1327,12 +1550,13 @@ void FragmentModule::WriteStaticTev() {
     using Operation = TexturingRegs::TevStageConfig::Operation;
     const auto& plan = *static_tev;
     const u32 end = (plan.buffer_mask >> 8) & 7U;
-    u32 sampled = 0;
     constexpr std::array components{'r', 'g', 'b', 'a'};
     const auto arity = [](u32 operation) {
         return operation == 0 ? 1U : operation == 4 || operation == 8 || operation == 9 ? 3U : 2U;
     };
     out += "// CodexAstraLocal: Exact prepared TEV plan; other fragment state stays runtime.\n";
+    out += "uint uber_static_sampled = 0u;\nvec4 uber_static_texel0, uber_static_texel1, "
+           "uber_static_texel2, uber_static_texel3;\n";
     for (u32 stage = 0; stage < end; ++stage) {
         // CodexAstraLocal: The immutable static key includes the exact liveness
         // flags; only demanded outputs can feed later previous/buffer consumers.
@@ -1345,9 +1569,18 @@ void FragmentModule::WriteStaticTev() {
             // CodexAstraLocal: Select the already-prepared component/inversion
             // directly. Stage-zero Previous remapping was done exactly once.
             if (live_rgb || (live_alpha && color_op == 7)) {
+            // CodexAstraLocal: Static modules bake structural operations only;
+            // the current command owns qualification/result bits. Never reuse
+            // a previous draw's numeric constants through the optional key.
+            out += fmt::format("vec3 color_output_{};\n", stage);
+            if (profile.fragment_constant_tev)
+                out += fmt::format("if ((uber_tev.stages[{0}].z & 1024u) != 0u) {{\n"
+                    "color_output_{0} = vec3(float((uber_tev.stages[{0}].z >> 12u) & 1u), "
+                    "float((uber_tev.stages[{0}].z >> 13u) & 1u), "
+                    "float((uber_tev.stages[{0}].z >> 14u) & 1u));\n}} else {{\n", stage);
             for (u32 input = 0; input < arity(color_op); ++input) {
                 const auto source = GetStaticTevSource(
-                    (instruction.sources >> (input * 4)) & 15U, stage, sampled);
+                    (instruction.sources >> (input * 4)) & 15U, stage);
                 const u32 modifier = (instruction.modifiers >> (input * 4)) & 15U;
                 const u32 component = modifier >> 1;
                 std::string value = component == 4 ? fmt::format("{}.rgb", source)
@@ -1361,21 +1594,26 @@ void FragmentModule::WriteStaticTev() {
             }
             // CodexAstraLocal: Reuse the existing operation emitters unchanged;
             // retain round-before-scale and the generic reserved-operation result.
-            out += fmt::format("vec3 color_output_{} = byteround(", stage);
+            out += fmt::format("color_output_{} = byteround(", stage);
             if (color_op <= 9) {
                 AppendColorCombiner(static_cast<Operation>(color_op));
             } else {
                 out += "vec3(0.0)";
             }
             out += ");\n";
+            if (profile.fragment_constant_tev) out += "}\n";
             }
             if (live_alpha) {
+            out += fmt::format("float alpha_output_{};\n", stage);
+            if (profile.fragment_constant_tev)
+                out += fmt::format("if ((uber_tev.stages[{0}].z & 2048u) != 0u) "
+                    "alpha_output_{0} = float((uber_tev.stages[{0}].z >> 15u) & 1u); else {{\n", stage);
             if (color_op == 7) {
-                out += fmt::format("float alpha_output_{0} = color_output_{0}.r;\n", stage);
+                out += fmt::format("alpha_output_{0} = color_output_{0}.r;\n", stage);
             } else {
                 for (u32 input = 0; input < arity(alpha_op); ++input) {
                     const auto source = GetStaticTevSource(
-                        (instruction.sources >> (16 + input * 4)) & 15U, stage, sampled);
+                        (instruction.sources >> (16 + input * 4)) & 15U, stage);
                     const u32 modifier = (instruction.modifiers >> (12 + input * 4)) & 7U;
                     std::string value = fmt::format("{}.{}", source, components[modifier >> 1]);
                     if ((modifier & 1U) != 0) {
@@ -1383,7 +1621,7 @@ void FragmentModule::WriteStaticTev() {
                     }
                     out += fmt::format("alpha_results_{} = {};\n", input + 1, value);
                 }
-                out += fmt::format("float alpha_output_{} = byteround(", stage);
+                out += fmt::format("alpha_output_{} = byteround(", stage);
                 if (alpha_op <= 5 || alpha_op == 8 || alpha_op == 9) {
                     AppendAlphaCombiner(static_cast<Operation>(alpha_op));
                 } else {
@@ -1391,6 +1629,7 @@ void FragmentModule::WriteStaticTev() {
                 }
                 out += ");\n";
             }
+            if (profile.fragment_constant_tev) out += "}\n";
             out += fmt::format("combiner_output.a = clamp(alpha_output_{} * {}.0, 0.0, 1.0);\n",
                                stage, (instruction.multipliers >> 16) & 7U);
             }
@@ -1601,8 +1840,24 @@ uint uber_light_count = uber_tev.lighting_ops_lo >> 28u;
         } else {
             out += fmt::format("light_vector = {}.position + view;\n", light_src);
         }
-        out += fmt::format("light_distance = length(light_vector);\n", light_src);
-        out += fmt::format("light_vector = normalize(light_vector);\n", light_src);
+        // CodexAstraLocal: Only exact original (+0,+0,+1) directional inputs
+        // bypass normalization; position/view/zero/nonfinite vectors retain the
+        // inherited formula. Unused distance has no LUT/output consumer.
+        const bool prepared_direction = graphics_optimizations && dynamic_tev &&
+                                        profile.fragment_directional_precompute;
+        if (prepared_direction)
+            out += "if ((uber_tev.lighting_luts_hi & (1u << (24u + uber_light_slot))) != 0u) {\n"
+                   "light_vector = vec3(0.0, 0.0, 1.0); light_distance = 1.0;\n} else {\n";
+        if (graphics_optimizations && profile.fragment_directional_precompute) {
+            if (dynamic_tev)
+                out += "if ((uber_light_ops & 4u) != 0u) light_distance = length(light_vector);\n";
+            else if (light_config.dist_atten_enable)
+                out += "light_distance = length(light_vector);\n";
+        } else {
+            out += "light_distance = length(light_vector);\n";
+        }
+        out += "light_vector = normalize(light_vector);\n";
+        if (prepared_direction) out += "}\n";
 
         out += fmt::format("spot_dir = {}.spot_direction;\n", light_src);
         out += "half_vector = normalize(view) + light_vector;\n";

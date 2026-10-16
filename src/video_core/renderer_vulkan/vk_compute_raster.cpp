@@ -11,6 +11,9 @@
 #include "video_core/renderer_vulkan/uberhar_compute_shadow.h"
 #include "video_core/renderer_vulkan/uberhar_compute_target_format.h"
 #include "video_core/renderer_vulkan/vk_compute_raster.h"
+// CodexAstraLocal: Exact rectangle scheduling and independent feature/cost policy.
+#include "video_core/renderer_vulkan/compute_raster_dispatch.h"
+#include "video_core/renderer_vulkan/compute_feature_profile.h"
 #include "video_core/renderer_vulkan/vk_descriptor_update_queue.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_resource_pool.h"
@@ -42,6 +45,7 @@ void MemoryBarrier(vk::CommandBuffer cmd, vk::PipelineStageFlags src_stage,
 } // namespace
 
 struct ComputeRasterizer::Impl {
+    using Cost=ComputeFeatureProfile::Cost;
     // CodexAstraLocal: Each scratch allocation is reused only in queue order.
     // Growth waits its actual last consumer before destruction; ordinary reuse
     // uses explicit transfer/compute barriers without a host read or GPU wait.
@@ -62,6 +66,7 @@ struct ComputeRasterizer::Impl {
         vk::UniquePipeline pipeline;
         u64 tick{};
         std::shared_ptr<const ComputeModuleEvidence> evidence;
+        u64 feature_key{}; // CodexAstraLocal: Effective source/diagnostic revision.
     };
 
     Impl(const Instance& instance_, Scheduler& scheduler_, DescriptorUpdateQueue& updates_)
@@ -104,14 +109,18 @@ struct ComputeRasterizer::Impl {
                       const std::shared_ptr<ComputeFailurePacket>& failure) {
         auto found = std::find_if(programs.begin(), programs.end(), [&](const Program& program) {
             return program.config == config && program.user.raw == user.raw &&
-                   program.profile == profile;
+                   program.profile == profile && program.feature_key==costs.config.Key();
         });
         if (found != programs.end()) {
+            ++costs.raster_hits;
             if (failure) failure->Module(found->evidence);
             return *found;
         }
+        ++costs.raster_misses;
+        auto evaluator_timer=costs.Measure(Cost::RasterCompile,true);
         if (failure) failure->Stage(ComputeFailureStage::RasterCompile);
         const auto evaluator = GLSL::GenerateComputeFragmentEvaluator(config, user, profile);
+        evaluator_timer.End();
         if (!evaluator)
             throw VideoCore::ShaderRecoveryError("Calculated fragment configuration unsupported");
         // CodexAstraLocal: Bound resident pipelines without ever dropping a draw
@@ -120,16 +129,19 @@ struct ComputeRasterizer::Impl {
         if (programs.size() == PipelineLimit) {
             const auto oldest = std::min_element(programs.begin(), programs.end(),
                 [](const Program& a, const Program& b) { return a.tick < b.tick; });
-            scheduler.Wait(oldest->tick);
+            costs.Time(Cost::Wait,[&]{scheduler.Wait(oldest->tick);});
             programs.erase(oldest);
         }
-        const auto source = "#version 450\n" + *evaluator +
+        auto compile_timer=costs.Measure(Cost::RasterCompile,true);
+        const auto source = fmt::format("#version 450\n// CodexAstraLocal: calculated_feature_key={}\n",
+                                        costs.config.Key()) + *evaluator +
                             std::string{ComputeTargetFormat::KernelFunctions} +
                             std::string{ComputeShadow::KernelFunctions} +
                             std::string{ComputeRasterKernel};
         auto evidence = std::make_shared<ComputeModuleEvidence>();
         evidence->role = "raster"; evidence->source = source;
         evidence->optimizer_disabled = profile.vk_disable_spirv_optimizer != 0;
+        evidence->calculated_feature_key=costs.config.Key();
         if (failure) failure->Module(evidence);
         const auto code = CompileGLSL(source, vk::ShaderStageFlagBits::eCompute, "",
                                      profile.vk_disable_spirv_optimizer != 0);
@@ -138,17 +150,17 @@ struct ComputeRasterizer::Impl {
         evidence=std::make_shared<ComputeModuleEvidence>(*evidence);
         evidence->spirv=code;
         if(failure)failure->Module(evidence);
+        compile_timer.End();
         if (code.empty())
             throw VideoCore::ShaderRecoveryError("Calculated compute module compilation failed");
-        Program program{config, user, profile, {}, {}, 0, evidence};
+        Program program{config, user, profile, {}, {}, 0, evidence,costs.config.Key()};
         // CodexAstraLocal: This compute owner does not concurrently mutate
         // the legacy worker-owned driver cache; a private pipeline has no saved-
         // cache dependency and cannot cause graphics pipeline selection.
         if (failure) failure->Stage(ComputeFailureStage::RasterPipeline);
-        auto objects = CreateComputePipeline(
-            instance, *layout, source, code,
-            profile.vk_disable_spirv_optimizer != 0, ComputePipelineRole::Raster,
-            reported_creation_failure, failure.get());
+        auto objects = costs.Time(Cost::RasterLink,[&]{return CreateComputePipeline(
+            instance,*layout,source,code,profile.vk_disable_spirv_optimizer != 0,
+            ComputePipelineRole::Raster,reported_creation_failure,failure.get());},true);
         program.module = std::move(objects.module);
         program.pipeline = std::move(objects.pipeline);
         programs.push_back(std::move(program));
@@ -157,7 +169,7 @@ struct ComputeRasterizer::Impl {
 
     void EnsureScratch(std::unique_ptr<Scratch>& slot, vk::DeviceSize bytes) {
         if (slot && slot->bytes >= bytes) return;
-        if (slot) scheduler.Wait(slot->tick);
+        if (slot) costs.Time(Cost::Wait,[&]{scheduler.Wait(slot->tick);});
         auto next = std::make_unique<Scratch>(instance.GetAllocator());
         const vk::BufferCreateInfo create{.size = bytes,
             .usage = vk::BufferUsageFlagBits::eStorageBuffer |
@@ -198,9 +210,11 @@ struct ComputeRasterizer::Impl {
                                  vk::UniqueShaderModule& module,
                                  vk::UniquePipeline& pipeline,
                                  std::shared_ptr<const ComputeModuleEvidence>& retained) {
+            auto compile_timer=costs.Measure(Cost::TransferCompile,true);
             auto evidence = std::make_shared<ComputeModuleEvidence>();
             evidence->role = role == ComputePipelineRole::Expand ? "expand" : "pack";
             evidence->source = source; evidence->optimizer_disabled = true;
+            evidence->calculated_feature_key=costs.config.Key();
             if (failure) { failure->Stage(ComputeFailureStage::TransferCompile); failure->Module(evidence); }
             const auto code = CompileGLSL(std::string{source}, stage, "", true);
             // CodexAstraLocal: A queued failure may already hold the source-only
@@ -208,13 +222,14 @@ struct ComputeRasterizer::Impl {
             evidence=std::make_shared<ComputeModuleEvidence>(*evidence);
             evidence->spirv=code;
             if(failure)failure->Module(evidence);
+            compile_timer.End();
             if (code.empty())
                 throw VideoCore::ShaderRecoveryError("Calculated target transfer compilation failed");
             // CodexAstraLocal: Transfer kernels have the same terminal contract
             // as guest/raster kernels; tag their exact independent role.
             if (failure) failure->Stage(ComputeFailureStage::TransferPipeline);
-            auto objects = CreateComputePipeline(instance, *transfer_layout, source, code, true,
-                                                  role, reported_creation_failure, failure.get());
+            auto objects = costs.Time(Cost::TransferLink,[&]{return CreateComputePipeline(
+                instance,*transfer_layout,source,code,true,role,reported_creation_failure,failure.get());},true);
             module = std::move(objects.module);
             pipeline = std::move(objects.pipeline);
             retained = std::move(evidence);
@@ -231,6 +246,8 @@ struct ComputeRasterizer::Impl {
               const TextureBindings& texture_bindings, const LutBindings& luts,
               GpuVertices vertices) {
         const auto& failure = vertices.failure;
+        costs.Begin(failure);costs.inputs+=push.extent[2];
+        auto admission_timer=costs.Measure(Cost::Prepare);
         // CodexAstraLocal TEST-ONLY LOG: Preserve actual resolved configuration,
         // ABI bytes and binding identities before they can change. Image pixels
         // are explicitly unavailable rather than reading unsafe GPU state during
@@ -301,15 +318,27 @@ struct ComputeRasterizer::Impl {
         if (!vertices.buffer || vertices.bytes > limits.maxStorageBufferRange ||
             vk::DeviceSize{vertices.first_word} * 4 + vk::DeviceSize{push.extent[2]} * 88 > vertices.bytes)
             throw VideoCore::ShaderRecoveryError("Calculated GPU vertex range invalid");
+        admission_timer.End();
         auto& program = Pipeline(config, user, profile, failure);
+        // CodexAstraLocal: Rectangle scheduling changes dispatch work only;
+        // retained absolute pixel/quad coordinates preserve all merger semantics.
+        const bool tiled=costs.config.Has(CalculatedFeatures::RasterTiles);
+        const auto dispatch=SelectComputeRasterDispatch(push.extent,push.rectangle,tiled);
+        costs.dispatch_groups+=u64{dispatch.groups[0]}*dispatch.groups[1];
+        costs.full_target_groups+=dispatch.full_groups;costs.active_pixels+=dispatch.active_pixels;
+        costs.triangle_pixel_pairs+=dispatch.active_pixels*(push.extent[2]/3);
+        auto prepare_timer=costs.Measure(Cost::Prepare);
         if (failure) failure->Stage(ComputeFailureStage::Allocation);
         EnsureScratch(depth_scratch, storage_bytes);
         EnsureScratch(color_scratch, color_bytes);
         const bool needs_transfer = buffered_color || packed_depth;
         if (needs_transfer) {
             EnsureScratch(transfer_scratch, transfer_bytes);
+            prepare_timer.End();
             PrepareTransfer(failure);
         }
+        prepare_timer.End();
+        auto upload_timer=costs.Measure(Cost::Prepare);
         // CodexAstraLocal: All potentially flushing allocation/compilation/Map
         // preparation precedes every descriptor stamp. Only uniforms cross the
         // host upload ring; guest vertices and native pixels remain on GPU.
@@ -326,9 +355,13 @@ struct ComputeRasterizer::Impl {
                         (shadow ? 128u : 0u) | (buffered_color ? 256u : 0u);
         push.reserved[0] = static_cast<u32>(color_format ? color_format->encoding : Encoding::Rgba8);
         push.reserved[1] = static_cast<u32>(depth_format ? depth_format->encoding : Encoding::D24);
+        push.reserved[2] = tiled?1u:0u;
         push.reserved[3] = static_cast<u32>(config.proctex.coord.Value());
         if (failure) {
             failure->Value("raster.push.native_abi", push);
+            failure->Value("raster.dispatch_groups.u32",dispatch.groups);
+            failure->Number("raster.full_target_groups",dispatch.full_groups);
+            failure->Number("raster.active_pixels",dispatch.active_pixels);
             failure->Number("raster.vertex_buffer_bytes", vertices.bytes);
             failure->Number("raster.vertex_first_word", vertices.first_word);
             failure->Stage(ComputeFailureStage::Descriptors);
@@ -385,7 +418,13 @@ struct ComputeRasterizer::Impl {
         // access after this owner uses an image, even when its format is packed.
         if (color) color->is_compute = true;
         if (depth) depth->is_compute = true;
-        scheduler.Record([failure, push, sets, pipeline = *program.pipeline, view_layout = *layout,
+        upload_timer.End();
+        auto enqueue_timer=costs.Measure(Cost::Enqueue);
+        // CodexAstraLocal TEST-ONLY LOG: Sample actual raster and packing command
+        // spans on the existing worker under the independent global profiler policy,
+        // not the Calculated diagnostic switch; remove after hardware qualification.
+        scheduler.Record([scheduler=&scheduler,dispatch,
+                          failure, push, sets, pipeline = *program.pipeline, view_layout = *layout,
                           depth_image, color_image, depth_buffer, raw_buffer, stencil,
                           depth_bytes, depth_offset, packed_depth, buffered_color,
                           transfer_sets, color_bpp, depth_bpp,
@@ -430,7 +469,10 @@ struct ComputeRasterizer::Impl {
                                        transfer_sets[set_index], {});
                 cmd.pushConstants(transfer_view, vk::ShaderStageFlagBits::eCompute, 0,
                                   sizeof(transfer_push), transfer_push.data());
+                const int sample=scheduler->BeginGpuWork(cmd,GpuWork::CalculatedTransfer,
+                    u64{transfer_push[0]}*bpp);
                 cmd.dispatch(x, (groups + x - 1) / x, 1);
+                scheduler->EndGpuWork(cmd,sample);
             };
             if (buffered_color) transform(expand, 0, color_bpp, false);
             if (packed_depth) transform(expand, 2, depth_bpp, false);
@@ -441,7 +483,10 @@ struct ComputeRasterizer::Impl {
             cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, view_layout, 0, sets, {});
             cmd.pushConstants(view_layout, vk::ShaderStageFlagBits::eCompute, 0, sizeof(push), &push);
             stage = ComputeFailureStage::RasterDispatch;
-            cmd.dispatch((push.extent[0] + 7) / 8, (push.extent[1] + 7) / 8, 1);
+            const int sample=scheduler->BeginGpuWork(cmd,GpuWork::CalculatedRaster,
+                dispatch.active_pixels*4);
+            cmd.dispatch(dispatch.groups[0],dispatch.groups[1],1);
+            scheduler->EndGpuWork(cmd,sample);
             if (buffered_color || packed_depth) {
                 MemoryBarrier(cmd, vk::PipelineStageFlagBits::eComputeShader,
                               vk::PipelineStageFlagBits::eComputeShader, compute_access, compute_access);
@@ -464,12 +509,15 @@ struct ComputeRasterizer::Impl {
                           vk::AccessFlagBits::eShaderWrite | vk::AccessFlagBits::eTransferWrite, memory);
             } catch (const vk::SystemError& error) {
                 if (failure) failure->Notice(stage, error.what(), error.code().value());
-                throw VideoCore::ShaderRecoveryError("Calculated raster command recording failed");
+                throw VideoCore::ShaderRecoveryError("Calculated raster command recording failed",error.code().value());
             } catch (const std::exception& error) {
                 if (failure) failure->Notice(stage, error.what());
                 throw;
             }
         });
+        enqueue_timer.End();
+        costs.outputs+=dispatch.active_pixels;costs.raw_bytes+=color_raw+depth_raw;
+        costs.output_bytes+=dispatch.active_pixels*4;costs.Complete(true);
         if (failure) failure->Number("raster_recorded_tick", scheduler.CurrentTick());
         program.tick = depth_scratch->tick = color_scratch->tick = scheduler.CurrentTick();
         if (needs_transfer) transfer_scratch->tick = scheduler.CurrentTick();
@@ -490,6 +538,8 @@ struct ComputeRasterizer::Impl {
     std::unique_ptr<Scratch> depth_scratch, color_scratch, transfer_scratch;
     std::vector<Program> programs;
     bool reported_creation_failure{};
+    // CodexAstraLocal: Immutable settings and bounded per-owner accounting.
+    ComputeFeatureProfile costs{"raster"};
 };
 
 ComputeRasterizer::ComputeRasterizer(const Instance& instance, Scheduler& scheduler,
@@ -506,12 +556,23 @@ void ComputeRasterizer::DrawGpu(Surface* color, Surface* depth, vk::ImageView in
         impl->Draw(color, depth, inactive_color_view, push, config, user, profile, uniforms, textures,
                    luts, vertices);
     } catch (const vk::SystemError& error) {
+        impl->costs.Complete(false);
         if (vertices.failure) {
             vertices.failure->Value("raster.fragment_uniforms.native_abi", uniforms);
             vertices.failure->Failure(error.what(), error.code().value());
         }
-        throw VideoCore::ShaderRecoveryError("Calculated raster preparation failed");
+        throw VideoCore::ShaderRecoveryError("Calculated raster preparation failed",error.code().value());
+    } catch (const VideoCore::ShaderRecoveryError& error) {
+        impl->costs.Complete(false);
+        // CodexAstraLocal: This shared pipeline owner can be the first reporter;
+        // preserve the normalized signed result before the outer draw catches it.
+        if (vertices.failure) {
+            vertices.failure->Value("raster.fragment_uniforms.native_abi", uniforms);
+            vertices.failure->Failure(error.what(), error.DriverResult());
+        }
+        throw;
     } catch (const std::exception& error) {
+        impl->costs.Complete(false);
         if (vertices.failure) {
             vertices.failure->Value("raster.fragment_uniforms.native_abi", uniforms);
             vertices.failure->Failure(error.what());

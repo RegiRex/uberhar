@@ -78,6 +78,9 @@ add_library(citra_common STATIC EXCLUDE_FROM_ALL
     setting_keys.h
     settings.cpp
     settings.h
+    uberhar_software_controls.h # CodexAstraLocal: Independent Software comparisons.
+    calculated_features.h # CodexAstraLocal: Shared feature/cache identity.
+    calculated_renderer_settings.h # CodexAstraLocal: Isolated persisted controls.
     slot_vector.h
     serialization/atomic.h
     serialization/boost_discrete_interval.hpp

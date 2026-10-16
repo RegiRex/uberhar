@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include <array>
+#include <chrono> // CodexAstraLocal: Bounded owner-cadence dependency diagnostics.
 #include <mutex>
 
 #include "common/math_util.h"
@@ -49,8 +51,11 @@ public:
     /// Begins a new renderpass with the provided render state.
     void BeginRendering(const RenderPass& new_pass, GpuWork kind = GpuWork::Utility);
 
-    /// Exits from any currently active renderpass instance
-    void EndRendering();
+    // CodexAstraLocal: Record the known next owner rather than infer a GPU
+    // bottleneck from a broad attachment barrier. Unknown callers stay Other.
+    enum class EndReason : u32 { Other, PassChange, Copy, Blit, Feedback, Count };
+    void EndRendering(EndReason reason = EndReason::Other);
+    void ReportDependencies(bool final = false) noexcept;
 
     /// Returns the renderpass associated with the color-depth format pair
     vk::RenderPass GetRenderpass(VideoCore::PixelFormat color, VideoCore::PixelFormat depth,
@@ -71,6 +76,13 @@ private:
     bool shadow_rendering{};
     RenderPass pass{};
     u32 num_draws{};
+    // CodexAstraLocal TEST-ONLY LOG: Owner-only cumulative dependency reasons;
+    // remove after precise barrier populations are qualified, never remove required visibility.
+    const bool dependency_diagnostics;
+    std::array<u64, static_cast<u32>(EndReason::Count)> dependency_ends{};
+    u64 dependency_attachments{}, dependency_shadow{}, dependency_sequence{};
+    u32 dependency_prescale{};
+    std::chrono::steady_clock::time_point dependency_report_time{std::chrono::steady_clock::now()};
 };
 
 } // namespace Vulkan

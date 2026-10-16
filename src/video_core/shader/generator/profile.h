@@ -47,6 +47,14 @@ struct Profile {
 
     u8 is_vulkan{};
 
+    // CodexAstraLocal: Session-frozen graphics code-generation controls belong
+    // to every exact profile/cache identity, never mutable per-draw Settings.
+    u8 fragment_liveness{true};
+    u8 fragment_alpha_never{true};
+    u8 fragment_memo{true};
+    u8 fragment_constant_tev{true};
+    u8 fragment_directional_precompute{true};
+
     auto operator<=>(const Profile&) const = default;
 };
 

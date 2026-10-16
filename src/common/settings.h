@@ -565,6 +565,22 @@ struct Values {
     SwitchableSetting<bool> uberhar_cpu_prefix_overlap{true, Keys::uberhar_cpu_prefix_overlap};
     SwitchableSetting<bool> uberhar_parallel_texture_decode{true, Keys::uberhar_parallel_texture_decode};
 
+    // CodexAstraLocal: Independent restart-only .50 controls are snapshotted by each owner;
+    // profiling stays optional so comparison runs do not pay GPU timestamp overhead.
+    SwitchableSetting<bool> uberhar_cpu_queue_expanded_seeds{false, Keys::uberhar_cpu_queue_expanded_seeds};
+    SwitchableSetting<bool> uberhar_cpu_adaptive_participation{true, Keys::uberhar_cpu_adaptive_participation};
+    SwitchableSetting<bool> uberhar_cpu_execution_census{false, Keys::uberhar_cpu_execution_census};
+    SwitchableSetting<bool> uberhar_feature_diagnostics{true, Keys::uberhar_feature_diagnostics};
+    SwitchableSetting<bool> uberhar_fragment_memo{true, Keys::uberhar_fragment_memo};
+    SwitchableSetting<bool> uberhar_constant_tev{true, Keys::uberhar_constant_tev};
+    SwitchableSetting<bool> uberhar_directional_precompute{true, Keys::uberhar_directional_precompute};
+    SwitchableSetting<bool> uberhar_lit_specialization{true, Keys::uberhar_lit_specialization};
+    SwitchableSetting<bool> uberhar_fragment_liveness{true, Keys::uberhar_fragment_liveness};
+    SwitchableSetting<bool> uberhar_alpha_never{true, Keys::uberhar_alpha_never};
+    SwitchableSetting<bool> uberhar_gpu_timestamps{false, Keys::uberhar_gpu_timestamps};
+    SwitchableSetting<bool> uberhar_image_reuse{true, Keys::uberhar_image_reuse};
+    SwitchableSetting<bool> uberhar_cpu_transfers{true, Keys::uberhar_cpu_transfers};
+
     // AstraEH: Profiles are applied after loading custom values, never written back over them.
     SwitchableSetting<UberharTestMode> uberhar_test_mode{UberharTestMode::Custom,
                                                          Keys::uberhar_test_mode};

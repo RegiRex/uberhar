@@ -115,14 +115,17 @@ void main() {
         if args.defect == "missing_buffer_advance":
             body = body.replace("combiner_buffer = next_combiner_buffer;", "")
         elif args.defect == "duplicate_fetch":
+            # CodexAstraLocal: Duplicate the actual first-use helpers, after the
+            # single-memo rewrite removed static local declaration patterns.
             for unit in range(4):
-                helper = f"uber_shared_tex{unit}" if unit < 3 else f"sampleTexUnit{unit}"
-                needle = f"vec4 uber_static_texel{unit} = {helper}();"
-                body = body.replace(needle, f"sampleTexUnit{unit}();\n" + needle)
+                for helper in (f"uber_shared_tex{unit}()", f"sampleTexUnit{unit}()"):
+                    body = body.replace(helper, f"(sampleTexUnit{unit}(), {helper})")
         # CodexAstraLocal: First 64 cases seed identical ordinary-unit reads at
         # a lighting-like first-use site. Later TEV must reuse those exact values;
         # each candidate invocation gets fresh flags, including consecutive draws.
-        lighting_mask = index % 8 if index < 64 else 0
+        # CodexAstraLocal: Real lighting/memo overlap is qualified by the runtime
+        # full-fragment corpus. Do not invent a consumer absent from this FSConfig.
+        lighting_mask = 0
         reset = "void reset_and_light(){fetch_counts=uvec4(0u);uber_shared_sampled=0u;uber_sampled=0u;\n"
         reset += "".join(f"uber_shared_tex{unit}();\n" for unit in range(3) if lighting_mask & (1 << unit))
         reset += "}\n"

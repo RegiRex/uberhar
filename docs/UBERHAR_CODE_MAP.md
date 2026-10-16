@@ -1,4 +1,38 @@
 <!-- AstraEH: Attribution index for the Uberhar implementation, tests, packaging and documentation. -->
+
+<!-- CodexAstraLocal: Map .50 runtime consumers and independent controls; qualification is tracked separately. -->
+## 0.1.50 candidate — remove redundant work and qualify individual paths
+
+- `uberhar_cpu_work_budget.h`, `uberhar_parallel_work.h`, and PICA CPU queue/
+  preparation owners retain hard shared permits and guest-visible order while
+  separating conservative standalone seeds from useful pending groups. Adaptive
+  discovery cadence and bounded comparable histories are independent of cache eviction.
+- `glsl_fs_shader_gen.*`, prepared-TEV transport, pipeline and shader caches connect
+  qualified constant-channel/directional proofs, ordinary sample reuse and bounded
+  lit-state admission to actual selected routes. Mutable proof values belong to
+  immutable draws, not unbounded shader-module identities.
+- `settings.*`, generated keys and frontend configuration expose independent
+  restart controls. `core.cpp` configures optional process-lifetime worker census
+  before pools; changing that census requires fully restarting the app.
+- `vk_work_profile.*` separates optional GPU query commands from operation counts;
+  `vk_scheduler.*` distinguishes recorder, submission readiness and actual fence waits.
+  Existing command boundaries, failure propagation and ownership remain unchanged.
+- `rasterizer_cache.*` and `uberhar_cpu_transfer_policy.h` attribute every transfer
+  eligibility stage while retaining authoritative RAM and alias/writer guards.
+  `vk_texture_runtime.*` arms snapshot epochs only when needed and reports on the
+  existing frame cadence. `vk_render_manager.*` records known next-consumer reasons
+  without weakening attachment visibility or old-pass metadata ownership.
+- Temporary diagnostics retain `CodexAstraLocal TEST-ONLY LOG` removal guidance.
+  Counters and sampled scopes describe actual work; none claims saved GPU time
+  or measured frame gains without a matched hardware comparison.
+- `sw_tev_preparation.h`, `sw_raster_work.h`, `sw_rasterizer.*`, and PICA input
+  provenance connect exact Software preparation, checked coverage and owned
+  constant groups to the real renderer. Live input checks remain mandatory.
+- `calculated_features.h`, compute generator/storage helpers and Vulkan compute
+  owners implement independent invocation state, clipping/dispatch changes and
+  a bounded structural driver retry. Effective feature identity excludes the
+  unqualified primary-color bit; model diagnostics do not enable GPU queries.
+
 # Uberhar code map
 
 <!-- CodexAstraLocal: Bind .46 work removal and error ownership to real consumers, with no claim of measured target speed. -->

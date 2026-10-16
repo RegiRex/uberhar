@@ -93,6 +93,15 @@ static const char* android_config_default_file_content = (BOOST_HANA_STRING(R"(
 )") DECLARE_KEY(cpu_clock_percentage) BOOST_HANA_STRING(R"(
 
 [Renderer]
+# CodexAstraLocal: Restart-only Software feature mask: TEV1, spans2, rows4, owned groups8.
+software_renderer_features = 15
+# CodexAstraLocal TEST-ONLY LOG: Independent optional sampled counters; remove after qualification.
+software_renderer_diagnostics = true
+# CodexAstraLocal: Restart-only Calculated mask: invocation1, inside2, lowering4,
+# flat-clip8, active-rectangle32. Primary-color16 remains unavailable.
+calculated_renderer_features = 47
+# CodexAstraLocal TEST-ONLY LOG: Remove sampled model counters after qualification; retain failures.
+calculated_renderer_diagnostics = true
 # Whether to render using OpenGL
 # CodexAstraLocal: 0: CPU Software (1x, GPU presentation only), 1: OpenGL ES, 2: Vulkan.
 )") DECLARE_KEY(graphics_api) BOOST_HANA_STRING(R"(
@@ -138,6 +147,45 @@ static const char* android_config_default_file_content = (BOOST_HANA_STRING(R"(
 # CodexAstraLocal: Parallel CPU texture decoding; independent comparison, restart required.
 # 0: Off, 1 (default): On
 )") DECLARE_KEY(uberhar_parallel_texture_decode) BOOST_HANA_STRING(R"(
+
+# CodexAstraLocal: Allow small standalone CPU batches; restart required. Default: 0.
+)") DECLARE_KEY(uberhar_cpu_queue_expanded_seeds) BOOST_HANA_STRING(R"(
+
+# CodexAstraLocal: Adapt CPU worker participation; restart required. Default: 1.
+)") DECLARE_KEY(uberhar_cpu_adaptive_participation) BOOST_HANA_STRING(R"(
+
+# CodexAstraLocal: Collect detailed CPU worker counts; restart required. Default: 0.
+)") DECLARE_KEY(uberhar_cpu_execution_census) BOOST_HANA_STRING(R"(
+
+# CodexAstraLocal: Collect optimization diagnostics; restart required. Default: 1.
+)") DECLARE_KEY(uberhar_feature_diagnostics) BOOST_HANA_STRING(R"(
+
+# CodexAstraLocal: Reuse fragment texture samples; restart required. Default: 1.
+)") DECLARE_KEY(uberhar_fragment_memo) BOOST_HANA_STRING(R"(
+
+# CodexAstraLocal: Prepare constant fragment results on CPU; restart required. Default: 1.
+)") DECLARE_KEY(uberhar_constant_tev) BOOST_HANA_STRING(R"(
+
+# CodexAstraLocal: Prepare directional lighting on CPU; restart required. Default: 1.
+)") DECLARE_KEY(uberhar_directional_precompute) BOOST_HANA_STRING(R"(
+
+# CodexAstraLocal: Prioritize costly lighting shaders; restart required. Default: 1.
+)") DECLARE_KEY(uberhar_lit_specialization) BOOST_HANA_STRING(R"(
+
+# CodexAstraLocal: Remove unused fragment work; restart required. Default: 1.
+)") DECLARE_KEY(uberhar_fragment_liveness) BOOST_HANA_STRING(R"(
+
+# CodexAstraLocal: Reject invisible alpha tests early; restart required. Default: 1.
+)") DECLARE_KEY(uberhar_alpha_never) BOOST_HANA_STRING(R"(
+
+# CodexAstraLocal: Collect GPU timing samples; restart required. Default: 0.
+)") DECLARE_KEY(uberhar_gpu_timestamps) BOOST_HANA_STRING(R"(
+
+# CodexAstraLocal: Reuse exact image copies; restart required. Default: 1.
+)") DECLARE_KEY(uberhar_image_reuse) BOOST_HANA_STRING(R"(
+
+# CodexAstraLocal: Copy current RAM on CPU; restart required. Default: 1.
+)") DECLARE_KEY(uberhar_cpu_transfers) BOOST_HANA_STRING(R"(
 
 
 # Whether to emit PICA fragment shader using SPIRV or GLSL (Vulkan only)

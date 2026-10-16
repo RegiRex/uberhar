@@ -56,6 +56,9 @@ def main():
     # CodexAstraLocal: Focus new grouping/publication/ready-prefix behavior in
     # local checks; the default CI invocation still runs every older control.
     parser.add_argument('--groups-only', action='store_true')
+    # CodexAstraLocal: One local .50 run covers changed seed/token/group guards;
+    # CI's default still retains the full existing output/failure campaign.
+    parser.add_argument('--features-only', action='store_true')
     # CodexAstraLocal: Resume an interrupted local gate without repeating passed
     # controls; default CI still checks the full positive population and defects.
     parser.add_argument('--start-variant')
@@ -292,6 +295,24 @@ inline struct { Setting uberhar_test_mode; } values;
         variants = [('positive', instrumented, header, 'groups', None)] + grouped_variants
     else:
         variants += grouped_variants
+    # CodexAstraLocal: Actual policy and token defects must fail their distinct
+    # assertions; positive scope compares real JIT/FIFO/88-byte output too.
+    feature_variants = [
+        ('ignored_seed_control', change(instrumented,
+            '(impl->policy.expanded_seeds && guaranteed_work >= GroupWorkUnit)',
+            '(guaranteed_work >= GroupWorkUnit)'), header, 'work', 'conservative seed admitted93'),
+        ('stale_accepted_token', change(instrumented,
+            'Impl::Matches(candidate, source.shader_lease, booleans)', 'true'),
+            header, 'groups', 'stale Boolean token reused'),
+    ]
+    variants += feature_variants
+    if args.features_only:
+        names = {'positive', 'missing_arithmetic_floor', 'input_count_as_misses',
+                 'missing_copy_floor', 'missing_pending_seed', 'missing_member_charge',
+                 'missing_group_bound', 'missing_submit_recheck', 'missing_progress_reservation',
+                 'ignored_seed_control', 'stale_accepted_token'}
+        variants = [v for v in variants if v[0] in names]
+        variants[0] = ('positive', instrumented, header, 'features', None)
     if args.positive_scope != 'all':
         variants[0] = ('positive', instrumented, header, args.positive_scope, None)
     if args.start_variant:
@@ -318,7 +339,12 @@ inline struct { Setting uberhar_test_mode; } values;
             run(name+'-link',flags+[selected_fixture,queue,*common,*link_flags,'-o',binary])
             result = json.loads(run(name+'-run',[*prefix,binary,selected],0 if expected is None else 1).stdout)
             if expected is None:
-                minimum = 0 if selected == 'work' else 4 if args.reset_only else 9 if args.groups_only else (1024 if args.a64 else 512)
+                # CodexAstraLocal: The focused .50 population has11actual byte
+                # comparisons. Full/normal coverage retains its larger minimum;
+                # a new selection must not masquerade as that complete corpus.
+                minimum = (11 if selected == 'features' else 0 if selected == 'work'
+                           else 4 if args.reset_only else 9 if args.groups_only
+                           else (1024 if args.a64 else 512))
                 if result.get('passed') is not True or result.get('comparisons',0) < minimum or result.get('checks',0) == 0:
                     raise RuntimeError('Incomplete positive population')
                 proof['result'] = result

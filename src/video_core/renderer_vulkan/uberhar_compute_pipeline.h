@@ -105,13 +105,28 @@ struct ComputePipelineObjects {
     vk::UniquePipeline pipeline;
 };
 
+// CodexAstraLocal: A guest owner may retry one compiler-policy variant only
+// after pipeline linking itself returned ErrorUnknown, never a module error,
+// device loss or allocation failure. Other compute owners remain terminal.
+struct ComputePipelineFailureInfo {
+    int result{};
+    bool pipeline_link{};
+    bool AllowsStructuralRetry(bool optimizer_disabled) const noexcept {
+        return optimizer_disabled && pipeline_link &&
+               result == static_cast<int>(vk::Result::eErrorUnknown);
+    }
+};
+
 // CodexAstraLocal: Vulkan-Hpp reports pipeline rejection as vk::SystemError,
 // which cannot unwind through the generated SVC caller. Normalize it here to
-// the existing terminal renderer error; no pipeline retry or graphics fallback.
+// the existing terminal renderer error. The guest owner alone may explicitly
+// retry another compute module; no graphics fallback exists at this boundary.
 inline ComputePipelineObjects CreateComputePipeline(
     const Instance& instance, vk::PipelineLayout layout, std::string_view source,
     std::span<const u32> code, bool disable_optimizer, ComputePipelineRole role, bool& reported,
-    ComputeFailurePacket* failure = nullptr) {
+    ComputeFailurePacket* failure = nullptr, ComputePipelineFailureInfo* outcome = nullptr) {
+    // CodexAstraLocal: No stale failed attempt can authorize a later retry.
+    if (outcome) *outcome = {};
     std::string_view operation = "create_shader_module";
     try {
         const auto device = instance.GetDevice();
@@ -124,6 +139,9 @@ inline ComputePipelineObjects CreateComputePipeline(
                     .pName = "main"}, .layout = layout}).value;
         return result;
     } catch (const vk::SystemError& error) {
+        // CodexAstraLocal: Return the exact failed operation/result to the
+        // bounded guest retry and preserve it in the normalized exception.
+        if (outcome) *outcome = {error.code().value(), operation == "create_compute_pipeline"};
         // CodexAstraLocal: The draw packet carries exact creation outcome along
         // with original inputs. The older module-only sidecar remains available
         // to initialization callers that do not yet have a guest draw.
@@ -142,7 +160,7 @@ inline ComputePipelineObjects CreateComputePipeline(
             "Calculated %.*s %.*s failed (VkResult %d): %.320s",
             static_cast<int>(name.size()), name.data(), static_cast<int>(operation.size()),
             operation.data(), error.code().value(), error.what());
-        throw VideoCore::ShaderRecoveryError(message.data());
+        throw VideoCore::ShaderRecoveryError(message.data(), error.code().value());
     }
 }
 

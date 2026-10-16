@@ -21,6 +21,20 @@ struct NativeInputAttribute {
     bool is_default{};
 };
 
+// CodexAstraLocal TEST-ONLY LOG: Fixed per-invocation actual-read provenance.
+// Each scalar is copied from the SAME local used by conversion, never reread
+// from guest RAM after a fault. Remove after Software source-input localization.
+struct NativeInputReadTrace {
+    struct Attribute {
+        PAddr address{};
+        u32 attribute{},input_register{},format{},elements{},size{};
+        bool is_default{};
+        std::array<u8,16> bytes;
+    };
+    std::array<Attribute,16> attributes;
+    u32 count{},guest_bytes{};
+};
+
 // AstraEH: Fuse attribute conversion and VS-register transport on validated no-GS
 // draws. Resolve bounded, pinned memory once per draw, never across draws/frames.
 // The caller supplies a conservative maximum index and retains mapped MemoryRefs.
@@ -111,8 +125,34 @@ public:
         }
     }
 
+    // CodexAstraLocal TEST-ONLY LOG: Select only for the armed Software
+    // diagnostic draw. Original Load/recipes and every other renderer stay
+    // unchanged. Descriptor fields come from the same qualified loader plan.
+    void LoadObserved(ShaderUnit& unit,const AttributeBuffer& defaults,u32 vertex,
+                      PAddr base,std::span<const NativeInputAttribute> descriptions,
+                      NativeInputReadTrace& trace) const {
+        trace.count=count;trace.guest_bytes=0;
+        for(u32 attr=0;attr<count;++attr) {
+            const auto& op=ops[attr];const auto& desc=descriptions[attr];
+            auto& record=trace.attributes[attr];
+            record.attribute=attr;record.input_register=op.reg;
+            record.is_default=op.is_default;
+            record.format=static_cast<u32>(desc.format);record.elements=desc.elements;
+            if(op.is_default) {
+                unit.input[op.reg]=defaults[op.attribute];record.address=0;record.size=16;
+                std::memcpy(record.bytes.data(),&unit.input[op.reg],16);
+            } else {
+                record.address=base+desc.offset+desc.stride*vertex;
+                record.size=desc.elements*FormatBytes(desc.format);trace.guest_bytes+=record.size;
+                TraceReader(desc.format,desc.elements)(unit.input[op.reg],
+                    op.data+static_cast<std::size_t>(op.stride)*vertex,record.bytes.data());
+            }
+        }
+    }
+
 private:
     using Read = void (*)(Common::Vec4<f24>&, const u8*);
+    using TraceRead = void (*)(Common::Vec4<f24>&, const u8*,u8*);
     struct Op {
         const u8* data{};
         Read read{};
@@ -126,15 +166,38 @@ private:
     // AstraEH: Select both format and element count once, allowing unrolled scalar
     // conversions without unaligned typed-pointer dereferences. This is not SIMD
     // approximation; use exactly the inherited f24::FromFloat32 operation.
-    template <typename T, u32 N>
-    static void Convert(Common::Vec4<f24>& out, const u8* data) {
-        for (u32 component = 0; component < N; ++component) {
+    // CodexAstraLocal: One actual read/conversion implementation; the ordinary
+    // specialization compiles out provenance and keeps its existing recipe ABI.
+    template <typename T,u32 N,bool Trace>
+    static void ConvertValues(Common::Vec4<f24>& out,const u8* data,u8* copied=nullptr) {
+        for(u32 component=0;component<N;++component) {
             T value;
-            std::memcpy(&value, data + component * sizeof(T), sizeof(T));
-            out[component] = f24::FromFloat32(value);
+            std::memcpy(&value,data+component*sizeof(T),sizeof(T));
+            if constexpr(Trace) std::memcpy(copied+component*sizeof(T),&value,sizeof(T));
+            out[component]=f24::FromFloat32(value);
         }
-        for (u32 component = N; component < 4; ++component)
-            out[component] = component == 3 ? f24::One() : f24::Zero();
+        for(u32 component=N;component<4;++component)
+            out[component]=component==3 ? f24::One() : f24::Zero();
+    }
+    template<typename T,u32 N>
+    static void Convert(Common::Vec4<f24>& out,const u8* data) { ConvertValues<T,N,false>(out,data); }
+    template<typename T,u32 N>
+    static void ConvertTraced(Common::Vec4<f24>& out,const u8* data,u8* bytes) {
+        ConvertValues<T,N,true>(out,data,bytes);
+    }
+    template<typename T> static TraceRead SizedTrace(u32 count) {
+        constexpr std::array<TraceRead,4> readers{ConvertTraced<T,1>,ConvertTraced<T,2>,
+                                                ConvertTraced<T,3>,ConvertTraced<T,4>};
+        return readers[count-1];
+    }
+    static TraceRead TraceReader(PipelineRegs::VertexAttributeFormat format,u32 count) {
+        switch(format) {
+        case PipelineRegs::VertexAttributeFormat::BYTE:return SizedTrace<s8>(count);
+        case PipelineRegs::VertexAttributeFormat::UBYTE:return SizedTrace<u8>(count);
+        case PipelineRegs::VertexAttributeFormat::SHORT:return SizedTrace<s16>(count);
+        case PipelineRegs::VertexAttributeFormat::FLOAT:return SizedTrace<f32>(count);
+        }
+        return nullptr; // Ready() has already rejected unsupported formats.
     }
     template <typename T>
     static Read SizedReader(u32 count) {

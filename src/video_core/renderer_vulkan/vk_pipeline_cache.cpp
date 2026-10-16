@@ -134,7 +134,10 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
       // CodexAstraLocal: PicaCore selects its CPU engine at construction. Freeze
       // the same choice for this renderer; never change a shader-map policy live.
       shader_jit_enabled{(CITRA_ARCH(x86_64) || CITRA_ARCH(arm64)) &&
-                         Settings::values.use_shader_jit.GetValue()} {
+                         Settings::values.use_shader_jit.GetValue()},
+      // CodexAstraLocal: Per-feature controls freeze at renderer construction.
+      feature_diagnostics{Settings::values.uberhar_feature_diagnostics.GetValue()},
+      lit_specialization{Settings::values.uberhar_lit_specialization.GetValue()} {
     // AstraPro: Diagnostics 19 adds bounded GPU promotion and rescued-input observations.
     // AstraEH: Record effective settings so a device log identifies the tested path.
     // AstraEH Log Line: bounded renderer diagnostics; see docs/UBERHAR_DIAGNOSTICS.md.
@@ -150,9 +153,7 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
         "host_pipeline_identity=true "
         "bridge_assembly=isolated_lists_strips_fans "
         "compiler_workers={} static_cpu_tev={} full_cpu_pso_attempts=64 static_cpu_pso_attempts=16 "
-        "glsl_graphics_liveness=true early_alpha_never=true shared_color_samples=true "
-        "constant_tev_substitution=false directional_precompute=false "
-        "arithmetic_evidence=sampled_inputs_only arithmetic_gpu_parity=unavailable "
+        "shader_controls=reported_separately arithmetic_scope=generic_static "
         "unchanged_shader_domains=calculated_opengl_custom_spirv_generator",
         hybrid_tev, force_tev, Settings::values.async_shader_compilation.GetValue(),
         Settings::values.spirv_shader_gen.GetValue(), cpu_vertex_bridge, GLSL::DynamicTevAbiVersion,
@@ -189,7 +190,23 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
         .vk_disable_spirv_optimizer = Settings::values.disable_spirv_optimizer.GetValue(),
         .vk_use_spirv_generator = Settings::values.spirv_shader_gen.GetValue(),
         .is_vulkan = true,
+        // CodexAstraLocal: Profile equality and generated-source fingerprints
+        // include every frozen shader control, including independent OFF paths.
+        .fragment_liveness = Settings::values.uberhar_fragment_liveness.GetValue(),
+        .fragment_alpha_never = Settings::values.uberhar_alpha_never.GetValue(),
+        .fragment_memo = Settings::values.uberhar_fragment_memo.GetValue(),
+        .fragment_constant_tev = Settings::values.uberhar_constant_tev.GetValue(),
+        .fragment_directional_precompute = Settings::values.uberhar_directional_precompute.GetValue(),
     };
+    // CodexAstraLocal TEST-ONLY LOG: One effective-session record; remove after
+    // independent shader feature qualification, retaining permanent failures.
+    LOG_INFO(Render_Vulkan, "Uberhar shader controls: schema=2 liveness={} alpha_never={} "
+        "fragment_memo={} constant_tev={} directional_precompute={} lit_specialization={} "
+        "diagnostics={} constant_domain=endpoint_only direction_domain=positive_z_unit "
+        "arithmetic_routes=generic_static transport_abi={}",
+        profile.fragment_liveness, profile.fragment_alpha_never, profile.fragment_memo,
+        profile.fragment_constant_tev, profile.fragment_directional_precompute,
+        lit_specialization, feature_diagnostics, GLSL::DynamicTevAbiVersion);
 
     const auto& traits = instance.GetAllTraits();
     size_t i = 0;
@@ -763,6 +780,9 @@ bool PipelineCache::BindPipeline(PipelineInfo& info, bool wait_built,
     // AstraEH: Copy TEV registers into the queued command; later draws may change them.
     scheduler.Record([this, is_dirty, constants_dirty, pipeline, using_fallback, static_tev_cpu, alternative,
                       prepared_gpu_route,
+                      fragment_sample = pending_fragment_evidence,
+                      fragment_cacheable = pending_fragment_cacheable,
+                      recovery_glsl = pending_recovery_glsl,
                       draw_id = draw_requests, alternative_was_pending, constants = tev_constants,
                       current_dynamic = current_info.dynamic_info, dynamic = info.dynamic_info,
                       descriptor_sets = bound_descriptor_sets, offsets = offsets,
@@ -882,6 +902,43 @@ bool PipelineCache::BindPipeline(PipelineInfo& info, bool wait_built,
             SelectUsablePipeline(pipeline_completion, *pipeline, alternative, prefer_fallback);
         const bool selected_fallback = using_fallback || selected == alternative;
         scheduler.RecordGpuRoute(selected_fallback ? 0U : prepared_gpu_route);
+        // CodexAstraLocal TEST-ONLY LOG: Attribute to the actual final route on
+        // its sole worker. Sparse metadata owns original draw inputs; remove
+        // after independent hardware qualification, never infer pixel savings.
+        if (feature_diagnostics) {
+            const u32 route = selected_fallback ? 0U : prepared_gpu_route;
+            auto& selected_work = fragment_selected[route];
+            ++selected_work.draws;
+            if (fragment_sample && fragment_cacheable && (route != 3 || recovery_glsl)) {
+                const auto& work = *fragment_sample;
+                ++selected_work.samples;
+                selected_work.alpha_never += work.alpha_never &&
+                    (route >= 2 || profile.fragment_alpha_never);
+                if (!work.alpha_never) {
+                    if (profile.fragment_liveness) {
+                        selected_work.dead_rgb += work.dead_rgb;
+                        selected_work.dead_alpha += work.dead_alpha;
+                        selected_work.dead_lighting += work.lighting_dead;
+                    }
+                    if (profile.fragment_memo) selected_work.memo_units += std::popcount(work.memo_mask);
+                    u32 rgb = 0, alpha = 0, directional = 0;
+                    if (route < 2) {
+                        for (const auto& stage : constants.stages) {
+                            rgb += (stage.operations & GLSL::TevConstantRgb) != 0;
+                            alpha += (stage.operations & GLSL::TevConstantAlpha) != 0;
+                        }
+                        directional = std::popcount(constants.lighting_luts_hi >> 24);
+                        selected_work.constant_rgb += rgb;
+                        selected_work.constant_alpha += alpha;
+                        selected_work.directional_slots += directional;
+                    }
+                    selected_work.constant_refused_rgb += work.constant_rgb > rgb ? work.constant_rgb - rgb : 0;
+                    selected_work.constant_refused_alpha += work.constant_alpha > alpha ? work.constant_alpha - alpha : 0;
+                    const u32 eligible_directional = std::popcount(work.directional_slots);
+                    selected_work.directional_refused += eligible_directional > directional ? eligible_directional - directional : 0;
+                }
+            }
+        }
         if (selected == alternative && alternative_was_pending && !prefer_fallback) {
             late_fallback_draws.fetch_add(1, std::memory_order::relaxed);
         }
@@ -1184,6 +1241,23 @@ GraphicsPipeline* PipelineCache::PrepareReadyCpuFragment(
         // maintenance never waits and never replaces the already selected draw.
         const auto advance = [&](Candidate& candidate) noexcept {
             if (candidate.slot) return;
+            // CodexAstraLocal: A ready lookup above always wins. New cheap
+            // demand cannot consume the reserved live-light portion; retain
+            // existing exact probation and all compiler/GPU retirement guards.
+            const auto tier = candidate.partial ? 1U : 0U;
+            const bool live_lit = virtual_fs_config->lighting.enable &&
+                                 (tev_constants.buffer_mask & GLSL::TevLiveLighting);
+            if (lit_specialization && !live_lit) {
+                std::size_t cheap_owned = 0;
+                for (const auto& slot : ready_cpu_bank->AllSlots())
+                    cheap_owned += slot.observation && !slot.lit &&
+                                   CpuFragmentPartitions::Index(*slot.observation) == tier;
+                if (!StaticTevPolicy::AllowCheapAdmission(cheap_owned, fragment_cheap_attempts[tier],
+                        CpuFragmentPartitions::Owners(tier), CpuFragmentPartitions::Attempts(tier))) {
+                    ++fragment_lit_reserved_refusals;
+                    return;
+                }
+            }
             // CodexAstraLocal: Keep terminal misses cheap: tier identity is
             // already known, so reject its budget before copying state/profile.
             if (!ready_cpu_bank->AcceptingDemand(ready_optional_attempts, candidate.partial ? 1 : 0)) {
@@ -1221,9 +1295,13 @@ GraphicsPipeline* PipelineCache::PrepareReadyCpuFragment(
                     return;
                 }
                 auto* slot = ready_cpu_bank->Reserve(observed_hash, observation,
-                    virtual_fs_config->lighting.enable.Value() != 0, ready_vertex_pipelines.size(),
+                    live_lit, ready_vertex_pipelines.size(),
                     ready_optional_attempts, pending);
                 if (!slot) { ++ready_cpu_deferred; return; }
+                // CodexAstraLocal: Charge attempts before throwing allocation;
+                // retained failures cannot refund a protected work allowance.
+                if (live_lit) ++fragment_lit_admissions;
+                else { ++fragment_cheap_admissions; ++fragment_cheap_attempts[tier]; }
                 // CodexAstraLocal: Both eight-owner partitions charge their own
                 // lifetime attempts before allocation. Failed/retiring owners
                 // remain charged until the inherited three-way drain releases.
@@ -1449,15 +1527,35 @@ void PipelineCache::UseFragmentShader(const Pica::RegsInternal& regs,
     // CodexAstraLocal: A new draw or GPU-to-CPU retry starts a fresh transport
     // obligation; it can never inherit a pending original config from its predecessor.
     pending_tev_transport.reset();
+    // CodexAstraLocal TEST-ONLY LOG: Sample complete owner preparation, including
+    // early route refusals and live-value capture. Remove after attribution is
+    // qualified; OFF performs no new clock read or evidence analysis.
+    pending_fragment_evidence.reset();
+    const bool sample_fragment = feature_diagnostics && ((fragment_evidence.attempts++ & 1023U) == 0);
+    const auto preparation_start = sample_fragment ? std::chrono::steady_clock::now() :
+                                                   std::chrono::steady_clock::time_point{};
+    SCOPE_EXIT({
+        if (sample_fragment) {
+            const u64 ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now() - preparation_start).count();
+            ++fragment_prepare_samples;
+            fragment_prepare_ns += ns;
+            fragment_prepare_max_ns = std::max(fragment_prepare_max_ns, ns);
+        }
+    });
 
     // CodexAstraLocal: Decode guest fragment registers once for this draw. The
     // generic family mutates its TEV fields below, so keep the original value
     // for exact specialization/recovery instead of repeating all light, texture
     // and combiner register decoding on the serial draw owner.
     const FSConfig fragment_config{regs};
+    // CodexAstraLocal: Optional shaders are GLSL; recovery can be standalone
+    // SPIR-V or custom code outside this optimization domain.
+    pending_fragment_cacheable = user.IsCacheable();
+    pending_recovery_glsl = !profile.vk_use_spirv_generator || fragment_config.UsesSpirvIncompatibleConfig();
     // CodexAstraLocal TEST-ONLY LOG: Bound CPU work to one in 1024 preparation
     // attempts. Failure to allocate/format optional evidence cannot affect a draw.
-    if ((fragment_evidence.attempts++ & 1023U) == 0) {
+    if (sample_fragment) {
         try { SampleFragmentEvidence(regs, fragment_config, preparing_ready_gpu); }
         catch (...) { ++fragment_evidence.failures; }
     }
@@ -1480,6 +1578,10 @@ void PipelineCache::UseFragmentShader(const Pica::RegsInternal& regs,
             // CodexAstraLocal: Preserve the exact original fields before family
             // canonicalization. Defer their expansion until an actual consumer.
             pending_tev_transport = fragment_config;
+            // CodexAstraLocal: FSConfig deliberately excludes numeric uniforms.
+            // Capture consumed live register bytes before the next draw changes
+            // them; no pointer or later guest-memory reread enters the cache.
+            pending_fragment_values = GLSL::CaptureFragmentRuntimeValues(regs, fragment_config, profile);
         } else if (tev_supported) {
             // AstraPro: This attempt can use only a ready specialized GPU FS or
             // return for a complete CPU draw. No generic consumer sees old data;
@@ -1516,15 +1618,27 @@ void PipelineCache::UseFragmentShader(const Pica::RegsInternal& regs,
 // readiness checks or invalidation of the worker's last uploaded constants.
 void PipelineCache::EnsureDynamicTevState() {
     if (!pending_tev_transport) return;
-    tev_constants = dynamic_tev_preparation.Get(*pending_tev_transport, profile);
+    // CodexAstraLocal TEST-ONLY LOG: Pure runtime preparation/cache cost is
+    // sampled separately from the surrounding owner path, never added as GPU
+    // savings. Remove after cache/certificate cost qualification.
+    const bool sample = pending_fragment_evidence.has_value();
+    const auto start = sample ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+    tev_constants = dynamic_tev_preparation.Get(*pending_tev_transport, profile, pending_fragment_values);
+    if (sample) {
+        const u64 ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now() - start).count();
+        ++fragment_runtime_samples;
+        fragment_runtime_ns += ns;
+        fragment_runtime_max_ns = std::max(fragment_runtime_max_ns, ns);
+    }
     pending_tev_transport.reset();
     ++tev_transport_prepared;
 }
 
 // CodexAstraLocal TEST-ONLY LOG: Preserve enough original register/value words
 // to replay candidate arithmetic offline. This records inputs, not a GPU answer;
-// CPU constant folding and normalized directional uniforms remain disabled until
-// exact GPU parity is established. Remove after that decision/owner qualification.
+// Selection is reported separately after qualification and actual route choice.
+// Remove after arithmetic inputs and hardware qualification are established.
 void PipelineCache::SampleFragmentEvidence(const Pica::RegsInternal& regs,
                                           const FSConfig& config, bool preparing_gpu) {
     const auto begin = std::chrono::steady_clock::now();
@@ -1535,6 +1649,7 @@ void PipelineCache::SampleFragmentEvidence(const Pica::RegsInternal& regs,
         fragment_evidence.max_host_ns = std::max(fragment_evidence.max_host_ns, ns);
     });
     const auto work = GLSL::AnalyzeFragmentWork(config, profile);
+    pending_fragment_evidence = work;
     auto& e = fragment_evidence;
     ++e.samples;
     e.dead_rgb += work.dead_rgb;
@@ -1552,7 +1667,7 @@ void PipelineCache::SampleFragmentEvidence(const Pica::RegsInternal& regs,
             LOG_INFO(Render_Vulkan,
                 "Uberhar arithmetic input: schema=1 session={} title={:016X} kind=constant_tev "
                 "capture={} attempt={} preparing_gpu={} fs={:016X} buffer_mask={} buffer_rgba={:08X} "
-                "live_constant_rgb={} live_constant_alpha={} cpu_substitution=false gpu_result=unavailable "
+                "live_constant_rgb={} live_constant_alpha={} runtime_selection=separate gpu_result=unavailable "
                 "stage0=generated_glsl scope=sampled_preparation_attempt max_captures=4",
                 cache_session, GetProgramID(), id, e.attempts, preparing_gpu, config.Hash(),
                 config.texture.combiner_buffer_input.Value(), regs.texturing.tev_combiner_buffer_color.raw,
@@ -1585,7 +1700,7 @@ void PipelineCache::SampleFragmentEvidence(const Pica::RegsInternal& regs,
                 "Uberhar arithmetic direction: schema=1 session={} title={:016X} capture={} "
                 "attempt={} preparing_gpu={} fs={:016X} slot={} source={} controls={:08X} "
                 "position_raw=[{:04X},{:04X},{:04X}] position_f32=[{:08X},{:08X},{:08X}] "
-                "attenuation_raw=[{:08X},{:08X}] finite={} cpu_substitution=false "
+                "attenuation_raw=[{:08X},{:08X}] finite={} runtime_selection=separate "
                 "gpu_normalized=unavailable gpu_lut_index=unavailable max_captures=4 "
                 "scope=sampled_preparation_attempt",
                 cache_session, GetProgramID(), direction_id, e.attempts, preparing_gpu, config.Hash(),
@@ -1606,7 +1721,9 @@ GraphicsPipeline* PipelineCache::GetTevFallback(const PipelineInfo& info, bool c
     constexpr std::size_t MaxPipelines = 1024;
     // AstraEH: Reuse pure preparation only after complete raw/native input equality.
     // A miss still observes every census dimension before pipeline admission.
-    const bool sample = (tev_preparation.Stats().requests & 1023U) == 0;
+    // CodexAstraLocal: Diagnostic OFF also removes the inherited sampled
+    // structural-cache clocks; functional preparation/reuse remains enabled.
+    const bool sample = feature_diagnostics && (tev_preparation.Stats().requests & 1023U) == 0;
     const auto sample_start =
         sample ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
     const auto prepared = tev_preparation.Get(*tev_family_config, info);
@@ -1952,6 +2069,15 @@ void PipelineCache::ClearTevFallbacks() {
     dynamic_tev_preparation.Reset();
     // CodexAstraLocal TEST-ONLY LOG: Never carry arithmetic samples/caps across titles.
     fragment_evidence = {};
+    // CodexAstraLocal: Both owners were drained above; no old title's route or
+    // numeric-input certificate survives a cache-session transition.
+    fragment_selected = {};
+    pending_fragment_evidence.reset();
+    pending_fragment_values = {};
+    fragment_prepare_samples = fragment_prepare_ns = fragment_prepare_max_ns = 0;
+    fragment_runtime_samples = fragment_runtime_ns = fragment_runtime_max_ns = 0;
+    fragment_cheap_attempts = {};
+    fragment_lit_reserved_refusals = fragment_lit_admissions = fragment_cheap_admissions = 0;
     tev_prepare_hit_samples = tev_prepare_miss_samples = 0;
     tev_prepare_hit_ns = tev_prepare_miss_ns = 0;
     tev_census_capped = false;
@@ -1973,6 +2099,27 @@ void PipelineCache::ReportTevPushStats(const char* kind) {
                               ? Common::Log::Delivery::Diagnostic
                               : Common::Log::Delivery::Reliable;
     const auto& stats = tev_push_constants.Stats();
+    // CodexAstraLocal TEST-ONLY LOG: Reliable finals and queued progress read
+    // worker-owned actual-route counters without cross-thread atomics. Remove
+    // after feature qualification; samples are draws, never fragment counts.
+    if (feature_diagnostics) {
+        for (u32 route = 0; route < fragment_selected.size(); ++route) {
+            const auto& work = fragment_selected[route];
+            LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
+                "Uberhar fragment selected {}: schema=2 session={} title={:016X} route={} "
+                "draws={} samples={} period_preparations=1024 dead_rgb={} dead_alpha={} "
+                "dead_lighting={} alpha_never={} memo_units={} constant_rgb={} constant_alpha={} "
+                "canonical_direction_slots={} constant_unqualified_rgb={} constant_unqualified_alpha={} "
+                "direction_unqualified_slots={} route_names=generic,static,full,recovery,gpu_full "
+                "features=1,6,7,11,12 arithmetic_routes=generic_static weighting=sampled_draws "
+                "refusal=nonendpoint_or_disabled_or_route direction_refusal=noncanonical_or_disabled_or_route "
+                "scope=current_title gpu_cost=unmeasured",
+                kind, cache_session, GetProgramID(), route, work.draws, work.samples,
+                work.dead_rgb, work.dead_alpha, work.dead_lighting, work.alpha_never, work.memo_units,
+                work.constant_rgb, work.constant_alpha, work.directional_slots,
+                work.constant_refused_rgb, work.constant_refused_alpha, work.directional_refused);
+        }
+    }
     // AstraEH: Same five-second/final cadence; completed worker commands only.
     // CodexAstraUlt Log Line: Replace AstraEH's blocking progress enqueue; totals stay reliable.
     LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
@@ -1993,18 +2140,37 @@ void PipelineCache::ReportUberharStats(const char* kind) {
     // overhead, never actual fragment invocations or measured GPU savings. Remove
     // after liveness/sample-reuse qualification and the arithmetic decision.
     const auto& e = fragment_evidence;
-    LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
+    if (feature_diagnostics) LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
         "Uberhar fragment evidence {}: schema=1 session={} title={:016X} "
         "attempts={} samples={} period_attempts=1024 dead_rgb={} dead_alpha={} dead_lighting={} "
         "alpha_never={} lighting_tev_sample_overlap={} constant_rgb={} constant_alpha={} "
         "directional_slots={} zero_direction={} nonfinite_direction={} constant_captures={} "
         "directional_captures={} capture_capped={} capture_failures={} host_ms={:.3f} host_max_ms={:.3f} "
         "scope=sampled_preparation_attempts weighting=not_pixels gpu_cost=unknown "
-        "constant_substitution=false directional_substitution=false arithmetic_gpu_parity=unavailable",
+        "runtime_substitutions=separate_final_route_record arithmetic_domain=endpoints_canonical_direction",
         kind, cache_session, GetProgramID(), e.attempts, e.samples, e.dead_rgb, e.dead_alpha,
         e.dead_lighting, e.alpha_never, e.sample_overlap, e.constant_rgb, e.constant_alpha,
         e.directional_slots, e.zero_direction, e.nonfinite_direction, e.constant_captures,
         e.directional_captures, e.capture_capped, e.failures, e.host_ns / 1e6, e.max_host_ns / 1e6);
+    // CodexAstraLocal TEST-ONLY LOG: Whole owner and pure-runtime intervals can
+    // overlap; never add them or extrapolate a saved-time counterfactual. Remove
+    // after feature cost qualification. Diagnostic OFF has zero sample clocks.
+    if (feature_diagnostics) {
+        LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
+            "Uberhar shader preparation {}: schema=2 session={} title={:016X} "
+            "owner_samples={} owner_ns={} owner_max_ns={} runtime_samples={} runtime_ns={} runtime_max_ns={} "
+            "arithmetic_requests={} arithmetic_hits={} arithmetic_builds={} "
+            "lit_reservation={} reserved_refusals={} lit_admissions={} cheap_admissions={} "
+            "cheap_full_attempts={} cheap_static_attempts={} "
+            "features=1,6,7,11,12,lit_admission scope=current_title timing=sampled_owner_wall "
+            "owner_includes_early_refusals=true intervals_may_overlap=true",
+            kind, cache_session, GetProgramID(), fragment_prepare_samples, fragment_prepare_ns,
+            fragment_prepare_max_ns, fragment_runtime_samples, fragment_runtime_ns, fragment_runtime_max_ns,
+            dynamic_tev_preparation.Stats().requests, dynamic_tev_preparation.Stats().hits,
+            dynamic_tev_preparation.Stats().builds, lit_specialization, fragment_lit_reserved_refusals,
+            fragment_lit_admissions, fragment_cheap_admissions,
+            fragment_cheap_attempts[0], fragment_cheap_attempts[1]);
+    }
     // CodexAstraLocal TEST-ONLY LOG: Remove after descriptor reuse is qualified
     // on hardware; these are work counts, not CPU time or speedup estimates.
     LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,

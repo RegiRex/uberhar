@@ -25,6 +25,21 @@ enum class BooleanSetting(
     UBERHAR_NATIVE_FULL_FRAGMENTS(SettingKeys.uberhar_native_full_fragments(), Settings.SECTION_RENDERER, true),
     UBERHAR_CPU_PREFIX_OVERLAP(SettingKeys.uberhar_cpu_prefix_overlap(), Settings.SECTION_RENDERER, true),
     UBERHAR_PARALLEL_TEXTURE_DECODE(SettingKeys.uberhar_parallel_texture_decode(), Settings.SECTION_RENDERER, true),
+    // CodexAstraLocal: Independent restart-only .50 controls are snapshotted by each owner;
+    // profiling stays optional so comparison runs do not pay GPU timestamp overhead.
+    UBERHAR_CPU_QUEUE_EXPANDED_SEEDS(SettingKeys.uberhar_cpu_queue_expanded_seeds(), Settings.SECTION_RENDERER, false),
+    UBERHAR_CPU_ADAPTIVE_PARTICIPATION(SettingKeys.uberhar_cpu_adaptive_participation(), Settings.SECTION_RENDERER, true),
+    UBERHAR_CPU_EXECUTION_CENSUS(SettingKeys.uberhar_cpu_execution_census(), Settings.SECTION_RENDERER, false),
+    UBERHAR_FEATURE_DIAGNOSTICS(SettingKeys.uberhar_feature_diagnostics(), Settings.SECTION_RENDERER, true),
+    UBERHAR_FRAGMENT_MEMO(SettingKeys.uberhar_fragment_memo(), Settings.SECTION_RENDERER, true),
+    UBERHAR_CONSTANT_TEV(SettingKeys.uberhar_constant_tev(), Settings.SECTION_RENDERER, true),
+    UBERHAR_DIRECTIONAL_PRECOMPUTE(SettingKeys.uberhar_directional_precompute(), Settings.SECTION_RENDERER, true),
+    UBERHAR_LIT_SPECIALIZATION(SettingKeys.uberhar_lit_specialization(), Settings.SECTION_RENDERER, true),
+    UBERHAR_FRAGMENT_LIVENESS(SettingKeys.uberhar_fragment_liveness(), Settings.SECTION_RENDERER, true),
+    UBERHAR_ALPHA_NEVER(SettingKeys.uberhar_alpha_never(), Settings.SECTION_RENDERER, true),
+    UBERHAR_GPU_TIMESTAMPS(SettingKeys.uberhar_gpu_timestamps(), Settings.SECTION_RENDERER, false),
+    UBERHAR_IMAGE_REUSE(SettingKeys.uberhar_image_reuse(), Settings.SECTION_RENDERER, true),
+    UBERHAR_CPU_TRANSFERS(SettingKeys.uberhar_cpu_transfers(), Settings.SECTION_RENDERER, true),
 
     DISABLE_SPIRV_OPTIMIZER(SettingKeys.disable_spirv_optimizer(), Settings.SECTION_RENDERER, true),
     PLUGIN_LOADER(SettingKeys.plugin_loader(), Settings.SECTION_SYSTEM, false),

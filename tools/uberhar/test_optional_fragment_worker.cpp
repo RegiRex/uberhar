@@ -104,6 +104,8 @@ void FmtLogMessageImpl(Class, Level, const char*, unsigned, const char*, fmt::st
 #define LOG_ERROR(...) ::Probe::Log()
 
 namespace Pica::Shader::Generator::GLSL {
+// CodexAstraLocal: Pure liveness is production code; only the compiler is modeled.
+#include "lighting-demand.inc"
 // CodexAstraLocal: Record the immutable generator inputs before returning a tiny
 // sentinel source. The independent selection/ABI suites exercise real generation.
 std::string GenerateFragmentShader(const FSConfig& config, const UserConfig&,
@@ -169,6 +171,9 @@ struct Parent {
     Queue* ready_vertex_worker=&shader_workers;
     Shader* warming_ready_vertex{};
     bool allow_static_cpu_tev=true;
+    // CodexAstraLocal: Worker failure controls retain original admission; finite
+    // priority/capacity is exercised separately by the ready-fragment fixture.
+    bool lit_specialization=false, feature_diagnostics=false;
 };
 class ShaderDiskCache {
 public:

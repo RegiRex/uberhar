@@ -82,7 +82,11 @@ namespace Settings {
 enum class UberharTestMode { Custom, Native, Automatic, ComboGeneric, Compute, Software };
 struct Setting { UberharTestMode value{UberharTestMode::Native};
     UberharTestMode GetValue() const { return value; } };
-inline struct Values { Setting uberhar_test_mode; } values;
+// CodexAstraLocal: Boundary settings mirror production controls; tests explicitly
+// request timestamps where query behavior is under examination.
+struct BoolSetting { bool value{true}; bool GetValue() const { return value; } };
+inline struct Values { Setting uberhar_test_mode; BoolSetting uberhar_feature_diagnostics;
+    BoolSetting uberhar_gpu_timestamps; } values;
 inline bool UsesReadyGpuVertices(UberharTestMode mode) {
     return mode==UberharTestMode::Automatic || mode==UberharTestMode::ComboGeneric;
 }
@@ -175,6 +179,8 @@ void Check(bool value,const char* reason) {
 template<class F> void Case(const char* name,F function) {
     current=name; ++cases;
     Settings::values.uberhar_test_mode.value=Settings::UberharTestMode::Native;
+    Settings::values.uberhar_feature_diagnostics.value=true;
+    Settings::values.uberhar_gpu_timestamps.value=true;
     Model::log_throws=false; Model::deliveries.clear(); function();
 }
 auto& Stats(WorkProfile& p,GpuWork kind) { return p.totals[static_cast<u32>(kind)]; }
@@ -196,6 +202,22 @@ try {
           Check(p.Begin(command,GpuWork::Copy,64)==-1 && Stats(p,GpuWork::Copy).calls==1,
                 "unsupported counts work without inventing timing");
           Check(Stats(p,GpuWork::Copy).samples==0 && b.queries==0,"unsupported has no sample"); }
+    });
+    // CodexAstraLocal: Timestamp-off must retain truthful counts while issuing
+    // no query commands; diagnostic-off is inert even if timestamps are requested.
+    Case("independent diagnostic controls",[] {
+        Model::Backend b; Vulkan::Instance instance{b}; vk::CommandBuffer command{&b};
+        Settings::values.uberhar_gpu_timestamps.value=false;
+        { WorkProfile p{instance}; Check(p.Enabled() && !p.pool,"counts remain enabled");
+          p.BeginPass(command,GpuWork::Graphics); p.Route(0); p.EndPass(command);
+          p.Submitted(1,1); p.Poll(1);
+          Check(Stats(p,GpuWork::Graphics).calls==1 && p.routes[0]==1,"counts retained");
+          Check(b.creates==0 && b.resets==0 && b.timestamps==0 && b.queries==0,"no GPU observer commands"); }
+        Settings::values.uberhar_gpu_timestamps.value=true;
+        Settings::values.uberhar_feature_diagnostics.value=false;
+        { WorkProfile p{instance}; Check(!p.Enabled(),"diagnostic off is effective");
+          p.BeginPass(command,GpuWork::Graphics); p.EndPass(command); p.Submitted(1,1);
+          Check(Stats(p,GpuWork::Graphics).calls==0 && b.creates==0,"disabled collection inert"); }
     });
     Case("submission and original tick",[] {
         Model::Backend b; Vulkan::Instance instance{b}; WorkProfile p{instance}; vk::CommandBuffer command{&b};
@@ -305,11 +327,11 @@ try {
         std::thread a{add},c{add}; a.join(); c.join();
         Check(p.wait_calls[0]==200 && p.waits[0]==1400,"cross-thread host totals are atomic");
         Model::deliveries.clear(); p.Report(); Check(Model::deliveries.empty(),"cadence suppresses immediate report");
-        p.report_time-=std::chrono::seconds(11); p.Report();
-        Check(Model::deliveries.size()==12 && std::ranges::all_of(Model::deliveries,[](int x){return x==2;}),
+        p.report_time-=std::chrono::seconds(11); p.report_prescale=63; p.Report();
+        Check(Model::deliveries.size()==static_cast<unsigned>(GpuWork::Count)+static_cast<unsigned>(HostWait::Count)+1 && std::ranges::all_of(Model::deliveries,[](int x){return x==2;}),
               "periodic delivery is nonblocking diagnostic");
         Model::deliveries.clear(); p.Report(true);
-        Check(Model::deliveries.size()==12 && std::ranges::all_of(Model::deliveries,[](int x){return x==1;}),
+        Check(Model::deliveries.size()==static_cast<unsigned>(GpuWork::Count)+static_cast<unsigned>(HostWait::Count)+1 && std::ranges::all_of(Model::deliveries,[](int x){return x==1;}),
               "final delivery is retained reliable");
     });
     Case("initialization and final log failures",[] {

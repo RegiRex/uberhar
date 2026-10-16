@@ -7,6 +7,7 @@
 #include "video_core/renderer_vulkan/uberhar_dynamic_tev_preparation.h"
 #include "common/logging/log.h"
 #include "common/settings.h"
+#include "common/scope_exit.h" // CodexAstraLocal: Execute the complete sampled owner preparation.
 #include "common/uberhar_activity.h"
 #include "video_core/shader/generator/shader_gen.h"
 #include <bit>
@@ -347,6 +348,9 @@ public:
   // CodexAstraLocal: Exercise CPU full-fragment permission independently from
   // the original GPU-fragment/vertex capabilities in extracted production code.
   bool allow_full_cpu_fragments = true;
+  // CodexAstraLocal: Legacy budget fixtures explicitly retain OFF; new focused
+  // controls below exercise reservation ON without rewriting old cap contracts.
+  bool lit_specialization = false, feature_diagnostics = true;
   const FSConfig* prepared_cpu_family{};
   std::optional<FSConfig> owned_family;
   u64 ready_cpu_static_selected{}, ready_cpu_full_selected{}, ready_fragment_preflight_deferred{};
@@ -359,11 +363,15 @@ public:
   // CodexAstraLocal: Bind the production lazy transport owner in extracted route tests.
   std::optional<FSConfig> pending_tev_transport;
   DynamicTevPreparation dynamic_tev_preparation;
+  GLSL::FragmentRuntimeValues pending_fragment_values;
+  // CodexAstraLocal: Actual production metadata ownership and counter layout.
+#include "fragment_runtime_members.inc"
   // CodexAstraLocal: Arithmetic-input output is a controlled endpoint here;
   // actual route/lifetime decisions remain extracted production methods.
   struct { u64 attempts{}, failures{}, samples{}; } fragment_evidence;
-  void SampleFragmentEvidence(const Pica::RegsInternal&, const FSConfig&, bool) {
+  void SampleFragmentEvidence(const Pica::RegsInternal&, const FSConfig& config, bool) {
     ++fragment_evidence.samples;
+    pending_fragment_evidence = GLSL::AnalyzeFragmentWork(config, profile);
   }
   ExactPushConstants<TevPushConstants> tev_push_constants;
   std::unordered_map<u64, std::unique_ptr<Shader>> tev_shaders;

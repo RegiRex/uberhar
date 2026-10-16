@@ -95,8 +95,11 @@ public:
         : capacity{processors > 1 ? processors - 1 : 0}, execution_census{census} {}
     AuxiliaryBudget(const AuxiliaryBudget&) = delete;
     AuxiliaryBudget& operator=(const AuxiliaryBudget&) = delete;
-    static AuxiliaryBudget& Global() {
-        static AuxiliaryBudget budget{AvailableProcessors()};
+    // CodexAstraLocal: First acquisition freezes optional census for the process.
+    // System initialization supplies the requested value before pools exist;
+    // later titles report requested/effective rather than racing live permits.
+    static AuxiliaryBudget& Global(bool requested_census = false) {
+        static AuxiliaryBudget budget{AvailableProcessors(), requested_census};
         return budget;
     }
     static bool HasPermit() { return held_tokens != 0; }
@@ -199,13 +202,19 @@ public:
         // advance the sampling cadence. At most one eligible call in 64 samples.
         return maximum && count / std::max(1U, grain) >= 2 && (++cadence % 64 == 0);
     }
+    // CodexAstraLocal: Discovery and learning use the same validity floor;
+    // probation never manufactures cheaper arithmetic or relaxes participation.
+    static bool Valid(const Sample& sample) {
+        return !sample.denied && !sample.failed && sample.grain &&
+            sample.count / sample.grain >= 2 && sample.owner_items &&
+            sample.owner_items + std::uint64_t{sample.worker_items} == sample.count &&
+            sample.total_ns >= 50'000 && sample.total_ns <= 1'000'000'000 &&
+            sample.owner_ns >= 5'000 && (!sample.helpers || sample.worker_items);
+    }
+    bool InTrial() const { return trial; }
     void Observe(const Sample& sample) {
         ++samples;
-        if (sample.denied || sample.failed || !sample.grain || sample.count / sample.grain < 2 ||
-            sample.owner_items == 0 ||
-            sample.owner_items + std::uint64_t{sample.worker_items} != sample.count ||
-            sample.total_ns < 50'000 || sample.total_ns > 1'000'000'000 ||
-            sample.owner_ns < 5'000 || (sample.helpers && !sample.worker_items)) {
+        if (!Valid(sample)) {
             RejectWindow();
             return;
         }
@@ -288,96 +297,163 @@ private:
     Window window{}, baseline{};
 };
 
-// CodexAstraLocal: Preserve four exact work/shape windows across intervening
-// jobs instead of resetting every unsampled shape switch. Identity is supplied
-// by the work owner, never a lossy shader hash. Unknown/mixed work keeps static
-// participation. Capacity changes invalidate every retained trial together.
+// CodexAstraLocal: Sample the pool independently of key lifetime. Unrelated jobs
+// keep static participation and cannot evict a learning window on every draw.
+// Four sparse probation identities admit recurrence without borrowing their cost.
+// All storage is bounded; capacity changes cancel trials before the next job.
 class AdaptiveParticipation {
 public:
     using Sample = ParticipationWindow::Sample;
+    static constexpr std::uint64_t SampleStride = 64, DormantStride = 4096;
+    static constexpr std::uint64_t ProbationAge = 256, EvidenceAge = 1024;
     struct Statistics : ParticipationWindow::Statistics {
         std::uint64_t history_hits{}, history_misses{}, evictions{}, capacity_resets{}, unkeyed{};
         std::uint64_t rejected_invalid{}, rejected_cost{}, rejected_helpers{};
+        // CodexAstraLocal TEST-ONLY LOG: Distinguish actual discovery/learning
+        // from enabled-but-inert maintenance; remove after .50 qualification.
+        std::uint64_t eligible{}, probes{}, probation_hits{}, probation_evictions{}, promotions{};
+        std::uint64_t expired{}, trial_expired{}, dormant_entries{}, discovery_samples{}, discovery_rejected{};
+        std::uint64_t prepare_samples{}, prepare_ns{}, observe_samples{}, observe_ns{};
+        bool enabled{}, dormant{};
+        unsigned histories{};
     };
-    explicit AdaptiveParticipation(unsigned maximum) : maximum{maximum}, fallback{maximum} {}
+    explicit AdaptiveParticipation(unsigned maximum, bool enabled = true)
+        : maximum{maximum}, fallback{maximum}, enabled{enabled} {}
     unsigned Desired() const { return selected ? selected->window.Desired() : fallback; }
     void Limit(unsigned limit) {
         if (maximum == limit) return;
-        // CodexAstraLocal: Retire counts before invalidation so a capacity reset
-        // cannot erase evidence of a trial or apply its cap to another epoch.
         for (auto& entry : entries) if (entry.valid) Retire(entry);
-        selected = nullptr; prepared_unkeyed = false;
-        maximum = fallback = limit; ++totals.capacity_resets;
+        probation = {}; selected = nullptr; live = 0;
+        maximum = fallback = limit; dormant = false; last_promotion = epoch;
+        ++totals.capacity_resets;
     }
     void Prepare(std::uint32_t count, std::uint32_t grain, bool hook = false,
                  std::uint64_t identity = 1) {
         grain = std::max(1U, grain);
         fallback = std::min(maximum, count / grain > 0 ? count / grain - 1 : 0);
-        const Key key{identity, count, grain, hook};
-        prepared_unkeyed = identity == 0;
-        if (!identity) { selected = nullptr; ++totals.unkeyed; return; }
-        if (selected && selected->key == key) return;
-        for (auto& entry : entries) if (entry.valid && entry.key == key) {
+        current = {identity, count, grain, hook}; prepared = true;
+        if (!enabled || !identity) {
+            selected = nullptr;
+            if (enabled && !identity) ++totals.unkeyed;
+            return;
+        }
+        if (selected && selected->key == current) return;
+        selected = nullptr;
+        if (live) for (auto& entry : entries) if (entry.valid && entry.key == current) {
             selected = &entry; ++totals.history_hits; return;
         }
-        auto& entry = entries[next++ % entries.size()];
-        if (entry.valid) { Retire(entry); ++totals.evictions; }
-        entry.key = key; entry.valid = true; entry.window = ParticipationWindow{maximum};
-        entry.window.Prepare(count, grain, hook); selected = &entry; ++totals.history_misses;
+        // CodexAstraLocal: A miss is a static job, not an insertion/retirement.
+        // Dormant/empty pools skip even the four-entry learning lookup.
+        ++totals.history_misses;
     }
     bool SelectSample(std::uint32_t count, std::uint32_t grain) {
-        // CodexAstraLocal: Unprepared standalone callers retain the old public
-        // cadence contract; production always prepares its exact identity first.
-        if (!selected && !prepared_unkeyed) Prepare(count, grain);
-        return selected && selected->window.SelectSample(count, grain);
+        if (!prepared || current.count != count || current.grain != std::max(1U, grain))
+            Prepare(count, grain, current.hook, prepared ? current.identity : 1);
+        if (!enabled || !current.identity || !maximum || count / std::max(1U, grain) < 2)
+            return false;
+        ++totals.eligible;
+        if (++cadence % (dormant ? DormantStride : SampleStride)) return false;
+        ++epoch; ++totals.probes;
+        // CodexAstraLocal: Expiry is sampled, never a clock or wait. A trial
+        // also has an absolute lifetime. Partial samples that repeatedly reset
+        // their comparable window cannot pin maintenance without a decision.
+        for (auto& entry : entries) if (entry.valid &&
+            (epoch - entry.progress_epoch >= EvidenceAge ||
+             (entry.window.InTrial() && epoch - entry.trial_epoch >= EvidenceAge))) {
+            ++totals.expired;
+            totals.trial_expired += entry.window.InTrial();
+            if (selected == &entry) selected = nullptr;
+            Retire(entry);
+        }
+        if (!live && !dormant && epoch - last_promotion >= EvidenceAge) {
+            dormant = true; ++totals.dormant_entries;
+        }
+        return true;
     }
     void Observe(const Sample& sample) {
-        if (prepared_unkeyed) return;
-        if (!selected) Prepare(sample.count, sample.grain);
-        if (!selected) return;
-        if (!sample.failed && sample.grain &&
-            (selected->key.count != sample.count || selected->key.grain != sample.grain))
-            Prepare(sample.count, sample.grain, selected->key.hook, selected->key.identity);
+        if (!enabled || !prepared || !current.identity) return;
+        const bool valid = ParticipationWindow::Valid(sample) &&
+            current.count == sample.count && current.grain == sample.grain;
+        if (!selected) {
+            ++totals.discovery_samples;
+            if (!valid || sample.helpers != fallback) {
+                ++totals.discovery_rejected; return;
+            }
+            // CodexAstraLocal: Two valid sampled appearances prove recurrence.
+            // The first cost is discarded, not combined across workload keys.
+            auto found = probation.end();
+            for (auto it = probation.begin(); it != probation.end(); ++it)
+                if (it->valid && it->key == current && epoch - it->epoch <= ProbationAge) {
+                    found = it; break;
+                }
+            if (found == probation.end()) {
+                auto& slot = probation[next_probation++ % probation.size()];
+                totals.probation_evictions += slot.valid;
+                slot = {current, epoch, true}; return;
+            }
+            ++totals.probation_hits;
+            // Existing comparable windows/trials are protected. A fifth key
+            // stays static until sampled expiry releases a slot; no cache race.
+            for (auto& entry : entries) if (!entry.valid) {
+                entry.key = current; entry.window = ParticipationWindow{maximum};
+                entry.window.Prepare(current.count, current.grain, current.hook);
+                entry.progress_epoch = epoch; entry.trial_epoch = epoch;
+                entry.valid = true; ++live; selected = &entry;
+                found->valid = false; ++totals.promotions; last_promotion = epoch;
+                dormant = false; break;
+            }
+            if (!selected) return;
+        }
         const auto before = selected->window.GetStatistics();
-        selected->window.Observe(sample);
+        if (!valid) {
+            auto invalid = sample; invalid.failed = true;
+            selected->window.Observe(invalid);
+        } else selected->window.Observe(sample);
         const auto after = selected->window.GetStatistics();
         if (after.rejected != before.rejected) {
-            if (sample.denied || sample.failed || !sample.grain ||
-                sample.count / sample.grain < 2 || !sample.owner_items ||
-                sample.owner_items + std::uint64_t{sample.worker_items} != sample.count ||
-                sample.total_ns < 50'000 || sample.total_ns > 1'000'000'000 ||
-                sample.owner_ns < 5'000 || (sample.helpers && !sample.worker_items))
-                ++totals.rejected_invalid;
+            if (!valid) ++totals.rejected_invalid;
             else if (sample.helpers != before.desired) ++totals.rejected_helpers;
             else ++totals.rejected_cost;
         }
+        // CodexAstraLocal: Only completed baseline/trial decisions renew
+        // retention. A stream of accepted partial samples is not progress.
+        if (after.trials != before.trials || after.accepted != before.accepted ||
+            after.reverted != before.reverted) selected->progress_epoch = epoch;
+        if (after.trials != before.trials) selected->trial_epoch = epoch;
     }
     Statistics GetStatistics() const {
         auto result = totals;
         for (const auto& entry : entries) if (entry.valid) Add(result, entry.window.GetStatistics());
-        result.desired = Desired(); return result;
+        result.desired = Desired(); result.enabled = enabled; result.dormant = dormant;
+        result.histories = live; return result;
     }
 private:
     struct Key {
         std::uint64_t identity{}; std::uint32_t count{}, grain{}; bool hook{};
         bool operator==(const Key&) const = default;
     };
-    // CodexAstraLocal: Direct initialization admits the explicit default window
-    // constructor on Clang/libc++ as well as GCC; every history starts empty.
-    struct Entry { Key key; ParticipationWindow window{}; bool valid{}; };
+    struct Entry {
+        Key key; ParticipationWindow window{};
+        std::uint64_t progress_epoch{}, trial_epoch{}; bool valid{};
+    };
+    struct Probation { Key key; std::uint64_t epoch{}; bool valid{}; };
     static void Add(Statistics& target, const ParticipationWindow::Statistics& value) {
         target.samples += value.samples; target.rejected += value.rejected;
         target.trials += value.trials; target.accepted += value.accepted; target.reverted += value.reverted;
     }
     void Retire(Entry& entry) {
-        // CodexAstraLocal: A discarded trial is a rollback, not an accepted cap.
-        entry.window.Limit(0); Add(totals, entry.window.GetStatistics()); entry.valid = false;
+        entry.window.Limit(0); Add(totals, entry.window.GetStatistics());
+        entry.valid = false; --live; ++totals.evictions;
     }
-    unsigned maximum{}, fallback{};
-    bool prepared_unkeyed{};
+    unsigned maximum{}, fallback{}, live{};
+    const bool enabled;
+    bool prepared{}, dormant{};
+    Key current{};
     std::array<Entry, 4> entries{};
+    std::array<Probation, 4> probation{};
     Entry* selected{};
-    std::size_t next{};
+    std::size_t next_probation{};
+    std::uint64_t cadence{}, epoch{}, last_promotion{};
     Statistics totals{};
 };
 } // namespace Common::Uberhar

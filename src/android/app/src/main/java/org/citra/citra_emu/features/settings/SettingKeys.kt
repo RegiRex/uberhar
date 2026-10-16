@@ -47,6 +47,21 @@ object SettingKeys {
     external fun uberhar_native_full_fragments(): String
     external fun uberhar_cpu_prefix_overlap(): String
     external fun uberhar_parallel_texture_decode(): String
+    // CodexAstraLocal: Independent restart-only .50 controls are snapshotted by each owner;
+    // profiling stays optional so comparison runs do not pay GPU timestamp overhead.
+    external fun uberhar_cpu_queue_expanded_seeds(): String
+    external fun uberhar_cpu_adaptive_participation(): String
+    external fun uberhar_cpu_execution_census(): String
+    external fun uberhar_feature_diagnostics(): String
+    external fun uberhar_fragment_memo(): String
+    external fun uberhar_constant_tev(): String
+    external fun uberhar_directional_precompute(): String
+    external fun uberhar_lit_specialization(): String
+    external fun uberhar_fragment_liveness(): String
+    external fun uberhar_alpha_never(): String
+    external fun uberhar_gpu_timestamps(): String
+    external fun uberhar_image_reuse(): String
+    external fun uberhar_cpu_transfers(): String
 
     // AstraEH: Persist only the selected profile, not three conflicting booleans.
     external fun uberhar_test_mode(): String

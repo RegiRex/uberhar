@@ -37,6 +37,14 @@ int main() {
     Check(cache.Builds()==history_builds && cache.HistoryHits()!=0,"recurring exact mapping rebuilt");
     shader.output_mask.Assign(16); cache.Get(shader,raster);
     Check(cache.Evictions()!=0,"mapping history unbounded");
+    // CodexAstraLocal: Frozen diagnostics prices the real hit/build routes;
+    // disabled costs stay unavailable without changing exact cache output.
+    Pica::NativeVertexPlanCache priced{true};
+    for(unsigned n=0;n<1023;++n) priced.Get(shader,raster);
+    shader.output_mask.Assign(32); priced.Get(shader,raster);
+    for(unsigned n=0;n<1024;++n) priced.Get(shader,raster);
+    Check(priced.BuildSamples()==1 && priced.HitSamples()==1,"mapping cost route census");
+    Check(cache.BuildSamples()==0 && cache.HitSamples()==0,"disabled mapping diagnostic measured");
     cache.Reset();
     for (unsigned iteration = 0; iteration < 20000; ++iteration) {
         // Alternate changed plans and exact repeats, including invalid output

@@ -147,6 +147,14 @@ public:
         switch_disk_resources_callback = callback;
     }
 
+    // CodexAstraLocal: Narrow Software ownership scope, not general deferred
+    // vertices. Inputs are already pinned through End; no shader/FIFO behavior
+    // changes. Other backends refuse. Append virtuals preserve earlier slots.
+    struct CpuRasterReadRange { PAddr address; std::span<const u8> bytes; };
+    virtual bool WantsCpuRasterBatch() const { return false; }
+    virtual bool BeginCpuRasterBatch(std::span<const CpuRasterReadRange>) { return false; }
+    virtual void EndCpuRasterBatch(bool) {}
+
     void SetAccurateMul(bool accurate_mul_) {
         accurate_mul = accurate_mul_;
     }

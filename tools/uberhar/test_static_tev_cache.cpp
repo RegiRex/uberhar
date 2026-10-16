@@ -387,12 +387,54 @@ void LazyTransportAndExactReuse() {
     Settings::values.uberhar_test_mode.value = Settings::UberharTestMode::Automatic;
 }
 
+// CodexAstraLocal: Exercise production capture, queued final-route attribution
+// and diagnostic OFF. These are populated counters, not log-substring checks.
+void RuntimeFeatureAttribution() {
+    PipelineCache p;
+    Pica::RegsInternal regs{};
+    regs.lighting.disable.Assign(1);
+    regs.framebuffer.output_merger.alphablend_enable.Assign(1);
+    regs.texturing.tev_stage5.sources_raw = 0x000e000e;
+    regs.texturing.tev_stage5.const_color = 0;
+    Settings::values.uberhar_test_mode.value = Settings::UberharTestMode::Automatic;
+    p.UseFragmentShader(regs, {}, false);
+    auto info = Info();
+    Require(p.BindPipeline(info, true), "runtime feature generic draw binds");
+    p.scheduler.WaitWorker();
+    const auto& work = p.fragment_selected[0];
+    Require(work.draws == 1 && work.samples == 1 && work.constant_rgb == 1 &&
+            work.constant_alpha == 1 && work.dead_rgb == 5 && work.dead_alpha == 5,
+            "actual selected worker populates independent constant/liveness fields");
+    const auto first = p.scheduler.completed.back().constants;
+    regs.texturing.tev_stage5.const_color = 0xFFFFFFFF;
+    p.fragment_evidence.attempts = 0; // Force a second diagnostic sample only.
+    p.UseFragmentShader(regs, {}, false);
+    Require(p.BindPipeline(info, true), "changed uniform same structure binds");
+    p.scheduler.WaitWorker();
+    Require(first != p.scheduler.completed.back().constants && work.constant_rgb == 2 &&
+            p.dynamic_tev_preparation.Stats().builds == 2,
+            "live numeric change invalidates cache and reaches queued consumer");
+    const auto samples = p.fragment_prepare_samples;
+    p.feature_diagnostics = false; // Explicit fixture control; production freezes at construction.
+    p.UseFragmentShader(regs, {}, false);
+    Require(p.BindPipeline(info, true), "diagnostic OFF keeps draw"); p.scheduler.WaitWorker();
+    Require(p.fragment_prepare_samples == samples && work.draws == 2,
+            "diagnostic OFF omits new clocks and selected counters");
+    PipelineCache reserved;
+    reserved.lit_specialization = true;
+    for (u32 i = 0; i < 6; ++i) Require(Spend(reserved, false, 300 + i), "seed six charged cheap owners");
+    SeedModule(reserved, Config());
+    DrawCpu(reserved, Info(), Config());
+    Require(reserved.fragment_lit_reserved_refusals > 0 && reserved.ready_cpu_bank->Owned(0) == 6,
+            "actual advance preserves two reserved full owners");
+}
+
 int main() {
     try {
         Probe::partial_tier=true;
         PromotionAndPriority(); ColdBridge(); PartitionPressure(); TerminalBudgetsKeepHits();
         PartialTransportAndIdentity(); FourRouteBindings(); NativeAndFailureFallback();
-        LazyTransportAndExactReuse();
+        LazyTransportAndExactReuse(); RuntimeFeatureAttribution();
         Require(Probe::optional_waits==0 && Probe::lifetime_errors==0,
                 "no optional wait or borrowed shader destruction");
         std::cout<<"PASS checks="<<Probe::checks<<" builds="<<Probe::pipeline_builds

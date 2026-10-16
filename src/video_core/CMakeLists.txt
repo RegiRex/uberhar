@@ -98,6 +98,7 @@ add_library(video_core STATIC EXCLUDE_FROM_ALL
     # the production guest decompiler; it is not a graphics vertex fallback.
     shader/generator/glsl_compute_vertex_shader_gen.cpp
     shader/generator/glsl_compute_vertex_shader_gen.h
+    shader/generator/glsl_compute_clip_storage.h # CodexAstraLocal: Indexed clip storage candidate.
     shader/generator/glsl_shader_decompiler.cpp
     shader/generator/glsl_shader_decompiler.h
     shader/generator/glsl_shader_gen.cpp
@@ -150,6 +151,9 @@ if (ENABLE_SOFTWARE_RENDERER)
         renderer_software/sw_proctex.h
         renderer_software/sw_rasterizer.cpp
         renderer_software/sw_rasterizer.h
+        # CodexAstraLocal: Immutable preparation and exact row-work policies.
+        renderer_software/sw_tev_preparation.h
+        renderer_software/sw_raster_work.h
         renderer_software/sw_texturing.cpp
         renderer_software/sw_texturing.h
     )
@@ -215,6 +219,8 @@ if (ENABLE_VULKAN)
         # CodexAstraLocal: Compute creation failures retain bounded incident evidence
         # and use the existing typed stop; fragment transport reuse is owner-only.
         renderer_vulkan/uberhar_compute_pipeline.h
+        # CodexAstraLocal: Explicit structural-only guest retry source inventory.
+        renderer_vulkan/uberhar_compute_lowering.h
         renderer_vulkan/uberhar_dynamic_tev_preparation.h
         renderer_vulkan/uberhar_compute_shadow.h
         renderer_vulkan/vk_compute_vertex.cpp
@@ -222,6 +228,8 @@ if (ENABLE_VULKAN)
         # CodexAstraLocal: Actual Calculated terminal paths share one owned packet writer.
         renderer_vulkan/compute_failure_packet.cpp
         renderer_vulkan/compute_failure_packet.h
+    renderer_vulkan/compute_feature_profile.h # CodexAstraLocal: Bounded feature attribution.
+    renderer_vulkan/compute_raster_dispatch.h # CodexAstraLocal: Exact active rectangle scheduling.
         # CodexAstraLocal: Default-off fixed scratch comparison shares actual
         # compute commands but owns its request, pipelines, queries and readbacks.
         renderer_vulkan/uberhar_compute_benchmark.h
@@ -290,6 +298,12 @@ if (ENABLE_VULKAN)
         shader/generator/spv_fs_shader_gen.h
     )
     target_link_libraries(video_core PRIVATE vulkan-headers vma sirit SPIRV glslang)
+    # CodexAstraLocal: Reuse the pinned optimizer only for explicit structural
+    # compute lowering. Tool-less/system builds retain terminal failure instead.
+    if (TARGET SPIRV-Tools-opt)
+        target_link_libraries(video_core PRIVATE SPIRV-Tools-opt)
+        target_compile_definitions(video_core PRIVATE UBERHAR_HAS_SPIRV_TOOLS_OPT=1)
+    endif()
     # CodexAstraLocal: Branch build tags may report native version "0". Stamp
     # opt-in evidence with the app's actual fork version without changing shaders.
     file(READ "${CMAKE_SOURCE_DIR}/UBERHAR_VERSION" UBERHAR_CAPTURE_VERSION LIMIT 64)

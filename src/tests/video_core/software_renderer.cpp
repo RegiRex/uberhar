@@ -12,6 +12,7 @@
 #endif
 #include "common/color.h"
 #include "common/settings.h"
+#include "common/uberhar_software_controls.h" // CodexAstraLocal: Exercise independent feature/observation policy.
 #ifndef UBERHAR_SOFTWARE_HELPER_PROBE
 #include <sstream> // CodexAstraLocal: Round-trip the actual first-candidate archive, not a substitute.
 #include <json.hpp> // CodexAstraLocal: Verify invocation/entry ownership in the actual capsule metadata.
@@ -20,6 +21,7 @@
 #include "core/core.h"
 #include "core/memory.h"
 #include "video_core/pica/pica_core.h"
+#include "video_core/pica/uberhar_vertex_input.h" // CodexAstraLocal: Actual read-time source provenance.
 #include "video_core/renderer_software/sw_lighting.h" // CodexAstraLocal: Real multi-light LUT reuse.
 #include "video_core/renderer_software/sw_rasterizer.h"
 #include "video_core/shader/shader.h"
@@ -39,6 +41,36 @@ struct SoftwareRendererTestAccess {
         std::array<RasterizerSoftware::PreparedTexture, 3> prepared;
         return raster.PrepareTextures(regs.texturing.GetTextures(), prepared,
             TextureDemandMask(regs.texturing, regs.lighting));
+    }
+    // CodexAstraLocal: Observe only owner-written preparation/dispatch evidence;
+    // framebuffer comparisons remain the numerical oracle.
+    static auto Work(const RasterizerSoftware& raster) {
+        return std::array<u64,6>{raster.tev_cache.Generation(),raster.tev_cache.Hits(),
+            raster.bounding_candidates,raster.retained_candidates,raster.small_serial,
+            raster.parallel_triangles};
+    }
+    // CodexAstraLocal: Inspect populated measured fields, not log-format strings.
+    static auto Diagnostic(const RasterizerSoftware& raster) {
+        return std::array<u64,8>{raster.work_samples,raster.tev_ns,raster.span_ns,
+            raster.row_policy_ns,raster.owner_rows,raster.helper_rows,raster.errors,raster.feature_mask};
+    }
+    // CodexAstraLocal: Explicit fixture facts exercise the real owner proof;
+    // these tests own all guest memory and have no concurrent DSP/IPC writer.
+    static bool Begin(RasterizerSoftware& raster,std::span<const VideoCore::RasterizerInterface::CpuRasterReadRange> reads,
+                      bool writers=false,bool fp=true) { return raster.BeginConstantBatch(reads,writers,fp); }
+    static bool Queue(RasterizerSoftware& raster,std::span<const Pica::OutputVertex* const> fan) {
+        return raster.QueueConstantFan(fan);
+    }
+    static bool Fan(RasterizerSoftware& raster,std::span<const Pica::OutputVertex* const> fan,
+                    bool writers=false,bool fp=true) { return raster.TryConstantFan(fan,writers,fp); }
+    static auto GroupCost(const RasterizerSoftware& raster) {
+        return std::array<u64,6>{raster.constant_admission_calls,raster.constant_admission_samples,
+            raster.constant_admission_ns,raster.constant_capture_calls,raster.constant_capture_samples,
+            raster.constant_capture_ns};
+    }
+    static auto Group(const RasterizerSoftware& raster) {
+        return std::array<u64,7>{raster.fan_groups,raster.fan_grouped_triangles,raster.fan_candidates,
+            raster.constant_queued,raster.pending_constants_count,raster.constant_drains,raster.constant_unwinds};
     }
     static unsigned Workers(const RasterizerSoftware& raster) { return raster.sw_workers.CreatedWorkers(); }
     static unsigned Available(const RasterizerSoftware& raster) { return raster.sw_workers.Available(); }
@@ -68,6 +100,17 @@ namespace Pica {
 struct SoftwareProducerTestAccess {
     using GeometryEntry = PicaCore::SoftwareGeometryEntry;
     using SnapshotType = PicaCore::SoftwareProducerSnapshot;
+    // CodexAstraLocal: Invoke the actual scoped loader, with modeled raster
+    // publication endpoints only; shader, live memory and FIFO stay production.
+    static void Batch(PicaCore& pica,bool indexed=false) {
+        pica.LoadVertices(indexed,std::chrono::steady_clock::now());
+    }
+    // CodexAstraLocal: Observe populated production fields rather than log strings.
+    static auto TraceCost(const PicaCore& pica) {
+        return std::array<u64,6>{pica.software_trace_draws,pica.software_trace_loads,
+            pica.software_trace_bytes,pica.software_trace_samples,pica.software_trace_ns,
+            pica.software_trace_errors};
+    }
     static u32 Mask(const PicaCore& pica) { return pica.SoftwareProducerMask(); }
     static u32 Invalid(u32 mask, const OutputVertex& output) {
         return PicaCore::SoftwareInvalidSemantics(mask, output);
@@ -80,10 +123,11 @@ struct SoftwareProducerTestAccess {
         return OutputVertex{pica.regs.internal.rasterizer, buffer};
     }
     static auto Snapshot(const PicaCore& pica, ShaderSetup& setup, const ShaderUnit& unit,
-                         const OutputVertex& output, bool fresh, bool post = true) {
+                         const OutputVertex& output, bool fresh, bool post = true,
+                         const NativeInputReadTrace* trace=nullptr) {
         const auto mask = Mask(pica);
         return pica.MakeSoftwareProducerSnapshot(mask, Invalid(mask, output), output,
-            setup, unit, fresh ? 0 : 1, 17, "fixture_cpu", fresh, post, 0x12345678ULL);
+            setup, unit, fresh ? 0 : 1, 17, "fixture_cpu", fresh, post, 0x12345678ULL,nullptr,nullptr,trace);
     }
     // CodexAstraLocal: Drive the actual GS boundary/emitter from the fixture;
     // only file retention is replaced by an owned in-memory snapshot consumer.
@@ -657,7 +701,31 @@ TEST_CASE("Software producer capsule preserves demanded inputs and carry limits"
     unit.output[1][4].z = nan;
     const auto output = Access::Run(pica, setup, unit);
     REQUIRE(Access::Invalid(Access::Mask(pica), output) == (1U << Semantic::TEXCOORD0_U));
+    // CodexAstraLocal: The snapshot metadata computes lazy shader hashes after
+    // serializing their cache fields. Compare traced/untraced payloads from the
+    // same stable hash state, rather than mistaking cache population for input edits.
+    (void)setup.GetProgramCodeHash();(void)setup.GetSwizzleDataHash();
     const auto snapshot = Access::Snapshot(pica, setup, unit, output, false);
+    // CodexAstraLocal: Exact source bytes are copied by actual typed loading;
+    // later RAM mutation cannot change the retained metadata payload.
+    std::array<u32,4> source_bits{0x7fc12345,0x3f800000,0,0x3f800000};
+    const std::array<Pica::NativeInputAttribute,1> description{{{0,16,4,Pica::PipelineRegs::VertexAttributeFormat::FLOAT,false}}};
+    Pica::ShaderRegs trace_regs{};Pica::NativeVertexInputPlan trace_plan;
+    REQUIRE(trace_plan.Prepare(trace_regs,1,0x123400,0,[&](u32){return description[0];},
+        [&](PAddr){return std::span<const u8>{reinterpret_cast<const u8*>(source_bits.data()),16};})==Pica::NativeVertexInputPlan::Result::Ready);
+    Pica::ShaderUnit trace_unit;Pica::NativeInputReadTrace trace;
+    trace_plan.LoadObserved(trace_unit,{},0,0x123400,description,trace);
+    source_bits[0]=0;
+    const auto traced=Access::Snapshot(pica,setup,unit,output,false,true,&trace);
+    const auto metadata=nlohmann::json::parse(traced.metadata);
+    CHECK(metadata["input_provenance"]["available"]==true);
+    CHECK(metadata["input_provenance"]["guest_bytes"]==16);
+    CHECK(metadata["input_provenance"]["attributes"][0]["address"]==0x123400);
+    CHECK(metadata["input_provenance"]["attributes"][0]["bytes_hex"]=="4523c17f0000803f000000000000803f");
+    CHECK(metadata["input_provenance"]["attributes"][0]["origin"]=="actual_scalar_load");
+    const bool same_native_payload=traced.payload==snapshot.payload;
+    CHECK(same_native_payload); // Keep failure XML bounded; native binary strings contain control bytes.
+
     // CodexAstraLocal: The same capsule remains evidence on other hosts, but
     // only the recorded exact FP-control contracts authorize value replay.
 #if (defined(__aarch64__) && (defined(__GNUC__) || defined(__clang__))) || \
@@ -1069,11 +1137,52 @@ TEST_CASE("Software actual triangle budgets and alias admission", "[software]") 
         CHECK(available== (budget ? std::min(budget,Common::Uberhar::AvailableProcessors()) : Common::Uberhar::AvailableProcessors()));
         std::memset(color,0,64*64*4);
         raster.AddTriangle(a,b,c);raster.AddTriangle(b,d,c);
+        // CodexAstraLocal: The real two-triangle draw reuses its immutable plan
+        // and bypasses empty bounding pixels without altering framebuffer bytes.
+        const auto work=SwRenderer::SoftwareRendererTestAccess::Work(raster);
+        CHECK(work[0]==1); CHECK(work[1]>=1); CHECK(work[2]>work[3]);
+        if(available>1) CHECK(work[5]>0);
         std::vector<u8> output(color,color+64*64*4);
         REQUIRE(std::count(output.begin(),output.end(),255)>100);
         if (reference.empty()) reference=output; else CHECK(output==reference);
     }
+    // CodexAstraLocal: Independent feature switches and diagnostic-off retain
+    // exact actual framebuffer output. Measured enabled fields must populate;
+    // disabled observation performs no optional timing or counter accumulation.
+    const auto old_features=Settings::software_renderer_features.GetValue();
+    const auto old_diagnostics=Settings::software_renderer_diagnostics.GetValue();
+    struct RestoreFeatures { u32 mask; bool diagnostics; ~RestoreFeatures() {
+        Settings::software_renderer_features=mask;Settings::software_renderer_diagnostics=diagnostics;
+    }} restore_features{old_features,old_diagnostics};
+    for(u32 mask:{15U,14U,13U,11U,7U,0U}) for(bool observe:{false,true}) {
+        Settings::software_renderer_features=mask;Settings::software_renderer_diagnostics=observe;
+        SwRenderer::RasterizerSoftware comparison{memory,pica};
+        std::memset(color,0,64*64*4);
+        comparison.AddTriangle(a,b,c);comparison.AddTriangle(b,d,c);
+        CHECK(std::vector<u8>(color,color+64*64*4)==reference);
+        const auto data=SwRenderer::SoftwareRendererTestAccess::Diagnostic(comparison);
+        CHECK(data[7]==mask);
+        if(observe) {
+            CHECK(data[0]>0);CHECK(data[1]>0);CHECK(data[2]>0);CHECK(data[3]>0);
+            CHECK(data[4]+data[5]>0);CHECK(data[6]==0);
+            const auto work=SwRenderer::SoftwareRendererTestAccess::Work(comparison);
+            if(mask&1) {CHECK(work[0]==1);CHECK(work[1]>=1);}
+            else {CHECK(work[0]==2);CHECK(work[1]==0);}
+            if(mask&2) CHECK(work[2]>work[3]); else CHECK(work[2]==work[3]);
+        } else for(u32 i=0;i<7;++i) CHECK(data[i]==0);
+    }
+    Settings::software_renderer_features=old_features;
+    Settings::software_renderer_diagnostics=old_diagnostics;
     Settings::values.software_renderer_workers=2;
+    {
+        // CodexAstraLocal: Real covered tiny work remains on the owner even
+        // with a two-participant allowance; no sleeper is created just for it.
+        SwRenderer::RasterizerSoftware tiny{memory,pica};
+        tiny.AddTriangle(a,vertex(-.8f,-.9f),vertex(-.9f,-.8f));
+        const auto work=SwRenderer::SoftwareRendererTestAccess::Work(tiny);
+        CHECK(work[3]>0); CHECK(work[4]==1); CHECK(work[5]==0);
+        CHECK(SwRenderer::SoftwareRendererTestAccess::Workers(tiny)==0);
+    }
     SwRenderer::RasterizerSoftware raster{memory,pica};
     regs.texturing.main_config.texture0_enable.Assign(1);
     regs.texturing.texture0=Sampler(64);
@@ -1099,6 +1208,157 @@ TEST_CASE("Software actual triangle budgets and alias admission", "[software]") 
     CHECK_NOTHROW(raster.AddTriangle(a,b,c));
     target.allow_depth_stencil_write.Assign(0);target.depth_buffer_address.Assign(0);
     CHECK(SwRenderer::SoftwareRendererTestAccess::Safe(raster,regs));
+}
+
+// CodexAstraLocal: The actual Software kernel must preserve output across
+// joined ordinary triangles, owned fan grouping, bounded cross-call queues and
+// owner-only error drains. Host facts are explicit, not a fake powered guest.
+TEST_CASE("Software constant groups preserve ownership aliases and drain boundaries", "[software]") {
+    using Access=SwRenderer::SoftwareRendererTestAccess;
+    const auto old_features=Settings::software_renderer_features.GetValue();
+    const auto old_workers=Settings::values.software_renderer_workers.GetValue();
+    const auto old_diagnostics=Settings::software_renderer_diagnostics.GetValue();
+    struct Restore { u32 features,workers;bool diagnostics;~Restore(){Settings::software_renderer_features=features;
+        Settings::values.software_renderer_workers=workers;Settings::software_renderer_diagnostics=diagnostics;}
+    } restore{old_features,old_workers,old_diagnostics};
+    Settings::values.software_renderer_workers=2;Settings::software_renderer_diagnostics=true;
+    Core::System system;Memory::MemorySystem memory{system};Pica::PicaCore pica{memory,{}};
+    auto& regs=pica.regs.internal;regs={};regs.lighting.disable.Assign(1);
+    regs.rasterizer.depthmap_enable.Assign(Pica::RasterizerRegs::DepthBuffering::ZBuffering);
+    regs.rasterizer.viewport_size_x.Assign(0x440000);regs.rasterizer.viewport_size_y.Assign(0x440000);
+    auto& target=regs.framebuffer.framebuffer;target.width.Assign(64);target.height.Assign(63);
+    target.color_format.Assign(Pica::FramebufferRegs::ColorFormat::RGBA8);
+    target.color_buffer_address.Assign((Memory::VRAM_PADDR+0x40000)/8);target.allow_color_write.Assign(15);
+    auto& m=regs.framebuffer.output_merger;m.logic_op.Assign(Pica::FramebufferRegs::LogicOp::Copy);
+    m.red_enable.Assign(1);m.green_enable.Assign(1);m.blue_enable.Assign(1);m.alpha_enable.Assign(1);
+    using Stage=Pica::TexturingRegs::TevStageConfig;
+    regs.texturing.tev_stage5.color_source1.Assign(Stage::Source::Constant);
+    regs.texturing.tev_stage5.alpha_source1.Assign(Stage::Source::Constant);
+    regs.texturing.tev_stage5.const_color=0xff4080ff;
+    auto* color=memory.GetPhysicalPointer(target.GetColorBufferPhysicalAddress());
+    const auto vertex=[](float x,float y) { Pica::OutputVertex v{};const auto f=[](float z){return Pica::f24::FromFloat32(z);};
+        v.pos={f(x),f(y),f(-.5f),f(1)};return v; };
+    std::array<Pica::OutputVertex,4> quad{vertex(-.9f,-.9f),vertex(.9f,-.9f),vertex(.9f,.9f),vertex(-.9f,.9f)};
+    const std::array<const Pica::OutputVertex*,4> fan{&quad[0],&quad[1],&quad[2],&quad[3]};
+    std::vector<u8> reference;
+    Settings::software_renderer_features=7;
+    { SwRenderer::RasterizerSoftware raster{memory,pica};std::memset(color,0,64*64*4);
+      raster.AddTriangle(quad[0],quad[1],quad[2]);raster.AddTriangle(quad[0],quad[2],quad[3]);
+      reference.assign(color,color+64*64*4); }
+    REQUIRE(std::count(reference.begin(),reference.end(),255)>100);
+    Settings::software_renderer_features=15;
+    SwRenderer::RasterizerSoftware raster{memory,pica};
+    std::memset(color,0,64*64*4);
+    REQUIRE(Access::Fan(raster,fan));CHECK(std::vector<u8>(color,color+64*64*4)==reference);
+    CHECK(Access::Group(raster)[0]==1);CHECK(Access::Group(raster)[1]==2);CHECK(Access::Group(raster)[2]>1024);
+    CHECK_FALSE(Access::Fan(raster,fan,true));CHECK_FALSE(Access::Fan(raster,fan,false,false));
+    using Range=VideoCore::RasterizerInterface::CpuRasterReadRange;
+    std::array<u8,16> separate{};
+    const std::array<Range,1> physical_alias{{{target.GetColorBufferPhysicalAddress(),separate}}};
+    const std::array<Range,1> host_alias{{{Memory::VRAM_PADDR+0x10000,{color,16}}}};
+    const std::array<Range,1> independent{{{Memory::VRAM_PADDR+0x10000,separate}}};
+    CHECK_FALSE(Access::Begin(raster,physical_alias));CHECK_FALSE(Access::Begin(raster,host_alias));
+    CHECK_FALSE(Access::Begin(raster,independent,true));CHECK_FALSE(Access::Begin(raster,independent,false,false));
+    for(bool unwind:{false,true}) {
+        std::memset(color,0,64*64*4);REQUIRE(Access::Begin(raster,independent));
+        raster.AddTriangle(quad[0],quad[1],quad[2]);raster.AddTriangle(quad[0],quad[2],quad[3]);
+        CHECK(Access::Group(raster)[4]==2);CHECK(std::count(color,color+64*64*4,255)==0);
+        raster.EndCpuRasterBatch(unwind);
+        CHECK(Access::Group(raster)[4]==0);CHECK(std::vector<u8>(color,color+64*64*4)==reference);
+        for(auto measured:Access::GroupCost(raster)) CHECK(measured>0);
+    }
+    // Capacity publishes only already-owned work and cannot leave a dormant tail.
+    REQUIRE(Access::Begin(raster,independent));
+    for(u32 i=0;i<8;++i) raster.AddTriangle(quad[0],quad[1],quad[2]);
+    CHECK(Access::Group(raster)[4]==0);
+    raster.AddTriangle(quad[0],quad[2],quad[3]);CHECK(Access::Group(raster)[4]==1);
+    raster.InvalidateRegion(target.GetColorBufferPhysicalAddress(),16);CHECK(Access::Group(raster)[4]==0);
+    // A failed new primitive drains earlier certified pixels before refusal.
+    std::memset(color,0,64*64*4);REQUIRE(Access::Begin(raster,independent));
+    raster.AddTriangle(quad[0],quad[1],quad[2]);
+    auto bad=quad[0];bad.pos.w=Pica::f24::Zero();
+    const std::array<const Pica::OutputVertex*,3> invalid{&bad,&quad[1],&quad[2]};
+    CHECK_FALSE(Access::Queue(raster,invalid));CHECK(Access::Group(raster)[4]==0);
+    CHECK(std::count(color,color+64*64*4,255)>100);
+    // Live texture/alpha/depth work and an aliased pitch never enter this route.
+    m.alpha_test.enable.Assign(1);CHECK_FALSE(Access::Begin(raster,independent));m.alpha_test.enable.Assign(0);
+    regs.texturing.tev_stage5.color_source1.Assign(Stage::Source::Texture0);CHECK_FALSE(Access::Begin(raster,independent));
+    regs.texturing.tev_stage5.color_source1.Assign(Stage::Source::Constant);
+    target.width.Assign(63);CHECK_FALSE(Access::Begin(raster,independent));target.width.Assign(64);
+    // Include and Exclude remain byte-identical under the shared integer bounds.
+    for(auto mode:{Pica::RasterizerRegs::ScissorMode::Include,Pica::RasterizerRegs::ScissorMode::Exclude}) {
+        regs.rasterizer.scissor_test.mode.Assign(mode);regs.rasterizer.scissor_test.x1.Assign(16);
+        regs.rasterizer.scissor_test.y1.Assign(16);regs.rasterizer.scissor_test.x2.Assign(47);regs.rasterizer.scissor_test.y2.Assign(47);
+        Settings::software_renderer_features=7;
+        { SwRenderer::RasterizerSoftware ordinary{memory,pica};std::memset(color,0,64*64*4);
+          ordinary.AddTriangle(quad[0],quad[1],quad[2]);ordinary.AddTriangle(quad[0],quad[2],quad[3]);reference.assign(color,color+64*64*4); }
+        Settings::software_renderer_features=15;std::memset(color,0,64*64*4);
+        REQUIRE(Access::Begin(raster,independent));raster.AddTriangle(quad[0],quad[1],quad[2]);raster.AddTriangle(quad[0],quad[2],quad[3]);
+        raster.EndCpuRasterBatch(false);CHECK(std::vector<u8>(color,color+64*64*4)==reference);
+    }
+    // CodexAstraLocal: Diagnostic-off preserves the grouped route/output while
+    // eliminating optional command/admission counters and clocks.
+    Settings::software_renderer_diagnostics=false;
+    SwRenderer::RasterizerSoftware unobserved{memory,pica};std::memset(color,0,64*64*4);
+    REQUIRE(Access::Begin(unobserved,independent));unobserved.AddTriangle(quad[0],quad[1],quad[2]);
+    unobserved.AddTriangle(quad[0],quad[2],quad[3]);unobserved.EndCpuRasterBatch(false);
+    CHECK(std::vector<u8>(color,color+64*64*4)==reference);
+    for(auto value:Access::GroupCost(unobserved)) CHECK(value==0);
+    CHECK(Access::Group(unobserved)[0]==0);
+}
+
+TEST_CASE("Software PICA input scope closes before return and exception", "[software]") {
+    // CodexAstraLocal: Real PICA loader/JIT/FIFO with a recording sink proves the
+    // scope hook, full range certificate and normal/unwind lifetime boundaries.
+    struct Sink final:VideoCore::RasterizerInterface {
+        bool fail{},open{},unwind{};u32 began{},ended{},triangles{};std::vector<CpuRasterReadRange> reads;
+        bool WantsCpuRasterBatch()const override{return true;}
+        bool BeginCpuRasterBatch(std::span<const CpuRasterReadRange> input)override {
+            ++began;open=true;reads.assign(input.begin(),input.end());return true; }
+        void EndCpuRasterBatch(bool error)override{++ended;unwind=error;open=false;}
+        void AddTriangle(const Pica::OutputVertex&,const Pica::OutputVertex&,const Pica::OutputVertex&)override {
+            ++triangles;if(fail)throw std::runtime_error("fixture publication failure"); }
+        void DrawTriangles()override{} void FlushAll()override{}void FlushRegion(PAddr,u32)override{}
+        void InvalidateRegion(PAddr,u32)override{}void FlushAndInvalidateRegion(PAddr,u32)override{}void ClearAll(bool)override{}
+    };
+    const auto old_mode=Settings::values.uberhar_test_mode.GetValue();
+    const auto old_diag=Settings::software_renderer_diagnostics.GetValue();
+    struct Restore { Settings::UberharTestMode mode;bool diag;~Restore(){Settings::values.uberhar_test_mode=mode;
+        Settings::software_renderer_diagnostics=diag;} }restore{old_mode,old_diag};
+    Settings::values.uberhar_test_mode=Settings::UberharTestMode::Software;Settings::software_renderer_diagnostics=false;
+    for(bool observe:{false,true})for(bool fail:{false,true})for(bool indexed:{false,true}) {
+        Settings::software_renderer_diagnostics=observe;
+        Core::System system;Memory::MemorySystem memory{system};Sink sink;sink.fail=fail;Pica::PicaCore pica{memory,{}};
+        pica.BindRasterizer(&sink);auto& regs=pica.regs.internal;regs={};
+        auto& a=regs.pipeline.vertex_attributes;a.base_address.Assign(Memory::VRAM_PADDR/16);
+        a.format0.Assign(Pica::PipelineRegs::VertexAttributeFormat::FLOAT);a.size0.Assign(3);a.max_attribute_index.Assign(0);
+        a.attribute_loaders[0].component_count.Assign(1);a.attribute_loaders[0].byte_count.Assign(16);
+        regs.pipeline.num_vertices=3;regs.pipeline.index_array.offset.Assign(0x1000);
+        regs.vs.output_mask.Assign(1);regs.vs.main_offset.Assign(1);regs.rasterizer.vs_output_total.Assign(1);
+        auto& map=regs.rasterizer.vs_output_attributes[0];
+        using Semantic=Pica::RasterizerRegs::VSOutputAttributes;
+        map.map_x.Assign(Semantic::POSITION_X);map.map_y.Assign(Semantic::POSITION_Y);
+        map.map_z.Assign(Semantic::POSITION_Z);map.map_w.Assign(Semantic::POSITION_W);
+        const std::array<float,12> vertices{-.5f,-.5f,-.5f,1,.5f,-.5f,-.5f,1,-.5f,.5f,-.5f,1};
+        std::memcpy(memory.GetPhysicalPointer(Memory::VRAM_PADDR),vertices.data(),sizeof(vertices));
+        const std::array<u8,3> indices{0,1,2};std::memcpy(memory.GetPhysicalPointer(Memory::VRAM_PADDR+0x1000),indices.data(),3);
+        using Op=nihstro::OpCode::Id;using Dest=nihstro::DestRegister;using Source=nihstro::SourceRegister;
+        const auto binary=nihstro::InlineAsm::CompileToRawBinary(std::initializer_list<nihstro::InlineAsm>{{Op::NOP},{Op::MOV,Dest::MakeOutput(0),Source::MakeInput(0)},{Op::END}});
+        Pica::ProgramCode program{};Pica::SwizzleData swizzles{};
+        std::transform(binary.program.begin(),binary.program.end(),program.begin(),[](auto word){return word.hex;});
+        std::transform(binary.swizzle_table.begin(),binary.swizzle_table.end(),swizzles.begin(),[](auto word){return word.hex;});
+        pica.vs_setup.UpdateProgramCode(program);pica.vs_setup.UpdateSwizzleData(swizzles);
+        if(fail) CHECK_THROWS_AS(Pica::SoftwareProducerTestAccess::Batch(pica,indexed),std::runtime_error);
+        else CHECK_NOTHROW(Pica::SoftwareProducerTestAccess::Batch(pica,indexed));
+        CHECK(sink.began==1);CHECK(sink.ended==1);CHECK(sink.triangles==1);CHECK_FALSE(sink.open);CHECK(sink.unwind==fail);
+        const auto trace=Pica::SoftwareProducerTestAccess::TraceCost(pica);
+        if(observe) { CHECK(trace[0]==1);CHECK(trace[1]==3);CHECK(trace[2]==48);
+            CHECK(trace[3]>0);CHECK(trace[4]>0);CHECK(trace[5]==0); }
+        else for(auto value:trace) CHECK(value==0);
+        REQUIRE(sink.reads.size()==(indexed?2:1));CHECK(sink.reads[0].address==Memory::VRAM_PADDR);
+        CHECK(sink.reads[0].bytes.size()==(indexed?4096:48));
+        if(indexed){CHECK(sink.reads[1].address==Memory::VRAM_PADDR+0x1000);CHECK(sink.reads[1].bytes.size()==3);}
+    }
 }
 
 TEST_CASE("Software prepared fragment demand preserves actual triangle outputs",

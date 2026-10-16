@@ -26,13 +26,21 @@ enum class LightingFamilyKey { Current, Alpha13, Alpha14 };
 FSConfig MakeDynamicTevFamilyConfig(const FSConfig& config, const Profile& profile,
                                     LightingFamilyKey lighting_key = LightingFamilyKey::Current);
 
-// CodexAstraLocal: ABI 8 adds backwards RGB/alpha liveness in spare instruction
+// CodexAstraLocal: ABI 9 retains backwards RGB/alpha liveness in spare instruction
 // bits and live external-source demand in buffer_mask, retaining Vulkan's
 // 128-byte minimum. Source-derived disk identities also invalidate old modules.
-inline constexpr u32 DynamicTevAbiVersion = 8;
+inline constexpr u32 DynamicTevAbiVersion = 9;
 inline constexpr u32 TevLiveRgb = 1U << 8;
 inline constexpr u32 TevLiveAlpha = 1U << 9;
 inline constexpr u32 TevLiveLighting = 1U << 11;
+// CodexAstraLocal: ABI9 spends only unused instruction bits on exact endpoint
+// results. The top lighting-LUT byte carries canonical directional slot proofs.
+// These mutable bits are explicitly excluded from optional static module keys.
+inline constexpr u32 TevConstantRgb = 1U << 10;
+inline constexpr u32 TevConstantAlpha = 1U << 11;
+inline constexpr u32 TevConstantBits = 0xFC00U;
+inline constexpr u32 TevMemoShift = 22;
+static_assert((TevConstantBits & (TevLiveRgb | TevLiveAlpha | 0x000F000FU)) == 0);
 // CodexAstraLocal: Neither liveness flags nor source demand overlap the legacy
 // decoded color/alpha operations, delayed writes, loop bound or stage activity.
 static_assert(((TevLiveRgb | TevLiveAlpha) & 0x000F000FU) == 0);
@@ -82,6 +90,21 @@ static_assert(offsetof(DynamicTevState, lighting_ops_hi) == 124);
 
 /// AstraEH: Capture effective runtime state before family canonicalization removes it.
 DynamicTevState MakeDynamicTevState(const FSConfig& config, const Profile& profile);
+// CodexAstraLocal: Only live register values copied by the draw owner enter the
+// bounded arithmetic cache. No guest pointer, texture data or shader key owns
+// these mutable values; unavailable fixtures retain the original GPU formulas.
+struct FragmentRuntimeValues {
+    std::array<u32, 6> constants{};
+    u32 buffer{};
+    std::array<u64, 8> light_positions{};
+    bool available{};
+    bool operator==(const FragmentRuntimeValues&) const = default;
+};
+FragmentRuntimeValues CaptureFragmentRuntimeValues(const Pica::RegsInternal& regs,
+                                                   const FSConfig& config, const Profile& profile);
+void ApplyFragmentRuntime(DynamicTevState& state, const Profile& profile,
+                          const FragmentRuntimeValues& values);
+u32 FragmentMemoMask(const FSConfig& config, const Pica::TevLiveness::Plan& live);
 // CodexAstraLocal: Original-config analysis is shared by generation and bounded
 // evidence; callers must never analyze a canonical generic family as a guest draw.
 Pica::TevLiveness::Plan GraphicsTevLiveness(const FSConfig& config);
@@ -93,6 +116,7 @@ struct FragmentWorkEvidence {
     u32 live_rgb{}, live_alpha{}, dead_rgb{}, dead_alpha{};
     u32 live_textures{}, lighting_texture_overlap{}, constant_rgb{}, constant_alpha{};
     u32 directional_slots{};
+    u32 memo_mask{};
     bool lighting_dead{}, alpha_never{};
 };
 FragmentWorkEvidence AnalyzeFragmentWork(const FSConfig& config, const Profile& profile);
@@ -197,7 +221,7 @@ private:
     // CodexAstraLocal: Bake only prepared TEV choices, preserving consumed-operand
     // order, one fetch per referenced texture, byte rounding and delayed writes.
     void WriteStaticTev();
-    std::string GetStaticTevSource(u32 source, u32 stage, u32& sampled);
+    std::string GetStaticTevSource(u32 source, u32 stage);
 
     void AppendProcTexShiftOffset(std::string_view v, Pica::TexturingRegs::ProcTexShift mode,
                                   Pica::TexturingRegs::ProcTexClamp clamp_mode);
@@ -240,6 +264,9 @@ private:
     // CodexAstraLocal: Keep OpenGL/custom and Calculated generation unchanged;
     // Vulkan graphics uses the same proven dependency semantics independently.
     bool graphics_optimizations{};
+    // CodexAstraLocal: One ordinary-unit memo only where another exact consumer
+    // exists; dynamic families qualify the same mask from original draw state.
+    u32 sample_memo_mask{};
     bool use_blend_fallback{};
     bool use_fragment_shader_interlock{};
     bool use_fragment_shader_barycentric{};

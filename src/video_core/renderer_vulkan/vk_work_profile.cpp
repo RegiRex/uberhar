@@ -10,19 +10,29 @@
 namespace Vulkan {
 namespace {
 constexpr std::array names{"graphics", "utility", "upload", "copy", "blit", "readback",
-                           "feedback", "presentation"};
-constexpr std::array wait_names{"cpu_recorder", "gpu_completion", "queue_submit"};
+                           "feedback", "presentation", "calculated_guest", "calculated_assembly",
+                           "calculated_raster", "calculated_transfer"};
+// CodexAstraLocal: Every actual stage must have exactly one retained category name.
+static_assert(names.size()==static_cast<u32>(GpuWork::Count));
+constexpr std::array wait_names{"cpu_recorder", "gpu_completion", "queue_submit", "submit_readiness"};
 }
 
 WorkProfile::WorkProfile(const Instance& instance_) : instance{instance_} {
     try {
     const auto mode = Settings::values.uberhar_test_mode.GetValue();
-    enabled = mode == Settings::UberharTestMode::Native || Settings::UsesReadyGpuVertices(mode);
+    // CodexAstraLocal: Keep operation counts independent of GPU timestamp commands.
+    // The owner can measure observer cost without disabling actual rendering work.
+    enabled = Settings::values.uberhar_feature_diagnostics.GetValue() &&
+              // CodexAstraLocal: Calculated adds stage counts under this same global policy;
+              // its own diagnostics flag never enables GPU timestamp queries.
+              (mode == Settings::UberharTestMode::Native || Settings::UsesReadyGpuVertices(mode) ||
+               mode == Settings::UberharTestMode::Compute);
+    timestamps_requested = Settings::values.uberhar_gpu_timestamps.GetValue();
     if (!enabled) return;
     const auto physical = instance.GetPhysicalDevice();
     const auto family = physical.getQueueFamilyProperties()[instance.GetGraphicsQueueFamilyIndex()];
     const auto limits = physical.getProperties().limits;
-    if (family.timestampValidBits && limits.timestampComputeAndGraphics && limits.timestampPeriod > 0) {
+    if (timestamps_requested && family.timestampValidBits && limits.timestampComputeAndGraphics && limits.timestampPeriod > 0) {
         period = limits.timestampPeriod;
         timestamp_mask = family.timestampValidBits >= 64 ? ~u64{} :
                          (u64{1} << family.timestampValidBits) - 1;
@@ -34,7 +44,7 @@ WorkProfile::WorkProfile(const Instance& instance_) : instance{instance_} {
             LOG_WARNING(Render_Vulkan, "Uberhar GPU cost queries unavailable: {}", error.what());
         }
     }
-    LOG_INFO(Render_Vulkan, "Uberhar GPU cost profile: enabled=true timestamps={} mode={} "
+    LOG_INFO(Render_Vulkan, "Uberhar GPU cost profile: feature=gpu_work.v2 enabled=true timestamps={} mode={} "
              "sample_stride=64 slots=128 waits=false pass_splits=false logical_bytes_not_bandwidth=true",
              bool(pool), static_cast<u32>(mode));
     } catch (...) { ++query_errors; } // CodexAstraLocal: Optional diagnostics cannot prevent startup.
@@ -92,7 +102,7 @@ void WorkProfile::Route(u32 route) {
 void WorkProfile::Submitted(u64 tick, u64 completed_tick) noexcept {
     if (!enabled) return;
     // CodexAstraLocal: Stamp only completed measurement pairs after successful submit.
-    for (auto& sample : samples)
+    if (pool) for (auto& sample : samples)
         if (sample.state == 2) { sample.tick = tick; sample.state = 3; }
     Poll(completed_tick);
 }
@@ -100,6 +110,8 @@ void WorkProfile::Submitted(u64 tick, u64 completed_tick) noexcept {
 void WorkProfile::Poll(u64 completed_tick) noexcept {
     try {
     if (!enabled) return;
+    // CodexAstraLocal: Counts-only runs do not scan query slots or time polling.
+    if (!pool) { Report(); return; }
     const auto start = std::chrono::steady_clock::now();
     for (u32 i = 0; i < samples.size(); ++i) {
         auto& sample = samples[i];
@@ -151,25 +163,29 @@ void WorkProfile::Wait(HostWait reason, u64 nanoseconds) {
 void WorkProfile::Report(bool final) noexcept {
     try {
     if (!enabled || (final && final_reported)) return;
+    // CodexAstraLocal TEST-ONLY LOG: Periodic cumulative evidence survives dropped
+    // records; prescale avoids a reporting clock read on every submission.
+    if (!final && (++report_prescale & 63U) != 0) return;
     const auto now = std::chrono::steady_clock::now();
     if (!final && now - report_time < std::chrono::seconds(10)) return;
     report_time = now;
     final_reported |= final;
+    ++report_sequence;
     for (u32 i = 0; i < totals.size(); ++i) {
         const auto& s = totals[i];
-        LOG_INFO_WITH_DELIVERY(Render_Vulkan, final ? Common::Log::Delivery::Reliable : Common::Log::Delivery::Diagnostic, "Uberhar GPU cost {}: final={} calls={} logical_bytes={} samples={} "
+        LOG_INFO_WITH_DELIVERY(Render_Vulkan, final ? Common::Log::Delivery::Reliable : Common::Log::Delivery::Diagnostic, "Uberhar GPU cost {}: feature=gpu_work.v2 sequence={} final={} calls={} logical_bytes={} samples={} "
                  "sample_ms={:.6f} max_sample_ms={:.6f} dropped={} mixed={} tick_first={} tick_last={} "
                  "sample_first={} sample_last={} host_record_span_ms={:.6f} total_is_cumulative=true unsampled_cost=unknown",
-                 names[i], final, s.calls, s.bytes, s.samples, s.ns / 1e6, s.maximum_ns / 1e6,
+                 names[i], report_sequence, final, s.calls, s.bytes, s.samples, s.ns / 1e6, s.maximum_ns / 1e6,
                  s.dropped, s.mixed, s.first_tick, s.last_tick, s.first_serial, s.last_serial, s.host_span_ns / 1e6);
     }
     for (u32 i = 0; i < waits.size(); ++i)
-        LOG_INFO_WITH_DELIVERY(Render_Vulkan, final ? Common::Log::Delivery::Reliable : Common::Log::Delivery::Diagnostic, "Uberhar host cost {}: final={} calls={} wall_ms={:.6f}",
-                 wait_names[i], final, wait_calls[i].load(std::memory_order_relaxed),
+        LOG_INFO_WITH_DELIVERY(Render_Vulkan, final ? Common::Log::Delivery::Reliable : Common::Log::Delivery::Diagnostic, "Uberhar host cost {}: feature=host_wait.v2 sequence={} final={} calls={} wall_ms={:.6f}",
+                 wait_names[i], report_sequence, final, wait_calls[i].load(std::memory_order_relaxed),
                  waits[i].load(std::memory_order_relaxed) / 1e6);
-    LOG_INFO_WITH_DELIVERY(Render_Vulkan, final ? Common::Log::Delivery::Reliable : Common::Log::Delivery::Diagnostic, "Uberhar GPU cost coverage: final={} generic={} static={} full={} "
+    LOG_INFO_WITH_DELIVERY(Render_Vulkan, final ? Common::Log::Delivery::Reliable : Common::Log::Delivery::Diagnostic, "Uberhar GPU cost coverage: feature=gpu_work.v2 sequence={} final={} timestamps_requested={} timestamps_available={} generic={} static={} full={} "
              "recovery={} gpu_optimized={} query_errors={} unavailable={} poll_cpu_ms={:.6f} pending={}",
-             final, routes[0], routes[1], routes[2], routes[3], routes[4], query_errors,
+             report_sequence, final, timestamps_requested, bool(pool), routes[0], routes[1], routes[2], routes[3], routes[4], query_errors,
              unavailable, profile_cpu_ns / 1e6,
              std::count_if(samples.begin(), samples.end(), [](const auto& sample) { return sample.state != 0; }));
     } catch (...) { ++query_errors; }

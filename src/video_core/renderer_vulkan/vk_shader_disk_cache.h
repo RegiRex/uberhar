@@ -412,6 +412,10 @@ private:
     std::unordered_map<u64, std::unique_ptr<ReadyFragmentEntry>> ready_fragments;
     ReadyFragmentPolicy::DemandGate<ReadyFragmentKey> ready_fragment_demand;
     Shader* warming_ready_fragment{};
+    // CodexAstraLocal: Finite optional module reservation never affects mandatory
+    // recovery maps. Counters retain allocation failures and reserved refusals.
+    u64 ready_fragment_cheap_attempts{}, ready_fragment_reserved_refusals{};
+    u64 static_tev_cheap_attempts{}, static_tev_reserved_refusals{};
     u64 ready_fragment_requests{}, ready_fragment_hits{}, ready_fragment_cold{},
         ready_fragment_busy{}, ready_fragment_capped{}, ready_fragment_mismatches{},
         ready_fragment_failed_hits{}, ready_fragment_unsupported{},

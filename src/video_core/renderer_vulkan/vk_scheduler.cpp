@@ -117,7 +117,8 @@ void Scheduler::WaitWorker() {
     MICROPROFILE_SCOPE(Vulkan_WaitForWorker);
     // CodexAstraLocal TEST-ONLY LOG: Measure actual owner recorder drainage,
     // separately from GPU execution. Remove with the .49 work profiler.
-    const auto wait_start = std::chrono::steady_clock::now();
+    const auto wait_start = work_profile.Enabled() ? std::chrono::steady_clock::now() :
+        std::chrono::steady_clock::time_point{};
     // CodexAstraUlt-2: Drain captures even after failure; report only after the
     // worker no longer references them. Shutdown leaves the latch terminal.
     if (shader_failure.Failed())
@@ -134,7 +135,7 @@ void Scheduler::WaitWorker() {
     // Now wait for execution to finish.
     // This needs to be done in the same order as WorkerThread.
     std::scoped_lock el{execution_mutex};
-    work_profile.Wait(HostWait::Recorder, std::chrono::duration_cast<std::chrono::nanoseconds>(
+    if (work_profile.Enabled()) work_profile.Wait(HostWait::Recorder, std::chrono::duration_cast<std::chrono::nanoseconds>(
         std::chrono::steady_clock::now() - wait_start).count());
     shader_failure.Check();
 }
@@ -146,18 +147,30 @@ void Scheduler::Wait(u64 tick) {
         if(compute_failures)compute_failures->Retire(master_semaphore->KnownGpuTick());
         return;
     }
-    const auto wait_start = std::chrono::steady_clock::now();
+    const auto wait_start = work_profile.Enabled() ? std::chrono::steady_clock::now() :
+        std::chrono::steady_clock::time_point{};
     if (tick >= master_semaphore->CurrentTick()) {
         // Make sure we are not waiting for the current tick without signalling
         Flush();
     }
     // CodexAstraUlt-2: A canceled submission never signals its Vulkan tick.
-    if (shader_failure.WaitSubmitted(tick))
+    const bool submitted = shader_failure.WaitSubmitted(tick);
+    // CodexAstraLocal TEST-ONLY LOG: Split readiness from the existing device wait;
+    // no extra submit/fence is introduced. Remove after dependency qualification.
+    const auto ready_time = work_profile.Enabled() ? std::chrono::steady_clock::now() :
+        std::chrono::steady_clock::time_point{};
+    if (work_profile.Enabled()) work_profile.Wait(HostWait::SubmitReadiness,
+        std::chrono::duration_cast<std::chrono::nanoseconds>(ready_time - wait_start).count());
+    if (submitted) {
+        // CodexAstraLocal TEST-ONLY LOG: Count only an actual device wait, excluding
+        // canceled readiness and the diagnostic update above. This is host wall time.
+        const auto fence_start = work_profile.Enabled() ? std::chrono::steady_clock::now() :
+            std::chrono::steady_clock::time_point{};
         master_semaphore->Wait(tick);
-    // CodexAstraLocal TEST-ONLY LOG: Includes submission readiness because it
-    // lies on this owner dependency; do not interpret this host span as GPU time.
-    work_profile.Wait(HostWait::GpuCompletion, std::chrono::duration_cast<std::chrono::nanoseconds>(
-        std::chrono::steady_clock::now() - wait_start).count());
+        if (work_profile.Enabled()) work_profile.Wait(HostWait::GpuCompletion,
+            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now() - fence_start).count());
+    }
     if(compute_failures)compute_failures->Retire(master_semaphore->KnownGpuTick());
     } catch(const vk::SystemError& error) {
         if(compute_failures)if(auto packet=compute_failures->Submitted(tick)) {
@@ -303,7 +316,8 @@ void Scheduler::SubmitExecution(vk::Semaphore signal_semaphore, vk::Semaphore wa
 
     RecordBound([signal_semaphore, wait_semaphore, signal_value, failure, this](vk::CommandBuffer cmdbuf) {
         MICROPROFILE_SCOPE(Vulkan_Submit);
-        const auto submit_start = std::chrono::steady_clock::now();
+        const auto submit_start = work_profile.Enabled() ? std::chrono::steady_clock::now() :
+            std::chrono::steady_clock::time_point{};
         try {
         std::scoped_lock lock{submit_mutex};
         master_semaphore->SubmitWork(cmdbuf, wait_semaphore, signal_semaphore, signal_value);
@@ -314,7 +328,7 @@ void Scheduler::SubmitExecution(vk::Semaphore signal_semaphore, vk::Semaphore wa
             throw VideoCore::ShaderRecoveryError(error.what());
         }
         if(failure)failure->Number("submit_succeeded_tick",signal_value);
-        work_profile.Wait(HostWait::Submit, std::chrono::duration_cast<std::chrono::nanoseconds>(
+        if (work_profile.Enabled()) work_profile.Wait(HostWait::Submit, std::chrono::duration_cast<std::chrono::nanoseconds>(
             std::chrono::steady_clock::now() - submit_start).count());
         // CodexAstraLocal: Queries are read only after their original successful
         // tick is complete, and availability still guards driver readiness.

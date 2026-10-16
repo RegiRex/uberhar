@@ -15,6 +15,9 @@
 #include "common/param_package.h"
 #include "common/setting_keys.h"
 #include "common/settings.h"
+#include "common/uberhar_software_controls.h" // CodexAstraLocal: Persist restart-only Software comparisons.
+// CodexAstraLocal: Persist independent Calculated diagnostic switches.
+#include "common/calculated_renderer_settings.h"
 #include "common/uberhar_test_profile.h" // AstraEH: Temporary renderer experiment overrides.
 #include "core/core.h"
 #include "core/hle/service/cfg/cfg.h"
@@ -145,6 +148,9 @@ void Config::ReadValues() {
     ReadSetting("Renderer", Settings::values.graphics_api);
     // CodexAstraLocal: Reload the persisted restart-only CPU raster budget.
     ReadSetting("Renderer", Settings::values.software_renderer_workers);
+    // CodexAstraLocal: Native INI controls survive profile application unchanged.
+    ReadSetting("Renderer", Settings::software_renderer_features);
+    ReadSetting("Renderer", Settings::software_renderer_diagnostics);
     ReadSetting("Renderer", Settings::values.async_presentation);
     ReadSetting("Renderer", Settings::values.async_shader_compilation);
     // AstraEH: Load the same opt-in flags exposed in Android's Graphics settings.
@@ -156,8 +162,26 @@ void Config::ReadValues() {
     ReadSetting("Renderer", Settings::values.uberhar_cpu_vertex_only);
     // CodexAstraLocal: Load comparison controls before constructing renderer owners.
     ReadSetting("Renderer", Settings::values.uberhar_native_full_fragments);
+    // CodexAstraLocal: Snapshotted by the next Calculated renderer; no hot toggles.
+    ReadSetting("Renderer", Settings::calculated_renderer_features);
+    ReadSetting("Renderer", Settings::calculated_renderer_diagnostics);
     ReadSetting("Renderer", Settings::values.uberhar_cpu_prefix_overlap);
     ReadSetting("Renderer", Settings::values.uberhar_parallel_texture_decode);
+    // CodexAstraLocal: Independent restart-only .50 controls are snapshotted by each owner;
+    // profiling stays optional so comparison runs do not pay GPU timestamp overhead.
+    ReadSetting("Renderer", Settings::values.uberhar_cpu_queue_expanded_seeds);
+    ReadSetting("Renderer", Settings::values.uberhar_cpu_adaptive_participation);
+    ReadSetting("Renderer", Settings::values.uberhar_cpu_execution_census);
+    ReadSetting("Renderer", Settings::values.uberhar_feature_diagnostics);
+    ReadSetting("Renderer", Settings::values.uberhar_fragment_memo);
+    ReadSetting("Renderer", Settings::values.uberhar_constant_tev);
+    ReadSetting("Renderer", Settings::values.uberhar_directional_precompute);
+    ReadSetting("Renderer", Settings::values.uberhar_lit_specialization);
+    ReadSetting("Renderer", Settings::values.uberhar_fragment_liveness);
+    ReadSetting("Renderer", Settings::values.uberhar_alpha_never);
+    ReadSetting("Renderer", Settings::values.uberhar_gpu_timestamps);
+    ReadSetting("Renderer", Settings::values.uberhar_image_reuse);
+    ReadSetting("Renderer", Settings::values.uberhar_cpu_transfers);
 
     // AstraEH: Read the profile before applying its temporary in-memory overrides.
     ReadSetting("Renderer", Settings::values.uberhar_test_mode);

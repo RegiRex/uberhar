@@ -158,6 +158,22 @@ void CheckGraphicsOptimizations() {
     const auto early = dynamic.find("if ((uber_tev.framebuffer & 7u) == 0u) discard;", main);
     need(early != std::string::npos && early < dynamic.find("float depth =", main) &&
          early < dynamic.find("vec4 diffuse_sum", main), "Alpha-Never rejection was not before fragment work");
+    // CodexAstraLocal: Controls change their intended generator/transport paths
+    // independently; old cache identity cannot stand in for a numeric certificate.
+    auto off = profile;
+    off.fragment_alpha_never = false;
+    need(FragmentModule{family, {}, off, true}.Generate().find(
+        "if ((uber_tev.framebuffer & 7u) == 0u) discard;") == std::string::npos,
+        "Alpha-Never OFF still emits early dynamic discard");
+    off = profile; off.fragment_memo = false;
+    need(FragmentModule{family, {}, off, true}.Generate().find("uber_shared_tex") == std::string::npos,
+        "Memo OFF retained shared cache");
+    off = profile; off.fragment_liveness = false;
+    const auto all_live = MakeDynamicTevState(overwritten, off);
+    need((all_live.stages[0].operations & (TevLiveRgb | TevLiveAlpha)) == (TevLiveRgb | TevLiveAlpha),
+        "Liveness OFF retained eliminated outputs");
+    need(dynamic.find("uber_texel0 = uber_shared_tex0") == std::string::npos,
+        "Generic ordinary sampler retained duplicate cache");
     std::printf("PASS %u graphics liveness/memo/transport/evidence controls\n", checks);
 }
 

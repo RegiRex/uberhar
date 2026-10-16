@@ -12,6 +12,9 @@
 #include "citra_qt/setting_qkeys.h"
 #include "common/file_util.h"
 #include "common/settings.h"
+#include "common/uberhar_software_controls.h" // CodexAstraLocal: Persist restart-only Software comparisons.
+// CodexAstraLocal: Persist independent Calculated diagnostic switches.
+#include "common/calculated_renderer_settings.h"
 #include "core/hle/service/service.h"
 #include "input_common/main.h"
 #include "input_common/udp/client.h"
@@ -709,6 +712,11 @@ void QtConfig::ReadRendererValues() {
     qt_config->beginGroup(QStringLiteral("Renderer"));
 
     ReadGlobalSetting(Settings::values.graphics_api);
+    // CodexAstraLocal: Keep Software feature and observation controls independent.
+    if (global) {
+        ReadBasicSetting(Settings::software_renderer_features);
+        ReadBasicSetting(Settings::software_renderer_diagnostics);
+    }
     ReadGlobalSetting(Settings::values.physical_device);
     ReadGlobalSetting(Settings::values.spirv_shader_gen);
     ReadGlobalSetting(Settings::values.disable_spirv_optimizer);
@@ -722,8 +730,29 @@ void QtConfig::ReadRendererValues() {
     ReadGlobalSetting(Settings::values.uberhar_cpu_vertex_only);
     // CodexAstraLocal: Read the same independent per-game controls as Android.
     ReadGlobalSetting(Settings::values.uberhar_native_full_fragments);
+    // CodexAstraLocal: Independent global Calculated controls, snapshotted at startup.
+    // Per-game files must not overwrite these process-global comparison values.
+    if (global) {
+        ReadBasicSetting(Settings::calculated_renderer_features);
+        ReadBasicSetting(Settings::calculated_renderer_diagnostics);
+    }
     ReadGlobalSetting(Settings::values.uberhar_cpu_prefix_overlap);
     ReadGlobalSetting(Settings::values.uberhar_parallel_texture_decode);
+    // CodexAstraLocal: Independent restart-only .50 controls are snapshotted by each owner;
+    // profiling stays optional so comparison runs do not pay GPU timestamp overhead.
+    ReadGlobalSetting(Settings::values.uberhar_cpu_queue_expanded_seeds);
+    ReadGlobalSetting(Settings::values.uberhar_cpu_adaptive_participation);
+    ReadGlobalSetting(Settings::values.uberhar_cpu_execution_census);
+    ReadGlobalSetting(Settings::values.uberhar_feature_diagnostics);
+    ReadGlobalSetting(Settings::values.uberhar_fragment_memo);
+    ReadGlobalSetting(Settings::values.uberhar_constant_tev);
+    ReadGlobalSetting(Settings::values.uberhar_directional_precompute);
+    ReadGlobalSetting(Settings::values.uberhar_lit_specialization);
+    ReadGlobalSetting(Settings::values.uberhar_fragment_liveness);
+    ReadGlobalSetting(Settings::values.uberhar_alpha_never);
+    ReadGlobalSetting(Settings::values.uberhar_gpu_timestamps);
+    ReadGlobalSetting(Settings::values.uberhar_image_reuse);
+    ReadGlobalSetting(Settings::values.uberhar_cpu_transfers);
 
     ReadGlobalSetting(Settings::values.async_presentation);
     ReadGlobalSetting(Settings::values.use_hw_shader);
@@ -1273,6 +1302,11 @@ void QtConfig::SaveRendererValues() {
     qt_config->beginGroup(QStringLiteral("Renderer"));
 
     WriteGlobalSetting(Settings::values.graphics_api);
+    // CodexAstraLocal: Round-trip restart-only global Software comparisons.
+    if (global) {
+        WriteBasicSetting(Settings::software_renderer_features);
+        WriteBasicSetting(Settings::software_renderer_diagnostics);
+    }
     WriteGlobalSetting(Settings::values.physical_device);
     WriteGlobalSetting(Settings::values.spirv_shader_gen);
     WriteGlobalSetting(Settings::values.disable_spirv_optimizer);
@@ -1286,8 +1320,29 @@ void QtConfig::SaveRendererValues() {
     WriteGlobalSetting(Settings::values.uberhar_cpu_vertex_only);
     // CodexAstraLocal: Write the same independent per-game controls as Android.
     WriteGlobalSetting(Settings::values.uberhar_native_full_fragments);
+    // CodexAstraLocal: Independent global Calculated controls, snapshotted at startup.
+    // Keep their persistence owner identical to the read path.
+    if (global) {
+        WriteBasicSetting(Settings::calculated_renderer_features);
+        WriteBasicSetting(Settings::calculated_renderer_diagnostics);
+    }
     WriteGlobalSetting(Settings::values.uberhar_cpu_prefix_overlap);
     WriteGlobalSetting(Settings::values.uberhar_parallel_texture_decode);
+    // CodexAstraLocal: Independent restart-only .50 controls are snapshotted by each owner;
+    // profiling stays optional so comparison runs do not pay GPU timestamp overhead.
+    WriteGlobalSetting(Settings::values.uberhar_cpu_queue_expanded_seeds);
+    WriteGlobalSetting(Settings::values.uberhar_cpu_adaptive_participation);
+    WriteGlobalSetting(Settings::values.uberhar_cpu_execution_census);
+    WriteGlobalSetting(Settings::values.uberhar_feature_diagnostics);
+    WriteGlobalSetting(Settings::values.uberhar_fragment_memo);
+    WriteGlobalSetting(Settings::values.uberhar_constant_tev);
+    WriteGlobalSetting(Settings::values.uberhar_directional_precompute);
+    WriteGlobalSetting(Settings::values.uberhar_lit_specialization);
+    WriteGlobalSetting(Settings::values.uberhar_fragment_liveness);
+    WriteGlobalSetting(Settings::values.uberhar_alpha_never);
+    WriteGlobalSetting(Settings::values.uberhar_gpu_timestamps);
+    WriteGlobalSetting(Settings::values.uberhar_image_reuse);
+    WriteGlobalSetting(Settings::values.uberhar_cpu_transfers);
 
     WriteGlobalSetting(Settings::values.async_presentation);
     WriteGlobalSetting(Settings::values.use_hw_shader);

@@ -18,17 +18,22 @@ public:
     };
 
     const Pica::Shader::Generator::GLSL::DynamicTevState& Get(
-        const Pica::Shader::FSConfig& next, const Pica::Shader::Profile& next_profile) {
+        const Pica::Shader::FSConfig& next, const Pica::Shader::Profile& next_profile,
+        const Pica::Shader::Generator::GLSL::FragmentRuntimeValues& next_values = {}) {
         ++counters.requests;
-        if (config && *config == next && profile == next_profile) {
+        if (config && *config == next && profile == next_profile && values == next_values) {
             ++counters.hits;
             return state;
         }
         // CodexAstraLocal: Full equality, never a hash or partial dirty-bit map,
         // proves reuse. Publish the key only after the original producer succeeds.
         state = Pica::Shader::Generator::GLSL::MakeDynamicTevState(next, next_profile);
+        // CodexAstraLocal: Numeric uniforms can change under identical FSConfig;
+        // exact owned values invalidate arithmetic preparation before publication.
+        Pica::Shader::Generator::GLSL::ApplyFragmentRuntime(state, next_profile, next_values);
         config = next;
         profile = next_profile;
+        values = next_values;
         ++counters.builds;
         return state;
     }
@@ -44,6 +49,7 @@ public:
 private:
     std::optional<Pica::Shader::FSConfig> config;
     Pica::Shader::Profile profile{};
+    Pica::Shader::Generator::GLSL::FragmentRuntimeValues values{};
     Pica::Shader::Generator::GLSL::DynamicTevState state{};
     Counters counters;
 };

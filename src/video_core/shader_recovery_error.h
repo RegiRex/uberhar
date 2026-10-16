@@ -14,6 +14,13 @@ public:
     // CodexAstraLocal: Reuse the contained terminal renderer error for strict
     // backend rejection while preserving the historical shader-failure message.
     explicit ShaderRecoveryError(const char* message) : std::runtime_error{message} {}
+    // CodexAstraLocal: Preserve a normalized driver's signed result through the
+    // terminal renderer boundary; zero remains the non-driver-error default.
+    ShaderRecoveryError(const char* message, int result)
+        : std::runtime_error{message}, driver_result{result} {}
+    int DriverResult() const noexcept { return driver_result; }
+private:
+    int driver_result{};
 };
 
 } // namespace VideoCore

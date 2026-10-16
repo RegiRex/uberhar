@@ -13,9 +13,12 @@ class Instance;
 // CodexAstraLocal: Categories describe complete command spans, never exclusive
 // hardware stages. Overlapping GPU durations must not be summed as frame time.
 enum class GpuWork : u32 {
-    Graphics, Utility, Upload, Copy, Blit, Readback, Feedback, Presentation, Count
+    Graphics, Utility, Upload, Copy, Blit, Readback, Feedback, Presentation,
+    // CodexAstraLocal: Actual compute-command spans share the independent global timestamp policy.
+    CalculatedGuest, CalculatedAssembly, CalculatedRaster, CalculatedTransfer, Count
 };
-enum class HostWait : u32 { Recorder, GpuCompletion, Submit, Count };
+// CodexAstraLocal: Submission readiness and actual fence waiting are different dependencies.
+enum class HostWait : u32 { Recorder, GpuCompletion, Submit, SubmitReadiness, Count };
 
 // CodexAstraLocal TEST-ONLY LOG: Bounded .49 cost attribution. Remove this
 // profiler after Native/Combo work placement is hardware-qualified. All query
@@ -31,6 +34,8 @@ public:
     void Route(u32 route);
     void Submitted(u64 tick, u64 completed_tick) noexcept;
     void Poll(u64 completed_tick) noexcept;
+    // CodexAstraLocal: Callers avoid clock reads entirely when diagnostic collection is off.
+    bool Enabled() const noexcept { return enabled; }
     void Wait(HostWait reason, u64 nanoseconds);
     void Report(bool final = false) noexcept;
 
@@ -56,6 +61,8 @@ private:
     u64 timestamp_mask{}, serial{}, query_errors{}, unavailable{}, profile_cpu_ns{};
     double period{};
     int pass_slot{-1};
-    bool enabled{}, final_reported{}, pass_active{};
+    bool enabled{}, timestamps_requested{}, final_reported{}, pass_active{};
+    u32 report_prescale{};
+    u64 report_sequence{};
 };
 } // namespace Vulkan

@@ -34,6 +34,11 @@ struct ComputeModuleEvidence {
     std::string source;
     std::vector<u32> spirv;
     bool optimizer_disabled{};
+    // CodexAstraLocal: Structural retry is distinct from the broad GLSL
+    // optimizer policy; cached accepted evidence must retain its exact variant.
+    u32 structural_lowering_revision{};
+    // CodexAstraLocal: Immutable source/diagnostic policy for cold and cached modules.
+    u64 calculated_feature_key{};
 };
 
 // CodexAstraLocal: Query immutable device limits once per compute owner. Draws

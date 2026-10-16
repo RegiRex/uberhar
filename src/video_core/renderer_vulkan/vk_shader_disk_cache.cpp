@@ -335,6 +335,21 @@ std::optional<std::pair<u64, Shader* const>> ShaderDiskCache::UseReadyFragmentSh
         else ++ready_fragment_capped;
         return {};
     }
+    // CodexAstraLocal: Reserve one quarter of the existing optional-only module
+    // budget for genuinely live lighting; all ready lookup and mandatory full
+    // recovery paths above/outside this map remain unchanged. Not a cost estimate.
+    auto applied = config;
+    applied.ApplyProfile(parent.profile);
+    const auto live = GLSL::GraphicsTevLiveness(applied);
+    using TevSource = Pica::TexturingRegs::TevStageConfig::Source;
+    const bool live_lit = applied.lighting.enable &&
+        (live.Uses(TevSource::PrimaryFragmentColor) || live.Uses(TevSource::SecondaryFragmentColor));
+    if (parent.lit_specialization && !live_lit &&
+        ready_fragment_cheap_attempts >= ReadyFragmentPolicy::MaxModules * 3 / 4) {
+        ++ready_fragment_reserved_refusals;
+        return {};
+    }
+    if (!live_lit) ++ready_fragment_cheap_attempts;
     auto object = std::make_unique<ReadyFragmentEntry>(parent.instance, key);
     auto* entry = object.get();
     ready_fragments.emplace(hash, std::move(object));
@@ -453,6 +468,15 @@ std::optional<std::pair<u64, Shader* const>> ShaderDiskCache::UseStaticTevFragme
         ++static_tev_busy;
         return {};
     }
+    // CodexAstraLocal: Static modules have their own eight-owner bound; protect
+    // the same two live-light slots as the PSO policy, including failed attempts.
+    const bool live_lit = family.lighting.enable && (plan.buffer_mask & GLSL::TevLiveLighting);
+    if (parent.lit_specialization && !live_lit &&
+        static_tev_cheap_attempts >= StaticTevPolicy::MaxModules * 3 / 4) {
+        ++static_tev_reserved_refusals;
+        return {};
+    }
+    if (!live_lit) ++static_tev_cheap_attempts;
     // CodexAstraLocal: Charge before every throwing owner allocation/insertion.
     // A failed entry remains terminal; an allocation failure consumes the finite
     // title attempt budget even when no entry could be retained.
@@ -651,6 +675,17 @@ void ShaderDiskCache::ReportUberharStats(const char* kind) const {
     const auto delivery = std::strcmp(kind, "progress") == 0
                               ? Common::Log::Delivery::Diagnostic
                               : Common::Log::Delivery::Reliable;
+    // CodexAstraLocal TEST-ONLY LOG: Distinguish protected capacity from total
+    // exhaustion at the existing report boundary. Remove after bounded priority
+    // qualification; unused reserved capacity is not a measured optimization.
+    if (parent.feature_diagnostics)
+        LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
+            "Uberhar lit module admission {}: enabled={} full_cheap_attempts={} "
+            "full_reserved_refusals={} static_cheap_attempts={} static_reserved_refusals={} "
+            "full_cheap_limit=96 static_cheap_limit=6 "
+            "scope=optional_modules priority=live_lighting cost_model=structural_proxy",
+            kind, parent.lit_specialization, ready_fragment_cheap_attempts,
+            ready_fragment_reserved_refusals, static_tev_cheap_attempts, static_tev_reserved_refusals);
     // AstraPro: Existing five-second/final cadence, not per draw.
     // CodexAstraUlt Log Line: Replace AstraPro's blocking progress enqueue; totals stay reliable.
     LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,

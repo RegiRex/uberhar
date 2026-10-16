@@ -15,7 +15,10 @@
 #include "video_core/pica/pica_core.h"
 #include "video_core/pica/vertex_loader.h"
 #include "video_core/renderer_vulkan/uberhar_compute_pipeline.h"
+#include "video_core/renderer_vulkan/uberhar_compute_lowering.h" // CodexAstraLocal: Structural retry only.
 #include "video_core/renderer_vulkan/vk_compute_vertex.h"
+// CodexAstraLocal: Independent feature policy and sampled real-path attribution.
+#include "video_core/renderer_vulkan/compute_feature_profile.h"
 #include "video_core/renderer_vulkan/vk_descriptor_update_queue.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_resource_pool.h"
@@ -253,6 +256,7 @@ struct ComputeVertexProducer::Impl {
         vk::DeviceSize size{};
         void* mapped{};
     };
+    using Cost=ComputeFeatureProfile::Cost;
     struct Program {
         Pica::ProgramCode words;
         Pica::SwizzleData swizzles;
@@ -261,6 +265,13 @@ struct ComputeVertexProducer::Impl {
         vk::UniqueShaderModule module;
         vk::UniquePipeline pipeline;
         std::shared_ptr<const ComputeModuleEvidence> evidence;
+        // CodexAstraLocal: A successful structural retry retains its rejected
+        // original too; a later cached draw may be the first terminal incident.
+        std::shared_ptr<const ComputeModuleEvidence> rejected_evidence;
+        int rejected_result{};
+        // CodexAstraLocal: No disk cache is used by this owner; in-memory reuse
+        // still keys every source/diagnostic revision and effective policy.
+        u64 feature_key{};
     };
     Impl(const Instance& instance_, Scheduler& scheduler_, DescriptorUpdateQueue& updates_)
         : instance{instance_}, scheduler{scheduler_}, updates{updates_},
@@ -293,18 +304,36 @@ struct ComputeVertexProducer::Impl {
         const auto found = std::find_if(programs.begin(), programs.end(), [&](const Program& p) {
             return p.entry == input.metadata[15] && p.sanitize == input.sanitize_mul &&
                 p.disable_optimizer == disable_optimizer && p.words == input.program &&
-                p.swizzles == input.swizzles;
+                p.swizzles == input.swizzles && p.feature_key==costs.config.Key();
         });
         if (found != programs.end()) {
-            if(failure) failure->Module(found->evidence);
+            ++costs.guest_hits;
+            if(found->rejected_evidence)++costs.retry_cache_hits;
+            if(failure) {
+                failure->Module(found->evidence);
+                // CodexAstraLocal: Republish both immutable attempts and their
+                // exact policy/result when this program is reused by a new draw.
+                if (found->rejected_evidence) {
+                    failure->Module(found->rejected_evidence);
+                    failure->Number("guest_initial_result_signed_bits", static_cast<u32>(found->rejected_result));
+                    failure->Label("guest_structural_retry", "created_cached");
+                    failure->Label("guest_lowering_policy", "structural_v2_local_only");
+                    failure->Number("guest_requested_optimizer_disabled", disable_optimizer);
+                    failure->Number("guest_effective_optimizer_disabled", found->evidence->optimizer_disabled);
+                    failure->Number("pipeline_result_signed_bits", 0);
+                }
+            }
             return *found;
         }
+        ++costs.guest_misses;
+        auto compile_timer=costs.Measure(Cost::GuestCompile,true);
         if(failure) failure->Stage(ComputeFailureStage::GuestTranslate);
         const auto source = Pica::Shader::Generator::GLSL::GenerateComputeGuestVertex(
             input.program, input.swizzles, input.metadata[15], input.sanitize_mul);
         auto evidence=std::make_shared<ComputeModuleEvidence>();
         evidence->role="guest_vertex";evidence->source=source;
         evidence->optimizer_disabled=disable_optimizer;
+        evidence->calculated_feature_key=costs.config.Key();
         if(failure) failure->Module(evidence);
         if (source.empty()) Refuse("Calculated guest program cannot be translated to compute");
         if(failure) failure->Stage(ComputeFailureStage::GuestCompile);
@@ -314,18 +343,75 @@ struct ComputeVertexProducer::Impl {
         evidence=std::make_shared<ComputeModuleEvidence>(*evidence);
         evidence->spirv=code;
         if(failure)failure->Module(evidence);
+        compile_timer.End();
         if (code.empty()) Refuse("Calculated guest compute program compilation failed");
         // CodexAstraLocal: Produce has already retired the previous use. Bound
         // shader storage without optional readiness, dropped draws or native retry.
         if (programs.size() == 32) programs.erase(programs.begin());
-        Program p{input.program, input.swizzles, input.metadata[15], input.sanitize_mul,
-                  disable_optimizer, {}, {}, evidence};
         // CodexAstraLocal: Preserve the exact module on rejection and contain
         // its Vulkan error before returning through guest-generated code.
         if(failure) failure->Stage(ComputeFailureStage::GuestPipeline);
-        auto objects = CreateComputePipeline(instance, *layout, source, code, disable_optimizer,
-                                             ComputePipelineRole::GuestVertex,
-                                             reported_creation_failure, failure.get());
+        ComputePipelineObjects objects;
+        ComputePipelineFailureInfo outcome;
+        std::shared_ptr<const ComputeModuleEvidence> rejected_evidence;
+        try {
+            objects = costs.Time(Cost::GuestLink,[&] { return CreateComputePipeline(
+                instance,*layout,source,code,disable_optimizer,ComputePipelineRole::GuestVertex,
+                reported_creation_failure,failure.get(),&outcome); },true);
+        } catch (const VideoCore::ShaderRecoveryError&) {
+            // CodexAstraLocal: The captured Dark Moon module validates but the
+            // driver cannot link it. Reuse pinned structural SPIR-V passes
+            // once, only for that rejection class; never the size optimizer.
+            // No guest operation, precise qualifier or NaN guard is changed.
+            if (!costs.config.Has(CalculatedFeatures::StructuralRetry) ||
+                !outcome.AllowsStructuralRetry(disable_optimizer)) throw;
+            ++costs.retry_attempts;
+            ComputeLoweringReport lowering;
+            const auto alternate = LowerComputePrivateState(code, &lowering);
+            // CodexAstraLocal TEST-ONLY LOG: Failure-path transform accounting
+            // distinguishes refusal from success; remove with compatibility qualification.
+            if (failure) {
+                failure->Label("guest_lowering_status", ComputeLoweringStatusName(lowering.status));
+                failure->Number("guest_lowering_input_bytes", lowering.input_bytes);
+                failure->Number("guest_lowering_output_bytes", lowering.output_bytes);
+                failure->Number("guest_lowering_host_ns", lowering.host_ns);
+            }
+            costs.transform_ns+=lowering.host_ns;
+            costs.transform_input_bytes+=lowering.input_bytes;
+            costs.transform_output_bytes+=lowering.output_bytes;
+            if (alternate.empty()) {++costs.retry_no_alternate;throw;}
+            // CodexAstraLocal: Same-role replacement would discard the rejected
+            // module. Keep both exact attempts in the original failure packet.
+            auto rejected = std::make_shared<ComputeModuleEvidence>(*evidence);
+            rejected->role = "guest_vertex_initial";
+            rejected_evidence = rejected;
+            if (failure) failure->Module(rejected);
+            evidence = std::make_shared<ComputeModuleEvidence>(*evidence);
+            evidence->spirv = alternate;
+            evidence->structural_lowering_revision = 2;
+            if (failure) {
+                failure->Number("guest_initial_result_signed_bits", static_cast<u32>(outcome.result));
+                failure->Label("guest_structural_retry", "attempted_once");
+                failure->Number("guest_requested_optimizer_disabled", disable_optimizer);
+                failure->Number("guest_effective_optimizer_disabled", disable_optimizer);
+                failure->Label("guest_lowering_policy", "structural_v2_local_only");
+                failure->Module(evidence);
+            }
+            try {
+                objects = costs.Time(Cost::GuestLink,[&] { return CreateComputePipeline(
+                    instance,*layout,source,alternate,disable_optimizer,ComputePipelineRole::GuestVertex,
+                    reported_creation_failure,failure.get()); },true);
+                ++costs.retry_created;
+            } catch(...) { ++costs.retry_failed;throw; }
+            if (failure) {
+                failure->Label("guest_structural_retry", "created");
+                failure->Number("pipeline_result_signed_bits", 0);
+            }
+        }
+        // CodexAstraLocal: Lookup remains keyed by the requested immutable
+        // policy; the cached evidence records the actual accepted module policy.
+        Program p{input.program, input.swizzles, input.metadata[15], input.sanitize_mul,
+                  disable_optimizer, {}, {}, evidence, rejected_evidence, outcome.result,costs.config.Key()};
         p.module = std::move(objects.module);
         p.pipeline = std::move(objects.pipeline);
         programs.push_back(std::move(p));
@@ -336,15 +422,21 @@ struct ComputeVertexProducer::Impl {
     // Resolve both stages before dispatch, so a second-stage creation failure
     // cannot leave a half-executed draw or publish a semantic tail.
     void PrepareAssembly(bool disable_optimizer) {
-        if (assembly_pipeline && assembly_disable_optimizer == disable_optimizer) {
+        if (assembly_pipeline && assembly_disable_optimizer == disable_optimizer &&
+            assembly_feature_key==costs.config.Key()) {
+            ++costs.assembly_hits;
             if(failure) failure->Module(assembly_evidence);
             return;
         }
+        ++costs.assembly_misses;
+        auto compile_timer=costs.Measure(Cost::AssemblyCompile,true);
         if(failure) failure->Stage(ComputeFailureStage::AssemblyCompile);
-        const auto source = Pica::Shader::Generator::GLSL::GenerateComputeAssembly();
+        const auto source = Pica::Shader::Generator::GLSL::GenerateComputeAssembly(
+            costs.config.effective,costs.config.diagnostics);
         auto evidence=std::make_shared<ComputeModuleEvidence>();
         evidence->role="assembly_clip";evidence->source=source;
         evidence->optimizer_disabled=disable_optimizer;
+        evidence->calculated_feature_key=costs.config.Key();
         if(failure) failure->Module(evidence);
         const auto code = CompileGLSL(source, vk::ShaderStageFlagBits::eCompute, "", disable_optimizer);
         // CodexAstraLocal: A queued failure may already hold the source-only
@@ -352,20 +444,24 @@ struct ComputeVertexProducer::Impl {
         evidence=std::make_shared<ComputeModuleEvidence>(*evidence);
         evidence->spirv=code;
         if(failure)failure->Module(evidence);
+        compile_timer.End();
         if (code.empty()) Refuse("Calculated assembly compute compilation failed");
         if(failure) failure->Stage(ComputeFailureStage::AssemblyPipeline);
-        auto objects = CreateComputePipeline(instance, *layout, source, code, disable_optimizer,
-                                             ComputePipelineRole::AssemblyClip,
-                                             reported_creation_failure, failure.get());
+        auto objects = costs.Time(Cost::AssemblyLink,[&] { return CreateComputePipeline(
+            instance,*layout,source,code,disable_optimizer,ComputePipelineRole::AssemblyClip,
+            reported_creation_failure,failure.get()); },true);
         assembly_module = std::move(objects.module);
         assembly_pipeline = std::move(objects.pipeline);
         assembly_disable_optimizer = disable_optimizer;
+        assembly_feature_key=costs.config.Key();
         assembly_evidence=std::move(evidence);
     }
     void RetirePrevious(const std::shared_ptr<ComputeFailurePacket>& next_failure = {}) {
         // CodexAstraLocal: Retirement belongs to the previous draw. Keep its
         // immutable context until this wait succeeds, including raster failures.
-        try { scheduler.Wait(last_use); }
+        // CodexAstraLocal TEST-ONLY LOG: Existing owner wait, never GPU execution time.
+        // Remove sampled cost with hardware qualification; no extra wait is added.
+        try { costs.Time(Cost::Wait,[&]{scheduler.Wait(last_use);}); }
         catch(const std::exception& error) {
             // CodexAstraLocal: B has not executed. Only prior packet A owns
             // this retirement failure; outer B unwind cannot create an incident.
@@ -382,6 +478,8 @@ struct ComputeVertexProducer::Impl {
         RetirePrevious(next_failure);
         failure=std::move(next_failure); completed_readback=false; output_bytes=0;
         retained_failure_output=false;upload_bytes=0;
+        costs.Begin(failure);costs.inputs+=input.metadata[1];costs.raw_bytes+=input.raw.size();
+        auto admission_timer=costs.Measure(Cost::Prepare);
         const auto recording=scheduler.RecordComputeFailure(failure);
         if(failure) failure->Stage(ComputeFailureStage::Admission);
         try {
@@ -407,8 +505,10 @@ struct ComputeVertexProducer::Impl {
             failure->Label("expected_schema","success,reason,max_vertices,input_count,misses_plus_hits,first_word,topology,index,flags,written_mask,diagnostic_words");
             failure->Number("optimizer_disabled",disable_optimizer);
         }
+        admission_timer.End();
         auto& program = Pipeline(input, disable_optimizer);
         PrepareAssembly(disable_optimizer);
+        auto prepare_timer=costs.Measure(Cost::Prepare);
         const auto limits = instance.GetPhysicalDevice().getProperties().limits;
         const auto meta_offset = Common::AlignUp<vk::DeviceSize>(input.raw.size(),
             std::max<vk::DeviceSize>(4, limits.minStorageBufferOffsetAlignment));
@@ -441,7 +541,14 @@ struct ComputeVertexProducer::Impl {
         updates.AddBuffer(set, 0, vk::Buffer{upload->buffer}, 0, input.raw.size(), vk::DescriptorType::eStorageBuffer);
         updates.AddBuffer(set, 1, vk::Buffer{upload->buffer}, meta_offset, sizeof(input.metadata), vk::DescriptorType::eStorageBuffer);
         updates.AddBuffer(set, 2, vk::Buffer{vertices->buffer}, 0, result_bytes, vk::DescriptorType::eStorageBuffer);
-        scheduler.Record([set, pipeline = *program.pipeline, clip_pipeline = *assembly_pipeline,
+        prepare_timer.End();
+        auto enqueue_timer=costs.Measure(Cost::Enqueue);
+        // CodexAstraLocal TEST-ONLY LOG: Worker-owned timestamp slots bracket the
+        // actual dispatches. No new scheduler nodes, submissions, waits or reads.
+        // Root's independent profiler policy decides counts/queries; Calculated diagnostics never enables them.
+        // Remove with Calculated hardware qualification.
+        scheduler.Record([scheduler=&scheduler,
+                          input_bytes=input.raw.size(),set, pipeline = *program.pipeline, clip_pipeline = *assembly_pipeline,
                           pipeline_layout = *layout,
                           output = vk::Buffer{vertices->buffer}, status = vk::Buffer{readback->buffer},
                           failure=failure,result_bytes]
@@ -463,7 +570,9 @@ struct ComputeVertexProducer::Impl {
                 vk::PipelineStageFlagBits::eComputeShader, {}, input_ready, {}, {});
             cmd.bindPipeline(vk::PipelineBindPoint::eCompute, pipeline);
             cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, pipeline_layout, 0, set, {});
+            const int guest_sample=scheduler->BeginGpuWork(cmd,GpuWork::CalculatedGuest,input_bytes);
             cmd.dispatch(1, 1, 1);
+            scheduler->EndGpuWork(cmd,guest_sample);
             // CodexAstraLocal: Stage one owns FIFO/carry and writes complete
             // semantic scratch plus a transient token. Stage two sees both only
             // after this buffer-wide dependency; it alone publishes final state.
@@ -474,7 +583,9 @@ struct ComputeVertexProducer::Impl {
                 vk::PipelineStageFlagBits::eComputeShader, {}, semantic_ready, {}, {});
             cmd.bindPipeline(vk::PipelineBindPoint::eCompute, clip_pipeline);
             stage=ComputeFailureStage::AssemblyDispatch;
+            const int assembly_sample=scheduler->BeginGpuWork(cmd,GpuWork::CalculatedAssembly,result_bytes);
             cmd.dispatch(1, 1, 1);
+            scheduler->EndGpuWork(cmd,assembly_sample);
             const vk::MemoryBarrier complete{.srcAccessMask = vk::AccessFlagBits::eShaderWrite,
                 .dstAccessMask = vk::AccessFlagBits::eTransferRead | vk::AccessFlagBits::eShaderRead};
             cmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader,
@@ -488,15 +599,16 @@ struct ComputeVertexProducer::Impl {
                                 {}, host, {}, {});
             } catch(const vk::SystemError& error) {
                 if(failure) { failure->Unavailable("actual.status.u32","recording_failed");failure->Notice(stage,error.what(),error.code().value()); }
-                throw VideoCore::ShaderRecoveryError(error.what());
+                throw VideoCore::ShaderRecoveryError(error.what(),error.code().value());
             } catch(const std::exception& error) {
                 if(failure) failure->Notice(stage,error.what());
                 throw;
             }
         });
+        enqueue_timer.End();
         last_use = scheduler.CurrentTick();
         if(failure) { failure->Stage(ComputeFailureStage::ProducerWait);failure->Number("producer_tick",last_use); }
-        scheduler.Wait(last_use);
+        costs.Time(Cost::Wait,[&]{scheduler.Wait(last_use);});
         if(failure) failure->Stage(ComputeFailureStage::Invalidate);
         if (vmaInvalidateAllocation(readback->allocator, readback->allocation, 0, VK_WHOLE_SIZE) != VK_SUCCESS)
             Refuse("Calculated completion invalidation failed");
@@ -551,6 +663,17 @@ struct ComputeVertexProducer::Impl {
         if(failure) failure->Number("completion_mismatch_mask",mismatch);
         if (mismatch)
             Refuse("Calculated completed guest stream metadata is inconsistent");
+        // CodexAstraLocal TEST-ONLY LOG: Consume success-only CDS1 words after
+        // unchanged mandatory status/tail checks. Unknown counters never repair
+        // output; report unavailable. Remove with the paired shader counters.
+        costs.outputs+=status[2];costs.output_bytes+=u64{status[2]}*88;
+        costs.zero_outputs+=status[2]==0;
+        if(costs.config.diagnostics) {
+            if(status[60]==0x43445331u) {
+                costs.inside+=status[61];costs.polygon+=status[62];costs.intersections+=status[63];
+            } else ++costs.counter_unavailable;
+        }
+        costs.Complete(true);
         Batch batch{{vk::Buffer{vertices->buffer}, result_bytes, status[6],failure}, status[2], {}};
         batch.assembly = expected;
         for (u32 slot = 0; slot < 2; ++slot)
@@ -559,16 +682,26 @@ struct ComputeVertexProducer::Impl {
                             batch.assembly.state.words.begin() + slot * 24);
         return batch;
         } catch(const vk::SystemError& error) {
+            costs.Complete(false);
             if(failure) {
                 failure->Unavailable("gpu.output","Vulkan operation failed; no diagnostic GPU work attempted");
                 failure->Failure(error.what(),error.code().value());
             }
-            throw VideoCore::ShaderRecoveryError(error.what());
+            throw VideoCore::ShaderRecoveryError(error.what(),error.code().value());
+        } catch(const VideoCore::ShaderRecoveryError& error) {
+            costs.Complete(false);
+            // CodexAstraLocal: Pipeline normalization must not turn -13 into a
+            // successful-looking zero in the first terminal capsule header.
+            RetainFailedOutput();
+            if(failure) failure->Failure(error.what(),error.DriverResult());
+            throw;
         } catch(const std::exception& error) {
+            costs.Complete(false);
             RetainFailedOutput();
             if(failure) failure->Failure(error.what());
             throw;
         } catch(...) {
+            costs.Complete(false);
             if(failure) failure->Failure("unknown exception; original failure preserved");
             throw;
         }
@@ -584,6 +717,9 @@ struct ComputeVertexProducer::Impl {
     vk::UniquePipeline assembly_pipeline;
     std::shared_ptr<const ComputeModuleEvidence> assembly_evidence;
     bool assembly_disable_optimizer{};
+    // CodexAstraLocal: Per-owner snapshot; cache-hit metadata uses actual policy.
+    u64 assembly_feature_key{};
+    ComputeFeatureProfile costs{"producer"};
     std::vector<Program> programs;
     std::unique_ptr<Buffer> upload, vertices, readback;
     std::unique_ptr<Buffer> diagnostic_readback;

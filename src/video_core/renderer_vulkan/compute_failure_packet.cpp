@@ -247,7 +247,11 @@ void ComputeFailurePacket::WriteNotice(ComputeFailureStage stage, std::string_vi
             if (module->spirv.empty()) metadata["unavailable"][module->role+".spv"]="compilation_not_completed";
             else append(module->role + ".spv", module->spirv.data(), module->spirv.size()*4);
             metadata["modules"].push_back({{"role", module->role},
-                {"optimizer_disabled", module->optimizer_disabled}, {"entry", "main"}});
+                {"optimizer_disabled", module->optimizer_disabled}, {"entry", "main"},
+                // CodexAstraLocal: Preserve compute-only structural identity
+                // on initial creation and every later cached-module capture.
+                {"structural_lowering_revision", module->structural_lowering_revision},
+                {"calculated_feature_key", module->calculated_feature_key}});
         }
         // CodexAstraLocal TEST-ONLY LOG: A bounded or unavailable section is
         // explicit evidence loss, never a complete GPU replay capsule. Remove

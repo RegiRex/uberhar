@@ -38,6 +38,7 @@ class RasterizerInterface;
 }
 
 namespace Pica {
+struct NativeInputReadTrace; // CodexAstraLocal: Optional actual-read Software provenance.
 
 class DebugContext;
 class ShaderEngine;
@@ -205,10 +206,11 @@ private:
         const ShaderUnit& unit, u32 index, u32 vertex, const char* route,
         bool fresh_unit, bool post_shader, u64 title,
         const SoftwareGeometryEntry* geometry_entry = nullptr,
-        const AttributeBuffer* geometry_slot = nullptr) const;
+        const AttributeBuffer* geometry_slot = nullptr,
+        const NativeInputReadTrace* input_trace = nullptr) const;
     void ObserveSoftwareProducer(u32 mask, const OutputVertex& output, ShaderSetup& setup,
         const ShaderUnit& unit, u32 index, u32 vertex, const char* route,
-        bool fresh_unit, bool post_shader) noexcept;
+        bool fresh_unit, bool post_shader, const NativeInputReadTrace* input_trace = nullptr) noexcept;
     void WriteSoftwareProducerSnapshot(const SoftwareProducerSnapshot& snapshot,
         const char* route, u32 mask, u32 invalid, u32 index, u32 vertex) const;
     void BeginSoftwareGeometry(SoftwareGeometryEntry& entry, bool begin) noexcept;
@@ -494,10 +496,18 @@ private:
     const bool cpu_vertex_only;
     // CodexAstraLocal: Prefix comparison is frozen independently of CPU placement.
     const bool cpu_prefix_overlap;
+    // CodexAstraLocal: Independent .50 controls are frozen for this title and
+    // propagate to lazy owners; changing Settings cannot mutate active work.
+    const bool cpu_expanded_seeds, cpu_adaptive, cpu_feature_diagnostics;
     // CodexAstraLocal TEST-ONLY LOG: One candidate/attempt per constructed PICA
     // owner, including write failure. Remove with the producer diagnostic above.
     const bool software_producer_diagnostics;
     bool software_producer_attempted{};
+    // CodexAstraLocal TEST-ONLY LOG: Immutable independent evidence control;
+    // clocks/counts stay on the owner and stop after the first candidate attempt.
+    const bool software_input_provenance;
+    u64 software_trace_draws{},software_trace_loads{},software_trace_bytes{},software_trace_samples{};
+    u64 software_trace_ns{},software_trace_refused{},software_trace_errors{};
     // CodexAstraLocal: Draw-synchronous CPU workers and bounded host certificates
     // never enter guest save state; their borrowed jobs finish before each draw returns.
     struct ParallelVertexState;

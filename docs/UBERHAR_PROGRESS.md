@@ -1,3 +1,39 @@
+# Uberhar progress — 0.1.50 implementation
+
+<!-- CodexAstraLocal: Reconcile the completed multi-build assessment with the authorized implementation; publication and hardware qualification are separate. -->
+0.1.49 is published and its owner tests are complete. The broader .39–.49 review
+identified avoidable small-packet queue traffic, adaptive-history churn without
+useful trials, and independent shader/profiling costs. These are specific changes
+to investigate, not a claim that every slowdown has one cause.
+
+The .50 candidate restores conservative standalone CPU batch admission while
+retaining useful grouping, repairs bounded adaptive learning, removes redundant
+fragment sampling, and introduces narrowly qualified draw-invariant arithmetic.
+Independent restart controls distinguish actual optimizations from diagnostic
+cost. GPU timestamps default off; cheap cumulative counts remain available.
+Transfer and attachment diagnostics preserve current memory ownership and required
+visibility. No CPU occupancy target justifies artificial work or extra GPU readback.
+
+Previously isolated Calculated and CPU Software improvements are integrated and
+independently reviewed. Their host validation does not establish Thor game startup, graphics
+correctness or usable speed. Existing live-input and numerical failures remain
+explicit until corrected and tested. The performance goal remains correct cold
+rendering without skipped draws, sustained99%+ at2x first, then4x.
+
+<!-- CodexAstraLocal: Bind the current source review without claiming the pending release gates or hardware tests have passed. -->
+The [0.1.50 integration review](UBERHAR_REVIEW_0.1.50.md) records architectural
+contracts, separate cleanliness findings, affected compilation and validation limits.
+Calculated's primary-color specialization stays unavailable; Software's live-input
+failure remains explicit. Both modes include new functional changes and diagnostic
+coverage, rather than a claim that either is already playable on the Thor.
+
+The owner authorizes this candidate through completed checks and posted prerelease;
+root coordinates repairs and publication. Other agents stop at useful completion
+or automation waits. No automatic gameplay test or installation is authorized by
+this implementation session; owner hardware testing follows artifact qualification.
+
+## Earlier checkpoints
+
 # Uberhar progress — 0.1.48 CPU scheduling and failure correction
 
 <!-- CodexAstraLocal: Owner-approved .48 implementation supersedes historical build pauses below; separate measured .47 failures from unqualified candidate behavior. -->

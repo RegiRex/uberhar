@@ -26,8 +26,12 @@ public:
     // pools may overlap; this does not reserve physical cores or cap all threads.
     explicit ParallelTextureDecoder(bool enabled_, unsigned processors =
                                         Common::Uberhar::AvailableProcessors(),
-                                    void (*worker_start)() = nullptr)
-        : enabled{enabled_}, pool{processors > 2 ? processors - 2 : 1, worker_start},
+                                    void (*worker_start)() = nullptr,
+                                    bool adaptive = true, bool diagnostics = true)
+        // CodexAstraLocal: Cache owner supplies its immutable session policy;
+        // texture/transfer work never reads live settings inside a worker job.
+        : enabled{enabled_}, diagnostics{diagnostics}, pool{processors > 2 ? processors - 2 : 1, worker_start,
+              Common::Uberhar::AuxiliaryBudget::Global(), nullptr, adaptive, diagnostics},
           last_report{Clock::now()} {}
 
     unsigned CreatedWorkers() const { return pool.CreatedWorkers(); }
@@ -41,7 +45,7 @@ public:
         // CodexAstraLocal TEST-ONLY LOG: Sample small uploads and measure all large
         // ones, retaining counts beside wall times. Remove these clocks/counters
         // after the serial/parallel Thor comparison fixes the admission threshold.
-        const bool measure = pixels >= MinPixels || calls % 64 == 0;
+        const bool measure = diagnostics && (pixels >= MinPixels || calls % 64 == 0);
         const auto start = measure ? Clock::now() : Clock::time_point{};
         Common::Uberhar::ParallelWork::Result work{};
         bool admitted = false;
@@ -92,7 +96,11 @@ public:
     // and excludes concurrent writers. Reuse this pool, join before publishing
     // the guest transfer, and leave tiny copies to the ordinary libc path.
     void CopyCurrentBytes(std::span<const u8> source, std::span<u8> dest) {
-        const auto start = Clock::now();
+        // CodexAstraLocal TEST-ONLY LOG: Independent frozen diagnostics gate
+        // copy clocks, not actual copying or adaptive learning. Remove after
+        // qualification; these sampled spans overlap the pool join below.
+        const bool measure = diagnostics && copy_calls % 64 == 0;
+        const auto start = measure ? Clock::now() : Clock::time_point{};
         constexpr u32 block = 64 * 1024;
         Common::Uberhar::ParallelWork::Result result{};
         ++copy_calls;
@@ -104,16 +112,20 @@ public:
                 const auto begin = static_cast<std::size_t>(first) * block;
                 const auto end = std::min(source.size(), static_cast<std::size_t>(last) * block);
                 std::memcpy(dest.data() + begin, source.data() + begin, end - begin);
-            }, true);
+            }, measure);
         } else {
             std::memcpy(dest.data(), source.data(), source.size());
         }
-        copy_ns += Elapsed(start);
+        if (measure) { ++copy_samples; copy_sampled_bytes += source.size(); copy_ns += Elapsed(start); }
         copy_worker_blocks += result.worker_items;
         copy_join_ns += result.join_ns;
     }
 
     void Report(bool final = false) {
+        // CodexAstraLocal: Disabled diagnostics read no progress-report clock;
+        // final reliable totals still disclose work and unavailable cost fields.
+        if (!diagnostics && !final) return;
+        if (!final && ++report_calls % 64 != 0) return;
         const auto now = Clock::now();
         if (!final && now - last_report < std::chrono::seconds{5}) return;
         last_report = now;
@@ -121,30 +133,40 @@ public:
         // real decode work and sampled costs; remove after texture placement is
         // qualified on Thor. These durations are wall time, not worker CPU time.
         const auto scheduling = pool.Scheduling();
-        LOG_INFO(Render, "Uberhar texture decode: final={} enabled={} calls={} input_bytes={} "
+        const auto delivery = final ? Common::Log::Delivery::Reliable : Common::Log::Delivery::Diagnostic;
+        LOG_INFO_WITH_DELIVERY(Render, delivery, "Uberhar texture decode: final={} enabled={} calls={} input_bytes={} "
                  "serial={} parallel={} parallel_owner_tiles={} worker_tiles={} peak_threads={} "
                  "serial_samples={} parallel_samples={} serial_ns={} parallel_ns={} "
                  "owner_ns={} join_ns={} budget={} created={} startup_failures={} "
                  "adaptive_helpers={} adaptive_samples={} adaptive_rejected={} "
-                 "adaptive_trials={} adaptive_accepted={} adaptive_reverted={}",
+                 "adaptive_trials={} adaptive_accepted={} adaptive_reverted={} diagnostics={}",
                  final, enabled, calls, input_bytes, serial_calls, parallel_calls, owner_tiles,
                  worker_tiles, peak_threads, serial_samples, parallel_samples, serial_ns,
                  parallel_ns, owner_ns, join_ns, pool.Available(), pool.CreatedWorkers(),
                  pool.StartupFailures(), scheduling.desired, scheduling.samples,
-                 scheduling.rejected, scheduling.trials, scheduling.accepted, scheduling.reverted);
+                 scheduling.rejected, scheduling.trials, scheduling.accepted, scheduling.reverted, diagnostics);
         // CodexAstraLocal TEST-ONLY LOG: Explain why learning retained or refused
         // evidence; counters remain bounded and are removed after qualification.
-        LOG_INFO_DIAGNOSTIC(Render, "Uberhar texture adaptation: history_hits={} history_misses={} "
-            "history_evictions={} capacity_resets={} unkeyed={} rejected_invalid={} rejected_cost={} rejected_helpers={}",
+        LOG_INFO_WITH_DELIVERY(Render, delivery, "Uberhar texture adaptation: feature=8 schema=2 history_hits={} history_misses={} "
+            "history_evictions={} capacity_resets={} unkeyed={} rejected_invalid={} rejected_cost={} rejected_helpers={} "
+            "enabled={} dormant={} histories={} eligible={} probes={} probation_hits={} promotions={} "
+            "expired={} trial_expired={} discovery_samples={} discovery_rejected={} "
+            "prepare_samples={} prepare_ns={} observe_samples={} observe_ns={}",
             scheduling.history_hits, scheduling.history_misses, scheduling.evictions,
             scheduling.capacity_resets, scheduling.unkeyed, scheduling.rejected_invalid,
-            scheduling.rejected_cost, scheduling.rejected_helpers);
+            scheduling.rejected_cost, scheduling.rejected_helpers,
+            scheduling.enabled, scheduling.dormant, scheduling.histories, scheduling.eligible,
+            scheduling.probes, scheduling.probation_hits, scheduling.promotions,
+            scheduling.expired, scheduling.trial_expired, scheduling.discovery_samples, scheduling.discovery_rejected,
+            scheduling.prepare_samples, scheduling.prepare_ns, scheduling.observe_samples, scheduling.observe_ns);
         // CodexAstraLocal TEST-ONLY LOG: Compare transfer cost including joins
         // against actual future uploads; remove after CPU placement qualification.
         LOG_INFO_WITH_DELIVERY(Render, final ? Common::Log::Delivery::Reliable :
             Common::Log::Delivery::Diagnostic, "Uberhar CPU raw copy: final={} enabled={} calls={} bytes={} "
-                 "wall_ns={} worker_blocks={} join_ns={} block_bytes=65536 no_new_readback=true",
-                 final, enabled, copy_calls, copy_bytes, copy_ns, copy_worker_blocks, copy_join_ns);
+                 "wall_ns={} worker_blocks={} join_ns={} samples={} sampled_bytes={} diagnostics={} "
+                 "block_bytes=65536 no_new_readback=true timing=sampled_copy_wall_join_overlap",
+                 final, enabled, copy_calls, copy_bytes, copy_ns, copy_worker_blocks, copy_join_ns,
+                 copy_samples, copy_sampled_bytes, diagnostics);
     }
 
 private:
@@ -214,6 +236,9 @@ private:
         DecodeTiles<PixelFormat::RGBA4, true>};
 
     const bool enabled;
+    // CodexAstraLocal: Diagnostic cost remains separate from useful work/adaptation.
+    const bool diagnostics;
+    u64 report_calls{}, copy_samples{}, copy_sampled_bytes{};
     Common::Uberhar::ParallelWork pool;
     Clock::time_point last_report;
     u64 calls{}, input_bytes{}, serial_calls{}, parallel_calls{}, owner_tiles{}, worker_tiles{};

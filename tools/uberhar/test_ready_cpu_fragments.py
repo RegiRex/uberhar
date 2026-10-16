@@ -152,6 +152,12 @@ def main() -> None:
         return p.read_text()
     cpp=read('src/video_core/renderer_vulkan/vk_pipeline_cache.cpp')
     check_final_image_capture(function(cpp, 'bool PipelineCache::BindPipeline('))
+    # CodexAstraLocal: Source-derived selected-route metadata ensures the actual
+    # worker closure can populate and expose feature counters in this fixture.
+    pipeline_header=read('src/video_core/renderer_vulkan/vk_pipeline_cache.h')
+    runtime_start=pipeline_header.index('    // CodexAstraLocal TEST-ONLY LOG: Fixed sampled metadata')
+    runtime_end=pipeline_header.index('    // AstraEH: This state belongs', runtime_start)
+    (out/'fragment_runtime_members.inc').write_text(pipeline_header[runtime_start:runtime_end])
     graphics=read('src/video_core/renderer_vulkan/vk_graphics_pipeline.cpp')
     parts=[function(graphics,'u64 GraphicsPipeline::Key()').replace('GraphicsPipeline::Key()','GraphicsPipeline::ActualKey()'),
            function(graphics,'bool GraphicsPipeline::MatchesExecution(')]

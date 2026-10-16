@@ -90,7 +90,7 @@ def main():
             'void Scheduler::AllocateWorkerCommandBuffers()']:parts.append(function(schedule,sig))
         for sig in ['void RenderManager::BeginRendering(const Framebuffer*',
             'void RenderManager::BeginRendering(const RenderPass&',
-            'void RenderManager::EndRendering()']:
+            'void RenderManager::EndRendering(EndReason']:
             body=function(render,sig)
             if sig.endswith('const Framebuffer*'):
                 # CodexAstraLocal: Recreate only the former metadata ordering;
@@ -106,6 +106,8 @@ def main():
             else:
                 parts.append(body)
         (output/'production.inc').write_text('\n\n'.join(parts)+'\n')
+        # CodexAstraLocal: Keep the exact reason enum while modeling only the recording endpoint.
+        (output/'end-reason.inc').write_text(function(render_header, 'enum class EndReason : u32')+';\n')
         (output/'renderpass.inc').write_text(section(render_header,'struct RenderPass {','\n};')+'\n};\n')
         (output/'bind-commands.inc').write_text(section(pipeline,
             '        if (is_dirty || bound_pipeline != selected) {','        // AstraEH: Invalidate even'))

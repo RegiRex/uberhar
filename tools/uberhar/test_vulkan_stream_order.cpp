@@ -257,6 +257,8 @@ namespace Vulkan {
 // simulator. The separate WorkProfile gate executes its complete production
 // state machine; this gate preserves render-pass and submission call ordering.
 struct ProfileEndpoint {
+    // CodexAstraLocal: Clock-control boundary; actual collection is tested separately.
+    bool Enabled() const { return true; }
     void Wait(HostWait, u64) {}
     void Submitted(u64, u64) {}
 };
@@ -426,7 +428,12 @@ public:
     u32 num_draws{};
     void BeginRendering(const Framebuffer*, Common::Rectangle<u32>);
     void BeginRendering(const RenderPass&, GpuWork = GpuWork::Utility);
-    void EndRendering();
+    // CodexAstraLocal: Preserve typed next-consumer attribution in actual pass bodies.
+#include "end-reason.inc"
+    void EndRendering(EndReason reason = EndReason::Other);
+    bool dependency_diagnostics{true};
+    std::array<u64, static_cast<u32>(EndReason::Count)> dependency_ends{};
+    u64 dependency_attachments{}, dependency_shadow{};
 };
 enum class BufferType : u32 { Upload, Download, Stream };
 constexpr u64 WATCHES_RESERVE_CHUNK = 0x1000;

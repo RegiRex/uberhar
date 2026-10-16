@@ -19,6 +19,7 @@
 
 #include "common/literals.h"
 #include "common/microprofile.h"
+#include "common/settings.h" // CodexAstraLocal: Snapshot independent transfer controls at startup.
 #include "video_core/custom_textures/material.h"
 #include "video_core/rasterizer_cache/texture_codec.h"
 #include "video_core/rasterizer_cache/utils.h"
@@ -296,22 +297,37 @@ TextureRuntime::TextureRuntime(const Instance& instance, Scheduler& scheduler,
                       vk::BufferUsageFlagBits::eTransferDst |
                           vk::BufferUsageFlagBits::eStorageBuffer,
                       DOWNLOAD_BUFFER_SIZE, BufferType::Download},
-      num_swapchain_images{num_swapchain_images_} {}
+      num_swapchain_images{num_swapchain_images_},
+      feedback_reuse_enabled{Settings::values.uberhar_image_reuse.GetValue()},
+      transfer_diagnostics{Settings::values.uberhar_feature_diagnostics.GetValue()} {}
 
 TextureRuntime::~TextureRuntime() { ReportTransferSavings(true); }
 
 void TextureRuntime::ReportTransferSavings(bool final) noexcept {
     try {
+    // CodexAstraLocal TEST-ONLY LOG: Only the existing frame cadence reports;
+    // hot copy operations never read a reporting clock. Remove after qualification.
+    if (!transfer_diagnostics || (!final && (++transfer_report_prescale & 63U))) return;
     const auto now = std::chrono::steady_clock::now();
     if (!final && now - transfer_report_time < std::chrono::seconds(10)) return;
     transfer_report_time = now;
+    ++transfer_sequence;
     // CodexAstraLocal TEST-ONLY LOG: Counts are avoided commands, not measured
     // GPU milliseconds saved. Remove after exact image reuse is qualified.
     LOG_INFO_WITH_DELIVERY(Render_Vulkan, final ? Common::Log::Delivery::Reliable :
         Common::Log::Delivery::Diagnostic,
-        "Uberhar image reuse: final={} copy_regions={} identity_regions={} feedback_requests={} "
-        "feedback_reuses={} identity_blits={} epoch_scope=any_recorded_command saved_gpu_ms=unknown",
-        final, copy_regions, identity_regions, feedback_requests, feedback_reuses, identity_blits);
+        "Uberhar image reuse: feature=14.image_reuse.v2 sequence={} final={} feedback_enabled={} "
+        "copy_regions={} identity_regions={} feedback_requests={} feedback_reuses={} "
+        "blit_requests={} identity_blits={} copy_image_refused={} copy_subresource_refused={} "
+        "copy_coordinates_refused={} feedback_disabled={} feedback_compute={} feedback_missing={} "
+        "feedback_allocation={} feedback_epoch={} identity_safety_always=true "
+        "copy_gate_samples={} copy_gate_ns={} blit_gate_samples={} blit_gate_ns={} feedback_gate_samples={} feedback_gate_ns={} "
+        "epoch_scope=any_recorded_command_after_first_snapshot saved_gpu_ms=unknown cumulative=true",
+        transfer_sequence, final, feedback_reuse_enabled, copy_regions, identity_regions,
+        feedback_requests, feedback_reuses, blit_requests, identity_blits, copy_image_refused,
+        copy_subresource_refused, copy_coordinates_refused, feedback_disabled, feedback_compute,
+        feedback_missing, feedback_allocation, feedback_epoch, reuse_gate_samples[0], reuse_gate_ns[0],
+        reuse_gate_samples[1], reuse_gate_ns[1], reuse_gate_samples[2], reuse_gate_ns[2]);
     } catch (...) { /* CodexAstraLocal: Optional reporting cannot interrupt image work or teardown. */ }
 }
 
@@ -514,7 +530,7 @@ void TextureRuntime::ClearTextureWithRenderpass(Surface& surface,
 
 bool TextureRuntime::CopyTextures(Surface& source, Surface& dest,
                                   std::span<const VideoCore::TextureCopy> copies) {
-    renderpass_cache.EndRendering();
+    renderpass_cache.EndRendering(RenderManager::EndReason::Copy);
 
     const RecordParams params = {
         .aspect = source.Aspect(),
@@ -533,12 +549,28 @@ bool TextureRuntime::CopyTextures(Surface& source, Surface& dest,
         // CodexAstraLocal: Identical subresource/coordinates preserve all pixels.
         // Keep the existing EndRendering visibility boundary and caller cache/IRQ
         // bookkeeping; overlapping NONidentity copies are never removed here.
-        if (params.src_image == params.dst_image && copy.src_level == copy.dst_level &&
+        // CodexAstraLocal TEST-ONLY LOG: Sample the exact predicate, not copy or
+        // render-pass time; diagnostic-off does not read clocks.
+        const bool sample_gate = transfer_diagnostics && (copy_regions & 63U) == 1;
+        const auto gate_start = sample_gate ? std::chrono::steady_clock::now() :
+            std::chrono::steady_clock::time_point{};
+        const bool identity = params.src_image == params.dst_image && copy.src_level == copy.dst_level &&
             copy.src_layer == copy.dst_layer && copy.src_offset.x == copy.dst_offset.x &&
-            copy.src_offset.y == copy.dst_offset.y) {
+            copy.src_offset.y == copy.dst_offset.y;
+        if (sample_gate) {
+            ++reuse_gate_samples[0];
+            reuse_gate_ns[0] += std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now() - gate_start).count();
+        }
+        if (identity) {
             ++identity_regions;
             continue;
         }
+        // CodexAstraLocal TEST-ONLY LOG: Exclusive first refusal, not overlapping counts.
+        if (params.src_image != params.dst_image) ++copy_image_refused;
+        else if (copy.src_level != copy.dst_level || copy.src_layer != copy.dst_layer)
+            ++copy_subresource_refused;
+        else ++copy_coordinates_refused;
         logical_bytes += u64{copy.extent.width} * copy.extent.height * source.GetInternalBytesPerPixel();
         vk_copies.push_back(vk::ImageCopy{
             .srcSubresource{
@@ -560,7 +592,6 @@ bool TextureRuntime::CopyTextures(Surface& source, Surface& dest,
             .extent = {copy.extent.width, copy.extent.height, 1},
         });
     }
-    ReportTransferSavings();
     if (vk_copies.empty()) return true;
 
     scheduler.RecordGpuWork(GpuWork::Copy, logical_bytes, [params, copies = std::move(vk_copies)](vk::CommandBuffer cmdbuf) {
@@ -630,13 +661,23 @@ bool TextureRuntime::CopyTextures(Surface& source, Surface& dest,
 
 bool TextureRuntime::BlitTextures(Surface& source, Surface& dest,
                                   const VideoCore::TextureBlit& blit) {
+    ++blit_requests; // CodexAstraLocal TEST-ONLY LOG: Blits have a distinct denominator.
     // CodexAstraLocal: An identical image/subresource/rectangle blit changes no
     // data. Preserve the normal visibility boundary and caller ownership updates.
-    if (source.Image() == dest.Image() && blit.src_level == blit.dst_level &&
-        blit.src_layer == blit.dst_layer && blit.src_rect == blit.dst_rect) {
-        renderpass_cache.EndRendering();
+    // CodexAstraLocal TEST-ONLY LOG: Keep blit eligibility cost separate from copies.
+    const bool sample_gate = transfer_diagnostics && (blit_requests & 63U) == 1;
+    const auto gate_start = sample_gate ? std::chrono::steady_clock::now() :
+        std::chrono::steady_clock::time_point{};
+    const bool identity = source.Image() == dest.Image() && blit.src_level == blit.dst_level &&
+        blit.src_layer == blit.dst_layer && blit.src_rect == blit.dst_rect;
+    if (sample_gate) {
+        ++reuse_gate_samples[1];
+        reuse_gate_ns[1] += std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now() - gate_start).count();
+    }
+    if (identity) {
+        renderpass_cache.EndRendering(RenderManager::EndReason::Blit);
         ++identity_blits;
-        ReportTransferSavings();
         return true;
     }
     const bool is_depth_stencil = source.type == VideoCore::SurfaceType::DepthStencil;
@@ -645,7 +686,7 @@ bool TextureRuntime::BlitTextures(Surface& source, Surface& dest,
         return blit_helper.BlitDepthStencil(source, dest, blit);
     }
 
-    renderpass_cache.EndRendering();
+    renderpass_cache.EndRendering(RenderManager::EndReason::Blit);
 
     const RecordParams params = {
         .aspect = source.Aspect(),
@@ -1252,13 +1293,31 @@ vk::ImageView Surface::CopyImageView(ViewType view_type, bool compute) noexcept 
     ++runtime.feedback_requests;
     // CodexAstraLocal: No recorded command may intervene between this snapshot
     // and reuse. Include both allocations; never reuse or seed from compute.
+    // CodexAstraLocal TEST-ONLY LOG: Sparse complete reuse predicate cost includes
+    // disabled/compute refusals; GPU snapshot-copy time remains separate.
+    const bool sample_gate = runtime.transfer_diagnostics && (runtime.feedback_requests & 63U) == 1;
+    const auto gate_start = sample_gate ? std::chrono::steady_clock::now() :
+        std::chrono::steady_clock::time_point{};
     const auto epoch = scheduler.RecordedCommandEpoch();
-    if (!compute && copy_handle && epoch != ~u64{} && snapshot_epoch == epoch &&
-        snapshot_source == Image() && snapshot_dest == copy_handle.image) {
+    const bool reusable = runtime.feedback_reuse_enabled && !compute && copy_handle && epoch != ~u64{} && snapshot_epoch == epoch &&
+        snapshot_source == Image() && snapshot_dest == copy_handle.image;
+    if (sample_gate) {
+        ++runtime.reuse_gate_samples[2];
+        runtime.reuse_gate_ns[2] += std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now() - gate_start).count();
+    }
+    if (reusable) {
         ++runtime.feedback_reuses;
-        runtime.ReportTransferSavings();
         return ImageView(view_type, Type::Copy);
     }
+    // CodexAstraLocal TEST-ONLY LOG: Preserve the first reason without broadening
+    // image identity or visibility. Remove when the reuse population is qualified.
+    if (!runtime.feedback_reuse_enabled) ++runtime.feedback_disabled;
+    else if (compute) ++runtime.feedback_compute;
+    else if (!copy_handle || !snapshot_source || !snapshot_dest) ++runtime.feedback_missing;
+    else if (snapshot_source != Image() || snapshot_dest != copy_handle.image)
+        ++runtime.feedback_allocation;
+    else ++runtime.feedback_epoch;
     vk::ImageLayout copy_layout = vk::ImageLayout::eGeneral;
     if (!copy_handle) {
         vk::ImageCreateFlags flags{};
@@ -1277,7 +1336,7 @@ vk::ImageView Surface::CopyImageView(ViewType view_type, bool compute) noexcept 
         copy_layout = vk::ImageLayout::eUndefined;
     }
 
-    runtime.renderpass_cache.EndRendering();
+    runtime.renderpass_cache.EndRendering(RenderManager::EndReason::Feedback);
 
     const RecordParams params = {
         .aspect = Aspect(),
@@ -1388,8 +1447,8 @@ vk::ImageView Surface::CopyImageView(ViewType view_type, bool compute) noexcept 
                                vk::DependencyFlagBits::eByRegion, {}, {}, post_barriers);
     });
 
-    if (!compute) {
-        snapshot_epoch = scheduler.RecordedCommandEpoch();
+    if (!compute && runtime.feedback_reuse_enabled) {
+        snapshot_epoch = scheduler.ArmSnapshotEpoch();
         snapshot_source = Image();
         snapshot_dest = copy_handle.image;
     } else {
@@ -1397,7 +1456,6 @@ vk::ImageView Surface::CopyImageView(ViewType view_type, bool compute) noexcept 
         snapshot_source = nullptr;
         snapshot_dest = nullptr;
     }
-    runtime.ReportTransferSavings();
     return ImageView(view_type, Type::Copy);
 }
 

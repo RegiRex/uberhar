@@ -240,6 +240,9 @@ void RasterizerVulkan::TickFrame() {
             scheduler.GetMasterSemaphore()->KnownGpuTick());
     }
     res_cache.TickFrame();
+    // CodexAstraLocal TEST-ONLY LOG: Reuse frame-owner cadence, never a hot image-copy clock.
+    runtime.ReportTransferSavings();
+    renderpass_cache.ReportDependencies();
     // AstraEH: Read only completed GPU queries; do not add a per-frame GPU wait.
     if (compute_rect)
         compute_rect->Poll();
@@ -1053,6 +1056,12 @@ bool RasterizerVulkan::DrawComputeBatch(bool is_indexed,
         ++strict_compute_stats.terminal_failures;
         if (failure) failure->Failure(error.what(), error.code().value());
         throw VideoCore::ShaderRecoveryError("Calculated Vulkan resource preparation failed");
+    } catch (const VideoCore::ShaderRecoveryError& error) {
+        // CodexAstraLocal: Keep normalized signed driver results through the
+        // outer Calculated owner as well as the first producer capsule.
+        ++strict_compute_stats.terminal_failures;
+        if (failure) failure->Failure(error.what(), error.DriverResult());
+        throw;
     } catch (const std::exception& error) {
         ++strict_compute_stats.terminal_failures;
         if (failure) failure->Failure(error.what());

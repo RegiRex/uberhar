@@ -61,9 +61,22 @@ public:
     // CodexAstraLocal: Conservative owner-side content boundary. Every recorded
     // command invalidates snapshot reuse, even harmless commands; never wrap.
     u64 RecordedCommandEpoch() const noexcept { return recorded_command_epoch; }
+    // CodexAstraLocal: No snapshot exists before the first arm. Once armed,
+    // track for the scheduler lifetime so older surfaces never lose invalidation.
+    u64 ArmSnapshotEpoch() noexcept {
+        snapshot_epoch_tracking = true;
+        return recorded_command_epoch;
+    }
 
     // CodexAstraLocal TEST-ONLY LOG: These hooks execute only on the command
     // worker. Existing commands retain ordering; no additional pass is created.
+    // CodexAstraLocal TEST-ONLY LOG: Existing compute worker commands may mark
+    // dispatch boundaries without a new scheduler node/pass/submit/wait. Remove
+    // with Calculated feature qualification; tokens remain worker-owned.
+    int BeginGpuWork(vk::CommandBuffer command, GpuWork kind, u64 bytes=0) {
+        return work_profile.Begin(command,kind,bytes);
+    }
+    void EndGpuWork(vk::CommandBuffer command,int slot) { work_profile.End(command,slot); }
     void RecordGpuRoute(u32 route) { work_profile.Route(route); }
     void BeginGpuPass(vk::CommandBuffer command, GpuWork kind) { work_profile.BeginPass(command, kind); }
     void EndGpuPass(vk::CommandBuffer command) { work_profile.EndPass(command); }
@@ -106,7 +119,9 @@ private:
             shader_failure.Check();
             return;
         }
-        if (recorded_command_epoch != ~u64{}) ++recorded_command_epoch;
+        // CodexAstraLocal: Titles without feedback snapshots need no per-command
+        // epoch writes; saturation still refuses every later reuse.
+        if (snapshot_epoch_tracking && recorded_command_epoch != ~u64{}) ++recorded_command_epoch;
         if(failure)chunk->failure=failure;
         if (chunk->Record(command)) {
             return;
@@ -271,6 +286,9 @@ private:
     vk::CommandBuffer current_cmdbuf;
     StateFlags state{};
     u64 recorded_command_epoch{};
+    // CodexAstraLocal: Once armed by a real snapshot, track every later command
+    // for this scheduler lifetime; disabling reuse must never revive stale epochs.
+    bool snapshot_epoch_tracking{};
     std::function<void()> on_submit;
     std::function<void()> on_dispatch;
     std::mutex execution_mutex;

@@ -1030,6 +1030,26 @@ class SettingsFragmentPresenter(private val fragmentView: SettingsFragmentView) 
             BooleanSetting.UBERHAR_PARALLEL_TEXTURE_DECODE.key,
             BooleanSetting.UBERHAR_PARALLEL_TEXTURE_DECODE.defaultValue
         ))
+        // CodexAstraLocal: Keep independent comparisons available in every preset;
+        // owners freeze controls at launch instead of changing queued work in flight.
+        val optimizationControls = listOf(
+            Triple(BooleanSetting.UBERHAR_CPU_QUEUE_EXPANDED_SEEDS, R.string.uberhar_cpu_queue_expanded_seeds, R.string.uberhar_cpu_queue_expanded_seeds_description),
+            Triple(BooleanSetting.UBERHAR_CPU_ADAPTIVE_PARTICIPATION, R.string.uberhar_cpu_adaptive_participation, R.string.uberhar_cpu_adaptive_participation_description),
+            Triple(BooleanSetting.UBERHAR_CPU_EXECUTION_CENSUS, R.string.uberhar_cpu_execution_census, R.string.uberhar_cpu_execution_census_description),
+            Triple(BooleanSetting.UBERHAR_FEATURE_DIAGNOSTICS, R.string.uberhar_feature_diagnostics, R.string.uberhar_feature_diagnostics_description),
+            Triple(BooleanSetting.UBERHAR_FRAGMENT_MEMO, R.string.uberhar_fragment_memo, R.string.uberhar_fragment_memo_description),
+            Triple(BooleanSetting.UBERHAR_CONSTANT_TEV, R.string.uberhar_constant_tev, R.string.uberhar_constant_tev_description),
+            Triple(BooleanSetting.UBERHAR_DIRECTIONAL_PRECOMPUTE, R.string.uberhar_directional_precompute, R.string.uberhar_directional_precompute_description),
+            Triple(BooleanSetting.UBERHAR_LIT_SPECIALIZATION, R.string.uberhar_lit_specialization, R.string.uberhar_lit_specialization_description),
+            Triple(BooleanSetting.UBERHAR_FRAGMENT_LIVENESS, R.string.uberhar_fragment_liveness, R.string.uberhar_fragment_liveness_description),
+            Triple(BooleanSetting.UBERHAR_ALPHA_NEVER, R.string.uberhar_alpha_never, R.string.uberhar_alpha_never_description),
+            Triple(BooleanSetting.UBERHAR_GPU_TIMESTAMPS, R.string.uberhar_gpu_timestamps, R.string.uberhar_gpu_timestamps_description),
+            Triple(BooleanSetting.UBERHAR_IMAGE_REUSE, R.string.uberhar_image_reuse, R.string.uberhar_image_reuse_description),
+            Triple(BooleanSetting.UBERHAR_CPU_TRANSFERS, R.string.uberhar_cpu_transfers, R.string.uberhar_cpu_transfers_description)
+        )
+        for ((setting, title, description) in optimizationControls) {
+            sl.add(SwitchSetting(setting, title, description, setting.key, setting.defaultValue))
+        }
         val customStart = sl.size
         sl.apply {
             add(HeaderSetting(R.string.renderer))

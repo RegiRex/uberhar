@@ -19,7 +19,7 @@ struct ComputeRasterPush {
     std::array<u32, 4> stencil; // compare, reference, read|write<<8, fail|zfail<<8|pass<<16
     std::array<u32, 4> blend;   // RGB equation, A equation, four factor nibbles, constant
     std::array<u32, 4> geometry; // cull, flip Y, first vertex word, stencil word offset
-    std::array<u32, 4> reserved{}; // native color/depth encoding, unused, proctex coord
+    std::array<u32, 4> reserved{}; // native color/depth encoding, rectangle dispatch flag, proctex coord
 };
 static_assert(sizeof(ComputeRasterPush) == 128);
 
@@ -190,6 +190,10 @@ uint merge_color(vec4 incoming,uint old_color) {
 
 void main() {
     uvec2 p=gl_GlobalInvocationID.xy;
+    // CodexAstraLocal: Tiled scheduling starts at the clipped rectangle origin.
+    // Absolute pixel coordinates preserve edge coverage, quad gradients, packed
+    // stencil ownership and all target addresses; feature OFF keeps full extent.
+    if(draw.reserved.z!=0u)p+=uvec2(max(draw.rectangle.xy,ivec2(0)));
     if(any(greaterThanEqual(p,draw.extent.xy)) ||
        int(p.x)<draw.rectangle.x || int(p.y)<draw.rectangle.y ||
        int(p.x)>=draw.rectangle.z || int(p.y)>=draw.rectangle.w) return;

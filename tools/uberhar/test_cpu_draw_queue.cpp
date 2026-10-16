@@ -528,9 +528,16 @@ void WorkFloor(const std::vector<CarryChallenge::Case>& programs) {
     }
     auto source=live.source; source.indexed=false; source.base_vertex=0;
     source.count=93;
-    // CodexAstraLocal: This fixture has 37 guaranteed arithmetic instructions;
-    // 93 misses now pay the 3360 work seed threshold despite the old count floor.
-    Need(bool(queue.Capture(source,VideoCore::ActualWriter)),"certified small seed refused93");
+    // CodexAstraLocal: Default standalone admission restores actual96misses;
+    // the independent expanded control below retains its qualified alternative.
+    Need(!queue.Capture(source,VideoCore::ActualWriter),"conservative seed admitted93");
+    CpuDrawExecutor expanded{4,64,8*1024*1024,nullptr,{.expanded_seeds=true}};
+    Need(bool(expanded.Capture(source,VideoCore::ActualWriter)),"certified small seed refused93");
+    for (u32 domain : {63U,64U,65U,96U}) {
+        for(u32 n=0;n<live.indices.size();++n)live.indices[n]=n%domain;
+        Need(bool(expanded.Capture(live.source,VideoCore::ActualWriter))==(domain>64),
+             "FIFO miss floor boundary");
+    }
     source.count=96;
     Need(bool(queue.Capture(source,VideoCore::ActualWriter)),"miss floor rejected96");
     source.available_attributes=9; source.shader.max_input_attribute_index.Assign(8);
@@ -540,9 +547,9 @@ void WorkFloor(const std::vector<CarryChallenge::Case>& programs) {
     for(u32 n=0;n<9;++n)source.attributes[n].stride=71;
     source.attributes[9]={70,71,1,PipelineRegs::VertexAttributeFormat::UBYTE,false};
     Need(!queue.Capture(source,VideoCore::ActualWriter)&&!queue.LastCaptureAtCapacity(),"raw copy floor accepted71");
-    // CodexAstraLocal: Only the 34-instruction, two low-miss and 71-byte
-    // cases refuse work now; the certified 93-miss seed is intentionally accepted.
-    Need(queue.GetStatistics().work_refused==4,"work refusal accounting");
+    // CodexAstraLocal: Conservative default adds the93miss standalone refusal;
+    // that draw remains executable through the synchronous path.
+    Need(queue.GetStatistics().work_refused==5,"work refusal accounting");
 
     // A long branch cannot inflate a guaranteed work floor; a Boolean snapshot
     // fixes the choice, while per-invocation condition branches retain minimum0.
@@ -691,7 +698,7 @@ void Groups(const std::vector<CarryChallenge::Case>& programs) {
     // key accepted proof is reused through owned capture before lazy startup.
     {
         const auto reservations = Common::Uberhar::AuxiliaryBudget::Global().GetStatistics().reservations;
-        CpuDrawExecutor queue{4};
+        CpuDrawExecutor queue{4,64,8*1024*1024,nullptr,{.expanded_seeds=true}};
         Need(!queue.CachedShaderWork(floor_lease,0,3).has_value(),"unknown cached policy invented");
         Need(!queue.AllowsShaderWork(floor_lease,0,3),"tiny floor policy admitted");
         const auto built=queue.GetStatistics().effect_builds;
@@ -715,10 +722,47 @@ void Groups(const std::vector<CarryChallenge::Case>& programs) {
         Need(queue.GetStatistics().start_requests==1 && queue.GetStatistics().work_seeded==1,
              "lazy progress startup count");
     }
+    // CodexAstraLocal: With expansion OFF the same exact heavy48draw must
+    // not start/reserve anything. A Boolean-mismatched accepted token falls back
+    // to the actual policy, never borrowing the old proof or skipping rendering.
+    {
+        CpuDrawExecutor queue{4};
+        Live small{heavy_lease,heavy,48,1,false};
+        Need(!queue.AllowsShaderWork(heavy_lease,0,48) &&
+             !queue.Capture(small.source,VideoCore::ActualWriter), "expanded control ignored");
+        Need(queue.GetStatistics().start_requests==0,"disabled expansion started coordinator");
+        Live original{heavy_lease,heavy,96,1,false};
+        Need(queue.AllowsShaderWork(heavy_lease,0,96),"original policy rejected");
+        original.source.uniforms.b[0] = true;
+        auto packet=queue.Capture(original.source,VideoCore::ActualWriter);
+        Need(packet && queue.GetStatistics().token_mismatches==1 &&
+             queue.GetStatistics().effect_reuses==0,"stale Boolean token reused");
+        Need(queue.Submit(packet),"original seed not published"); queue.Drain();
+        const auto expected=Serial(original); const auto bytes=packet->HardwareBytes();
+        Need(bytes.size()==expected.hardware.size() &&
+             !std::memcmp(bytes.data(),expected.hardware.data(),bytes.size()),"token fallback output differs");
+        ++comparisons;
+        const auto stats=queue.GetStatistics();
+        Need(stats.original_seeded==1 && stats.work_seeded==0 && stats.group_submitted==0,
+             "seed classes not exclusive");
+    }
+    // CodexAstraLocal: Diagnostics independently prices actual cached lookup
+    // and eligibility. OFF keeps admission/owner counters but reads no clocks.
+    for(bool diagnostics : {false,true}) {
+        CpuDrawExecutor queue{4,64,8*1024*1024,nullptr,{.sampled_costs=diagnostics}};
+        Need(!queue.AllowsShaderWork(floor_lease,0,3),"diagnostic gate admitted tiny work");
+        for(unsigned i=0;i<2048;++i)
+            Need(queue.CachedShaderWork(floor_lease,0,3)==std::optional<bool>{false},
+                 "diagnostic control changed eligibility");
+        const auto stats=queue.GetStatistics();
+        Need(stats.cached_checks==2048 && stats.start_requests==0 &&
+             stats.lookup_samples==(diagnostics?2U:0U) &&
+             stats.eligibility_samples==(diagnostics?2U:0U),"feature cost sample routing");
+    }
     // CodexAstraLocal: Aggregate work alone cannot admit an unpartitionable
     // cheap tail. Exercise both the member bound and per-member dispatch charge.
     for (u32 member_size : {12U,30U}) {
-        Gate(false); CpuDrawExecutor queue{4,8,8*1024*1024,Start};
+        Gate(false); CpuDrawExecutor queue{4,8,8*1024*1024,Start,{.expanded_seeds=true}};
         struct ReleaseGate { ~ReleaseGate() { Gate(true); } } release;
         Live seed{heavy_lease,heavy,48,1,false};
         auto first=queue.Capture(seed.source,VideoCore::ActualWriter);
@@ -796,9 +840,9 @@ int main(int argc, char** argv) try {
     if (selected == "all" || selected == "normal") Normal(programs);
     if (selected == "all" || selected == "bounds") Boundaries(programs);
     if (selected == "all" || selected == "failures") Failures(programs);
-    if (selected == "all" || selected == "work") WorkFloor(programs);
-    if (selected == "all" || selected == "resets" || selected == "groups") Resets(programs);
-    if (selected == "all" || selected == "groups") { Groups(programs); ReadyPrefix(programs); }
+    if (selected == "all" || selected == "work" || selected == "features") WorkFloor(programs);
+    if (selected == "all" || selected == "resets" || selected == "groups" || selected == "features") Resets(programs);
+    if (selected == "all" || selected == "groups" || selected == "features") { Groups(programs); ReadyPrefix(programs); }
     original.Apply();
     std::cout << Json{{"passed", true}, {"checks", checks}, {"comparisons", comparisons},
         {"programs", programs.size()}, {"fp_modes", ModeCount},

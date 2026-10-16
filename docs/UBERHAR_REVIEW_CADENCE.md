@@ -1,5 +1,18 @@
 # Architecture review ledger
 
+<!-- CodexAstraLocal: Add the broad assessment and current scoped integration review without erasing historical anchors or declaring untested gameplay accepted. -->
+**Current checkpoint: 0.1.39–0.1.49 hardware assessment complete; 0.1.50 integration review.**
+The [0.1.50 review](UBERHAR_REVIEW_0.1.50.md) records independent architecture and
+separate consumer/cleanliness coverage across the scheduling, graphics, resource
+and experimental-model changes. Required release gates and owner qualification
+remain distinct. This does not claim a new line-by-line audit of all inherited
+code. Continue the owner's every-three-build review cadence, sooner for a
+material regression, and close this candidate's hardware assessment after testing.
+The latest authorization requires root to complete the actual 0.1.50 prerelease;
+older submission pauses below are historical.
+
+## Earlier .46 checkpoint
+
 <!-- CodexAstraLocal: Record current scoped review and observed failures without silently declaring a full historical audit complete. -->
 **Current checkpoint: .45 delivered and tested; .46 focused source review complete.**
 The [.44](UBERHAR_REVIEW_0.1.44.md), [.45](UBERHAR_REVIEW_0.1.45.md) and

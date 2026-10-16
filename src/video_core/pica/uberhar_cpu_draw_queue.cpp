@@ -5,6 +5,7 @@
 
 #include <atomic>
 #include <condition_variable>
+#include <chrono> // CodexAstraLocal: Sampled owner-only feature timing.
 #include <cstring>
 #include <exception>
 #include <limits>
@@ -25,6 +26,23 @@ constexpr u64 GroupWorkUnit = 96 * 35;
 // bounded capture charge. Admission and dispatch use this same partition rule.
 constexpr u64 MemberWorkUnit = 12 * 35;
 constexpr std::size_t MaxGroupMembers = 4, MaxPackets = 64;
+
+// CodexAstraLocal TEST-ONLY LOG: Sparse disjoint feature spans never count as
+// saved time or GPU execution; remove after .50 qualification. No shared atomics.
+struct ScopedCost {
+    bool enabled; u64& samples; u64& nanoseconds;
+    std::chrono::steady_clock::time_point start;
+    ScopedCost(bool measure, u64& count, u64& total)
+        : enabled{measure}, samples{count}, nanoseconds{total},
+          start{measure ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{}} {}
+    ~ScopedCost() {
+        if (enabled) {
+            ++samples;
+            nanoseconds += std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now() - start).count();
+        }
+    }
+};
 
 // CodexAstraLocal: Credit follows the last CPU/renderer reference, not merely
 // completion. Canceled command captures release safely without waiting, and
@@ -208,7 +226,12 @@ struct CpuDrawExecutor::Impl {
     std::array<Effect, 16> effects{};
     u32 next_effect{};
     mutable std::size_t last_effect{}; // CodexAstraLocal: Adjacent exact policy hits precede the bounded scan.
-    std::optional<Effect> approved_effect;
+    // CodexAstraLocal: Cache slots already own immutable leases; the accepted
+    // owner-only token needs no second shared_ptr copy. Generation plus exact
+    // lease/entry/Boolean validation refuses overwritten or changed decisions.
+    struct Approval { std::size_t slot{}; u64 generation{}; };
+    std::optional<Approval> approved_effect;
+    u64 eligibility_calls{}, proof_calls{};
     u64 effect_generation{};
     struct WaveKey {
         u64 effect{}, work{}; u32 vertices{}; bool indexed{};
@@ -237,7 +260,8 @@ struct CpuDrawExecutor::Impl {
         try {
             pool = std::make_unique<Common::Uberhar::ParallelWork>(
                 std::max(1U, processors - 1), worker_start,
-                Common::Uberhar::AuxiliaryBudget::Global(), &*progress_lane);
+                Common::Uberhar::AuxiliaryBudget::Global(), &*progress_lane,
+                policy.adaptive, policy.sampled_costs);
             asynchronous = true;
             coordinator = std::thread{[this] { Loop(); }};
             ++owner_statistics.async_starts;
@@ -289,8 +313,12 @@ struct CpuDrawExecutor::Impl {
         }
         last_effect = next_effect++ % effects.size();
         auto& cached = effects[last_effect];
+        // CodexAstraLocal: Saturation disables generation-dependent reuse and
+        // adaptive identity, rather than allowing a wrapped token to alias.
+        const auto generation = effect_generation == std::numeric_limits<u64>::max()
+            ? 0 : ++effect_generation;
         cached = {lease, booleans, true, accepted && work.valid, work.minimum_arithmetic,
-                  ++effect_generation};
+                  generation};
         ++owner_statistics.effect_builds;
         return cached;
     }
@@ -339,15 +367,21 @@ struct CpuDrawExecutor::Impl {
         return PendingGroupFits(work);
     }
     bool AllowsEffect(const Effect* effect, u32 count) {
+        ScopedCost cost{policy.sampled_costs && (++eligibility_calls % 1024 == 0),
+                        owner_statistics.eligibility_samples, owner_statistics.eligibility_ns};
         approved_effect.reset();
         const bool shape = count && count <= 65535 && count % 3 == 0;
         const bool supported = effect && effect->accepted;
         const bool useful = supported && effect->minimum_arithmetic >= 35 &&
-            ((policy.broader_groups ? u64(count) * effect->minimum_arithmetic >= GroupWorkUnit
-                                   : count >= 96) ||
+            ((count >= 96 || (policy.expanded_seeds &&
+                u64(count) * effect->minimum_arithmetic >= GroupWorkUnit)) ||
              (u64(count) * effect->minimum_arithmetic >= MemberWorkUnit &&
               CanJoinPending(u64(count) * effect->minimum_arithmetic)));
-        if (shape && useful) { approved_effect = *effect; return true; }
+        if (shape && useful) {
+            if (effect->identity) approved_effect = Approval{
+                static_cast<std::size_t>(effect - effects.data()), effect->identity};
+            return true;
+        }
         // CodexAstraLocal: These fields have only the emulation-owner writer;
         // no queue lock is needed solely to count a negative policy decision.
         ++owner_statistics.captures; ++owner_statistics.refused; ++owner_statistics.early_refused;
@@ -362,8 +396,11 @@ struct CpuDrawExecutor::Impl {
                            packet->impl->vertex_count, packet->impl->indexed};
         };
         const auto key = key_for(wave.front());
+        if (!key.effect) return 0; // CodexAstraLocal: Exhausted generations stay static.
         for (const auto& packet : wave) if (!(key_for(packet) == key)) return 0;
         for (const auto& entry : wave_identities) if (entry.identity && entry.key == key) return entry.identity;
+        // CodexAstraLocal: Identity exhaustion cannot recycle an adaptive key.
+        if (next_wave_identity == std::numeric_limits<u64>::max()) return 0;
         const auto identity = ++next_wave_identity;
         wave_identities[(identity - 1) % wave_identities.size()] = {key, identity};
         return identity;
@@ -479,7 +516,13 @@ std::optional<bool> CpuDrawExecutor::CachedShaderWork(const ShaderRunLease& leas
     // cached positive proof is retained for exact validation at Capture, too.
     if (!impl->policy.cached_precheck || !lease) return std::nullopt;
     ++impl->owner_statistics.cached_checks;
-    const auto* effect = impl->FindEffect(lease, booleans);
+    const Impl::Effect* effect{};
+    {
+        ScopedCost lookup{impl->policy.sampled_costs &&
+            (impl->owner_statistics.cached_checks % 1024 == 0),
+            impl->owner_statistics.lookup_samples, impl->owner_statistics.lookup_ns};
+        effect = impl->FindEffect(lease, booleans);
+    }
     if (!effect) { ++impl->owner_statistics.cached_misses; return std::nullopt; }
     ++impl->owner_statistics.cached_hits;
     impl->capture_at_capacity = false;
@@ -512,10 +555,24 @@ std::shared_ptr<CpuDrawPacket> CpuDrawExecutor::Capture(const CpuDrawCapture& so
     // CodexAstraLocal: Reuse only the accepted immutable same-code/entry/boolean
     // proof; standalone captures and changed keys still perform normal lookup.
     const auto booleans = ParallelVertexBooleanUniforms(source.uniforms);
-    const bool reuse = impl->approved_effect &&
-        Impl::Matches(*impl->approved_effect, source.shader_lease, booleans);
-    impl->owner_statistics.effect_reuses += reuse;
-    const auto& effect = reuse ? *impl->approved_effect : impl->Effects(source.shader_lease, booleans);
+    const Impl::Effect* selected_effect{};
+    {
+        ScopedCost proof{impl->policy.sampled_costs && (++impl->proof_calls % 1024 == 0),
+                         impl->owner_statistics.proof_samples, impl->owner_statistics.proof_ns};
+        if (impl->approved_effect) {
+            const auto& token = *impl->approved_effect;
+            const auto& candidate = impl->effects[token.slot];
+            if (token.generation && candidate.identity == token.generation &&
+                Impl::Matches(candidate, source.shader_lease, booleans))
+                selected_effect = &candidate;
+            else ++impl->owner_statistics.token_mismatches;
+        } else ++impl->owner_statistics.token_missing;
+        impl->owner_statistics.effect_reuses += selected_effect != nullptr;
+        if (!selected_effect) selected_effect = &impl->Effects(source.shader_lease, booleans);
+    }
+    // CodexAstraLocal: No cache mutation follows before the packet captures its
+    // own source lease; no mutable cache reference crosses publication.
+    const auto& effect = *selected_effect;
     if (!effect.accepted)
         return refuse();
     // CodexAstraLocal: The finite complete-path control lost on tiny/light
@@ -535,7 +592,12 @@ std::shared_ptr<CpuDrawPacket> CpuDrawExecutor::Capture(const CpuDrawCapture& so
         }
     }
     const u64 guaranteed_work = u64(misses) * effect.minimum_arithmetic;
-    const bool work_seed = impl->policy.broader_groups ? guaranteed_work >= GroupWorkUnit : misses >= 96;
+    const bool work_seed = misses >= 96 ||
+        (impl->policy.expanded_seeds && guaranteed_work >= GroupWorkUnit);
+    // CodexAstraLocal: Count the disabled standalone opportunity independently
+    // of successful pending-member admission; final grouping checks remain live.
+    impl->owner_statistics.expanded_refused += !impl->policy.expanded_seeds &&
+        misses < 96 && guaranteed_work >= GroupWorkUnit;
     if (!work_seed) {
         if (!impl->CanJoinPending(guaranteed_work)) return refuse(false, true);
     }
@@ -641,6 +703,7 @@ bool CpuDrawExecutor::Submit(const std::shared_ptr<CpuDrawPacket>& packet) {
         packet->impl->submitted.store(true, std::memory_order_release);
         ++impl->statistics.submitted;
         impl->owner_statistics.work_seeded += packet->impl->work_seed;
+        impl->owner_statistics.original_seeded += !packet->impl->requires_group && !packet->impl->work_seed;
         if (packet->impl->requires_group) ++impl->statistics.group_submitted;
         else ++impl->statistics.seed_submitted;
     }
@@ -686,6 +749,11 @@ CpuDrawExecutor::Statistics CpuDrawExecutor::GetStatistics() const {
     result.cached_negative = owner.cached_negative; result.cached_misses = owner.cached_misses;
     result.effect_hits = owner.effect_hits; result.effect_builds = owner.effect_builds;
     result.effect_reuses = owner.effect_reuses; result.work_seeded = owner.work_seeded;
+    result.original_seeded = owner.original_seeded; result.expanded_refused = owner.expanded_refused;
+    result.token_missing = owner.token_missing; result.token_mismatches = owner.token_mismatches;
+    result.lookup_samples = owner.lookup_samples; result.lookup_ns = owner.lookup_ns;
+    result.eligibility_samples = owner.eligibility_samples; result.eligibility_ns = owner.eligibility_ns;
+    result.proof_samples = owner.proof_samples; result.proof_ns = owner.proof_ns;
     result.start_requests = owner.start_requests; result.start_refused = owner.start_refused;
     result.start_failed = owner.start_failed; result.async_starts = owner.async_starts;
     result.drain_calls = owner.drain_calls; result.drain_samples = owner.drain_samples;

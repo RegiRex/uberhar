@@ -87,6 +87,13 @@ python3 tools/uberhar/test_strict_compute_backend.py
 # CodexAstraLocal: Exercise CPU Software framebuffer capture and production
 # sampling through the same cases as native tests before publishing Android.
 python3 tools/uberhar/test_software_renderer.py
+# CodexAstraLocal: Gate exact Software preparation identities, checked coverage
+# spans and read-time provenance without requiring a second full emulator build.
+c++ -std=c++20 -O2 -DFMT_HEADER_ONLY -ffunction-sections -fdata-sections \
+  -Isrc -Iexternals/fmt/include -Iexternals/boost -Iexternals/nihstro/include \
+  tools/uberhar/test_software_work.cpp src/video_core/pica/shader_unit.cpp -Wl,--gc-sections \
+  -o build/uberhar-probe/test-software-work
+build/uberhar-probe/test-software-work
 # CodexAstraLocal: Prove new masked/endpoint admission with original CPU vertices
 # and immutable command capture; shader CI separately executes the pixel fixtures.
 python3 tools/uberhar/test_compute_rect_pixels.py
