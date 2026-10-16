@@ -19,6 +19,9 @@
 #include "common/logging/log.h"
 #include "common/thread_worker.h"
 #include "video_core/shader/generator/pica_fs_config.h"
+// CodexAstraLocal: Both ordinary and static worker fixtures execute the real
+// liveness helper; do not depend on a static-only header's transitive include.
+#include "video_core/pica/uberhar_tev_liveness.h"
 #include "video_core/renderer_vulkan/uberhar_fragment_policy.h"
 #ifdef UBERHAR_STATIC_TEV_WORKER
 #include "video_core/renderer_vulkan/uberhar_static_tev_policy.h"

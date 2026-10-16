@@ -426,9 +426,24 @@ void KeyAndDynamicState() {
     auto unlit = Config();
     auto lit = Config(1);
     lit.lighting.enable.Assign(1);
+    // CodexAstraLocal: Reservation now follows consumed lighting, not merely
+    // the unit enable bit. Give the lit witness a real final RGB consumer and
+    // retain a check that enabled-but-unused lighting does not qualify.
+    using Source = Pica::TexturingRegs::TevStageConfig::Source;
+    Require(!GLSL::GraphicsTevLiveness(lit).Uses(Source::PrimaryFragmentColor),
+            "enabled unused lighting is not a live consumer");
+    Pica::TexturingRegs::TevStageConfig final_stage = lit.texture.tev_stages[5];
+    final_stage.color_source1.Assign(Source::PrimaryFragmentColor);
+    lit.texture.tev_stages[5].sources_raw = final_stage.sources_raw;
+    Require(GLSL::GraphicsTevLiveness(lit).Uses(Source::PrimaryFragmentColor),
+            "lit occupancy witness consumes lighting");
     auto info = Info();
     auto layout = SoftwareLayout();
+    // CodexAstraLocal: This legacy fixture otherwise owns synthetic payload
+    // bytes. Lighting attribution needs the actual draw's prepared demand bits.
+    p.tev_constants = GLSL::MakeDynamicTevState(unlit, p.profile);
     WarmPipeline(p, info, unlit);
+    p.tev_constants = GLSL::MakeDynamicTevState(lit, p.profile);
     WarmPipeline(p, info, lit);
     // CodexAstraLocal: The production report snapshots this same fixed metadata;
     // no test or reporter inspects a destruction-queued unique owner.
@@ -439,6 +454,7 @@ void KeyAndDynamicState() {
             "bank occupancy records lit and unlit admissions");
     for (const auto &c : {unlit, lit, lit}) {
       p.Fresh(c);
+      p.tev_constants = GLSL::MakeDynamicTevState(c, p.profile);
       Require(p.BindPipeline(info, true, nullptr, true, nullptr, &layout, &token),
               "lit/unlit ready draw");
     }
