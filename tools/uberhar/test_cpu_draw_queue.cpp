@@ -634,6 +634,10 @@ void Groups(const std::vector<CarryChallenge::Case>& programs) {
              "weighted grain accounting");
         Need(!queue.HasPendingSeed(), "executing seed stayed pending");
         packets.clear(); Need(queue.GetStatistics().resident_packets == 0, "group credit leaked");
+        // CodexAstraLocal: Lazy startup rejects the initial empty queue before
+        // reaching the seed guard. Recheck after a real group drains with the
+        // coordinator active: completed seeds cannot fund new small packets.
+        Need(!queue.AllowsShaderWork(heavy_lease, 0, 93), "unseeded small admission");
     }
     {
         Gate(false); CpuDrawExecutor queue{4, 8, 8 * 1024 * 1024, Start};
