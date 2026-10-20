@@ -184,7 +184,7 @@ private:
     const bool transfer_diagnostics;
     u64 copy_regions{}, identity_regions{}, identity_blits{}, feedback_requests{}, feedback_reuses{};
     u64 copy_image_refused{}, copy_subresource_refused{}, copy_coordinates_refused{}, blit_requests{};
-    u64 feedback_disabled{}, feedback_compute{}, feedback_missing{}, feedback_allocation{}, feedback_epoch{};
+    u64 feedback_disabled{}, feedback_missing{}, feedback_allocation{}, feedback_epoch{};
     // CodexAstraLocal TEST-ONLY LOG: Sparse predicate cost excludes copy/visibility execution.
     std::array<u64, 3> reuse_gate_samples{}, reuse_gate_ns{};
     u64 transfer_sequence{};
@@ -239,10 +239,8 @@ public:
     }
 
     /// Returns a copy of the upscaled image handle, used for feedback loops.
-    // CodexAstraLocal: Compute feedback needs the original typed view after a
-    // full-aspect snapshot, including R32 shadow and depth sampling views.
-    vk::ImageView CopyImageView(ViewType view_type = ViewType::Sample,
-                               bool compute = false) noexcept;
+    // CodexAstraLocal: Supported graphics feedback reads the sampled color snapshot.
+    vk::ImageView CopyImageView() noexcept;
 
     /// Returns the framebuffer view of the surface image
     vk::ImageView FramebufferView() noexcept {
@@ -312,9 +310,6 @@ public:
     vk::UniqueImageView storage_view;
     bool is_framebuffer{};
     bool is_storage{};
-    // CodexAstraLocal: Sampling is also a compute access. Cache transfers must
-    // not infer its pipeline stage solely from storage-image writes.
-    bool is_compute{};
 };
 
 class Framebuffer : public VideoCore::FramebufferParams {

@@ -161,6 +161,14 @@ def main() -> None:
     graphics=read('src/video_core/renderer_vulkan/vk_graphics_pipeline.cpp')
     parts=[function(graphics,'u64 GraphicsPipeline::Key()').replace('GraphicsPipeline::Key()','GraphicsPipeline::ActualKey()'),
            function(graphics,'bool GraphicsPipeline::MatchesExecution(')]
+    # CodexAstraLocal: Diagnostic accessors must inspect the real immutable
+    # selected owner rather than a fixture-maintained duplicate implementation.
+    graphics_header = read('src/video_core/renderer_vulkan/vk_graphics_pipeline.h')
+    for signature, name in (
+        ('const StaticPipelineInfo& DiagnosticState()', 'DiagnosticState'),
+        ('std::array<u64, MAX_SHADER_STAGES> DiagnosticShaderIds()', 'DiagnosticShaderIds'),
+    ):
+        parts.append(function(graphics_header, signature).replace(name+'()', 'GraphicsPipeline::'+name+'()'))
     for signature in ('bool PipelineCache::PreferReadySpecializedFragment(',
                       'bool PipelineCache::ReadyVertexShaders()',
                       'GraphicsPipeline* PipelineCache::PrepareReadyCpuFragment(',

@@ -259,7 +259,7 @@ void BindTransportAndModes() {
   auto layout = SoftwareLayout();
   auto c = Config();
   for (auto mode :
-       {Settings::UberharTestMode::Native, Settings::UberharTestMode::Compute,
+       {Settings::UberharTestMode::Native,
         Settings::UberharTestMode::ComboGeneric,
         Settings::UberharTestMode::Custom}) {
     PipelineCache p;

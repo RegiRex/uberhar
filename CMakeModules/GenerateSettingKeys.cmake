@@ -51,7 +51,7 @@ foreach(KEY IN ITEMS
     "uberhar_cpu_prefix_overlap"
     "uberhar_parallel_texture_decode"
     # CodexAstraLocal: Shared native/Android keys for independently qualified .50 features.
-    "uberhar_cpu_queue_expanded_seeds"
+    # CodexAstraLocal: The retired standalone-seed control has no generated key.
     "uberhar_cpu_adaptive_participation"
     "uberhar_cpu_execution_census"
     "uberhar_feature_diagnostics"

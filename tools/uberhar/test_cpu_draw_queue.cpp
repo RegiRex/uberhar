@@ -528,16 +528,9 @@ void WorkFloor(const std::vector<CarryChallenge::Case>& programs) {
     }
     auto source=live.source; source.indexed=false; source.base_vertex=0;
     source.count=93;
-    // CodexAstraLocal: Default standalone admission restores actual96misses;
-    // the independent expanded control below retains its qualified alternative.
+    // CodexAstraLocal: Below96 standalone work must stay synchronous even for
+    // expensive shaders; the removed expansion cannot be enabled by any policy.
     Need(!queue.Capture(source,VideoCore::ActualWriter),"conservative seed admitted93");
-    CpuDrawExecutor expanded{4,64,8*1024*1024,nullptr,{.expanded_seeds=true}};
-    Need(bool(expanded.Capture(source,VideoCore::ActualWriter)),"certified small seed refused93");
-    for (u32 domain : {63U,64U,65U,96U}) {
-        for(u32 n=0;n<live.indices.size();++n)live.indices[n]=n%domain;
-        Need(bool(expanded.Capture(live.source,VideoCore::ActualWriter))==(domain>64),
-             "FIFO miss floor boundary");
-    }
     source.count=96;
     Need(bool(queue.Capture(source,VideoCore::ActualWriter)),"miss floor rejected96");
     source.available_attributes=9; source.shader.max_input_attribute_index.Assign(8);
@@ -693,12 +686,12 @@ void Groups(const std::vector<CarryChallenge::Case>& programs) {
         ++comparisons;
         Need(queue.GetStatistics().peak_threads == 1, "no-lane async work");
     }
-    // CodexAstraLocal: Actual FIFO work, not input count, admits heavy small
-    // seeds. Cached negative policy creates no coordinator/reservation; a same-
+    // CodexAstraLocal: Retain lazy startup and exact proof reuse for worthwhile
+    // standalone work. Cached negative policy creates no reservation; a same-
     // key accepted proof is reused through owned capture before lazy startup.
     {
         const auto reservations = Common::Uberhar::AuxiliaryBudget::Global().GetStatistics().reservations;
-        CpuDrawExecutor queue{4,64,8*1024*1024,nullptr,{.expanded_seeds=true}};
+        CpuDrawExecutor queue{4};
         Need(!queue.CachedShaderWork(floor_lease,0,3).has_value(),"unknown cached policy invented");
         Need(!queue.AllowsShaderWork(floor_lease,0,3),"tiny floor policy admitted");
         const auto built=queue.GetStatistics().effect_builds;
@@ -707,30 +700,30 @@ void Groups(const std::vector<CarryChallenge::Case>& programs) {
              Common::Uberhar::AuxiliaryBudget::Global().GetStatistics().reservations==reservations,
              "negative policy reserved progress");
         Need(!queue.CachedShaderWork(floor_lease,1,3).has_value(),"cached Boolean identity aliased");
-        Live live{heavy_lease,heavy,48,1,false};
+        Live live{heavy_lease,heavy,96,1,false};
         const auto expected=Serial(live);
-        Need(queue.AllowsShaderWork(heavy_lease,0,48),"work qualified small seed rejected");
+        Need(queue.AllowsShaderWork(heavy_lease,0,96),"qualified standalone seed rejected");
         auto packet=queue.Capture(live.source,VideoCore::ActualWriter);
         auto before=queue.GetStatistics();
-        Need(packet && before.effect_reuses==1 && before.work_seeded==0 && before.start_requests==0,
+        Need(packet && before.effect_reuses==1 && before.original_seeded==0 && before.start_requests==0,
              "accepted proof or lazy capture contract");
-        Need(queue.Submit(packet),"small seed publication"); queue.Drain();
+        Need(queue.Submit(packet),"standalone seed publication"); queue.Drain();
         const auto bytes=packet->HardwareBytes();
         Need(bytes.size()==expected.hardware.size() &&
-             !std::memcmp(bytes.data(),expected.hardware.data(),bytes.size()),"small seed hardware differs");
+             !std::memcmp(bytes.data(),expected.hardware.data(),bytes.size()),"standalone seed hardware differs");
         ++comparisons;
-        Need(queue.GetStatistics().start_requests==1 && queue.GetStatistics().work_seeded==1,
+        Need(queue.GetStatistics().start_requests==1 && queue.GetStatistics().original_seeded==1,
              "lazy progress startup count");
     }
-    // CodexAstraLocal: With expansion OFF the same exact heavy48draw must
+    // CodexAstraLocal: The removed expansion means an exact heavy48 draw must
     // not start/reserve anything. A Boolean-mismatched accepted token falls back
     // to the actual policy, never borrowing the old proof or skipping rendering.
     {
         CpuDrawExecutor queue{4};
         Live small{heavy_lease,heavy,48,1,false};
         Need(!queue.AllowsShaderWork(heavy_lease,0,48) &&
-             !queue.Capture(small.source,VideoCore::ActualWriter), "expanded control ignored");
-        Need(queue.GetStatistics().start_requests==0,"disabled expansion started coordinator");
+             !queue.Capture(small.source,VideoCore::ActualWriter), "standalone miss floor ignored");
+        Need(queue.GetStatistics().start_requests==0,"small standalone work started coordinator");
         Live original{heavy_lease,heavy,96,1,false};
         Need(queue.AllowsShaderWork(heavy_lease,0,96),"original policy rejected");
         original.source.uniforms.b[0] = true;
@@ -743,7 +736,7 @@ void Groups(const std::vector<CarryChallenge::Case>& programs) {
              !std::memcmp(bytes.data(),expected.hardware.data(),bytes.size()),"token fallback output differs");
         ++comparisons;
         const auto stats=queue.GetStatistics();
-        Need(stats.original_seeded==1 && stats.work_seeded==0 && stats.group_submitted==0,
+        Need(stats.original_seeded==1 && stats.group_submitted==0,
              "seed classes not exclusive");
     }
     // CodexAstraLocal: Diagnostics independently prices actual cached lookup
@@ -762,9 +755,9 @@ void Groups(const std::vector<CarryChallenge::Case>& programs) {
     // CodexAstraLocal: Aggregate work alone cannot admit an unpartitionable
     // cheap tail. Exercise both the member bound and per-member dispatch charge.
     for (u32 member_size : {12U,30U}) {
-        Gate(false); CpuDrawExecutor queue{4,8,8*1024*1024,Start,{.expanded_seeds=true}};
+        Gate(false); CpuDrawExecutor queue{4,8,8*1024*1024,Start};
         struct ReleaseGate { ~ReleaseGate() { Gate(true); } } release;
-        Live seed{heavy_lease,heavy,48,1,false};
+        Live seed{floor_lease,floor,96,1,false};
         auto first=queue.Capture(seed.source,VideoCore::ActualWriter);
         Need(first&&queue.Submit(first),"partition seed publication");
         std::vector<std::shared_ptr<CpuDrawPacket>> packets{first};

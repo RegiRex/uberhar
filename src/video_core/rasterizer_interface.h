@@ -14,8 +14,6 @@
 
 namespace Pica {
 struct OutputVertex;
-struct ComputeAssemblyState;
-struct ComputeAssemblyResult;
 class CpuDrawPacket; // CodexAstraLocal: Forward declaration avoids renderer/queue coupling.
 }
 
@@ -62,19 +60,7 @@ public:
     /// Draw the current batch of triangles
     virtual void DrawTriangles() = 0;
 
-    // CodexAstraLocal: Strict independent compute enters before CPU guest
-    // shading. A successful producer returns the next persistent assembly state;
-    // unsupported backends return false and the strict caller terminates.
-    virtual bool DrawComputeBatch(bool, const Pica::ComputeAssemblyState&,
-                                  Pica::ComputeAssemblyResult&,
-                                  const Pica::AttributeBuffer* = nullptr) { return false; }
-    // CodexAstraLocal TEST-ONLY LOG: Admission/commit occur outside the draw
-    // body. Retain their original state without shading/retry/fallback. Remove
-    // after the diagnosed failures have corrected replay controls.
-    virtual void ReportComputeFailure(const char*, bool, const Pica::ComputeAssemblyState&,
-                                      const Pica::ComputeAssemblyResult*,
-                                      const Pica::AttributeBuffer*) noexcept {}
-
+    // CodexAstraLocal: Retired original-input compute entry points have no runtime owner.
     // CodexAstraLocal: Opt-in has no renderer side effects. Unknown backends
     // retain synchronous rendering. An admitted packet is independently running
     // before DrawDeferredVertices; that call consumes exactly one complete draw.

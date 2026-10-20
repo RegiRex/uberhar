@@ -27,7 +27,6 @@ enum class BooleanSetting(
     UBERHAR_PARALLEL_TEXTURE_DECODE(SettingKeys.uberhar_parallel_texture_decode(), Settings.SECTION_RENDERER, true),
     // CodexAstraLocal: Independent restart-only .50 controls are snapshotted by each owner;
     // profiling stays optional so comparison runs do not pay GPU timestamp overhead.
-    UBERHAR_CPU_QUEUE_EXPANDED_SEEDS(SettingKeys.uberhar_cpu_queue_expanded_seeds(), Settings.SECTION_RENDERER, false),
     UBERHAR_CPU_ADAPTIVE_PARTICIPATION(SettingKeys.uberhar_cpu_adaptive_participation(), Settings.SECTION_RENDERER, true),
     UBERHAR_CPU_EXECUTION_CENSUS(SettingKeys.uberhar_cpu_execution_census(), Settings.SECTION_RENDERER, false),
     UBERHAR_FEATURE_DIAGNOSTICS(SettingKeys.uberhar_feature_diagnostics(), Settings.SECTION_RENDERER, true),

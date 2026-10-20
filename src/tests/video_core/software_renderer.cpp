@@ -24,6 +24,7 @@
 #include "video_core/pica/uberhar_vertex_input.h" // CodexAstraLocal: Actual read-time source provenance.
 #include "video_core/renderer_software/sw_lighting.h" // CodexAstraLocal: Real multi-light LUT reuse.
 #include "video_core/renderer_software/sw_rasterizer.h"
+#include "video_core/renderer_software/sw_source_provenance.h" // CodexAstraLocal: Bounded actual terminal-source report.
 #include "video_core/shader/shader.h"
 #endif
 #include "video_core/renderer_software/sw_frame.h"
@@ -53,6 +54,13 @@ struct SoftwareRendererTestAccess {
     static auto Diagnostic(const RasterizerSoftware& raster) {
         return std::array<u64,8>{raster.work_samples,raster.tev_ns,raster.span_ns,
             raster.row_policy_ns,raster.owner_rows,raster.helper_rows,raster.errors,raster.feature_mask};
+    }
+    // CodexAstraLocal: Verify actual row/TEV/clipping populations alongside
+    // complete framebuffer equivalence; counters alone cannot qualify output.
+    static auto Efficiency(const RasterizerSoftware& raster) {
+        return std::array<u64,6>{raster.stepped_rows,raster.stepped_candidates,
+            raster.constant_tev_triangles,raster.constant_tev_candidates,
+            raster.clip_copy_bypasses,raster.constant_state_refusals};
     }
     // CodexAstraLocal: Explicit fixture facts exercise the real owner proof;
     // these tests own all guest memory and have no concurrent DSP/IPC writer.
@@ -100,6 +108,18 @@ namespace Pica {
 struct SoftwareProducerTestAccess {
     using GeometryEntry = PicaCore::SoftwareGeometryEntry;
     using SnapshotType = PicaCore::SoftwareProducerSnapshot;
+    // CodexAstraLocal: Exercise the actual capped tail without emitting a new
+    // file; the existing first-capsule serializer has independent coverage.
+    static void ArmTail(PicaCore& pica, u32 invocations) {
+        pica.software_producer_attempted = true;
+        pica.software_terminal_remaining = invocations;
+        pica.software_terminal_sources = std::make_unique<SwRenderer::SoftwareSourceHistory>();
+    }
+    static void Tail(PicaCore& pica, ShaderSetup& setup, const ShaderUnit& unit,
+                     const OutputVertex& output, const NativeInputReadTrace* trace) {
+        pica.ObserveSoftwareProducer(1U << RasterizerRegs::VSOutputAttributes::TEXCOORD0_U,
+            output, setup, unit, 1, 17, "fixture_tail", false, true, trace);
+    }
     // CodexAstraLocal: Invoke the actual scoped loader, with modeled raster
     // publication endpoints only; shader, live memory and FIFO stay production.
     static void Batch(PicaCore& pica,bool indexed=false) {
@@ -786,6 +806,27 @@ TEST_CASE("Software producer capsule preserves demanded inputs and carry limits"
     const auto mid_emit = Access::Snapshot(pica, setup, unit, output, false, false);
     CHECK_FALSE(mid_emit.replay_qualified);
     CHECK(mid_emit.metadata.find("buffered GS vertex may precede current emit") != std::string::npos);
+    // CodexAstraLocal: The real observer/report must retain actual bytes,
+    // distinguish a matching-UV/different-position source, and stop at expiry
+    // even if an already-admitted draw keeps invoking its observed callback.
+    Access::ArmTail(pica, 2);
+    Access::Tail(pica, setup, unit, output, &trace);
+    auto other = output;
+    other.pos.x = Pica::f24::FromFloat32(2.f);
+    const std::array<const Pica::OutputVertex*,3> terminal{&output,&other,&output};
+    auto tail = nlohmann::json::parse(pica.DescribeSoftwareTerminalSources(terminal));
+    CHECK(tail["remaining_invocations"] == 1);
+    CHECK(tail["sources"][0]["retained_exact_matches"] == 1);
+    CHECK(tail["sources"][0]["attributes"][0]["bytes_hex"] == "4523c17f0000803f000000000000803f");
+    CHECK(tail["sources"][1]["retained_exact_matches"] == 0);
+    Access::Tail(pica, setup, unit, output, nullptr);
+    Access::Tail(pica, setup, unit, other, &trace);
+    tail = nlohmann::json::parse(pica.DescribeSoftwareTerminalSources(terminal));
+    CHECK(tail["remaining_invocations"] == 0); CHECK(tail["events"] == 2);
+    CHECK(tail["sources"][0]["retained_exact_matches"] == 2);
+    CHECK(tail["sources"][0]["actual_reads"] == false);
+    CHECK(tail["sources"][1]["retained_exact_matches"] == 0);
+    CHECK(Access::Mask(pica) == 0);
 }
 
 TEST_CASE("Software geometry capsule owns the producing emit and entry carry",
@@ -1173,6 +1214,32 @@ TEST_CASE("Software actual triangle budgets and alias admission", "[software]") 
     }
     Settings::software_renderer_features=old_features;
     Settings::software_renderer_diagnostics=old_diagnostics;
+    // CodexAstraLocal: Compare actual clipped, scissored and reversed textured
+    // triangles with the old edge/copy route. These go beyond all-inside quads.
+    for (bool exclude : {false, true}) {
+        regs.rasterizer.scissor_test.mode.Assign(exclude
+            ? Pica::RasterizerRegs::ScissorMode::Exclude : Pica::RasterizerRegs::ScissorMode::Disabled);
+        regs.rasterizer.scissor_test.x1.Assign(8); regs.rasterizer.scissor_test.y1.Assign(8);
+        regs.rasterizer.scissor_test.x2.Assign(31); regs.rasterizer.scissor_test.y2.Assign(31);
+        std::vector<u8> clipped_reference;
+        for (u32 mask : {0U, 15U}) {
+            Settings::software_renderer_features=mask;
+            SwRenderer::RasterizerSoftware comparison{memory,pica};
+            std::memset(color,0,64*64*4);
+            comparison.AddTriangle(vertex(-2,-.9f),vertex(.9f,2),vertex(.9f,-.9f));
+            comparison.AddTriangle(vertex(-2,-2),vertex(-2,2),vertex(2,-2));
+            const std::vector<u8> result(color,color+64*64*4);
+            if (clipped_reference.empty()) clipped_reference=result;
+            else CHECK(result==clipped_reference);
+            if (mask && old_diagnostics) {
+                const auto efficiency=SwRenderer::SoftwareRendererTestAccess::Efficiency(comparison);
+                CHECK(efficiency[0]>0); CHECK(efficiency[1]>0); CHECK(efficiency[4]>0);
+                CHECK(efficiency[5]>0);
+            }
+        }
+    }
+    regs.rasterizer.scissor_test.mode.Assign(Pica::RasterizerRegs::ScissorMode::Disabled);
+    Settings::software_renderer_features=old_features;
     Settings::values.software_renderer_workers=2;
     {
         // CodexAstraLocal: Real covered tiny work remains on the owner even
@@ -1393,6 +1460,12 @@ TEST_CASE("Software prepared fragment demand preserves actual triangle outputs",
     SwRenderer::Framebuffer observed{memory, regs.framebuffer};
     observed.Bind();
     SwRenderer::RasterizerSoftware raster{memory, pica};
+    // CodexAstraLocal: Every constant-TEV fixture below also executes the
+    // original per-pixel evaluator, comparing all encoded framebuffer bytes.
+    const auto old_features = Settings::software_renderer_features.GetValue();
+    Settings::software_renderer_features = old_features & ~1U;
+    SwRenderer::RasterizerSoftware ordinary_tev{memory, pica};
+    Settings::software_renderer_features = old_features;
     const auto f = [](float value) { return Pica::f24::FromFloat32(value); };
     const auto nan = f(std::numeric_limits<float>::quiet_NaN());
     const auto vertex = [&](float x, float y) {
@@ -1429,7 +1502,12 @@ TEST_CASE("Software prepared fragment demand preserves actual triangle outputs",
     const auto draw = [&] {
         std::memset(color, 0x6d, 16 * 16 * 4);
         raster.AddTriangle(a, b, c);
-        return observed.GetPixel(2, 2);
+        const auto result = observed.GetPixel(2, 2);
+        const std::vector<u8> encoded(color, color + 16 * 16 * 4);
+        std::memset(color, 0x6d, 16 * 16 * 4);
+        ordinary_tev.AddTriangle(a, b, c);
+        CHECK(std::vector<u8>(color, color + 16 * 16 * 4) == encoded);
+        return result;
     };
     // Invalid enabled bump memory and NaN semantic attributes remain unused
     // only while no executed operand consumes them; there is no repair value.
@@ -1514,6 +1592,14 @@ TEST_CASE("Software prepared fragment demand preserves actual triangle outputs",
     for (u32 format = 0; format < encoded.size(); ++format) {
         target.color_format.Assign(static_cast<Pica::FramebufferRegs::ColorFormat>(format));
         CHECK(draw() == encoded[format]);
+    }
+    // CodexAstraLocal: The optimized production path must actually consume
+    // the hoisted value, while disabled reuse retains ordinary pixel TEV.
+    if (Settings::software_renderer_diagnostics.GetValue() && (old_features & 1)) {
+        const auto optimized = SwRenderer::SoftwareRendererTestAccess::Efficiency(raster);
+        const auto ordinary = SwRenderer::SoftwareRendererTestAccess::Efficiency(ordinary_tev);
+        CHECK(optimized[2] > 0); CHECK(optimized[3] > optimized[2]);
+        CHECK(ordinary[2] == 0); CHECK(ordinary[3] == 0);
     }
 }
 

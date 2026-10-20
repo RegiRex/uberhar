@@ -45,9 +45,6 @@ struct CpuDrawPolicy {
     bool cached_precheck{true};
     bool broader_groups{true};
     bool sampled_costs{true};
-    // CodexAstraLocal: Expanded standalone seeds are independent of useful
-    // pending-member grouping. Ordinary execution restores the .48 seed floor.
-    bool expanded_seeds{false};
     bool adaptive{true};
 };
 class CpuDrawPacket {
@@ -93,10 +90,10 @@ public:
         // CodexAstraLocal TEST-ONLY LOG: Remove feature/cost qualification fields
         // after .49 hardware acceptance; none authorizes publication or replay.
         u64 cached_checks{}, cached_hits{}, cached_negative{}, cached_misses{};
-        u64 effect_hits{}, effect_builds{}, effect_reuses{}, work_seeded{};
+        u64 effect_hits{}, effect_builds{}, effect_reuses{};
         // CodexAstraLocal TEST-ONLY LOG: Owner-only feature costs and exclusive
         // token/seed outcomes; remove after .50 hardware qualification.
-        u64 original_seeded{}, expanded_refused{}, token_missing{}, token_mismatches{};
+        u64 original_seeded{}, token_missing{}, token_mismatches{};
         u64 lookup_samples{}, lookup_ns{}, eligibility_samples{}, eligibility_ns{};
         u64 proof_samples{}, proof_ns{};
         u64 start_requests{}, start_refused{}, start_failed{}, async_starts{};
@@ -133,9 +130,9 @@ public:
     // CodexAstraLocal: Capture performs exact effect/flow proof and all owned
     // allocation before a task is published. Refusal returns empty; allocation
     // exceptions retain the caller's existing before-dispatch recovery path.
-    // CodexAstraLocal: Work-qualified seeds pay 96*35 actual FIFO arithmetic
-    // units; the separate expanded_seeds control additionally admits below96
-    // actual misses. Ordinary standalone seeds retain>=96misses. Joining members pay at least
+    // CodexAstraLocal: Remove expanded standalone seeds after measured extra
+    // coordination without more helper output. Seeds require at least 96 FIFO
+    // misses; useful small work can still join pending groups. Members pay at least
     // 12*35 units and belong to a certified1–4-member contiguous cost grain;
     // every extra member adds12*35 units to the3360 dispatch threshold. These are
     // conservative policy proxies, not measured capture costs. Copies stay<=70B/miss.

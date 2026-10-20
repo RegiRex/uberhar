@@ -411,7 +411,7 @@ bool BlitHelper::ConvertDS24S8ToRGBA8(Surface& source, Surface& dest,
 
     renderpass_cache.EndRendering();
     // CodexAstraLocal TEST-ONLY LOG: Inherited utility compute is distinct from
-    // the Calculated renderer; preserve its original barriers and descriptors.
+    // the retired independent renderer; preserve the shared barriers and descriptors.
     scheduler.RecordGpuWork(GpuWork::Utility, 0,
         [this, descriptor_set, copy, src_image = source.Image(),
                       dst_image = dest.Image()](vk::CommandBuffer cmdbuf) {
@@ -526,7 +526,7 @@ bool BlitHelper::DepthToBuffer(Surface& source, vk::Buffer buffer,
 
     renderpass_cache.EndRendering();
     // CodexAstraLocal TEST-ONLY LOG: Inherited utility compute is distinct from
-    // the Calculated renderer; preserve its original barriers and descriptors.
+    // the retired independent renderer; preserve the shared barriers and descriptors.
     scheduler.RecordGpuWork(GpuWork::Utility, 0,
         [this, descriptor_set, copy, src_image = source.Image(),
                       extent = source.RealExtent(false)](vk::CommandBuffer cmdbuf) {

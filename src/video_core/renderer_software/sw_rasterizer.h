@@ -151,6 +151,12 @@ private:
     // removed after hardware qualification. Clock samples are not inferred savings.
     u64 input_draws{}, report_draw{}, report_session{}, errors{};
     u64 tev_ns{}, span_ns{}, row_policy_ns{}, unsafe_rows{}, owner_rows{}, helper_rows{}, helper_runs{};
+    // CodexAstraLocal TEST-ONLY LOG: Owner-prepared work attribution; remove
+    // after matched .51 raster qualification, retaining permanent errors.
+    u64 stepped_rows{}, stepped_candidates{}, constant_tev_triangles{}, constant_tev_candidates{};
+    u64 clip_planes{}, clip_copy_bypasses{}, clip_samples{}, clip_ns{};
+    u64 constant_state_refusals{};
+    u64 constant_gate_calls{}, constant_gate_samples{}, constant_gate_ns{};
     std::chrono::steady_clock::time_point last_report{};
     // CodexAstraLocal: 9 raster triangles follow at most 8 clipping planes;
     // grouped admission bounds coordinates to 1023, so storage stays <=72KiB.

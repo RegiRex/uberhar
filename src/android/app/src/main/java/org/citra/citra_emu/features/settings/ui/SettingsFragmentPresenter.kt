@@ -954,6 +954,8 @@ class SettingsFragmentPresenter(private val fragmentView: SettingsFragmentView) 
         // CodexAstraUlt: Extend AstraEH's exclusive presets with the generic-fragment Combo
         // comparison. All choices share one persisted mode; custom settings remain untouched.
         val mode = UberharTestMode.from(IntSetting.UBERHAR_TEST_MODE.int)
+        // CodexAstraLocal: Persist legacy mode migration before exposing the active switch.
+        if (IntSetting.UBERHAR_TEST_MODE.int == 2) IntSetting.UBERHAR_TEST_MODE.int = mode.id
         sl.add(HeaderSetting(R.string.uberhar_test_modes))
         val modes = listOf(
             // CodexAstraLocal: Explicit CPU raster mode shares existing controls/lifecycle.
@@ -966,11 +968,6 @@ class SettingsFragmentPresenter(private val fragmentView: SettingsFragmentView) 
                 UberharTestMode.NATIVE,
                 R.string.uberhar_test_native,
                 R.string.uberhar_test_native_description
-            ),
-            Triple(
-                UberharTestMode.COMPUTE,
-                R.string.uberhar_test_compute,
-                R.string.uberhar_test_compute_description
             ),
             Triple(
                 UberharTestMode.AUTOMATIC,
@@ -1033,7 +1030,6 @@ class SettingsFragmentPresenter(private val fragmentView: SettingsFragmentView) 
         // CodexAstraLocal: Keep independent comparisons available in every preset;
         // owners freeze controls at launch instead of changing queued work in flight.
         val optimizationControls = listOf(
-            Triple(BooleanSetting.UBERHAR_CPU_QUEUE_EXPANDED_SEEDS, R.string.uberhar_cpu_queue_expanded_seeds, R.string.uberhar_cpu_queue_expanded_seeds_description),
             Triple(BooleanSetting.UBERHAR_CPU_ADAPTIVE_PARTICIPATION, R.string.uberhar_cpu_adaptive_participation, R.string.uberhar_cpu_adaptive_participation_description),
             Triple(BooleanSetting.UBERHAR_CPU_EXECUTION_CENSUS, R.string.uberhar_cpu_execution_census, R.string.uberhar_cpu_execution_census_description),
             Triple(BooleanSetting.UBERHAR_FEATURE_DIAGNOSTICS, R.string.uberhar_feature_diagnostics, R.string.uberhar_feature_diagnostics_description),

@@ -8,7 +8,9 @@
 
 namespace SwRenderer {
 using RasterPoints = std::array<std::array<s32, 2>, 3>;
-struct RasterSpan { u32 first{}, end{}; };
+// CodexAstraLocal: Only a span whose complete original edge products were
+// bounded may replace repeated signed areas by exact integer increments.
+struct RasterSpan { u32 first{}, end{}; bool exact_edges{}; };
 
 // CodexAstraLocal: Intersect the three exact integer edge inequalities on one
 // pixel-center row. Covered pixels retain the original weights/FP operations.
@@ -50,8 +52,29 @@ inline RasterSpan CoveredRow(const RasterPoints& points, const std::array<s32, 3
         }
     }
     if (result.first >= result.end) return {};
+    result.exact_edges = true;
     return result;
 }
+
+// CodexAstraLocal: These are integer edge planes, not incremental floating
+// attributes. Use wide accumulators even for the unused step past the last
+// pixel; certified in-span values convert to the same original s32 weights.
+struct RasterEdgeSteps {
+    std::array<s64, 3> value{}, step{};
+    RasterEdgeSteps() = default;
+    RasterEdgeSteps(const RasterPoints& points, u32 x, u32 y) {
+        for (u32 edge = 0; edge < 3; ++edge) {
+            const auto& a = points[(edge + 1) % 3];
+            const auto& b = points[(edge + 2) % 3];
+            const s64 dx = s64(b[0]) - a[0], dy = s64(b[1]) - a[1];
+            value[edge] = dx * (s64(y) - a[1]) - dy * (s64(x) - a[0]);
+            step[edge] = -dy * 16;
+        }
+    }
+    void Advance() {
+        for (u32 edge = 0; edge < 3; ++edge) value[edge] += step[edge];
+    }
+};
 
 struct RasterRowWork { u32 grain{}; bool parallel{}; };
 // CodexAstraLocal: Bound dispatch by proven row-span candidates, not bounding

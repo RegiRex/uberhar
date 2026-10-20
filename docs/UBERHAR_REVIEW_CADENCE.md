@@ -1,5 +1,15 @@
 # Architecture review ledger
 
+<!-- CodexAstraLocal: Supersede the .50 source checkpoint with the regression-triggered scoped .51 review, preserving historical cadence and hardware limits. -->
+**Current checkpoint: .39–.50 assessment and .51 integration review.**
+The [0.1.51 review](UBERHAR_REVIEW_0.1.51.md) separates architecture from the
+removal/consumer/comment audit. It covers the shader preparation corrections,
+CPU admission cleanup, Calculated retirement, Software work and diagnostic loss.
+Integrated release gates and hardware qualification are distinct; no full audit
+of all inherited code or recovered performance is implied.
+
+## Earlier .50 checkpoint
+
 <!-- CodexAstraLocal: Add the broad assessment and current scoped integration review without erasing historical anchors or declaring untested gameplay accepted. -->
 **Current checkpoint: 0.1.39–0.1.49 hardware assessment complete; 0.1.50 integration review.**
 The [0.1.50 review](UBERHAR_REVIEW_0.1.50.md) records independent architecture and

@@ -269,13 +269,11 @@ public:
     GLSLGenerator(const std::set<Subroutine>& subroutines, const ProgramCode& program_code,
                   const SwizzleData& swizzle_data, u32 main_offset,
                   const RegGetter& inputreg_getter, const RegGetter& outputreg_getter,
-                  bool sanitize_mul, bool precise_jit_dot, bool compute_a64_math,
-                  bool compute_uniform_reads)
+                  bool sanitize_mul, bool precise_jit_dot)
         : subroutines(subroutines), program_code(program_code), swizzle_data(swizzle_data),
           main_offset(main_offset), inputreg_getter(inputreg_getter),
           outputreg_getter(outputreg_getter), sanitize_mul(sanitize_mul),
-          precise_jit_dot(precise_jit_dot), compute_a64_math(compute_a64_math),
-          compute_uniform_reads(compute_uniform_reads) {
+          precise_jit_dot(precise_jit_dot) {
 
         Generate();
     }
@@ -340,10 +338,8 @@ private:
                 return fmt::format("get_offset_register({}, address_registers.{})", index,
                                    "xyz"[address_register_index - 1]);
             }
-            // CodexAstraLocal: Only independent compute selects the captured
-            // SSBO accessor; ordinary graphics retains its exact UBO source.
-            return compute_uniform_reads ? fmt::format("compute_uniform({}u)", index)
-                                         : fmt::format("uniforms.f[{}]", index);
+            // CodexAstraLocal: Supported graphics reads the existing uniform buffer.
+            return fmt::format("uniforms.f[{}]", index);
         default:
             UNREACHABLE();
             return "";
@@ -516,10 +512,6 @@ private:
                             ? fmt::format("vec4({}.xyz, 1.0)", src1)
                             : src1;
                     dot = fmt::format("precise_jit_dot4({}, {})", first, src2);
-                } else if (opcode == OpCode::Id::DP3 && compute_a64_math) {
-                    // CodexAstraLocal: Zero W before the second pairwise add,
-                    // retaining the A64 tree rather than a driver dot lowering.
-                    dot = fmt::format("compute_dot3({}, {})", src1, src2);
                 } else if (opcode == OpCode::Id::DP3) {
                     if (sanitize_mul) {
                         dot = fmt::format("dot(vec3(sanitize_mul({}, {})), vec3(1.0))", src1, src2);
@@ -560,8 +552,7 @@ private:
                     shader.AddLine("if ({}.x > 0.0)", src1);
                 }
                 SetDest(swizzle, dest_reg,
-                        compute_a64_math ? fmt::format("compute_rsq({}.x)", src1)
-                                         : fmt::format("inversesqrt({}.x)", src1), 4, 1);
+                        fmt::format("inversesqrt({}.x)", src1), 4, 1);
                 break;
             }
 
@@ -873,40 +864,13 @@ private:
             shader.AddLine("}}\n");
         }
 
-        // CodexAstraLocal: These formulas were checked against the actual A64
-        // guest engine for retained cohorts. They do not claim general handling
-        // of every exceptional floating-point input or target driver lowering.
-        if (compute_a64_math) {
-            shader.AddLine("float compute_dot3(vec4 lhs, vec4 rhs) {{");
-            ++shader.scope;
-            shader.AddLine("precise vec4 product = {};",
-                           sanitize_mul ? "sanitize_mul(lhs, rhs)" : "lhs * rhs");
-            shader.AddLine("precise float xy = product.x + product.y;");
-            shader.AddLine("precise float z0 = product.z + 0.0;");
-            shader.AddLine("precise float result = xy + z0;");
-            shader.AddLine("return result;");
-            --shader.scope;
-            shader.AddLine("}}");
-            shader.AddLine("float compute_rsq(float value) {{");
-            ++shader.scope;
-            shader.AddLine("precise float root = sqrt(value);");
-            shader.AddLine("precise float result = 1.0 / root;");
-            shader.AddLine("return result;");
-            --shader.scope;
-            shader.AddLine("}}");
-        }
-
+        // CodexAstraLocal: Retired compute numerical helpers are not emitted into graphics shaders.
         shader.AddLine("vec4 get_offset_register(int base_index, int offset) {{");
         ++shader.scope;
         shader.AddLine("int fixed_offset = offset >= -128 && offset <= 127 ? offset : 0;");
         shader.AddLine("uint index = uint((base_index + fixed_offset) & 0x7F);");
-        // CodexAstraLocal: Keep the inherited indirect wrap/range rules while
-        // avoiding a dynamically indexed 96-vector private compute allocation.
-        if (compute_uniform_reads) {
-            shader.AddLine("return index < 96u ? compute_uniform(index) : vec4(1.0);");
-        } else {
-            shader.AddLine("return index < 96u ? uniforms.f[index] : vec4(1.0);");
-        }
+        // CodexAstraLocal: Preserve graphics indirect uniform addressing and fallback.
+        shader.AddLine("return index < 96u ? uniforms.f[index] : vec4(1.0);");
         --shader.scope;
         shader.AddLine("}}\n");
 
@@ -994,26 +958,18 @@ private:
     const bool sanitize_mul;
     // CodexAstraLocal: Frozen for one generation; only the optional Combo policy enables it.
     const bool precise_jit_dot;
-    // CodexAstraLocal: Compute-only numerical policy; no graphics caller opts in.
-    const bool compute_a64_math;
-    // CodexAstraLocal: The caller supplies compute_uniform over immutable input;
-    // this changes storage placement, not arithmetic or guest addressing.
-    const bool compute_uniform_reads;
-
     ShaderWriter shader;
 };
 
 std::string DecompileProgram(const ProgramCode& program_code, const SwizzleData& swizzle_data,
                              u32 main_offset, const RegGetter& inputreg_getter,
                              const RegGetter& outputreg_getter, bool sanitize_mul,
-                             bool precise_jit_dot, bool compute_a64_math,
-                             bool compute_uniform_reads) {
+                             bool precise_jit_dot) {
 
     try {
         auto subroutines = ControlFlowAnalyzer(program_code, main_offset).MoveSubroutines();
         GLSLGenerator generator(subroutines, program_code, swizzle_data, main_offset,
-                                inputreg_getter, outputreg_getter, sanitize_mul, precise_jit_dot,
-                                compute_a64_math, compute_uniform_reads);
+                                inputreg_getter, outputreg_getter, sanitize_mul, precise_jit_dot);
         return generator.MoveShaderCode();
     } catch (const DecompileFail& exception) {
         LOG_INFO(HW_GPU, "Shader decompilation failed: {}", exception.what());

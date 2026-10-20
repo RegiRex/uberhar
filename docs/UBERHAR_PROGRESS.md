@@ -1,3 +1,25 @@
+<!-- CodexAstraLocal: Preserve historical evidence while making the current retirement explicit. -->
+## 0.1.51 — regression correction and Calculated retirement
+
+The independent Calculated renderer, shaders, controls and scratch benchmark are removed.
+Stored mode 2 migrates to Native; Custom=0, Native=1, Combo=3, generic Combo=4 and
+CPU Software=5 remain stable. Combo rectangle compute and shared graphics utilities remain.
+The prior design/results below are historical, not current runtime capabilities.
+
+<!-- CodexAstraLocal: Tie current implementation to observed wasted work and preserve the distinction between a correction and measured speed recovery. -->
+Expanded standalone CPU batches are removed, preserving useful pending grouping.
+Fragment preparation separates structural state from numeric updates, and static
+shaders omit certificate branches that cannot qualify. Existing sampled GPU passes
+carry actual selected identities; optional diagnostic omissions identify their
+feature families. CPU Software reduces raster/TEV work and adds bounded input
+provenance while retaining the unresolved nonfinite-input guard.
+
+The owner authorized existing-build and candidate Thor tests. A cold .50 baseline
+and lean Combo pair is complete; scene/condition analysis and integrated .51
+qualification are underway. No recovered frame rate is claimed before comparison.
+See [release notes](releases/0.1.51.md) and the
+[scoped integration review](UBERHAR_REVIEW_0.1.51.md).
+
 # Uberhar progress — 0.1.50 implementation
 
 <!-- CodexAstraLocal: Reconcile the completed multi-build assessment with the authorized implementation; publication and hardware qualification are separate. -->

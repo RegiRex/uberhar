@@ -9,6 +9,7 @@
 #include <optional> // CodexAstraLocal: Reuse preparation only within the current draw.
 #include <sstream> // CodexAstraLocal: Reuse bounded native shader serialization only on first fault.
 #include <json.hpp> // CodexAstraLocal: Self-describing producer evidence, never per-draw transport.
+#include "video_core/renderer_software/sw_source_provenance.h" // CodexAstraLocal TEST-ONLY LOG: Bounded terminal source-value evidence.
 #include "common/arch.h"
 #include "common/archives.h"
 #include "common/file_util.h" // CodexAstraLocal: Exclusive first-candidate sidecar retention.
@@ -72,12 +73,12 @@ struct PicaCore::DeferredVertexState {
     // grouped scheduling and preparation savings are hardware-qualified.
     u64 preparation_attempts{}, preparation_reuses{}, refused_path_samples{}, refused_path_ns{};
     u64 ready_prefix_packets{}, fallback_boundaries{};
-    explicit DeferredVertexState(unsigned processors, bool expanded, bool adaptive, bool diagnostics)
+    explicit DeferredVertexState(unsigned processors, bool adaptive, bool diagnostics)
         // CodexAstraLocal: Preserve pending grouping and lazy startup under
-        // independent, immutable standalone seed and learning controls.
+        // a fixed standalone floor after removing the unprofitable seed expansion.
         : executor{processors, PacketLimit, 8 * 1024 * 1024,
                    +[] { Common::SetCurrentThreadName("PICA draw pool"); },
-                   {.sampled_costs = diagnostics, .expanded_seeds = expanded, .adaptive = adaptive}} {
+                   {.sampled_costs = diagnostics, .adaptive = adaptive}} {
         pending.reserve(PacketLimit);
     }
 };
@@ -250,7 +251,10 @@ u32 PicaCore::SoftwareProducerMask() const {
     // including its stage0 alpha behavior, then remove physically unused units.
     // Draw setup/armed GS invocation and publication pay this work; remove
     // after FEA producer reconstruction.
-    if (!software_producer_diagnostics || software_producer_attempted) return 0;
+    // CodexAstraLocal TEST-ONLY LOG: Keep a strictly capped source-read tail
+    // after the first capsule so a later fault can match all semantic values.
+    if (!software_producer_diagnostics ||
+        (software_producer_attempted && !software_terminal_remaining)) return 0;
     using Semantic = RasterizerRegs::VSOutputAttributes;
     using Texture = TexturingRegs::TextureConfig;
     const auto& state = regs.internal;
@@ -364,6 +368,10 @@ PicaCore::SoftwareProducerSnapshot PicaCore::MakeSoftwareProducerSnapshot(
         {"replay_limit", "same backend/FP controls; bounded offline shader values only; no live replay; pre-FP-status and full draw/texture/assembler state absent"},
         {"initial_state", snapshot.replay_qualified ? "zero unit plus captured actual input registers" : "unavailable: do not replace pre-carry with captured post-state"},
         {"payload_bytes", snapshot.payload.size()}};
+    // CodexAstraLocal TEST-ONLY LOG: Bind the retained first capsule to the
+    // bounded tail's event sequence; zero means no actual source history.
+    metadata["source_event"] = software_terminal_sources ? software_terminal_sources->Events() : 0;
+    metadata["source_draw"] = software_source_draw;
     if (geometry_entry) {
         // CodexAstraLocal TEST-ONLY LOG: Newly emitted values now have exact
         // invocation/entry ownership. Do not turn this into full GS/frame replay:
@@ -429,9 +437,38 @@ PicaCore::SoftwareProducerSnapshot PicaCore::MakeSoftwareProducerSnapshot(
 void PicaCore::ObserveSoftwareProducer(u32 mask, const OutputVertex& output, ShaderSetup& setup,
     const ShaderUnit& unit, u32 index, u32 vertex, const char* route,
     bool fresh_unit, bool post_shader, const NativeInputReadTrace* input_trace) noexcept {
-    if (!mask || software_producer_attempted) return;
+    if (!mask) return;
+    // CodexAstraLocal TEST-ONLY LOG: Expiry is checked inside the already
+    // selected draw loop as well as at draw admission. No post-budget trace,
+    // semantic scan or record survives a large current draw.
+    if (software_producer_attempted && !software_terminal_remaining) return;
+    if (software_producer_attempted) --software_terminal_remaining;
     const u32 invalid = SoftwareInvalidSemantics(mask, output);
     if (!invalid) return;
+    // CodexAstraLocal TEST-ONLY LOG: At most16 source records, one allocation,
+    // and4096 additional invocations. Diagnostic failure cannot alter execution.
+    if (software_input_provenance) {
+        try {
+            if (!software_producer_attempted) {
+                software_terminal_sources = std::make_unique<SwRenderer::SoftwareSourceHistory>();
+                software_terminal_remaining = SwRenderer::SoftwareSourceHistory::InvocationLimit;
+            }
+            if (software_terminal_sources) {
+                // CodexAstraLocal TEST-ONLY LOG: One in64 recorded sources
+                // prices record ownership separately from scalar input loading.
+                const bool measure = software_terminal_sources->Events() % 64 == 0;
+                const auto start = measure ? std::chrono::steady_clock::now()
+                                           : std::chrono::steady_clock::time_point{};
+                software_terminal_sources->Add(output, input_trace, software_source_draw, index, vertex);
+                if (measure) {
+                    ++software_terminal_samples;
+                    software_terminal_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(
+                        std::chrono::steady_clock::now() - start).count();
+                }
+            }
+        } catch (...) { ++software_trace_errors; }
+    }
+    if (software_producer_attempted) return;
     // CodexAstraLocal TEST-ONLY LOG: One bounded attempt, without stopping or
     // repairing the draw. Preserve FP state and all diagnostic failures. Remove
     // after this capsule yields a fixed/reproduced producer regression.
@@ -452,6 +489,49 @@ void PicaCore::ObserveSoftwareProducer(u32 mask, const OutputVertex& output, Sha
         try { LOG_WARNING(Render_Software, "Software producer candidate unavailable: route={} index={} vertex={}",
                           route, index, vertex); } catch (...) {}
     }
+}
+
+std::string PicaCore::DescribeSoftwareTerminalSources(
+    std::span<const OutputVertex* const, 3> source) const {
+    // CodexAstraLocal TEST-ONLY LOG: Called once only after the raster fault.
+    // A newest exact-value match is evidence, not unique primitive ownership;
+    // duplicate counts, ring eviction and expiry remain explicit. Remove after
+    // a retained demanded-fault reproduction establishes its original writer.
+    nlohmann::json report{
+        {"feature", "sw.terminal_source"}, {"schema", 1},
+        {"scope", "full_semantic_value_match_only_not_unique_assembler_identity_or_original_writer"},
+        {"capacity", SwRenderer::SoftwareSourceHistory::Capacity},
+        {"remaining_invocations", software_terminal_remaining},
+        {"events", software_terminal_sources ? software_terminal_sources->Events() : 0},
+        {"record_samples", software_terminal_samples}, {"record_sampled_ns", software_terminal_ns},
+        {"capture_errors", software_trace_errors},
+        {"sources", nlohmann::json::array()}};
+    for (u32 slot = 0; slot < source.size(); ++slot) {
+        const auto match = software_terminal_sources && source[slot]
+            ? software_terminal_sources->Find(*source[slot]) : SwRenderer::SoftwareSourceHistory::Match{};
+        nlohmann::json entry{{"source_slot", slot}, {"retained_exact_matches", match.count}};
+        if (match.latest) {
+            const auto& record = *match.latest;
+            entry["latest_event"] = record.event;
+            entry["draw"] = record.draw;
+            entry["submitted_index"] = record.index;
+            entry["vertex"] = record.vertex;
+            entry["actual_reads"] = record.actual_reads;
+            entry["attributes"] = nlohmann::json::array();
+            if (record.actual_reads) for (u32 i = 0; i < record.input.count; ++i) {
+                const auto& attribute = record.input.attributes[i];
+                std::string bytes;
+                for (u32 byte = 0; byte < std::min<u32>(attribute.size, attribute.bytes.size()); ++byte)
+                    bytes += fmt::format("{:02x}", attribute.bytes[byte]);
+                entry["attributes"].push_back({
+                    {"address", attribute.address}, {"attribute", attribute.attribute},
+                    {"input_register", attribute.input_register}, {"format", attribute.format},
+                    {"elements", attribute.elements}, {"default", attribute.is_default}, {"bytes_hex", bytes}});
+            }
+        }
+        report["sources"].push_back(std::move(entry));
+    }
+    return report.dump();
 }
 
 void PicaCore::WriteSoftwareProducerSnapshot(const SoftwareProducerSnapshot& snapshot,
@@ -621,7 +701,6 @@ PicaCore::PicaCore(Memory::MemorySystem& memory_, std::shared_ptr<DebugContext> 
       // CodexAstraLocal: Changing overlap never changes worker admission or vertex inputs.
       cpu_prefix_overlap{Settings::values.uberhar_cpu_prefix_overlap.GetValue()},
       // CodexAstraLocal: Once-read CPU policy; no hot-path configuration calls.
-      cpu_expanded_seeds{Settings::values.uberhar_cpu_queue_expanded_seeds.GetValue()},
       cpu_adaptive{Settings::values.uberhar_cpu_adaptive_participation.GetValue()},
       cpu_feature_diagnostics{Settings::values.uberhar_feature_diagnostics.GetValue()},
       // CodexAstraLocal TEST-ONLY LOG: Immutable mode admission keeps producer
@@ -639,11 +718,11 @@ PicaCore::PicaCore(Memory::MemorySystem& memory_, std::shared_ptr<DebugContext> 
     // CodexAstraLocal TEST-ONLY LOG: Stable IDs and actual frozen controls bind
     // sampled costs to this owner; remove after .50 qualification. Census is
     // process-frozen and reported separately by System initialization.
-    LOG_INFO(Render, "Uberhar CPU features: schema=2 ids=2,3,4,5,8,9,10,13 "
-        "expanded_seeds={} pending_groups=true adaptive={} diagnostics={} "
+    LOG_INFO(Render, "Uberhar CPU features: schema=3 ids=2,3,4,5,8,9,10,13 "
+        "standalone_miss_floor=96 pending_groups=true adaptive={} diagnostics={} "
         "cache_precheck=true accepted_token=true semantic_history=4 lazy_progress=true "
         "owner_statistics=true adaptive_revision=2",
-        cpu_expanded_seeds, cpu_adaptive, cpu_feature_diagnostics);
+        cpu_adaptive, cpu_feature_diagnostics);
     // CodexAstraLocal TEST-ONLY LOG: Once-per-PICA effective evidence policy.
     if(software_producer_diagnostics) LOG_INFO(Render_Software,
         "Software feature policy schema=1 feature=sw.input_provenance enabled={} "
@@ -801,28 +880,28 @@ void PicaCore::ReportVirtualVertices(const char* kind, std::chrono::steady_clock
         // CodexAstraLocal TEST-ONLY LOG: Price real accepted waves and policy
         // reuse separately from owner capture; remove after .50 qualification.
         LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
-            "Uberhar CPU draw features {}: schema=2 cached_checks={} cached_hits={} cached_negative={} "
-            "cached_misses={} effect_hits={} effect_builds={} effect_reuses={} work_seeded={} "
+            "Uberhar CPU draw features {}: schema=3 cached_checks={} cached_hits={} cached_negative={} "
+            "cached_misses={} effect_hits={} effect_builds={} effect_reuses={} "
             "start_requests={} start_refused={} start_failed={} async_starts={} "
             "cost_samples={} cost_packets={} wave_ms={:.3f} owner_ms={:.3f} join_ms={:.3f} "
             "wave_max_ms={:.3f} drain_calls={} drain_samples={} drain_ms={:.3f} "
-            "original_seeded={} expanded_suppressed={} token_missing={} token_mismatches={} "
+            "original_seeded={} token_missing={} token_mismatches={} "
             "lookup_samples={} lookup_ns={} eligibility_samples={} eligibility_ns={} "
-            "proof_samples={} proof_ns={} feature_diagnostics={} expanded_enabled={} "
+            "proof_samples={} proof_ns={} feature_diagnostics={} "
             "timing=sampled_cpu_wall_overlapping_wave_and_drain_not_frame_or_gpu",
             kind, statistics.cached_checks, statistics.cached_hits, statistics.cached_negative,
             statistics.cached_misses, statistics.effect_hits, statistics.effect_builds,
-            statistics.effect_reuses, statistics.work_seeded, statistics.start_requests,
+            statistics.effect_reuses, statistics.start_requests,
             statistics.start_refused, statistics.start_failed, statistics.async_starts,
             statistics.cost_samples, statistics.cost_packets, statistics.wave_ns / 1e6,
             statistics.owner_ns / 1e6, statistics.join_ns / 1e6, statistics.wave_max_ns / 1e6,
             statistics.drain_calls, statistics.drain_samples, statistics.drain_ns / 1e6,
-            statistics.original_seeded, statistics.expanded_refused,
+            statistics.original_seeded,
             statistics.token_missing, statistics.token_mismatches,
             statistics.lookup_samples, statistics.lookup_ns,
             statistics.eligibility_samples, statistics.eligibility_ns,
             statistics.proof_samples, statistics.proof_ns,
-            cpu_feature_diagnostics, cpu_expanded_seeds);
+            cpu_feature_diagnostics);
         report_history("draw_queue", statistics.scheduling);
     }
     // AstraPro: Existing five-second/final reporting gate. Periodic
@@ -1942,39 +2021,7 @@ void PicaCore::SubmitImmediate(u32 value) {
 void PicaCore::DrawImmediate() {
     // CodexAstraLocal: Immediate assembly consumes the same persistent state.
     ReconcileDeferredVertices();
-    // CodexAstraLocal: Each immediate input starts its own compute ShaderUnit
-    // lifetime, but shares the actual PICA primitive tail with array draws.
-    // Only original command attributes cross this entry; no CPU shader runs.
-    if (Settings::RequiresComputeOnly(Settings::values.uberhar_test_mode.GetValue())) {
-        const auto before = primitive_assembler.ExportComputeState();
-        // CodexAstraLocal TEST-ONLY LOG: Refusals before renderer entry retain
-        // command state without reading unsafe guest spans or running shaders.
-        // Remove after first-fault admission regressions have corrected replay.
-        const auto refuse = [&](const char* reason) -> void {
-            rasterizer->ReportComputeFailure(reason,false,before,nullptr,&immediate.input_vertex);
-            throw VideoCore::ShaderRecoveryError(reason);
-        };
-
-        if (debug_context || regs.internal.pipeline.use_gs != PipelineRegs::UseGS::No ||
-            primitive_assembler.GetTopology() != regs.internal.pipeline.triangle_topology)
-            refuse(
-                "Calculated immediate input requires a matching topology without guest geometry");
-        if (Core::System::GetInstance().HasConcurrentGuestMemoryWriters())
-            refuse(
-                "Calculated immediate snapshot requires no concurrent guest memory writer");
-        if (immediate.reset_geometry_pipeline) geometry_pipeline.Reconfigure();
-        ComputeAssemblyResult completed;
-        if (!rasterizer->DrawComputeBatch(false,before,completed,&immediate.input_vertex))
-            refuse("Calculated immediate backend/state unavailable");
-        if (!primitive_assembler.CommitComputeState(completed)) {
-            rasterizer->ReportComputeFailure("Calculated immediate state commit invalid",false,
-                before,&completed,&immediate.input_vertex);
-            throw VideoCore::ShaderRecoveryError("Calculated immediate state commit invalid");
-        }
-        immediate.reset_geometry_pipeline = false;
-        immediate.current_attribute = 0;
-        return;
-    }
+    // CodexAstraLocal: Immediate vertices use the supported CPU assembly owner.
     // Compile the vertex shader.
     shader_engine->SetupBatch(vs_setup, regs.internal.vs.main_offset);
 
@@ -2078,41 +2125,7 @@ void PicaCore::DrawArrays(bool is_indexed) {
     delay_generator.AddVertices(regs.internal.pipeline.num_vertices,
                                 regs.internal.pipeline.triangle_topology);
 
-    // CodexAstraLocal: Independent compute owns the whole original-input draw.
-    // Persistent List/Strip/Fan/Shader state is snapshotted and committed only
-    // after whole-batch success. No refusal reaches LoadVertices or Native.
-    if (Settings::RequiresComputeOnly(Settings::values.uberhar_test_mode.GetValue())) {
-        const auto before = primitive_assembler.ExportComputeState();
-        // CodexAstraLocal TEST-ONLY LOG: Refusals before renderer entry retain
-        // command state without reading unsafe guest spans or running shaders.
-        // Remove after first-fault admission regressions have corrected replay.
-        const auto refuse = [&](const char* reason) -> void {
-            rasterizer->ReportComputeFailure(reason,is_indexed,before,nullptr,nullptr);
-            throw VideoCore::ShaderRecoveryError(reason);
-        };
-
-        ReconcileDeferredVertices();
-        const auto topology = primitive_assembler.GetTopology();
-        if (debug_context || regs.internal.pipeline.use_gs != PipelineRegs::UseGS::No ||
-            topology != regs.internal.pipeline.triangle_topology)
-            refuse(
-                "Calculated requires a matching persistent topology without guest geometry");
-        if (Core::System::GetInstance().HasConcurrentGuestMemoryWriters())
-            refuse(
-                "Calculated original input snapshot requires no concurrent guest memory writer");
-        if (!regs.internal.pipeline.num_vertices) return;
-        geometry_pipeline.Reconfigure();
-        ComputeAssemblyResult completed;
-        if (!rasterizer->DrawComputeBatch(is_indexed,before,completed))
-            refuse("Calculated original-input backend unavailable");
-        if (!primitive_assembler.CommitComputeState(completed)) {
-            rasterizer->ReportComputeFailure("Calculated persistent state commit invalid",is_indexed,
-                before,&completed,nullptr);
-            throw VideoCore::ShaderRecoveryError("Calculated persistent state commit invalid");
-        }
-        return;
-    }
-
+    // CodexAstraLocal: Supported paths retain original CPU/ready-GPU draw ownership.
     // AstraPro: Combo can promote complete no-GS lists to already-ready GPU
     // vertices. A false return still executes the full CPU batch below. Never
     // pass debugger work, partial assembly, strip/fan tails or excessive uploads.
@@ -2322,7 +2335,7 @@ bool PicaCore::TryDeferredVertices(bool is_indexed,
         if (!deferred_vertices) {
             try {
                 deferred_vertices = std::make_unique<DeferredVertexState>(deferred_processors,
-                    cpu_expanded_seeds, cpu_adaptive, cpu_feature_diagnostics);
+                    cpu_adaptive, cpu_feature_diagnostics);
             } catch (const std::system_error&) {
                 // CodexAstraLocal: No task exists during thread startup failure;
                 // disable the optional route and retain ordinary synchronous work.
@@ -2519,6 +2532,10 @@ void PicaCore::LoadVertices(bool is_indexed, std::chrono::steady_clock::time_poi
     // CodexAstraLocal TEST-ONLY LOG: Choose Software observation once per draw;
     // other modes retain their uninstrumented per-invocation loops.
     const u32 software_semantic_mask = SoftwareProducerMask();
+    // CodexAstraLocal TEST-ONLY LOG: This observed draw sequence is distinct
+    // from submitted raster primitives; cross-draw assembler tails keep their
+    // recorded source draw rather than assuming the terminal draw owns them.
+    if (software_semantic_mask) ++software_source_draw;
 
     // AstraEH: Experimental no-GS draws can reuse final rasterizer vertices. Keep
     // Custom, debugger and geometry-shader execution on their established path.
@@ -2658,7 +2675,7 @@ void PicaCore::LoadVertices(bool is_indexed, std::chrono::steady_clock::time_poi
                 if constexpr(ObserveProducer) { if(input_trace) input_trace->count=0; }
                 if (input_plan.CanLoad(vertex)) {
                     if constexpr(ObserveProducer) {
-                        if(input_trace && !software_producer_attempted) {
+                        if(input_trace && (!software_producer_attempted || software_terminal_remaining)) {
                             const bool measured=software_trace_loads%64==0;
                             const auto trace_start=measured ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
                             input_plan.LoadObserved(shader_unit,input_default_attributes,vertex,base_address,
@@ -2752,7 +2769,7 @@ void PicaCore::LoadVertices(bool is_indexed, std::chrono::steady_clock::time_poi
                 return shade_with_run.template operator()<Sample>(vertex, index, run_diagnostic);
             };
             // CodexAstraLocal: Parallelize only established Native/Combo no-GS
-            // prepared-input draws. Calculated, debugger, geometry and timing
+            // prepared-input draws. Debugger, geometry and timing
             // observers keep their existing paths. Every refusal still runs the
             // complete serial shader; no guest draw or input is dropped.
             // CodexAstraLocal: Retain one reason until the existing serial runner

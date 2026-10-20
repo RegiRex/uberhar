@@ -26,11 +26,11 @@ enum class GraphicsAPI {
 };
 
 // AstraEH: Values match Android's mutually exclusive test switches; zero preserves custom settings.
-// CodexAstraUlt: Append the fragment-isolation preset; persisted IDs 0–3 retain their meanings.
+// CodexAstraUlt: The fragment-isolation preset was appended without shifting earlier IDs.
 enum class UberharTestMode : u32 {
     Custom = 0,
     Native = 1,
-    Compute = 2,
+    // CodexAstraLocal: Retired mode 2 stays unused; migrate its saved value to Native.
     Automatic = 3,
     ComboGeneric = 4,
     // CodexAstraLocal: Append CPU graphics without changing persisted older modes.
@@ -565,9 +565,9 @@ struct Values {
     SwitchableSetting<bool> uberhar_cpu_prefix_overlap{true, Keys::uberhar_cpu_prefix_overlap};
     SwitchableSetting<bool> uberhar_parallel_texture_decode{true, Keys::uberhar_parallel_texture_decode};
 
-    // CodexAstraLocal: Independent restart-only .50 controls are snapshotted by each owner;
+    // CodexAstraLocal: The inefficient standalone seed control is removed in .51.
+    // Remaining restart-only controls are snapshotted by each owner;
     // profiling stays optional so comparison runs do not pay GPU timestamp overhead.
-    SwitchableSetting<bool> uberhar_cpu_queue_expanded_seeds{false, Keys::uberhar_cpu_queue_expanded_seeds};
     SwitchableSetting<bool> uberhar_cpu_adaptive_participation{true, Keys::uberhar_cpu_adaptive_participation};
     SwitchableSetting<bool> uberhar_cpu_execution_census{false, Keys::uberhar_cpu_execution_census};
     SwitchableSetting<bool> uberhar_feature_diagnostics{true, Keys::uberhar_feature_diagnostics};

@@ -16,8 +16,6 @@
 #include "common/setting_keys.h"
 #include "common/settings.h"
 #include "common/uberhar_software_controls.h" // CodexAstraLocal: Persist restart-only Software comparisons.
-// CodexAstraLocal: Persist independent Calculated diagnostic switches.
-#include "common/calculated_renderer_settings.h"
 #include "common/uberhar_test_profile.h" // AstraEH: Temporary renderer experiment overrides.
 #include "core/core.h"
 #include "core/hle/service/cfg/cfg.h"
@@ -162,14 +160,11 @@ void Config::ReadValues() {
     ReadSetting("Renderer", Settings::values.uberhar_cpu_vertex_only);
     // CodexAstraLocal: Load comparison controls before constructing renderer owners.
     ReadSetting("Renderer", Settings::values.uberhar_native_full_fragments);
-    // CodexAstraLocal: Snapshotted by the next Calculated renderer; no hot toggles.
-    ReadSetting("Renderer", Settings::calculated_renderer_features);
-    ReadSetting("Renderer", Settings::calculated_renderer_diagnostics);
+    // CodexAstraLocal: Retired renderer controls are no longer loaded.
     ReadSetting("Renderer", Settings::values.uberhar_cpu_prefix_overlap);
     ReadSetting("Renderer", Settings::values.uberhar_parallel_texture_decode);
     // CodexAstraLocal: Independent restart-only .50 controls are snapshotted by each owner;
     // profiling stays optional so comparison runs do not pay GPU timestamp overhead.
-    ReadSetting("Renderer", Settings::values.uberhar_cpu_queue_expanded_seeds);
     ReadSetting("Renderer", Settings::values.uberhar_cpu_adaptive_participation);
     ReadSetting("Renderer", Settings::values.uberhar_cpu_execution_census);
     ReadSetting("Renderer", Settings::values.uberhar_feature_diagnostics);

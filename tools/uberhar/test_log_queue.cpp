@@ -9,6 +9,7 @@
 #include <chrono>
 #include <future>
 #include <memory>
+#include <string> // CodexAstraLocal: Exercise borrowed production message ownership.
 using namespace std::chrono_literals;
 
 // CodexAstraUlt-2: Pause a producer inside construction, while it owns the queue's
@@ -150,20 +151,131 @@ static void TestDiagnosticDelivery() {
   assert(queue.TryEmplace(9));
   assert(queue.TryPop(value) && value == 9);
 
+  // CodexAstraLocal: Preserve cadence/forced export with the new exact-bin snapshots.
   // CodexAstraUlt: Exercise cadence, forced export and writes racing new drops.
   // A failed/unavailable sink does not acknowledge its snapshot and can retry.
   const auto now = Common::Log::DiagnosticDropCounter::Clock::now();
   const auto snapshot = omissions.Due(now, false);
-  assert(snapshot == 2);
+  assert(snapshot.Total() == 2 && snapshot[Common::Log::DiagnosticFamily::Other] == 2);
   omissions.RecordDrop();
   omissions.Acknowledge(snapshot);
   assert(omissions.Pending() == 1);
-  assert(omissions.Due(now + 1s, false) == 0);
-  assert(omissions.Due(now + 1s, true) == 1);
+  assert(omissions.Due(now + 1s, false).Total() == 0);
+  assert(omissions.Due(now + 1s, true).Total() == 1);
   assert(omissions.Pending() == 1);
-  assert(omissions.Due(now + 6s, false) == 1);
-  omissions.Acknowledge(1);
-  assert(omissions.Pending() == 0 && omissions.Due(now + 7s, true) == 0);
+  const auto retry = omissions.Due(now + 6s, false);
+  assert(retry.Total() == 1);
+  omissions.Acknowledge(retry);
+  assert(omissions.Pending() == 0 && omissions.Due(now + 7s, true).Total() == 0);
+}
+
+// CodexAstraLocal: Cover actual differently prefixed producers and specificity,
+// plus unknown rows. A family counts whole omitted records, not contained events.
+static void TestDiagnosticFamilies() {
+  using namespace Common::Log;
+  struct Expected { std::string_view message; DiagnosticFamily family; };
+  const std::array cases{
+      Expected{"Uberhar CPU draw features progress: schema=3", DiagnosticFamily::CpuDraw},
+      Expected{"Uberhar deferred CPU draws progress:", DiagnosticFamily::CpuDraw},
+      Expected{"Uberhar CPU parallel progress:", DiagnosticFamily::Prefix},
+      Expected{"Uberhar texture decode: final=false", DiagnosticFamily::Decode},
+      Expected{"Uberhar CPU raw copy: final=false", DiagnosticFamily::Decode},
+      Expected{"Uberhar CPU transfer: feature=15", DiagnosticFamily::Decode},
+      Expected{"Uberhar CPU adaptive history progress:", DiagnosticFamily::Adaptive},
+      Expected{"Uberhar texture adaptation: feature=8", DiagnosticFamily::Adaptive},
+      Expected{"Uberhar vertex scheduling progress:", DiagnosticFamily::Adaptive},
+      Expected{"Uberhar fragment selected progress:", DiagnosticFamily::Fragment},
+      Expected{"Uberhar shader preparation progress:", DiagnosticFamily::Fragment},
+      Expected{"Uberhar push constants progress:", DiagnosticFamily::Fragment},
+      Expected{"Uberhar CPU PSO census: schema=1", DiagnosticFamily::Fragment},
+      Expected{"Uberhar adaptive CPU PSOs progress:", DiagnosticFamily::Fragment},
+      Expected{"Uberhar GPU shader admission progress:", DiagnosticFamily::Fragment},
+      Expected{"Uberhar GPU graphics detail: feature=gpu_identity.v1", DiagnosticFamily::GpuIdentity},
+      Expected{"Uberhar GPU cost coverage: feature=gpu_work.v2", DiagnosticFamily::GpuCost},
+      Expected{"Uberhar host cost queue: feature=host_wait.v2", DiagnosticFamily::GpuCost},
+      Expected{"Software feature cost schema=1", DiagnosticFamily::Software},
+      Expected{"Software clipping cost schema=1", DiagnosticFamily::Software},
+      Expected{"Software row detail schema=1", DiagnosticFamily::Software},
+      Expected{"Software constant scope schema=1", DiagnosticFamily::Software},
+      Expected{"Uberhar software scheduling totals:", DiagnosticFamily::Software},
+      Expected{"Uberhar Vulkan memory progress:", DiagnosticFamily::Other},
+      Expected{"prefix Uberhar fragment selected progress:", DiagnosticFamily::Other},
+      Expected{"Uberhar GPU graphics detailer:", DiagnosticFamily::Other},
+      Expected{"", DiagnosticFamily::Other},
+  };
+  for (const auto& item : cases) {
+    assert(ClassifyDiagnosticFamily(item.message) == item.family);
+  }
+
+  Common::MPSCQueue<std::string, 1> queue;
+  DiagnosticDropCounter omissions;
+  auto unexpected_write = [](const auto&) { assert(false); };
+  std::string accepted = "Uberhar GPU graphics detail: accepted";
+  SubmitEntry(queue, std::move(accepted), Delivery::Diagnostic, true, omissions,
+              unexpected_write, accepted);
+  assert(omissions.Pending() == 0);
+  std::string dropped = "Uberhar GPU graphics detail: dropped";
+  SubmitEntry(queue, std::move(dropped), Delivery::Diagnostic, true, omissions,
+              unexpected_write, dropped);
+  assert(dropped == "Uberhar GPU graphics detail: dropped");
+  const auto now = DiagnosticDropCounter::Clock::now();
+  const auto snapshot = omissions.Due(now, false);
+  assert(snapshot.Total() == 1 && snapshot[DiagnosticFamily::GpuIdentity] == 1);
+  // CodexAstraLocal: Same-family and different-family arrivals during sink output
+  // survive exact-bin acknowledgement; a failed sink simply retries its snapshot.
+  omissions.RecordDrop(DiagnosticFamily::GpuIdentity);
+  omissions.RecordDrop(DiagnosticFamily::Software);
+  omissions.Acknowledge(snapshot);
+  const auto retry = omissions.Due(now + 1s, true);
+  assert(retry.Total() == 2 && retry[DiagnosticFamily::GpuIdentity] == 1 &&
+         retry[DiagnosticFamily::Software] == 1);
+  assert(omissions.Due(now + 1s, true).families == retry.families);
+  omissions.Acknowledge(retry);
+  assert(omissions.Pending() == 0);
+}
+
+// CodexAstraLocal: Race multiple real failed enqueue producers with snapshot/ACK
+// cycles. Every omission must appear once in its family, with no underflow/loss.
+static void TestConcurrentDiagnosticFamilies() {
+  using namespace Common::Log;
+  Common::MPSCQueue<int, 1> queue;
+  queue.EmplaceWait(0);
+  DiagnosticDropCounter omissions;
+  constexpr std::size_t attempts = 4000;
+  const std::array<std::string_view, 3> messages{
+      "Uberhar texture decode: test", "Uberhar fragment selected progress: test",
+      "Uberhar GPU graphics detail: test"};
+  std::array<std::future<void>, messages.size()> producers;
+  std::atomic<std::size_t> remaining{messages.size()};
+  for (std::size_t i = 0; i < producers.size(); ++i) {
+    producers[i] = std::async(std::launch::async, [&, i] {
+      for (std::size_t j = 0; j < attempts; ++j) {
+        SubmitEntry(queue, 1, Delivery::Diagnostic, false, omissions,
+                    [](int) { assert(false); }, messages[i]);
+      }
+      remaining.fetch_sub(1, std::memory_order_release);
+    });
+  }
+  DiagnosticDropCounter::Snapshot total;
+  const auto report = [&] {
+    const auto snapshot = omissions.Due(DiagnosticDropCounter::Clock::now(), true);
+    for (std::size_t i = 0; i < total.families.size(); ++i)
+      total.families[i] += snapshot.families[i];
+    omissions.Acknowledge(snapshot);
+  };
+  while (remaining.load(std::memory_order_acquire)) {
+    report();
+    std::this_thread::yield();
+  }
+  for (auto& producer : producers) producer.get();
+  report();
+  assert(total.Total() == attempts * messages.size());
+  assert(total[DiagnosticFamily::Decode] == attempts);
+  assert(total[DiagnosticFamily::Fragment] == attempts);
+  assert(total[DiagnosticFamily::GpuIdentity] == attempts);
+  assert(omissions.Pending() == 0);
+  int value = -1;
+  assert(queue.TryPop(value) && value == 0 && !queue.TryPop(value));
 }
 
 int main() {
@@ -171,6 +283,8 @@ int main() {
   TestSaturatedQueue();
   TestTryOwnershipAndOrder();
   TestDiagnosticDelivery(); // CodexAstraUlt: Opt-in loss never changes reliable delivery.
+  TestDiagnosticFamilies(); // CodexAstraLocal: Actual row prefixes and retained ownership.
+  TestConcurrentDiagnosticFamilies(); // CodexAstraLocal: Exact per-family concurrent ACK.
   Common::MPSCQueue<int> queue;
   std::stop_source stop;
   int value = 42;
@@ -197,6 +311,6 @@ int main() {
          value == 19); // Shutdown drain retains pending messages.
   // CodexAstraUlt: Extend the unchanged -2 queue guarantees with optional-delivery checks.
   puts("PASS: production logger queue handles bounded barrier insertion, "
-       "optional diagnostics, omission accounting, synchronous policy, saturation, "
+       "optional diagnostics, per-family concurrent omission accounting, synchronous policy, saturation, "
        "ownership, FIFO, idle, wakeup, cancellation and drain");
 }

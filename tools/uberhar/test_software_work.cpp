@@ -10,11 +10,12 @@
 #include <vector>
 #include "video_core/renderer_software/sw_raster_work.h"
 #include "video_core/renderer_software/sw_tev_preparation.h"
+#include "video_core/renderer_software/sw_source_provenance.h" // CodexAstraLocal: Exact bounded source evidence.
 using namespace SwRenderer;
 static u64 checks{};
 static void Need(bool value, const char* why) { ++checks; if (!value) throw std::runtime_error(why); }
 static std::vector<u32> Signature(const PreparedTevConfig& p) {
-    std::vector<u32> r{p.demand.textures,p.demand.primary_color,p.demand.lighting};
+    std::vector<u32> r{p.demand.textures,p.demand.primary_color,p.demand.lighting,p.constant_result};
     for (u32 i=0;i<4;++i) r.push_back(p.initial_buffer[i]);
     for (const auto& s:p.stages) {
         for (auto v:s.color_sources) r.push_back(static_cast<u32>(v));
@@ -120,6 +121,22 @@ int main() try {
         }
         Need(overflow_rows-previous_overflow==!safe,"overflow refusal count differs");
         if(!safe)Need(span.first==0&&span.end==n,"overflow changed legacy traversal");
+        // CodexAstraLocal: Exact edge stepping must match independent wide
+        // products at every admitted pixel, including top-left boundary bias.
+        Need(!span.exact_edges || safe, "unsafe row certified for stepping");
+        if (span.exact_edges) {
+            RasterEdgeSteps steps{p, x + span.first * 16, y};
+            for (u32 pixel = span.first; pixel < span.end; ++pixel, steps.Advance()) {
+                for (u32 edge = 0; edge < 3; ++edge) {
+                    const auto a=p[(edge+1)%3],b=p[(edge+2)%3];
+                    const s64 expected_weight = (s64(b[0])-a[0])*(s64(y)-a[1]) -
+                        (s64(b[1])-a[1])*(s64(x)+pixel*16-a[0]);
+                    Need(steps.value[edge] == expected_weight, "incremented edge differs");
+                    Need(steps.value[edge] >= INT32_MIN && steps.value[edge] <= INT32_MAX,
+                         "certified edge leaves original range");
+                }
+            }
+        }
         empty_saved+=n-(span.end-span.first);
     }
     Need(empty_saved>0,"empty coverage not pruned");
@@ -130,5 +147,40 @@ int main() try {
         Need(!work.parallel||(candidates>=1024&&rows/work.grain>=2),"underqualified dispatch");
     }
     Need(PlanRasterRows(64,4096).parallel,"qualified row work never dispatches");
+    // CodexAstraLocal: NaN payloads and full position identity must survive
+    // trace ownership, duplicate ambiguity and bounded-history eviction.
+    SoftwareSourceHistory history;
+    Pica::OutputVertex source{};
+    source.pos.w = Pica::f24::One();
+    source.tc0.y = std::bit_cast<Pica::f24>(0xfffffffeU);
+    Pica::NativeInputReadTrace read{};
+    read.count = 1; read.guest_bytes = 8;
+    read.attributes[0].address = 0x20f0f85c;
+    read.attributes[0].size = 8; read.attributes[0].elements = 2;
+    read.attributes[0].format = 3;
+    const std::array<u8,8> raw{0x30,0,0,0,0xfe,0xff,0xff,0xff};
+    std::copy(raw.begin(), raw.end(), read.attributes[0].bytes.begin());
+    history.Add(source, &read, 7, 1, 9);
+    read.attributes[0].bytes.fill(0);
+    auto match = history.Find(source);
+    Need(match.count == 1 && match.latest->event == 1 && match.latest->actual_reads,
+         "source values did not match their actual read");
+    Need(std::equal(raw.begin(), raw.end(), match.latest->input.attributes[0].bytes.begin()),
+         "source read retained mutable caller storage");
+    auto different = source;
+    different.pos.x = Pica::f24::One();
+    Need(history.Find(different).count == 0, "matching UVs substituted different position");
+    different = source;
+    different.tc0.y = std::bit_cast<Pica::f24>(0x7fc00000U);
+    Need(history.Find(different).count == 0, "NaN payload difference ignored");
+    history.Add(source, nullptr, 8, 2, 10);
+    match = history.Find(source);
+    Need(match.count == 2 && match.latest->event == 2 && !match.latest->actual_reads,
+         "duplicate output claimed unique actual-read identity");
+    for (u32 i = 0; i < SoftwareSourceHistory::Capacity; ++i) {
+        different.pos.x = Pica::f24::FromFloat32(float(i + 1));
+        history.Add(different, nullptr, 9, i, i);
+    }
+    Need(history.Find(source).count == 0 && history.Events() == 18, "history eviction failed");
     std::cout<<"software work PASS checks="<<checks<<" skipped_candidates="<<empty_saved<<'\n';
 } catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}

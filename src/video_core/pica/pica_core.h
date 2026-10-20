@@ -37,6 +37,12 @@ namespace VideoCore {
 class RasterizerInterface;
 }
 
+// CodexAstraLocal TEST-ONLY LOG: Allocate the bounded history only after a
+// demanded nonfinite source; remove after terminal provenance qualification.
+namespace SwRenderer {
+class SoftwareSourceHistory;
+}
+
 namespace Pica {
 struct NativeInputReadTrace; // CodexAstraLocal: Optional actual-read Software provenance.
 
@@ -135,6 +141,10 @@ public:
     void ProcessCmdList(PAddr list, u32 size, bool ignore_list);
 
     Vulkan::ReadyVertexPolicy::Admission GetReadyGpuVertexAdmission() const;
+    // CodexAstraLocal TEST-ONLY LOG: Owner-only after workers join; describes
+    // exact source-value matches, never replay or a unique original writer.
+    std::string DescribeSoftwareTerminalSources(
+        std::span<const OutputVertex* const, 3> source) const;
 
 private:
     void InitializeRegs();
@@ -498,13 +508,19 @@ private:
     const bool cpu_prefix_overlap;
     // CodexAstraLocal: Independent .50 controls are frozen for this title and
     // propagate to lazy owners; changing Settings cannot mutate active work.
-    const bool cpu_expanded_seeds, cpu_adaptive, cpu_feature_diagnostics;
+    const bool cpu_adaptive, cpu_feature_diagnostics;
     // CodexAstraLocal TEST-ONLY LOG: One candidate/attempt per constructed PICA
     // owner, including write failure. Remove with the producer diagnostic above.
     const bool software_producer_diagnostics;
     bool software_producer_attempted{};
+    // CodexAstraLocal TEST-ONLY LOG: Bound post-candidate input observation by
+    // actual shader invocations; remove after the terminal fault is reproduced.
+    std::unique_ptr<SwRenderer::SoftwareSourceHistory> software_terminal_sources;
+    u32 software_terminal_remaining{};
+    u64 software_source_draw{};
+    u64 software_terminal_samples{}, software_terminal_ns{};
     // CodexAstraLocal TEST-ONLY LOG: Immutable independent evidence control;
-    // clocks/counts stay on the owner and stop after the first candidate attempt.
+    // clocks/counts stay on the owner and cover only the bounded candidate tail.
     const bool software_input_provenance;
     u64 software_trace_draws{},software_trace_loads{},software_trace_bytes{},software_trace_samples{};
     u64 software_trace_ns{},software_trace_refused{},software_trace_errors{};

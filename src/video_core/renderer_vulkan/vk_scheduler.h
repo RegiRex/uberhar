@@ -13,7 +13,6 @@
 #include "video_core/renderer_vulkan/vk_master_semaphore.h"
 #include "video_core/renderer_vulkan/vk_resource_pool.h"
 #include "video_core/shader_build_failure.h" // CodexAstraUlt-2: Terminal worker handoff.
-#include "video_core/renderer_vulkan/compute_failure_packet.h"
 #include "video_core/renderer_vulkan/vk_work_profile.h" // CodexAstraLocal: Bounded worker-owned costs.
 
 namespace Vulkan {
@@ -70,14 +69,18 @@ public:
 
     // CodexAstraLocal TEST-ONLY LOG: These hooks execute only on the command
     // worker. Existing commands retain ordering; no additional pass is created.
-    // CodexAstraLocal TEST-ONLY LOG: Existing compute worker commands may mark
-    // dispatch boundaries without a new scheduler node/pass/submit/wait. Remove
-    // with Calculated feature qualification; tokens remain worker-owned.
     int BeginGpuWork(vk::CommandBuffer command, GpuWork kind, u64 bytes=0) {
         return work_profile.Begin(command,kind,bytes);
     }
     void EndGpuWork(vk::CommandBuffer command,int slot) { work_profile.End(command,slot); }
     void RecordGpuRoute(u32 route) { work_profile.Route(route); }
+    // CodexAstraLocal TEST-ONLY LOG: Existing sampled graphics passes alone
+    // request semantic metadata from the actual selecting worker. Remove after
+    // attribution qualification; no recording/synchronization policy changes.
+    bool GpuIdentityRequested() const noexcept { return work_profile.NeedsIdentity(); }
+    void RecordGpuIdentity(const GpuDrawIdentity& identity, u64 scissor_area) {
+        work_profile.Identity(identity, scissor_area);
+    }
     void BeginGpuPass(vk::CommandBuffer command, GpuWork kind) { work_profile.BeginPass(command, kind); }
     void EndGpuPass(vk::CommandBuffer command) { work_profile.EndPass(command); }
     // CodexAstraLocal: Caller has already completed the existing device idle;
@@ -92,29 +95,9 @@ public:
         });
     }
 
-    // CodexAstraLocal TEST-ONLY LOG: Only Calculated installs this recorder.
-    // Scope lifetime covers preparation-triggered submissions; closed pending
-    // work keeps its exact tick association until submit/completion. Remove the
-    // diagnostic observer after actual failure regressions are resolved.
-    struct ComputeRecordingScope {
-        std::shared_ptr<ComputeFailureTracker> tracker;
-        std::shared_ptr<ComputeFailurePacket> packet;
-        ~ComputeRecordingScope() { if(tracker)tracker->End(packet); }
-    };
-    ComputeRecordingScope RecordComputeFailure(std::shared_ptr<ComputeFailurePacket> packet) noexcept;
-
-    /// Records the command to the current chunk.
+    // CodexAstraLocal: Record supported commands directly; terminal failure and snapshot epochs remain shared.
     template <typename T>
     void Record(T&& command) {
-        const auto failure=compute_failures ? compute_failures->Recording(CurrentTick()) : nullptr;
-        RecordBound(std::forward<T>(command),failure);
-    }
-
-private:
-    // Submission callbacks belong to the tick they submit, not the next
-    // CurrentTick. Bypass scope lookup so an empty future tick stays unarmed.
-    template <typename T>
-    void RecordBound(T&& command,const std::shared_ptr<ComputeFailurePacket>& failure) {
         if (shader_failure.Failed()) {
             shader_failure.Check();
             return;
@@ -122,12 +105,10 @@ private:
         // CodexAstraLocal: Titles without feedback snapshots need no per-command
         // epoch writes; saturation still refuses every later reuse.
         if (snapshot_epoch_tracking && recorded_command_epoch != ~u64{}) ++recorded_command_epoch;
-        if(failure)chunk->failure=failure;
         if (chunk->Record(command)) {
             return;
         }
         DispatchWork();
-        if(failure)chunk->failure=failure;
         (void)chunk->Record(command);
     }
 
@@ -218,7 +199,6 @@ private:
 
     class CommandChunk final {
     public:
-        std::shared_ptr<ComputeFailurePacket> failure;
         ~CommandChunk() { Discard(); }
         void ExecuteAll(vk::CommandBuffer cmdbuf);
         // CodexAstraUlt-2: Destroy captured owners without executing canceled work.
@@ -302,7 +282,6 @@ private:
     WorkProfile work_profile;
     std::jthread worker_thread;
     bool use_worker_thread;
-    std::shared_ptr<ComputeFailureTracker> compute_failures;
 };
 
 } // namespace Vulkan

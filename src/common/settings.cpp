@@ -110,7 +110,6 @@ void LogSettings() {
     log_setting("UBERHAR_CPU_PREFIX_OVERLAP", values.uberhar_cpu_prefix_overlap.GetValue());
     log_setting("UBERHAR_PARALLEL_TEXTURE_DECODE", values.uberhar_parallel_texture_decode.GetValue());
     // CodexAstraLocal TEST-ONLY LOG: Effective controls; remove after feature qualification.
-    log_setting("UBERHAR_CPU_QUEUE_EXPANDED_SEEDS", values.uberhar_cpu_queue_expanded_seeds.GetValue());
     log_setting("UBERHAR_CPU_ADAPTIVE_PARTICIPATION", values.uberhar_cpu_adaptive_participation.GetValue());
     log_setting("UBERHAR_CPU_EXECUTION_CENSUS", values.uberhar_cpu_execution_census.GetValue());
     log_setting("UBERHAR_FEATURE_DIAGNOSTICS", values.uberhar_feature_diagnostics.GetValue());
@@ -259,7 +258,6 @@ void RestoreGlobalState(bool is_powered_on) {
     values.uberhar_cpu_prefix_overlap.SetGlobal(true);
     values.uberhar_parallel_texture_decode.SetGlobal(true);
     // CodexAstraLocal: Restore global feature values when leaving per-game settings.
-    values.uberhar_cpu_queue_expanded_seeds.SetGlobal(true);
     values.uberhar_cpu_adaptive_participation.SetGlobal(true);
     values.uberhar_cpu_execution_census.SetGlobal(true);
     values.uberhar_feature_diagnostics.SetGlobal(true);

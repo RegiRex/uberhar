@@ -356,6 +356,9 @@ private:
         u64 draws{}, samples{}, dead_rgb{}, dead_alpha{}, dead_lighting{}, alpha_never{};
         u64 memo_units{}, constant_rgb{}, constant_alpha{}, directional_slots{};
         u64 constant_refused_rgb{}, constant_refused_alpha{}, directional_refused{};
+        // CodexAstraLocal TEST-ONLY LOG: Actual static selections only; remove
+        // after impossible-certificate branch pruning is hardware-qualified.
+        u64 static_constant_tests{}, static_constant_omitted{};
     };
     std::array<FragmentSelectionCounters, 5> fragment_selected{};
     bool pending_fragment_cacheable{}, pending_recovery_glsl{};

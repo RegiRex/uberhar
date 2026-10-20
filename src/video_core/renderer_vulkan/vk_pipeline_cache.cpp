@@ -154,7 +154,9 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
         "bridge_assembly=isolated_lists_strips_fans "
         "compiler_workers={} static_cpu_tev={} full_cpu_pso_attempts=64 static_cpu_pso_attempts=16 "
         "shader_controls=reported_separately arithmetic_scope=generic_static "
-        "unchanged_shader_domains=calculated_opengl_custom_spirv_generator",
+        // CodexAstraLocal: Independent Calculated was retired; retain truthful
+        // boundaries for the graphics shader optimization report.
+        "unchanged_shader_domains=opengl_custom_spirv_generator",
         hybrid_tev, force_tev, Settings::values.async_shader_compilation.GetValue(),
         Settings::values.spirv_shader_gen.GetValue(), cpu_vertex_bridge, GLSL::DynamicTevAbiVersion,
         sizeof(TevPushConstants), num_worker_threads, allow_static_cpu_tev);
@@ -902,6 +904,23 @@ bool PipelineCache::BindPipeline(PipelineInfo& info, bool wait_built,
             SelectUsablePipeline(pipeline_completion, *pipeline, alternative, prefer_fallback);
         const bool selected_fallback = using_fallback || selected == alternative;
         scheduler.RecordGpuRoute(selected_fallback ? 0U : prepared_gpu_route);
+        // CodexAstraLocal TEST-ONLY LOG: Only existing sampled passes request
+        // these hashes. Read the actual selected immutable pipeline after a
+        // late fallback win, never the process-pointer execution key. Dynamic
+        // raster state and current transport come from this queued draw. Remove
+        // after costly-state qualification; uniforms/samplers are not captured.
+        if (scheduler.GpuIdentityRequested()) {
+            const auto ids = selected->DiagnosticShaderIds();
+            const auto state = Common::HashCombine(
+                selected->DiagnosticState().ExecutionHash(true, ids),
+                rasterization.value, depth_stencil.value, dynamic.blend_color,
+                dynamic.stencil_reference, dynamic.stencil_compare_mask, dynamic.stencil_write_mask,
+                Common::ComputeStructHash64(dynamic.viewport), Common::ComputeStructHash64(dynamic.scissor));
+            const u64 transport = selected_fallback || static_tev_cpu
+                ? Common::ComputeStructHash64(constants) : 0;
+            scheduler.RecordGpuIdentity({ids[0], ids[1], ids[2], state, transport},
+                u64{dynamic.scissor.GetWidth()} * dynamic.scissor.GetHeight());
+        }
         // CodexAstraLocal TEST-ONLY LOG: Attribute to the actual final route on
         // its sole worker. Sparse metadata owns original draw inputs; remove
         // after independent hardware qualification, never infer pixel savings.
@@ -915,6 +934,13 @@ bool PipelineCache::BindPipeline(PipelineInfo& info, bool wait_built,
                 selected_work.alpha_never += work.alpha_never &&
                     (route >= 2 || profile.fragment_alpha_never);
                 if (!work.alpha_never) {
+                    // CodexAstraLocal TEST-ONLY LOG: Selection owns attribution;
+                    // generic/full/recovery draws cannot claim static pruning.
+                    // Remove after qualification; no per-pixel or saved-time claim.
+                    if (route == 1) {
+                        selected_work.static_constant_tests += work.static_constant_tests;
+                        selected_work.static_constant_omitted += work.static_constant_omitted;
+                    }
                     if (profile.fragment_liveness) {
                         selected_work.dead_rgb += work.dead_rgb;
                         selected_work.dead_alpha += work.dead_alpha;
@@ -2106,18 +2132,20 @@ void PipelineCache::ReportTevPushStats(const char* kind) {
         for (u32 route = 0; route < fragment_selected.size(); ++route) {
             const auto& work = fragment_selected[route];
             LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
-                "Uberhar fragment selected {}: schema=2 session={} title={:016X} route={} "
+                "Uberhar fragment selected {}: schema=3 session={} title={:016X} route={} "
                 "draws={} samples={} period_preparations=1024 dead_rgb={} dead_alpha={} "
                 "dead_lighting={} alpha_never={} memo_units={} constant_rgb={} constant_alpha={} "
                 "canonical_direction_slots={} constant_unqualified_rgb={} constant_unqualified_alpha={} "
                 "direction_unqualified_slots={} route_names=generic,static,full,recovery,gpu_full "
+                "static_constant_tests={} static_constant_omitted={} "
                 "features=1,6,7,11,12 arithmetic_routes=generic_static weighting=sampled_draws "
                 "refusal=nonendpoint_or_disabled_or_route direction_refusal=noncanonical_or_disabled_or_route "
                 "scope=current_title gpu_cost=unmeasured",
                 kind, cache_session, GetProgramID(), route, work.draws, work.samples,
                 work.dead_rgb, work.dead_alpha, work.dead_lighting, work.alpha_never, work.memo_units,
                 work.constant_rgb, work.constant_alpha, work.directional_slots,
-                work.constant_refused_rgb, work.constant_refused_alpha, work.directional_refused);
+                work.constant_refused_rgb, work.constant_refused_alpha, work.directional_refused,
+                work.static_constant_tests, work.static_constant_omitted);
         }
     }
     // AstraEH: Same five-second/final cadence; completed worker commands only.
@@ -2157,9 +2185,10 @@ void PipelineCache::ReportUberharStats(const char* kind) {
     // after feature cost qualification. Diagnostic OFF has zero sample clocks.
     if (feature_diagnostics) {
         LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
-            "Uberhar shader preparation {}: schema=2 session={} title={:016X} "
+            "Uberhar shader preparation {}: schema=3 session={} title={:016X} "
             "owner_samples={} owner_ns={} owner_max_ns={} runtime_samples={} runtime_ns={} runtime_max_ns={} "
             "arithmetic_requests={} arithmetic_hits={} arithmetic_builds={} "
+            "structural_builds={} numeric_only_updates={} "
             "lit_reservation={} reserved_refusals={} lit_admissions={} cheap_admissions={} "
             "cheap_full_attempts={} cheap_static_attempts={} "
             "features=1,6,7,11,12,lit_admission scope=current_title timing=sampled_owner_wall "
@@ -2167,7 +2196,8 @@ void PipelineCache::ReportUberharStats(const char* kind) {
             kind, cache_session, GetProgramID(), fragment_prepare_samples, fragment_prepare_ns,
             fragment_prepare_max_ns, fragment_runtime_samples, fragment_runtime_ns, fragment_runtime_max_ns,
             dynamic_tev_preparation.Stats().requests, dynamic_tev_preparation.Stats().hits,
-            dynamic_tev_preparation.Stats().builds, lit_specialization, fragment_lit_reserved_refusals,
+            dynamic_tev_preparation.Stats().builds, dynamic_tev_preparation.Stats().structural_builds,
+            dynamic_tev_preparation.Stats().value_updates, lit_specialization, fragment_lit_reserved_refusals,
             fragment_lit_admissions, fragment_cheap_admissions,
             fragment_cheap_attempts[0], fragment_cheap_attempts[1]);
     }
@@ -2343,8 +2373,10 @@ void PipelineCache::ReportUberharStats(const char* kind) {
         // lazy transport and exact reuse; retain the production preparation path.
         const auto& transport = dynamic_tev_preparation.Stats();
         LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
-                 "Uberhar fragment preparation {}: schema=1 requests={} reuse={} builds={}",
-                 kind, transport.requests, transport.hits, transport.builds);
+                 "Uberhar fragment preparation {}: schema=2 requests={} reuse={} builds={} "
+                 "structural_builds={} numeric_only_updates={}",
+                 kind, transport.requests, transport.hits, transport.builds,
+                 transport.structural_builds, transport.value_updates);
     }
     // AstraEH: Cumulative buckets at the existing cadence; build time and wait time overlap.
     if (hybrid_tev) {

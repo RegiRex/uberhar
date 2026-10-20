@@ -430,6 +430,20 @@ public:
         return build_phase.load(std::memory_order::relaxed);
     }
     [[nodiscard]] u64 Key() const noexcept;
+    // CodexAstraLocal TEST-ONLY LOG: Immutable guest/generated shader hashes and
+    // state support cross-run sample attribution; Key() includes host owners and
+    // is unsuitable. Remove this accessor after cost attribution qualification.
+    [[nodiscard]] const StaticPipelineInfo& DiagnosticState() const noexcept {
+        return info.state;
+    }
+    // CodexAstraLocal TEST-ONLY LOG: Omitted stages have no semantic program,
+    // even when an inherited diagnostic config retained their guest hashes.
+    [[nodiscard]] std::array<u64, MAX_SHADER_STAGES> DiagnosticShaderIds() const noexcept {
+        auto ids = info.state.shader_ids;
+        for (u32 i = 0; i < ids.size(); ++i)
+            if (!stages[i]) ids[i] = 0;
+        return ids;
+    }
     // AstraPro: Immutable stage presence for diagnostic classification only.
     // Bits follow the existing array order: vertex, fragment, geometry.
     [[nodiscard]] u32 ShaderStageMask() const noexcept {

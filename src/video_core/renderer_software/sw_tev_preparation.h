@@ -23,6 +23,10 @@ struct PreparedTevConfig {
     std::array<Stage, 6> stages;
     Common::Vec4<u8> initial_buffer;
     FragmentDemand demand;
+    // CodexAstraLocal: Hoist only known integer operations with no external
+    // consumer. Unsupported live enums must keep their original pixel error
+    // path, including zero-coverage triangles that never execute TEV.
+    bool constant_result{};
 
     PreparedTevConfig(const Pica::TexturingRegs& texturing, const Pica::LightingRegs& lighting) {
         const auto config = texturing.GetTevStages();
@@ -34,6 +38,7 @@ struct PreparedTevConfig {
             texturing.tev_combiner_buffer_input.update_mask_a,
             Pica::TevLiveness::Stage0Policy::Software);
         demand = GetFragmentDemand(live, lighting);
+        constant_result = !demand.textures && !demand.primary_color && !demand.lighting;
         const auto& buffer = texturing.tev_combiner_buffer_color;
         initial_buffer = {static_cast<u8>(buffer.r.Value()), static_cast<u8>(buffer.g.Value()),
                           static_cast<u8>(buffer.b.Value()), static_cast<u8>(buffer.a.Value())};
@@ -72,6 +77,46 @@ struct PreparedTevConfig {
                 texturing.tev_combiner_buffer_input.TevStageUpdatesCombinerBufferColor(i);
             stage.update_alpha =
                 texturing.tev_combiner_buffer_input.TevStageUpdatesCombinerBufferAlpha(i);
+            if (constant_result) {
+                const auto known_source = [](Config::Source value) {
+                    return value == Config::Source::Constant || value == Config::Source::Previous ||
+                        value == Config::Source::PreviousBuffer ||
+                        value == Config::Source::PrimaryFragmentColor ||
+                        value == Config::Source::SecondaryFragmentColor;
+                };
+                const auto known_op = [](Config::Operation value, bool color) {
+                    switch (value) {
+                    case Config::Operation::Replace: case Config::Operation::Modulate:
+                    case Config::Operation::Add: case Config::Operation::AddSigned:
+                    case Config::Operation::Lerp: case Config::Operation::Subtract:
+                    case Config::Operation::MultiplyThenAdd: case Config::Operation::AddThenMultiply:
+                        return true;
+                    case Config::Operation::Dot3_RGB: case Config::Operation::Dot3_RGBA:
+                        return color;
+                    default: return false;
+                    }
+                };
+                if (stage.live.NeedsColor(stage.color_op)) {
+                    constant_result &= known_op(stage.color_op, true);
+                    for (u32 input = 0; input < stage.color_count; ++input) {
+                        const auto modifier = stage.color_modifiers[input];
+                        using Modifier = Config::ColorModifier;
+                        constant_result &= known_source(stage.color_sources[input]) &&
+                            (modifier == Modifier::SourceColor || modifier == Modifier::OneMinusSourceColor ||
+                             modifier == Modifier::SourceAlpha || modifier == Modifier::OneMinusSourceAlpha ||
+                             modifier == Modifier::SourceRed || modifier == Modifier::OneMinusSourceRed ||
+                             modifier == Modifier::SourceGreen || modifier == Modifier::OneMinusSourceGreen ||
+                             modifier == Modifier::SourceBlue || modifier == Modifier::OneMinusSourceBlue);
+                    }
+                }
+                if (stage.live.alpha && stage.color_op != Config::Operation::Dot3_RGBA) {
+                    constant_result &= known_op(stage.alpha_op, false);
+                    for (u32 input = 0; input < stage.alpha_count; ++input)
+                        constant_result &= known_source(stage.alpha_sources[input]) &&
+                            static_cast<u32>(stage.alpha_modifiers[input]) <=
+                                static_cast<u32>(Config::AlphaModifier::OneMinusSourceBlue);
+                }
+            }
         }
     }
 };

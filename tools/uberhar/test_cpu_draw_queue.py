@@ -242,9 +242,11 @@ inline struct { Setting uberhar_test_mode; } values;
             'bounds','late external effect escaped proof'),
         ('missing_arithmetic_floor',change(instrumented,'if (effect.minimum_arithmetic < 35)',
             'if (effect.minimum_arithmetic < 0)'),header,'work','arithmetic floor boundary'),
+        # CodexAstraLocal: The conservative standalone floor now uses FIFO misses
+        # directly; challenge that decision rather than an obsolete expansion cost.
         ('input_count_as_misses',change(instrumented,
-            'const u64 guaranteed_work = u64(misses) * effect.minimum_arithmetic;',
-            'const u64 guaranteed_work = u64(source.count) * effect.minimum_arithmetic;'),
+            'const bool standalone_seed = misses >= 96;',
+            'const bool standalone_seed = source.count >= 96;'),
             header,'work','FIFO miss floor boundary'),
         ('missing_copy_floor',change(instrumented,'if (raw_size > u64(misses) * 70)',
             'if (raw_size > u64(misses) * 700)'),header,'work','raw copy floor accepted71'),
@@ -299,8 +301,9 @@ inline struct { Setting uberhar_test_mode; } values;
     # assertions; positive scope compares real JIT/FIFO/88-byte output too.
     feature_variants = [
         ('ignored_seed_control', change(instrumented,
-            '(impl->policy.expanded_seeds && guaranteed_work >= GroupWorkUnit)',
-            '(guaranteed_work >= GroupWorkUnit)'), header, 'work', 'conservative seed admitted93'),
+            'const bool standalone_seed = misses >= 96;',
+            'const bool standalone_seed = guaranteed_work >= GroupWorkUnit;'),
+            header, 'work', 'conservative seed admitted93'),
         ('stale_accepted_token', change(instrumented,
             'Impl::Matches(candidate, source.shader_lease, booleans)', 'true'),
             header, 'groups', 'stale Boolean token reused'),

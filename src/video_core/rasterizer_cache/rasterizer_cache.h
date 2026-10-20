@@ -46,7 +46,7 @@ RasterizerCache<T>::RasterizerCache(Memory::MemorySystem& memory_,
       dump_textures{Settings::values.dump_textures.GetValue()},
       use_custom_textures{Settings::values.custom_textures.GetValue()},
       // CodexAstraLocal: Freeze the independent experiment for this session;
-      // retain serial codecs in Custom, Software, Calculated and other APIs.
+      // retain serial codecs in Custom, Software and other APIs.
       texture_decoder{Settings::values.uberhar_parallel_texture_decode.GetValue() &&
                       Settings::values.graphics_api.GetValue() == Settings::GraphicsAPI::Vulkan &&
                       (Settings::values.uberhar_test_mode.GetValue() == Settings::UberharTestMode::Native ||

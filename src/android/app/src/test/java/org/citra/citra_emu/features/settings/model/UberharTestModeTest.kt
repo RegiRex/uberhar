@@ -39,8 +39,10 @@ class UberharTestModeTest {
     @Test fun loadedModeAndUnknownValuesAreHandled() {
         val backing = Backing()
         backing.int = 2
-        assertTrue(UberharTestModeSwitch(backing, UberharTestMode.COMPUTE).boolean)
-        assertFalse(UberharTestModeSwitch(backing, UberharTestMode.NATIVE).boolean)
+        // CodexAstraLocal: The legacy persisted ID activates Native, never Combo or Software.
+        assertTrue(UberharTestModeSwitch(backing, UberharTestMode.NATIVE).boolean)
+        assertFalse(UberharTestModeSwitch(backing, UberharTestMode.AUTOMATIC).boolean)
+        assertEquals(UberharTestMode.NATIVE, UberharTestMode.from(2))
         assertEquals(UberharTestMode.CUSTOM, UberharTestMode.from(99))
         assertFalse(UberharTestModeSwitch(backing, UberharTestMode.AUTOMATIC).isRuntimeEditable)
     }
@@ -49,7 +51,7 @@ class UberharTestModeTest {
     // the native preset policy. The existing exclusivity test includes the appended mode.
     @Test fun fragmentIsolationPreservesIdsAndEffectiveDisplayPolicy() {
         // CodexAstraLocal: Append Software without changing persisted renderer choices.
-        assertEquals(listOf(0, 1, 2, 3, 4, 5), UberharTestMode.entries.map { it.id })
+        assertEquals(listOf(0, 1, 3, 4, 5), UberharTestMode.entries.map { it.id })
         assertEquals(UberharTestMode.COMBO_GENERIC, UberharTestMode.from(4))
         assertEquals(UberharTestMode.SOFTWARE, UberharTestMode.from(5))
         for (mode in UberharTestMode.entries) {

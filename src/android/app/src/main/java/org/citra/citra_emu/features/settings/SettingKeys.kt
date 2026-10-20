@@ -49,7 +49,6 @@ object SettingKeys {
     external fun uberhar_parallel_texture_decode(): String
     // CodexAstraLocal: Independent restart-only .50 controls are snapshotted by each owner;
     // profiling stays optional so comparison runs do not pay GPU timestamp overhead.
-    external fun uberhar_cpu_queue_expanded_seeds(): String
     external fun uberhar_cpu_adaptive_participation(): String
     external fun uberhar_cpu_execution_census(): String
     external fun uberhar_feature_diagnostics(): String

@@ -207,11 +207,14 @@ void RasterizerSoftware::ReportWork(bool force) {
     const auto now = std::chrono::steady_clock::now();
     if (!force && now - last_report < std::chrono::seconds{5}) return;
     last_report = now;
+    // CodexAstraLocal: Periodic feature progress must not stall rasterization on
+    // a saturated log queue. Forced error/teardown summaries retain reliable delivery.
+    const auto delivery = force ? Common::Log::Delivery::Reliable : Common::Log::Delivery::Diagnostic;
     const auto session = report_session;
     const auto scheduling = sw_workers.Scheduling();
     const auto emit = [&](const char* feature, bool enabled, u64 calls, u64 effective,
                           u64 refused, u64 work_in, u64 work_out, u64 ns) {
-        LOG_INFO(Render_Software, "Software feature cost schema=1 feature={} enabled={} "
+        LOG_INFO_WITH_DELIVERY(Render_Software, delivery, "Software feature cost schema=1 feature={} enabled={} "
             "diagnostics=true session={} mode=Software draw_first={} draw_last={} "
             "scope=cumulative_renderer samples={} calls={} effective={} refused={} "
             "work_in={} work_out={} sampled_ns={} errors={} errors_scope=renderer "
@@ -226,7 +229,24 @@ void RasterizerSoftware::ReportWork(bool force) {
          retained_candidates, unsafe_rows, bounding_candidates, retained_candidates, span_ns);
     emit("sw.row_dispatch", feature_mask & 4, work_triangles, parallel_triangles,
          small_serial + ordered_serial, owner_rows + helper_rows, helper_rows, row_policy_ns);
-    LOG_INFO(Render_Software, "Software row detail schema=1 session={} draw_last={} "
+    // CodexAstraLocal TEST-ONLY LOG: These exact work populations are not
+    // measured savings. Raster wall includes their execution; no pixel clocks.
+    // Remove after matched qualification of the new .51 raster changes.
+    emit("sw.edge_steps", feature_mask & 2, work_triangles, stepped_rows,
+         unsafe_rows, retained_candidates, stepped_candidates, span_ns);
+    emit("sw.constant_tev", feature_mask & 1, work_triangles, constant_tev_triangles,
+         work_triangles - constant_tev_triangles, retained_candidates, constant_tev_candidates, tev_ns);
+    LOG_INFO_WITH_DELIVERY(Render_Software, delivery, "Software clipping cost schema=1 feature=sw.clip_copy_reuse "
+        "enabled={} session={} planes={} copy_bypasses={} samples={} sampled_ns={} "
+        "constant_state_refusals={} errors={} scope=cumulative_renderer_not_savings",
+        bool(feature_mask & 2), session, clip_planes, clip_copy_bypasses, clip_samples,
+        clip_ns, constant_state_refusals, errors);
+    LOG_INFO_WITH_DELIVERY(Render_Software, delivery, "Software feature cost schema=1 feature=sw.constant_state_gate "
+        "enabled={} session={} calls={} refused={} samples={} sampled_ns={} errors={} "
+        "scope=cumulative_owner_gate_not_savings",
+        bool(feature_mask & 8), session, constant_gate_calls, constant_state_refusals,
+        constant_gate_samples, constant_gate_ns, errors);
+    LOG_INFO_WITH_DELIVERY(Render_Software, delivery, "Software row detail schema=1 session={} draw_last={} "
         "parallel_admitted={} actual_helper_runs={} owner_small={} owner_ordered={} "
         "owner_rows={} helper_rows={} unsafe_span_rows={} history_hits={} rejected_cost={} "
         "samples={} preparation_ns={} raster_wall_ns={} parallel_owner_ns={} join_ns={} "
@@ -236,7 +256,7 @@ void RasterizerSoftware::ReportWork(bool force) {
         work_samples, preparation_ns, raster_ns, owner_ns, join_ns);
     // CodexAstraLocal TEST-ONLY LOG: Quantify this narrow grouping's real usage;
     // candidates are pre-Exclude coverage, not successful-pixel or savings claims.
-    LOG_INFO(Render_Software, "Software feature cost schema=1 feature=sw.ordered_group "
+    LOG_INFO_WITH_DELIVERY(Render_Software, delivery, "Software feature cost schema=1 feature=sw.ordered_group "
         "enabled={} diagnostics=true session={} mode=Software draw_last={} attempts={} "
         "fan_members={} groups={} grouped_triangles={} candidates={} owner_rows={} helper_rows={} "
         "refused_disabled={} refused_size={} refused_writers={} refused_fp={} refused_pixel_state={} "
@@ -248,7 +268,7 @@ void RasterizerSoftware::ReportWork(bool force) {
         fan_refusals[0],fan_refusals[1],fan_refusals[2],fan_refusals[3],fan_refusals[4],
         fan_refusals[5],fan_refusals[6],fan_refusals[7],fan_refusals[8],fan_samples,
         fan_prepare_ns,fan_raster_ns,fan_owner_ns,fan_join_ns);
-    LOG_INFO(Render_Software, "Software constant scope schema=1 feature=sw.ordered_group "
+    LOG_INFO_WITH_DELIVERY(Render_Software, delivery, "Software constant scope schema=1 feature=sw.ordered_group "
         "session={} draw_last={} scopes={} refused={} input_alias_refused={} queued={} "
         "drains={} owner_drains={} pending={} admission_calls={} admission_samples={} admission_ns={} "
         "capture_calls={} capture_samples={} capture_ns={} errors={} errors_scope=renderer "
@@ -308,44 +328,85 @@ void RasterizerSoftware::AddTriangle(const Pica::OutputVertex& v0, const Pica::O
 
     // Simple implementation of the Sutherland-Hodgman clipping algorithm.
     // TODO: Make this less inefficient (currently lots of useless buffering overhead happens here)
-    const auto clip = [&](const ClippingEdge& edge) {
-        std::swap(input_list, output_list);
-        output_list->clear();
+    // CodexAstraLocal TEST-ONLY LOG: One in64 source primitives prices the
+    // complete clipping scope; remove after copy-bypass qualification.
+    {
+        const bool measure_clip = diagnostics && (input_draws % 64 == 1);
+        const auto clip_start = measure_clip ? std::chrono::steady_clock::now()
+                                             : std::chrono::steady_clock::time_point{};
+        SCOPE_EXIT({
+            if (measure_clip) {
+                ++clip_samples;
+                clip_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    std::chrono::steady_clock::now() - clip_start).count();
+            }
+        });
+        const auto clip = [&](const ClippingEdge& edge) {
+            // CodexAstraLocal: An all-inside plane copies the polygon unchanged.
+            // Keep the original inside predicate (outside is its complement),
+            // including NaN classification; skip writes only with no crossing.
+            if (diagnostics) ++clip_planes;
+            if ((feature_mask & 2) && std::all_of(output_list->begin(), output_list->end(),
+                    [&](const Vertex& vertex) {
+                        return edge.IsInside(vertex);
+                    })) {
+                if (diagnostics) ++clip_copy_bypasses;
+                return;
+            }
+            std::swap(input_list, output_list);
+            output_list->clear();
 
-        const Vertex* reference_vertex = &input_list->back();
-        for (const auto& vertex : *input_list) {
-            // NOTE: This algorithm changes vertex order in some cases!
-            if (edge.IsInside(vertex)) {
-                if (edge.IsOutSide(*reference_vertex)) {
+            const Vertex* reference_vertex = &input_list->back();
+            for (const auto& vertex : *input_list) {
+                // NOTE: This algorithm changes vertex order in some cases!
+                if (edge.IsInside(vertex)) {
+                    if (edge.IsOutSide(*reference_vertex)) {
+                        output_list->push_back(edge.GetIntersection(vertex, *reference_vertex));
+                    }
+                    output_list->push_back(vertex);
+                } else if (edge.IsInside(*reference_vertex)) {
                     output_list->push_back(edge.GetIntersection(vertex, *reference_vertex));
                 }
-                output_list->push_back(vertex);
-            } else if (edge.IsInside(*reference_vertex)) {
-                output_list->push_back(edge.GetIntersection(vertex, *reference_vertex));
+                reference_vertex = &vertex;
             }
-            reference_vertex = &vertex;
-        }
-    };
+        };
 
-    for (const ClippingEdge& edge : clipping_edges) {
-        clip(edge);
-        if (output_list->size() < 3) {
-            return;
+        for (const ClippingEdge& edge : clipping_edges) {
+            clip(edge);
+            if (output_list->size() < 3) {
+                return;
+            }
         }
-    }
 
-    if (regs.rasterizer.clip_enable) {
-        const ClippingEdge custom_edge{regs.rasterizer.GetClipCoef()};
-        clip(custom_edge);
-        if (output_list->size() < 3) {
-            return;
+        if (regs.rasterizer.clip_enable) {
+            const ClippingEdge custom_edge{regs.rasterizer.GetClipCoef()};
+            clip(custom_edge);
+            if (output_list->size() < 3) {
+                return;
+            }
         }
     }
 
     // CodexAstraLocal: Only already-owned fan primitives may share this route.
     // A certified PICA scope may retain owned coverage until its boundary;
     // otherwise the fan joins here. A refused certificate executes the old path.
-    if ((constant_batch || (feature_mask&8)) && output_list->size() > 3) {
+    // CodexAstraLocal: Retained .50 fans all failed constant-group admission.
+    // Reject the immutable pixel state before constructing ownership pointers
+    // or querying concurrent writers/FP policy; eligible groups keep all guards.
+    const bool constant_fan = (feature_mask & 8) && output_list->size() > 3;
+    // CodexAstraLocal TEST-ONLY LOG: Price cheap early refusals independently
+    // of the later full certificate; remove after grouping-cost qualification.
+    const bool measure_gate = diagnostics && constant_fan && (constant_gate_calls++ % 64 == 0);
+    const auto gate_start = measure_gate ? std::chrono::steady_clock::now()
+                                        : std::chrono::steady_clock::time_point{};
+    const bool constant_state = constant_fan && ConstantState();
+    if (measure_gate) {
+        ++constant_gate_samples;
+        constant_gate_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now() - gate_start).count();
+    }
+    if (diagnostics && constant_fan && !constant_state) ++constant_state_refusals;
+    if ((constant_batch || constant_state) && output_list->size() > 3) {
         std::array<const Pica::OutputVertex*, MAX_VERTICES> owned{};
         for (u32 i=0;i<output_list->size();++i) owned[i]=&(*output_list)[i];
         const auto& system = Core::System::GetInstance();
@@ -409,6 +470,14 @@ void RasterizerSoftware::AddTriangle(const Pica::OutputVertex& v0, const Pica::O
                 // reproduction of that remaining first-fault case.
                 const std::array<const Pica::OutputVertex*, 3> source{&v0, &v1, &v2};
                 const std::array<const Pica::OutputVertex*, 3> prepared{&vtx0, &vtx1, &vtx2};
+                // CodexAstraLocal TEST-ONLY LOG: Match original source values
+                // only after the terminal join; diagnostic allocation failure
+                // must not replace the numerical error. Remove after the
+                // demanded source/writer case has a retained reproduction.
+                try {
+                    LOG_ERROR(Render_Software, "Software terminal source: primitive={} fan={} {}",
+                              input_draws, i, pica.DescribeSoftwareTerminalSources(source));
+                } catch (...) {}
                 const auto bits = [](f24 value) { return std::bit_cast<u32>(value.ToFloat32()); };
                 for (u32 vertex = 0; vertex < source.size(); ++vertex) {
                     const auto& a = *source[vertex];
@@ -578,9 +647,9 @@ bool RasterizerSoftware::TryConstantFan(std::span<const Pica::OutputVertex* cons
     const auto refuse=[&](u32 reason) { if(diagnostics) ++fan_refusals[reason];return false; };
     if(!(feature_mask&8)) return refuse(0);
     if(fan.size()<4 || fan.size()>11) return refuse(1);
+    if(!ConstantState()) return refuse(4);
     if(concurrent_writers) return refuse(2);
     if(!isolated_fp || !Common::Uberhar::ParallelFloatEnvironment::AllowsParallel()) return refuse(3);
-    if(!ConstantState()) return refuse(4);
     const PreparedTevConfig tev{regs.texturing,regs.lighting};
     if(tev.demand.textures || tev.demand.primary_color || tev.demand.lighting) return refuse(5);
     if(!ConstantTarget()) return refuse(7);
@@ -773,6 +842,15 @@ void RasterizerSoftware::ProcessTriangle(const Vertex& v0, const Vertex& v1, con
     // mapping and live-input check below still belongs to this triangle.
     const auto tev_start = measure_work ? WorkClock::now() : WorkClock::time_point{};
     const auto& tev = tev_cache.Get(regs.texturing, regs.lighting, feature_mask & 1, diagnostics);
+    // CodexAstraLocal: A consumer-free TEV plan is an integer draw constant.
+    // Evaluate its existing six-stage implementation once; ordinary pixel
+    // alpha/fog/depth/blend and all live-input guards still execute below.
+    const bool constant_tev = (feature_mask & 1) && tev.constant_result;
+    std::optional<Common::Vec4<u8>> constant_tev_color;
+    if (constant_tev) {
+        const std::array<Common::Vec4<u8>, 4> none{};
+        constant_tev_color = WriteTevConfig(none, tev, {}, {}, {});
+    }
     if (measure_work) tev_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(
         WorkClock::now() - tev_start).count();
     // CodexAstraLocal: Use the same immutable demand for range mapping, covered
@@ -883,10 +961,17 @@ void RasterizerSoftware::ProcessTriangle(const Vertex& v0, const Vertex& v1, con
             min_x + 8, min_y + 8 + row * 16, columns, diagnostics ? &unsafe_rows : nullptr)
             : RasterSpan{0, columns};
         candidates += coverage_rows[row].end - coverage_rows[row].first;
+        if (diagnostics && coverage_rows[row].exact_edges &&
+            coverage_rows[row].end - coverage_rows[row].first >= 4) {
+            ++stepped_rows;
+            stepped_candidates += coverage_rows[row].end - coverage_rows[row].first;
+        }
     }
     if (diagnostics) {
         bounding_candidates += u64(rows) * columns;
         retained_candidates += candidates;
+        constant_tev_triangles += constant_tev;
+        if (constant_tev) constant_tev_candidates += candidates;
     }
     if (measure_work) span_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(
         WorkClock::now() - span_start).count();
@@ -910,8 +995,16 @@ void RasterizerSoftware::ProcessTriangle(const Vertex& v0, const Vertex& v1, con
             // CodexAstraLocal: Skip only proven uncovered centers. The retained
             // original edge check below remains authoritative for every visit.
             const auto span = coverage_rows[row];
+            if (span.first == span.end) continue;
             const u32 end_x = min_x + 8 + span.end * 16;
-            for (u32 wide_x = min_x + 8 + span.first * 16; wide_x < end_x; wide_x += 16) {
+            const u32 first_x = min_x + 8 + span.first * 16;
+            // CodexAstraLocal: Very short rows cannot amortize preparation.
+            // Disabled/unsafe rows do no additional edge setup or increments.
+            const bool step_edges = span.exact_edges && span.end - span.first >= 4;
+            RasterEdgeSteps edge_steps;
+            if (step_edges) edge_steps = RasterEdgeSteps{coverage_points, first_x, y};
+            const auto advance_edges = [&] { if (step_edges) edge_steps.Advance(); };
+            for (u32 wide_x = first_x; wide_x < end_x; wide_x += 16, advance_edges()) {
                 const auto x = static_cast<u16>(wide_x);
                 // Do not process the pixel if it's inside the scissor box and the scissor mode is
                 // set to Exclude.
@@ -924,9 +1017,15 @@ void RasterizerSoftware::ProcessTriangle(const Vertex& v0, const Vertex& v1, con
                 // CodexAstraLocal: Coverage alone uses top-left edge biases.
                 // Interpolation and Z/W depth use the true weights and area;
                 // biasing an area-1 triangle can otherwise erase its sum.
-                const s32 w0 = SignedArea(vtxpos[1].xy(), vtxpos[2].xy(), {x, y});
-                const s32 w1 = SignedArea(vtxpos[2].xy(), vtxpos[0].xy(), {x, y});
-                const s32 w2 = SignedArea(vtxpos[0].xy(), vtxpos[1].xy(), {x, y});
+                // CodexAstraLocal: Safe integer spans share exact edge
+                // increments; interpolation keeps its original f24 operations.
+                // Overflow-refused and disabled spans retain original products.
+                const s32 w0 = step_edges ? static_cast<s32>(edge_steps.value[0])
+                    : SignedArea(vtxpos[1].xy(), vtxpos[2].xy(), {x, y});
+                const s32 w1 = step_edges ? static_cast<s32>(edge_steps.value[1])
+                    : SignedArea(vtxpos[2].xy(), vtxpos[0].xy(), {x, y});
+                const s32 w2 = step_edges ? static_cast<s32>(edge_steps.value[2])
+                    : SignedArea(vtxpos[0].xy(), vtxpos[1].xy(), {x, y});
                 const s32 wsum = w0 + w1 + w2;
 
                 // If current pixel is not covered by the current primitive
@@ -1034,8 +1133,12 @@ void RasterizerSoftware::ProcessTriangle(const Vertex& v0, const Vertex& v1, con
                     cached_quad = qx;
                 }
                 const u32 lane = ((x >> 4) & 1U) | (((y >> 4) & 1U) << 1);
-                const auto texture_color = TextureColor(uv, textures, tc0_w, prepared_textures,
-                    quad, lane, demand_mask, footprint_mask, x >> 4, y >> 4, texel_memo);
+                // CodexAstraLocal: No demanded texture means no sampler call;
+                // the same zero inputs still feed any live nontexture TEV.
+                const auto texture_color = demand_mask
+                    ? TextureColor(uv, textures, tc0_w, prepared_textures,
+                        quad, lane, demand_mask, footprint_mask, x >> 4, y >> 4, texel_memo)
+                    : std::array<Common::Vec4<u8>, 4>{};
 
                 Common::Vec4<u8> primary_fragment_color = {0, 0, 0, 0};
                 Common::Vec4<u8> secondary_fragment_color = {0, 0, 0, 0};
@@ -1064,7 +1167,7 @@ void RasterizerSoftware::ProcessTriangle(const Vertex& v0, const Vertex& v1, con
                 }
 
                 // Write the TEV stages.
-                auto combiner_output =
+                auto combiner_output = constant_tev_color ? *constant_tev_color :
                     WriteTevConfig(texture_color, tev, primary_color, primary_fragment_color,
                                    secondary_fragment_color);
 

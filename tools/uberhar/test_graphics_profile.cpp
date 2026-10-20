@@ -17,13 +17,14 @@ int main() {
     // CodexAstraUlt: Persisted IDs are a compatibility contract; append the diagnostic preset.
     static_assert(static_cast<u32>(UberharTestMode::Custom) == 0);
     static_assert(static_cast<u32>(UberharTestMode::Native) == 1);
-    static_assert(static_cast<u32>(UberharTestMode::Compute) == 2);
+    // CodexAstraLocal: Retired value 2 remains a migration input, never an enum choice.
+    static_assert(MigrateUberharTestMode(static_cast<UberharTestMode>(2)) == UberharTestMode::Native);
     static_assert(static_cast<u32>(UberharTestMode::Automatic) == 3);
     static_assert(static_cast<u32>(UberharTestMode::ComboGeneric) == 4);
     // CodexAstraLocal: Software is appended; existing saved choices never move.
     static_assert(static_cast<u32>(UberharTestMode::Software) == 5);
     for (auto mode :
-         {UberharTestMode::Native, UberharTestMode::Compute, UberharTestMode::Automatic,
+         {UberharTestMode::Native, UberharTestMode::Automatic,
           UberharTestMode::ComboGeneric}) { // CodexAstraUlt: Exercise every supported preset.
         values.uberhar_test_mode = mode;
         values.graphics_api = GraphicsAPI::OpenGL;
@@ -67,10 +68,7 @@ int main() {
         Check(AllowsFullCpuFragments(mode, false) == (id == 3),
               "Native isolation changed Combo or retained Native specialization");
         Check(UsesAutomaticCompute(mode) == (id == 3 || id == 4), "compute selector changed");
-        Check(AllowsComputeRendering(mode) == (id >= 2), "compute capability changed");
-        // CodexAstraLocal: Isolation is exactly persisted mode2, independently
-        // of optional compute availability; all other modes keep recovery.
-        Check(RequiresComputeOnly(mode) == (id == 2), "strict compute isolation changed");
+        Check(AllowsComputeRendering(mode) == (id == 3 || id == 4), "compute capability changed");
         Check(!values.async_shader_compilation.GetValue() &&
                   !values.uberhar_cpu_vertex_bridge.GetValue(),
               "preset introduced skip-on-pending or legacy bridge behavior");
@@ -104,9 +102,18 @@ int main() {
     Check(IsUberharTestProfile(UberharTestMode::Software) &&
               !UsesReadyGpuVertices(UberharTestMode::Software) &&
               !AllowsComputeRendering(UberharTestMode::Software) &&
-              !RequiresComputeOnly(UberharTestMode::Software) &&
               !AllowsStaticCpuTev(UberharTestMode::Software),
           "software gained accelerated graphics capabilities");
+    // CodexAstraLocal: Legacy saved mode 2 must select Native, preserve resolution, and disable GPU vertices.
+    values.uberhar_test_mode = static_cast<UberharTestMode>(2);
+    values.graphics_api = GraphicsAPI::Software;
+    values.resolution_factor = 3;
+    ApplyUberharTestProfile();
+    Check(values.uberhar_test_mode.GetValue() == UberharTestMode::Native &&
+          values.graphics_api.GetValue() == GraphicsAPI::Vulkan &&
+          values.resolution_factor.GetValue() == 3 && !values.use_hw_shader.GetValue() &&
+          !UsesReadyGpuVertices(values.uberhar_test_mode.GetValue()),
+          "retired mode did not migrate deterministically to Native");
     // AstraEH: Config::ReadValues reloads original INI values before applying a
     // mode.
     values.uberhar_test_mode = UberharTestMode::Custom;
@@ -124,10 +131,9 @@ int main() {
     // CodexAstraUlt: Unknown/Custom modes cannot accidentally enable diagnostic capabilities.
     for (const auto mode : {UberharTestMode::Custom, static_cast<UberharTestMode>(99)}) {
         Check(!IsUberharTestProfile(mode) && !UsesReadyGpuVertices(mode) &&
-                  !AllowsSpecializedFragments(mode) && !AllowsComputeRendering(mode) &&
-                  !RequiresComputeOnly(mode),
+                  !AllowsSpecializedFragments(mode) && !AllowsComputeRendering(mode),
               "invalid/custom mode gained preset capabilities");
     }
-    std::puts("PASS: four GPU profiles plus CPU Software, stable IDs, independent route matrix, ready guards, "
+    std::puts("PASS: three GPU profiles plus CPU Software and legacy migration, stable IDs, independent route matrix, ready guards, "
               "preserved resolution/custom values and invalid-mode handling");
 }

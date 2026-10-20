@@ -236,10 +236,15 @@ int main(int argc, char** argv) {
         barrier();
         assert(read(omitted).find("optional_records=1") != std::string::npos);
         assert(logger.diagnostic_omissions.Pending() == 0);
-        logger.diagnostic_omissions.RecordDrop();
-        logger.diagnostic_omissions.RecordDrop();
+        // CodexAstraLocal: The actual reporter persists distinct family bins
+        // through a forced barrier while retaining the exact total.
+        logger.diagnostic_omissions.RecordDrop(DiagnosticFamily::Decode);
+        logger.diagnostic_omissions.RecordDrop(DiagnosticFamily::GpuIdentity);
         barrier();
         assert(read(omitted).find("optional_records=2") != std::string::npos);
+        assert(read(omitted).find("schema=2 optional_records=2 cpu_draw=0 prefix=0 "
+            "decode=1 adaptive=0 fragment=0 gpu_identity=1 gpu_cost=0 software=0 other=0") !=
+            std::string::npos);
         assert(logger.diagnostic_omissions.Pending() == 0);
         logger.diagnostic_omissions.RecordDrop();
         logger.diagnostic_omissions.RecordDrop();
@@ -252,10 +257,13 @@ int main(int argc, char** argv) {
     // diagnostics, including during the final worker drain and backend shutdown.
     {
         Logger missing{(root/"absent"/"omissions.txt").string()};
-        missing.diagnostic_omissions.RecordDrop();
+        // CodexAstraLocal: A failed primary sink preserves the actual family.
+        missing.diagnostic_omissions.RecordDrop(DiagnosticFamily::Fragment);
         missing.StartBackendThread();
         missing.StopBackendThread();
         assert(missing.diagnostic_omissions.Pending() == 1);
+        assert(missing.diagnostic_omissions.Due(DiagnosticDropCounter::Clock::now(), true)
+            [DiagnosticFamily::Fragment] == 1);
     }
     // CodexAstraUlt: A paused backend write holds only the sink lock. A reliable
     // synchronous producer must serialize with it; optional producers still return
@@ -324,9 +332,11 @@ void callback(retro_log_level level, const char* message, ...) {
 int main() {
     Logger active{"", callback};
     assert(!active.file_backend.Healthy());
-    active.diagnostic_omissions.RecordDrop();
+    // CodexAstraLocal: Callback-only delivery retains the same per-family schema.
+    active.diagnostic_omissions.RecordDrop(DiagnosticFamily::GpuCost);
     active.ReportDiagnosticOmissions(true);
     assert(captured.find("optional_records=1") != std::string::npos);
+    assert(captured.find("gpu_identity=0 gpu_cost=1 software=0 other=0") != std::string::npos);
     assert(active.diagnostic_omissions.Pending() == 0);
     Logger absent{"", nullptr};
     absent.diagnostic_omissions.RecordDrop();

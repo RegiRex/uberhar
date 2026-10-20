@@ -368,6 +368,9 @@ void LazyTransportAndExactReuse() {
     // when the owner selected specialization. Force that route with no virtual
     // config, then mutate owner state before execution to challenge snapshotting.
     PipelineCache alternative;
+    // CodexAstraLocal: The actual worker-selected late fallback also owns the
+    // sampled semantic identity; prepared specialization cannot claim its cost.
+    alternative.scheduler.sample_gpu_identity = true;
     Settings::values.uberhar_test_mode.value = Settings::UberharTestMode::Custom;
     alternative.force_tev = true;
     alternative.UseFragmentShader(regs, {}, false);
@@ -384,6 +387,11 @@ void LazyTransportAndExactReuse() {
             "late generic winner retains original queued transport");
     Require(alternative.scheduler.completed.back().gpu_route == 0,
             "late generic winner overrides prepared profiler route");
+    Require(alternative.scheduler.completed.back().identity.transport ==
+                Common::ComputeStructHash64(alternative_bytes) &&
+            alternative.scheduler.completed.back().identity.fragment ==
+                alternative.bound_pipeline->DiagnosticShaderIds()[1],
+            "late generic winner retains selected semantic identity and queued transport");
     Settings::values.uberhar_test_mode.value = Settings::UberharTestMode::Automatic;
 }
 
@@ -391,6 +399,9 @@ void LazyTransportAndExactReuse() {
 // and diagnostic OFF. These are populated counters, not log-substring checks.
 void RuntimeFeatureAttribution() {
     PipelineCache p;
+    // CodexAstraLocal: Model one sampled graphics span around real binding
+    // closures; work-profile's separate gate owns query cadence and mixed spans.
+    p.scheduler.sample_gpu_identity = true;
     Pica::RegsInternal regs{};
     regs.lighting.disable.Assign(1);
     regs.framebuffer.output_merger.alphablend_enable.Assign(1);
@@ -406,13 +417,31 @@ void RuntimeFeatureAttribution() {
             work.constant_alpha == 1 && work.dead_rgb == 5 && work.dead_alpha == 5,
             "actual selected worker populates independent constant/liveness fields");
     const auto first = p.scheduler.completed.back().constants;
+    const auto identity = p.scheduler.completed.back().identity;
+    const auto handle = p.scheduler.completed.back().pipeline;
+    // CodexAstraLocal: New process-local owners with the same semantics must
+    // retain the same diagnostic identity, unlike the execution-owner key.
+    {
+        PipelineCache another;
+        another.scheduler.sample_gpu_identity = true;
+        another.UseFragmentShader(regs, {}, false);
+        auto same_info = Info();
+        Require(another.BindPipeline(same_info, true), "second semantic owner binds");
+        another.scheduler.WaitWorker();
+        Require(another.scheduler.completed.back().pipeline != handle &&
+                another.scheduler.completed.back().identity == identity,
+                "semantic identity changes with process-local owner allocation");
+    }
     regs.texturing.tev_stage5.const_color = 0xFFFFFFFF;
     p.fragment_evidence.attempts = 0; // Force a second diagnostic sample only.
     p.UseFragmentShader(regs, {}, false);
     Require(p.BindPipeline(info, true), "changed uniform same structure binds");
     p.scheduler.WaitWorker();
     Require(first != p.scheduler.completed.back().constants && work.constant_rgb == 2 &&
-            p.dynamic_tev_preparation.Stats().builds == 2,
+            p.dynamic_tev_preparation.Stats().builds == 2 &&
+            p.dynamic_tev_preparation.Stats().structural_builds == 1 &&
+            p.dynamic_tev_preparation.Stats().value_updates == 1 &&
+            identity.transport != p.scheduler.completed.back().identity.transport,
             "live numeric change invalidates cache and reaches queued consumer");
     const auto samples = p.fragment_prepare_samples;
     p.feature_diagnostics = false; // Explicit fixture control; production freezes at construction.

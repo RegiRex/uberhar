@@ -97,11 +97,7 @@ static const char* android_config_default_file_content = (BOOST_HANA_STRING(R"(
 software_renderer_features = 15
 # CodexAstraLocal TEST-ONLY LOG: Independent optional sampled counters; remove after qualification.
 software_renderer_diagnostics = true
-# CodexAstraLocal: Restart-only Calculated mask: invocation1, inside2, lowering4,
-# flat-clip8, active-rectangle32. Primary-color16 remains unavailable.
-calculated_renderer_features = 47
-# CodexAstraLocal TEST-ONLY LOG: Remove sampled model counters after qualification; retain failures.
-calculated_renderer_diagnostics = true
+# CodexAstraLocal: Retired renderer controls are omitted; preserve every supported default key.
 # Whether to render using OpenGL
 # CodexAstraLocal: 0: CPU Software (1x, GPU presentation only), 1: OpenGL ES, 2: Vulkan.
 )") DECLARE_KEY(graphics_api) BOOST_HANA_STRING(R"(
@@ -122,7 +118,7 @@ calculated_renderer_diagnostics = true
 # Requires a game restart. 0 (default): Off, 1: On
 )") DECLARE_KEY(uberhar_force_tev) BOOST_HANA_STRING(R"(
 
-# AstraEH: 0=custom, 1=virtual native, 2=compute prototype, 3=automatic prototype.
+# CodexAstraLocal: 0=custom, 1=Native, 3=Combo. Retired value 2 migrates to Native.
 # CodexAstraUlt: 4=Combo with generic fragments; keeps Combo vertices and compute selection.
 # CodexAstraLocal: 5=CPU Software at 1x; GPU use is presentation only.
 # Requires a game restart. Custom graphics settings are preserved.
@@ -147,9 +143,6 @@ calculated_renderer_diagnostics = true
 # CodexAstraLocal: Parallel CPU texture decoding; independent comparison, restart required.
 # 0: Off, 1 (default): On
 )") DECLARE_KEY(uberhar_parallel_texture_decode) BOOST_HANA_STRING(R"(
-
-# CodexAstraLocal: Allow small standalone CPU batches; restart required. Default: 0.
-)") DECLARE_KEY(uberhar_cpu_queue_expanded_seeds) BOOST_HANA_STRING(R"(
 
 # CodexAstraLocal: Adapt CPU worker participation; restart required. Default: 1.
 )") DECLARE_KEY(uberhar_cpu_adaptive_participation) BOOST_HANA_STRING(R"(

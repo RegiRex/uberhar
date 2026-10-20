@@ -9,9 +9,9 @@
 
 namespace Vulkan {
 namespace {
+// CodexAstraLocal: Only the remaining renderer's categories can have producers.
 constexpr std::array names{"graphics", "utility", "upload", "copy", "blit", "readback",
-                           "feedback", "presentation", "calculated_guest", "calculated_assembly",
-                           "calculated_raster", "calculated_transfer"};
+                           "feedback", "presentation"};
 // CodexAstraLocal: Every actual stage must have exactly one retained category name.
 static_assert(names.size()==static_cast<u32>(GpuWork::Count));
 constexpr std::array wait_names{"cpu_recorder", "gpu_completion", "queue_submit", "submit_readiness"};
@@ -23,10 +23,9 @@ WorkProfile::WorkProfile(const Instance& instance_) : instance{instance_} {
     // CodexAstraLocal: Keep operation counts independent of GPU timestamp commands.
     // The owner can measure observer cost without disabling actual rendering work.
     enabled = Settings::values.uberhar_feature_diagnostics.GetValue() &&
-              // CodexAstraLocal: Calculated adds stage counts under this same global policy;
-              // its own diagnostics flag never enables GPU timestamp queries.
-              (mode == Settings::UberharTestMode::Native || Settings::UsesReadyGpuVertices(mode) ||
-               mode == Settings::UberharTestMode::Compute);
+              // CodexAstraLocal: The retired independent Compute mode has no
+              // timestamp producer; supported Native/Combo controls are retained.
+              (mode == Settings::UberharTestMode::Native || Settings::UsesReadyGpuVertices(mode));
     timestamps_requested = Settings::values.uberhar_gpu_timestamps.GetValue();
     if (!enabled) return;
     const auto physical = instance.GetPhysicalDevice();
@@ -80,6 +79,9 @@ void WorkProfile::End(vk::CommandBuffer command, int slot) {
     auto& sample = samples[slot];
     const auto now = std::chrono::duration_cast<std::chrono::nanoseconds>(
         std::chrono::steady_clock::now().time_since_epoch()).count();
+    // CodexAstraLocal TEST-ONLY LOG: Reuse the already measured endpoint;
+    // scene attribution adds no per-draw or per-span clock read.
+    sample.host_end = static_cast<u64>(now);
     totals[static_cast<u32>(sample.kind)].host_span_ns += static_cast<u64>(now) - sample.host_start;
     sample.state = 2;
 }
@@ -97,6 +99,20 @@ void WorkProfile::Route(u32 route) {
     if (!enabled || route >= routes.size()) return;
     ++routes[route];
     if (pass_slot >= 0) samples[pass_slot].mask |= u64{1} << route;
+}
+
+// CodexAstraLocal TEST-ONLY LOG: Called on the selecting worker after any late
+// fallback decision, using immutable selected shader IDs and current draw state.
+// First/last equality alone cannot hide a different shader in the middle.
+// Remove after attribution qualification; no clocks occur on this path.
+void WorkProfile::Identity(const GpuDrawIdentity& identity, u64 scissor_area) {
+    if (!NeedsIdentity()) return;
+    auto& sample = samples[pass_slot];
+    if (!sample.draw_bindings) sample.first = identity;
+    else sample.mixed_identity |= !(sample.first == identity);
+    sample.last = identity;
+    ++sample.draw_bindings;
+    sample.scissor_area_sum += scissor_area;
 }
 
 void WorkProfile::Submitted(u64 tick, u64 completed_tick) noexcept {
@@ -139,6 +155,26 @@ void WorkProfile::Poll(u64 completed_tick) noexcept {
             stat.last_tick = sample.tick;
             stat.last_serial = sample.serial;
             stat.mixed += std::popcount(sample.mask) > 1;
+            // CodexAstraLocal TEST-ONLY LOG: Keep complete metadata-coverage
+            // totals independently of which sixteen slow spans remain retained.
+            stat.identified_samples += sample.draw_bindings != 0;
+            stat.mixed_identity_samples += sample.mixed_identity;
+            stat.draw_bindings += sample.draw_bindings;
+            stat.scissor_area_sum += sample.scissor_area_sum;
+            // CodexAstraLocal TEST-ONLY LOG: A fixed-size slowest-span ledger
+            // retains actual selected identities through optional progress loss.
+            // Whole mixed-pass durations never become a single shader's cost.
+            if (sample.kind == GpuWork::Graphics && sample.draw_bindings) {
+                auto* target = &slow_graphics[0];
+                if (slow_graphics_count < slow_graphics.size()) {
+                    target = &slow_graphics[slow_graphics_count++];
+                } else {
+                    target = &*std::min_element(slow_graphics.begin(), slow_graphics.end(),
+                        [](const auto& a, const auto& b) { return a.ns < b.ns; });
+                }
+                if (!target->sample.draw_bindings || ns > target->ns)
+                    *target = Detail{sample, ns};
+            }
             sample.state = 0;
         } catch (const std::exception& error) {
             ++query_errors;
@@ -175,14 +211,39 @@ void WorkProfile::Report(bool final) noexcept {
         const auto& s = totals[i];
         LOG_INFO_WITH_DELIVERY(Render_Vulkan, final ? Common::Log::Delivery::Reliable : Common::Log::Delivery::Diagnostic, "Uberhar GPU cost {}: feature=gpu_work.v2 sequence={} final={} calls={} logical_bytes={} samples={} "
                  "sample_ms={:.6f} max_sample_ms={:.6f} dropped={} mixed={} tick_first={} tick_last={} "
-                 "sample_first={} sample_last={} host_record_span_ms={:.6f} total_is_cumulative=true unsampled_cost=unknown",
+                 "sample_first={} sample_last={} host_record_span_ms={:.6f} "
+                 "identified_samples={} mixed_identity_samples={} sampled_draw_bindings={} sampled_scissor_area_sum={} "
+                 "total_is_cumulative=true unsampled_cost=unknown",
                  names[i], report_sequence, final, s.calls, s.bytes, s.samples, s.ns / 1e6, s.maximum_ns / 1e6,
-                 s.dropped, s.mixed, s.first_tick, s.last_tick, s.first_serial, s.last_serial, s.host_span_ns / 1e6);
+                 s.dropped, s.mixed, s.first_tick, s.last_tick, s.first_serial, s.last_serial, s.host_span_ns / 1e6,
+                 s.identified_samples, s.mixed_identity_samples, s.draw_bindings, s.scissor_area_sum);
     }
     for (u32 i = 0; i < waits.size(); ++i)
         LOG_INFO_WITH_DELIVERY(Render_Vulkan, final ? Common::Log::Delivery::Reliable : Common::Log::Delivery::Diagnostic, "Uberhar host cost {}: feature=host_wait.v2 sequence={} final={} calls={} wall_ms={:.6f}",
                  wait_names[i], report_sequence, final, wait_calls[i].load(std::memory_order_relaxed),
                  waits[i].load(std::memory_order_relaxed) / 1e6);
+    // CodexAstraLocal TEST-ONLY LOG: Repeat the bounded ledger at the existing
+    // cadence and reliable final. Sequence+sample serial allow deduplication;
+    // unknown uniforms/samplers prevent treating identity as complete draw input.
+    // Remove after graphics-cost attribution is sufficient for optimization.
+    for (u32 i = 0; i < slow_graphics_count; ++i) {
+        const auto& detail = slow_graphics[i];
+        const auto& s = detail.sample;
+        LOG_INFO_WITH_DELIVERY(Render_Vulkan, final ? Common::Log::Delivery::Reliable : Common::Log::Delivery::Diagnostic,
+            "Uberhar GPU graphics detail: feature=gpu_identity.v1 sequence={} final={} slot={} limit=16 "
+            "sample={} tick={} sample_ns={} route_mask={} draw_bindings={} scissor_area_sum={} "
+            "host_start_ns={} host_end_ns={} report_host_ns={} host_clock=steady_clock "
+            "mixed_identity={} first_vs={:016X} first_fs={:016X} first_gs={:016X} first_state={:016X} first_transport={:016X} "
+            "last_vs={:016X} last_fs={:016X} last_gs={:016X} last_state={:016X} last_transport={:016X} "
+            "selection=actual_worker identity_scope=source_profile semantic_hashes=true binary_hashes=false uniforms_samplers=untracked "
+            "area=per_binding_scissor_proxy coverage=unknown retained=slowest_sampled_spans",
+            report_sequence, final, i, s.serial, s.tick, detail.ns, s.mask, s.draw_bindings,
+            s.scissor_area_sum, s.host_start, s.host_end,
+            std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count(),
+            s.mixed_identity, s.first.vertex, s.first.fragment, s.first.geometry,
+            s.first.state, s.first.transport, s.last.vertex, s.last.fragment, s.last.geometry,
+            s.last.state, s.last.transport);
+    }
     LOG_INFO_WITH_DELIVERY(Render_Vulkan, final ? Common::Log::Delivery::Reliable : Common::Log::Delivery::Diagnostic, "Uberhar GPU cost coverage: feature=gpu_work.v2 sequence={} final={} timestamps_requested={} timestamps_available={} generic={} static={} full={} "
              "recovery={} gpu_optimized={} query_errors={} unavailable={} poll_cpu_ms={:.6f} pending={}",
              report_sequence, final, timestamps_requested, bool(pool), routes[0], routes[1], routes[2], routes[3], routes[4], query_errors,

@@ -5,7 +5,6 @@
 #include <mutex>
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_master_semaphore.h"
-#include "video_core/renderer_vulkan/compute_failure_packet.h"
 
 namespace Vulkan {
 
@@ -60,14 +59,9 @@ void MasterSemaphoreTimeline::Wait(u64 tick) {
         if (result == vk::Result::eSuccess) {
             break;
         }
-        // CodexAstraLocal: This pointer overload returns errors rather than
-        // throwing. An exact Calculated tick must reach its existing owner
-        // failure capture instead of retrying a permanent device error forever.
-        // Unarmed Native/Combo waits retain their prior behavior.
+        // CodexAstraLocal: Preserve terminal device failure handling without renderer-specific tracking.
         if (static_cast<int>(result) < 0) {
-            if (auto tracker = GetComputeFailureTracker(); tracker && tracker->Submitted(tick)) {
-                throw vk::SystemError{vk::make_error_code(result), "Calculated timeline wait"};
-            }
+            throw vk::SystemError{vk::make_error_code(result), "Vulkan timeline wait"};
         }
     }
     Refresh();
@@ -111,9 +105,7 @@ void MasterSemaphoreTimeline::SubmitWork(vk::CommandBuffer cmdbuf, vk::Semaphore
     try {
         instance.GetGraphicsQueue().submit(submit_info);
     } catch (vk::DeviceLostError& err) {
-        // CodexAstraLocal: Let the Calculated submit owner persist after its
-        // submit/execution locks unwind. Unarmed Native/Combo behavior stays fatal.
-        if(auto tracker=GetComputeFailureTracker(); tracker && tracker->Submitted(signal_value))throw;
+        // CodexAstraLocal: Retain the shared fatal device-loss boundary.
         UNREACHABLE_MSG("Device lost during submit: {}", err.what());
     }
 }
@@ -166,7 +158,6 @@ void MasterSemaphoreFence::SubmitWork(vk::CommandBuffer cmdbuf, vk::Semaphore wa
     try {
         instance.GetGraphicsQueue().submit(submit_info, fence);
     } catch (vk::DeviceLostError& err) {
-        if(auto tracker=GetComputeFailureTracker(); tracker && tracker->Submitted(signal_value))throw;
         UNREACHABLE_MSG("Device lost during submit: {}", err.what());
     }
 
@@ -190,24 +181,12 @@ void MasterSemaphoreFence::WaitThread(std::stop_token token) {
             wait_queue.pop();
         }
 
-        // CodexAstraLocal TEST-ONLY LOG: A fence-thread failure has no normal
-        // owner unwind. Persist its exact submitted tick outside wait/free locks
-        // before the inherited fatal path. Remove after captured correction.
-        vk::Result result{};
-        try {
-        result = device.waitForFences(fence, true, WAIT_TIMEOUT);
+        // CodexAstraLocal: Preserve actual fence error reporting after removing the retired incident observer.
+        const auto result = device.waitForFences(fence, true, WAIT_TIMEOUT);
         if (result != vk::Result::eSuccess) {
-            if(auto tracker=GetComputeFailureTracker())tracker->FatalWait(signal_value,
-                "fence wait returned non-success",static_cast<int>(result));
             UNREACHABLE_MSG("Fence wait failed with error {}", vk::to_string(result));
         }
-
         device.resetFences(fence);
-        } catch(const vk::SystemError& error) {
-            if(auto tracker=GetComputeFailureTracker())
-                tracker->FatalWait(signal_value,error.what(),error.code().value());
-            throw; // Preserve the original fatal-thread contract after retention.
-        }
         gpu_tick.store(signal_value);
 
         std::scoped_lock lock{free_mutex};

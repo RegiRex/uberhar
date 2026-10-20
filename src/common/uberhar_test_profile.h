@@ -20,7 +20,7 @@ constexpr bool AllowsSpecializedFragments(UberharTestMode mode) {
 
 // CodexAstraLocal: CPU fragment preparation is independent of GPU vertex
 // promotion. Native and full Combo may reuse bounded static TEV; the explicit
-// ComboGeneric comparison and Calculated isolation retain their current paths.
+// ComboGeneric comparison retains its current path.
 constexpr bool AllowsStaticCpuTev(UberharTestMode mode) {
     return mode == UberharTestMode::Native || mode == UberharTestMode::Automatic;
 }
@@ -38,14 +38,13 @@ constexpr bool UsesAutomaticCompute(UberharTestMode mode) {
 }
 
 constexpr bool AllowsComputeRendering(UberharTestMode mode) {
-    return mode == UberharTestMode::Compute || UsesAutomaticCompute(mode);
+    // CodexAstraLocal: Only Combo retains optional compute rectangle rendering.
+    return UsesAutomaticCompute(mode);
 }
 
-// CodexAstraLocal: Only the explicit Calculated isolation preset consumes
-// unsupported guest draws without a graphics replacement. Other modes retain
-// complete-draw recovery; CPU vertex preparation is still shared by this preset.
-constexpr bool RequiresComputeOnly(UberharTestMode mode) {
-    return mode == UberharTestMode::Compute;
+// CodexAstraLocal: Legacy configuration 2 resolves to Native without reusing its ID.
+constexpr UberharTestMode MigrateUberharTestMode(UberharTestMode mode) {
+    return static_cast<u32>(mode) == 2 ? UberharTestMode::Native : mode;
 }
 
 constexpr bool IsUberharTestProfile(UberharTestMode mode) {
@@ -57,7 +56,9 @@ constexpr bool IsUberharTestProfile(UberharTestMode mode) {
 // These are effective session values; Android persists its separate Kotlin model.
 // Disabling a profile therefore restores the INI values without a lossy backup.
 inline void ApplyUberharTestProfile() {
-    const auto mode = values.uberhar_test_mode.GetValue();
+    // CodexAstraLocal: Migrate before applying any effective renderer settings.
+    const auto mode = MigrateUberharTestMode(values.uberhar_test_mode.GetValue());
+    values.uberhar_test_mode = mode;
     // CodexAstraUlt: Replace the original three-profile whitelist with the shared policy,
     // preserving invalid-value recovery while accepting the appended diagnostic preset.
     if (!IsUberharTestProfile(mode)) {
@@ -65,7 +66,7 @@ inline void ApplyUberharTestProfile() {
         return;
     }
     // CodexAstraLocal: CPU graphics is an explicit 1x implementation, not a
-    // Native/Calculated fallback. Keep guest CPU, audio and completion timing
+    // Native fallback. Keep guest CPU, audio and completion timing
     // choices intact while disabling hardware guest graphics and shortcuts.
     if (mode == UberharTestMode::Software) {
         values.graphics_api = GraphicsAPI::Software;

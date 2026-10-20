@@ -274,30 +274,7 @@ struct Instance {
     void RecordRawStreamFree(u64) const {}
 };
 
-// CodexAstraLocal: These ordering cases model Native/ordinary CPU draws with no
-// Calculated diagnostic tracker. Fail loudly if a new extraction activates it;
-// packet ownership/serialization and fatal-wait capture have their own tests.
-enum class ComputeFailureStage { QueueSubmit, FinalUseWait };
-struct ComputeFailurePacket {
-    void Unavailable(std::string_view, std::string_view) { Unexpected(); }
-    void Failure(ComputeFailureStage, std::string_view, int) { Unexpected(); }
-    void Notice(ComputeFailureStage, std::string_view, int) { Unexpected(); }
-    void Number(std::string_view, u64) { Unexpected(); }
-    void FlushNotices() { Unexpected(); }
-    [[noreturn]] static void Unexpected() {
-        throw std::runtime_error{"unexpected diagnostic packet in null-tracker stream fixture"};
-    }
-};
-struct ComputeFailureTracker {
-    void Retire(u64) { ComputeFailurePacket::Unexpected(); }
-    std::shared_ptr<ComputeFailurePacket> Submitted(u64) {
-        ComputeFailurePacket::Unexpected();
-    }
-    std::shared_ptr<ComputeFailurePacket> Attempt(u64, u64) {
-        ComputeFailurePacket::Unexpected();
-    }
-};
-
+// CodexAstraLocal: Retain production stream-order checks without retired packet adapters.
 // CodexAstraLocal: Submission and completion are explicit deterministic events.
 // Real scheduler method bodies run, while queue draining and OS waiting do not.
 struct Master {
@@ -341,7 +318,6 @@ class Scheduler {
 public:
     Driver& driver;
     std::unique_ptr<Master> master_semaphore = std::make_unique<Master>();
-    std::shared_ptr<ComputeFailureTracker> compute_failures;
     Failure shader_failure;
     ProfileEndpoint work_profile;
     bool use_worker_thread = true;
@@ -367,14 +343,6 @@ public:
     void Record(F&& f) {
         auto owned=std::make_shared<std::decay_t<F>>(std::forward<F>(f));
         chunk->commands.emplace_back([owned](vk::CommandBuffer cb){(*owned)(cb);});
-    }
-    // CodexAstraLocal: SubmitExecution now binds the submitted tick explicitly.
-    // Its null observer uses the same ordered callback queue as all old cases;
-    // this adapter does not model or silently accept a Calculated packet.
-    template <class F>
-    void RecordBound(F&& f, const std::shared_ptr<ComputeFailurePacket>& failure) {
-        if (failure) ComputeFailurePacket::Unexpected();
-        Record(std::forward<F>(f));
     }
     void AcquireNewChunk() { chunk = std::make_unique<Chunk>(); }
     void Drain() {

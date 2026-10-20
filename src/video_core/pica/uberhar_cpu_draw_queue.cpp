@@ -101,7 +101,6 @@ struct CpuDrawPacket::Impl {
     u64 guaranteed_work{};
     u64 effect_identity{}; // CodexAstraLocal: Exact proof generation for comparable wave history.
     bool requires_group{};
-    bool work_seed{}; // CodexAstraLocal: Count newly admitted small seeds only after publication.
     std::shared_ptr<Credit> credit;
     mutable std::mutex mutex;
     mutable std::condition_variable completion;
@@ -373,8 +372,7 @@ struct CpuDrawExecutor::Impl {
         const bool shape = count && count <= 65535 && count % 3 == 0;
         const bool supported = effect && effect->accepted;
         const bool useful = supported && effect->minimum_arithmetic >= 35 &&
-            ((count >= 96 || (policy.expanded_seeds &&
-                u64(count) * effect->minimum_arithmetic >= GroupWorkUnit)) ||
+            (count >= 96 ||
              (u64(count) * effect->minimum_arithmetic >= MemberWorkUnit &&
               CanJoinPending(u64(count) * effect->minimum_arithmetic)));
         if (shape && useful) {
@@ -592,13 +590,10 @@ std::shared_ptr<CpuDrawPacket> CpuDrawExecutor::Capture(const CpuDrawCapture& so
         }
     }
     const u64 guaranteed_work = u64(misses) * effect.minimum_arithmetic;
-    const bool work_seed = misses >= 96 ||
-        (impl->policy.expanded_seeds && guaranteed_work >= GroupWorkUnit);
-    // CodexAstraLocal: Count the disabled standalone opportunity independently
-    // of successful pending-member admission; final grouping checks remain live.
-    impl->owner_statistics.expanded_refused += !impl->policy.expanded_seeds &&
-        misses < 96 && guaranteed_work >= GroupWorkUnit;
-    if (!work_seed) {
+    // CodexAstraLocal: The rejected expansion is gone, including its counters.
+    // Exact FIFO misses retain the .48 standalone floor; pending grouping survives.
+    const bool standalone_seed = misses >= 96;
+    if (!standalone_seed) {
         if (!impl->CanJoinPending(guaranteed_work)) return refuse(false, true);
     }
     // CodexAstraLocal: This temporary validates guest mappings only; it never
@@ -647,8 +642,7 @@ std::shared_ptr<CpuDrawPacket> CpuDrawExecutor::Capture(const CpuDrawCapture& so
     packet->lease = source.shader_lease; packet->uniforms = source.uniforms; packet->defaults = source.defaults;
     packet->output = std::move(output); packet->environment = Environment::Capture(); packet->writer = writer;
     packet->first_vertex = minimum; packet->vertex_count = source.count; packet->indexed = source.indexed;
-    packet->guaranteed_work = guaranteed_work; packet->requires_group = !work_seed;
-    packet->work_seed = work_seed && misses < 96;
+    packet->guaranteed_work = guaranteed_work; packet->requires_group = !standalone_seed;
     packet->effect_identity = effect.identity;
     packet->vertices.resize(source.count); packet->converted.resize(source.count);
     packet->hardware.resize(u64(source.count) * stride); packet->raw.resize(raw_size);
@@ -702,8 +696,7 @@ bool CpuDrawExecutor::Submit(const std::shared_ptr<CpuDrawPacket>& packet) {
         }
         packet->impl->submitted.store(true, std::memory_order_release);
         ++impl->statistics.submitted;
-        impl->owner_statistics.work_seeded += packet->impl->work_seed;
-        impl->owner_statistics.original_seeded += !packet->impl->requires_group && !packet->impl->work_seed;
+        impl->owner_statistics.original_seeded += !packet->impl->requires_group;
         if (packet->impl->requires_group) ++impl->statistics.group_submitted;
         else ++impl->statistics.seed_submitted;
     }
@@ -748,8 +741,8 @@ CpuDrawExecutor::Statistics CpuDrawExecutor::GetStatistics() const {
     result.cached_checks = owner.cached_checks; result.cached_hits = owner.cached_hits;
     result.cached_negative = owner.cached_negative; result.cached_misses = owner.cached_misses;
     result.effect_hits = owner.effect_hits; result.effect_builds = owner.effect_builds;
-    result.effect_reuses = owner.effect_reuses; result.work_seeded = owner.work_seeded;
-    result.original_seeded = owner.original_seeded; result.expanded_refused = owner.expanded_refused;
+    result.effect_reuses = owner.effect_reuses;
+    result.original_seeded = owner.original_seeded;
     result.token_missing = owner.token_missing; result.token_mismatches = owner.token_mismatches;
     result.lookup_samples = owner.lookup_samples; result.lookup_ns = owner.lookup_ns;
     result.eligibility_samples = owner.eligibility_samples; result.eligibility_ns = owner.eligibility_ns;

@@ -4,7 +4,8 @@
 #include "common/settings.h"
 namespace Settings {
 // CodexAstraLocal: Restart-only, independently persisted Software comparisons.
-// Bit0 exact TEV reuse, bit1 coverage spans, bit2 useful row-work admission,
+// Bit0 exact TEV plan/constant reuse, bit1 coverage spans/edge steps/clip copies,
+// bit2 useful row-work admission,
 // bit3 certified owned constant-fill groups. Disabled bits keep the legacy path;
 // live-input checks are mandatory and have no disable switch.
 inline Setting<u32, true> software_renderer_features{15, 0, 15, "software_renderer_features"};

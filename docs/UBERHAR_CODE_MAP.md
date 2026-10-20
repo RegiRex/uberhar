@@ -1,3 +1,26 @@
+<!-- CodexAstraLocal: Preserve historical evidence while making the current retirement explicit. -->
+## 0.1.51 — Calculated retired
+
+The independent Calculated renderer, shaders, controls and scratch benchmark are removed.
+Stored mode 2 migrates to Native; Custom=0, Native=1, Combo=3, generic Combo=4 and
+CPU Software=5 remain stable. Combo rectangle compute and shared graphics utilities remain.
+The prior design/results below are historical, not current runtime capabilities.
+
+<!-- CodexAstraLocal: Map every .51 optimization and diagnostic consumer, including the version file that cannot carry comments. -->
+- `UBERHAR_VERSION` and `docs/releases/0.1.51.md` identify the candidate; gate and
+  hardware acceptance remain independent.
+- `pica/uberhar_cpu_draw_queue.*` retains actual-miss standalone admission and
+  existing pending-group publication, removing the expanded seed path and counters.
+- `renderer_vulkan/uberhar_dynamic_tev_preparation.h` separates structure builds
+  from numeric refresh; `glsl_fs_shader_gen.*` prunes impossible certificate branches.
+- `vk_graphics_pipeline.h`, `vk_pipeline_cache.*` and `vk_work_profile.*` connect
+  actual late-selected pipeline identities to existing sampled pass costs.
+- `common/logging/diagnostic_queue.h` and `backend.cpp` attribute dropped optional
+  progress to bounded feature families while retaining reliable final records.
+- `renderer_software/sw_raster_work.h`, `sw_tev_preparation.h` and
+  `sw_rasterizer.*` implement exact edge stepping, invariant reuse and cheap
+  rejection; `sw_source_provenance.h` records bounded source-value/read correlation.
+
 <!-- AstraEH: Attribution index for the Uberhar implementation, tests, packaging and documentation. -->
 
 <!-- CodexAstraLocal: Map .50 runtime consumers and independent controls; qualification is tracked separately. -->

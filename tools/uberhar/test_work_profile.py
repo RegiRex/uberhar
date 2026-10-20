@@ -241,6 +241,66 @@ try {
         Check(s.calls==1 && s.bytes==0 && p.samples[slot].state==0,"retired pass sample frees slot");
         Check(b.violations==0,"queries never request WAIT or malformed layout");
     });
+    // CodexAstraLocal: Same first/last shader cannot hide a distinct middle
+    // draw, and only original sampled graphics spans own semantic metadata.
+    Case("semantic identity and mixed middle",[] {
+        Model::Backend b; Vulkan::Instance instance{b}; WorkProfile p{instance}; vk::CommandBuffer command{&b};
+        const Vulkan::GpuDrawIdentity a{1,2,3,4,5}, changed{1,20,3,4,5};
+        Check(!p.NeedsIdentity(),"outside pass does not request identity");
+        p.Identity(a,99);
+        p.BeginPass(command,GpuWork::Graphics);
+        Check(p.NeedsIdentity(),"sampled graphics requests identity");
+        const auto slot=p.pass_slot;
+        p.Route(0); p.Identity(a,100);
+        p.Route(1); p.Identity(changed,200);
+        p.Route(0); p.Identity(a,300);
+        p.EndPass(command);
+        Check(!p.NeedsIdentity(),"ended pass stops identity preparation");
+        b.Ready(slot); p.Submitted(71,70); p.Poll(70);
+        Check(p.slow_graphics_count==0,"unresolved identity has no invented cost");
+        p.Poll(71);
+        Check(p.slow_graphics_count==1,"resolved identity retained");
+        const auto& detail=p.slow_graphics[0];
+        Check(detail.sample.first==a && detail.sample.last==a && detail.sample.mixed_identity,
+              "mixed middle draw remains explicit");
+        Check(detail.sample.draw_bindings==3 && detail.sample.scissor_area_sum==600 &&
+              detail.sample.tick==71 && detail.ns==150,"draw metadata stays with original span");
+        Check(detail.sample.host_start>0 && detail.sample.host_end>=detail.sample.host_start,
+              "original host span endpoints retained for scene alignment");
+        Check(Stats(p,GpuWork::Graphics).identified_samples==1 &&
+              Stats(p,GpuWork::Graphics).mixed_identity_samples==1 &&
+              Stats(p,GpuWork::Graphics).draw_bindings==3 &&
+              Stats(p,GpuWork::Graphics).scissor_area_sum==600,"complete identity coverage totals retained");
+        p.BeginPass(command,GpuWork::Graphics);
+        Check(!p.NeedsIdentity(),"unsampled pass does no identity preparation");
+        p.EndPass(command);
+        p.BeginPass(command,GpuWork::Presentation);
+        Check(!p.NeedsIdentity(),"nongraphics sample does not consume graphics identity");
+        p.EndPass(command);
+    });
+    // CodexAstraLocal: The fixed ledger retains actual slow spans after ring
+    // reuse, never growing with gameplay or mislabeling a replaced query slot.
+    Case("bounded slow graphics ledger",[] {
+        Model::Backend b; Vulkan::Instance instance{b}; WorkProfile p{instance}; vk::CommandBuffer command{&b};
+        for(unsigned n=0;n<20;++n) {
+            for(unsigned attempt=0;;++attempt) {
+                p.BeginPass(command,GpuWork::Graphics);
+                if(p.pass_slot>=0) break;
+                p.EndPass(command);
+                Check(attempt<64,"graphics cadence remains bounded");
+            }
+            const auto slot=p.pass_slot;
+            p.Route(2); p.Identity({1,n+1,0,50,0},10);
+            p.EndPass(command); b.Ready(slot,0,n+10); p.Submitted(n+1,n+1);
+        }
+        Check(p.slow_graphics_count==16,"slow ledger remains fixed size");
+        for(const auto& detail:p.slow_graphics)
+            Check(detail.sample.first.fragment>=5 && detail.sample.first.fragment<=20 &&
+                  detail.sample.first.fragment==detail.sample.tick,"slow ledger retains correct query owners");
+        Model::deliveries.clear(); p.Report(true);
+        Check(Model::deliveries.size()==static_cast<unsigned>(GpuWork::Count)+
+              static_cast<unsigned>(HostWait::Count)+17,"final includes exactly sixteen bounded details");
+    });
     Case("unavailable then ready",[] {
         Model::Backend b; Vulkan::Instance instance{b}; WorkProfile p{instance}; vk::CommandBuffer command{&b};
         const int slot=p.Begin(command,GpuWork::Copy); p.End(command,slot); p.Submitted(7,7);
@@ -431,6 +491,10 @@ def main():
              'original successful tick cannot be replaced'),
             ('forget_unsampled_pass', 'pass_active = true;', 'pass_active = pass_slot >= 0;',
              'unsampled pass is still active'),
+            # CodexAstraLocal: Executed negative control detects loss of a
+            # differing middle shader even when first and last identities match.
+            ('forget_mixed_identity', 'sample.mixed_identity |= !(sample.first == identity);',
+             'sample.mixed_identity = false;', 'mixed middle draw remains explicit'),
         ]
         for name, before, after, expected in mutations:
             if original.count(before) != 1:

@@ -34,6 +34,9 @@
 #include "video_core/renderer_vulkan/uberhar_push_constants.h"
 #include "video_core/renderer_vulkan/uberhar_shader_compile_policy.h"
 #include "video_core/renderer_vulkan/uberhar_wait_diagnostics.h"
+// CodexAstraLocal: Use the production diagnostic value type; no profiler or
+// Vulkan query object is constructed by this controlled command endpoint.
+#include "video_core/renderer_vulkan/vk_work_profile.h"
 #include "video_core/shader/generator/glsl_fs_shader_gen.h"
 #define MICROPROFILE_SCOPE(...) ((void)0)
 using namespace Pica::Shader::Generator;
@@ -138,6 +141,9 @@ public:
   }
   u64 ActualKey() const noexcept;
   u64 Key() const noexcept { return forged_key.value_or(ActualKey()); }
+  // CodexAstraLocal: Definitions are extracted unchanged from the real owner.
+  const StaticPipelineInfo& DiagnosticState() const noexcept;
+  std::array<u64, MAX_SHADER_STAGES> DiagnosticShaderIds() const noexcept;
   bool MatchesExecution(const PipelineInfo &, const std::array<u64, 3> &) const;
   bool HasFailed() const { return failed; }
   void MarkFailed() {
@@ -205,6 +211,9 @@ struct CommandsState {
   // CodexAstraLocal: Preserve actual worker-selected route with each recorded
   // binding; the fixture must not silently swallow the profiler integration.
   u32 gpu_route{~0U};
+  // CodexAstraLocal: Record immutable semantic attribution beside actual binds.
+  GpuDrawIdentity identity{};
+  u64 scissor_area{};
   std::array<u32, 3> offsets{};
   std::array<vk::DescriptorSet, 3> descriptors{};
   std::array<std::byte, 128> constants{};
@@ -282,6 +291,14 @@ struct Scheduler {
   std::vector<CommandsState> completed;
   std::vector<std::function<void(RecordingCommands)>> records;
   std::array<u64, 5> gpu_routes{};
+  // CodexAstraLocal: Explicit modeled sampled-pass boundary; normal controls
+  // still avoid identity work, while dedicated cases inspect actual closure use.
+  bool sample_gpu_identity{};
+  bool GpuIdentityRequested() const noexcept { return sample_gpu_identity; }
+  void RecordGpuIdentity(const GpuDrawIdentity& identity, u64 area) {
+    current.identity = identity;
+    current.scissor_area = area;
+  }
   void RecordGpuRoute(u32 route) {
     if (route >= gpu_routes.size()) throw std::runtime_error("invalid GPU route");
     current.gpu_route = route;

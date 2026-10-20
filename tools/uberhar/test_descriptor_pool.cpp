@@ -218,7 +218,7 @@ void CheckContract(std::span<const vk::DescriptorSetLayoutBinding> bindings, u32
 }
 void ProductionContracts() {
     // CodexAstraLocal: Exact binding declarations and hint expressions are
-    // inserted from actual Calculated, graphics, blit and presentation owners.
+    // inserted from actual graphics, rectangle, blit and presentation owners.
     // UBERHAR_OWNER_CONTRACTS
 }
 
@@ -351,7 +351,8 @@ int main() {
     dispatcher.vkAllocateDescriptorSets = AllocateSets;
     try {
         ProductionContracts();
-        for (const u32 hint : {0U, 1U, 4U, 16U, 32U, 1024U})
+        // CodexAstraLocal: A small nonzero shared heap challenges the minimum before zero-hint overflow math.
+        for (const u32 hint : {4U, 0U, 1U, 16U, 32U, 1024U})
             CheckContract(simple_bindings, hint, hint < 16 ? 64 : hint * 4);
         auto arrays = simple_bindings;
         arrays[0].descriptorCount = 65536;

@@ -36,12 +36,12 @@ Its development goals are:
   One core-equivalent means one core fully occupied over the measured interval;
   it does not require pinning work to a particular physical core.
 - **Renderer choices with clear ownership:** retain CPU vertex execution where
-  useful, investigate mixed rendering, and develop independent compute and CPU
-  graphics paths without silently substituting a different mode.
+  useful, investigate mixed rendering, and develop independent CPU graphics
+  without silently substituting a different mode.
 
 These are development targets. Native and Combo have completed device game runs,
-but substantial slowdowns and visual defects remain. Calculated and CPU Software
-are experimental and have failed tested game scenes; local correctness checks
+but substantial slowdowns and visual defects remain. CPU Software remains
+experimental and has failed tested game scenes; local correctness checks
 and successful builds do not establish playable whole-game support. Read the
 notes attached to each [published release](https://github.com/RegiRex/uberhar/releases)
 for its scope. The source branch may contain changes awaiting release or device
@@ -57,7 +57,6 @@ All modes still emulate the guest CPU on the host CPU. The table describes
 | --- | --- | --- |
 | **Native** — “Virtual PICA: native rasterization” | Guest vertex shaders run on the CPU; Vulkan rasterization and fragment shading run on the GPU. Eligible CPU work can use workers. | Main CPU-vertex rendering path. Generic and ready prepared fragment shaders reduce first-use work, but compilation stalls and rendering defects remain possible. |
 | **Combo** — “Virtual PICA: automatic combination” | CPU vertices combine with ready GPU vertex execution for eligible draws, Vulkan rasterization and bounded fragment specialization. | Compare mixed work placement with Native. It is not the independent compute renderer. Pending optional specialization retains a complete rendering path. |
-| **Calculated** | Vulkan compute processes original guest vertex inputs, assembly, clipping and fragment work independently of Native rasterization. | Experimental coverage. Unsupported states terminate emulation with an error; there is no Native rendering fallback. Device usability remains unqualified. |
 | **CPU Software** | Guest rasterization, texture sampling and fragment operations run on the CPU at **1×**. OpenGL ES presents completed frames. | Experimental CPU graphics with **1 / 2 / Automatic** rendering participants. Ordering and feedback can require serial work; game compatibility remains incomplete. |
 
 **Combo (generic fragments)** is a comparison mode that keeps Combo's vertex
@@ -65,9 +64,14 @@ policy while limiting optional fragment specialization. **Custom** exposes the
 inherited graphics settings; it does not carry the same preset behavior.
 
 Choose a mode in Android's **Graphics** settings and restart the game after
-changing it. The presets apply their own effective graphics settings. Native,
-Combo and Calculated use Vulkan; CPU Software uses its separate 1× path. The
+changing it. The presets apply their own effective graphics settings. Native
+and Combo use Vulkan; CPU Software uses its separate 1× path. The
 **Native mode** name does not mean **1× native resolution**.
+
+<!-- CodexAstraLocal: Document the actual removal and safe legacy migration. -->
+Calculated is removed starting with 0.1.51. Its saved mode value migrates to Native;
+the other mode IDs and saved settings keep their meanings. Historical results remain
+available, but do not describe a selectable mode in this version.
 
 <!-- CodexAstraLocal: Route installs to this fork and state the actual Android package/minimum SDK without borrowing upstream desktop or store qualification. -->
 ## Downloads and setup

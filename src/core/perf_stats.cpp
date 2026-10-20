@@ -290,8 +290,9 @@ void PerfStats::LogUberharSettings(const char* event) {
     const auto mode = values.uberhar_test_mode.GetValue();
     const auto api = Settings::GetWorkingGraphicsAPI();
     // CodexAstraUlt: Append the persisted diagnostic mode without relabeling older log modes.
-    // CodexAstraLocal: Identify explicit CPU graphics in ordinary run evidence.
-    const std::array mode_names{"Custom", "Native", "Compute", "Automatic", "ComboGeneric", "Software"};
+    // CodexAstraLocal: Preserve supported log IDs; legacy slot 2 migrates to Native
+    // before execution and must not advertise a retired renderer if observed raw.
+    const std::array mode_names{"Custom", "Native", "Retired", "Automatic", "ComboGeneric", "Software"};
     const std::array api_names{"Software", "OpenGL", "Vulkan"};
     const auto mode_index = static_cast<std::size_t>(mode);
     const auto api_index = static_cast<std::size_t>(api);
@@ -304,7 +305,7 @@ void PerfStats::LogUberharSettings(const char* event) {
         "skip_duplicate_frames={} render_thread_delay_us={} simulate_gpu_timings={} "
         "ready_gpu_vertex_policy={} ready_gpu_fragment_policy={} ready_cpu_fragment_policy={} "
         "static_cpu_fragment_policy={} "
-        "calculated_fallback_policy={} calculated_vertex_policy={}",
+        "graphics_fallback_policy={} vertex_execution_policy={}",
         mode_index < mode_names.size() ? mode_names[mode_index] : "Unknown",
         api_index < api_names.size() ? api_names[api_index] : "Unknown",
         values.resolution_factor.GetValue(), values.resolution_factor.GetValue() ? "fixed" : "auto",
@@ -339,11 +340,8 @@ void PerfStats::LogUberharSettings(const char* event) {
         api == Settings::GraphicsAPI::Vulkan && values.uberhar_hybrid_tev.GetValue() &&
                 Settings::AllowsStaticCpuTev(mode)
             ? "software_static_tev_ready_v1" : "disabled",
-        // CodexAstraLocal: Calculated consumes original guest inputs in compute;
-        // an unsupported draw terminates rather than being omitted or retried
-        // through Native. These labels declare policy, not successful coverage.
-        Settings::RequiresComputeOnly(mode) ? "disabled_terminal_unsupported" : "graphics_allowed",
-        Settings::RequiresComputeOnly(mode) ? "original_input_compute" : "route_dependent");
+        // CodexAstraLocal: Supported accelerated profiles preserve complete graphics recovery.
+        "graphics_allowed", "route_dependent");
     const bool changed = text != uberhar_settings;
     if (changed && !uberhar_settings.empty())
         ++uberhar_settings_changes;

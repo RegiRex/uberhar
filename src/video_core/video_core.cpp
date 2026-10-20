@@ -33,21 +33,7 @@ std::unique_ptr<RendererBase> CreateRenderer(Frontend::EmuWindow& emu_window,
         graphics_api != Settings::GraphicsAPI::Software) {
         throw ShaderRecoveryError{"CPU Software mode requires the Software backend; fallback is disabled"};
     }
-    // CodexAstraLocal: Calculated isolation cannot silently select OpenGL or
-    // software when Vulkan is unavailable. Other profiles retain the existing
-    // backend resolver and default behavior; initial-load callers contain this
-    // typed failure before any substitute renderer can be constructed.
-    if (Settings::values.uberhar_test_mode.GetValue() == Settings::UberharTestMode::Compute) {
-#ifdef ENABLE_VULKAN
-        const bool available = graphics_api == Settings::GraphicsAPI::Vulkan;
-#else
-        const bool available = false;
-#endif
-        if (!available) {
-            throw ShaderRecoveryError{
-                "Isolated Calculated rendering requires the Vulkan backend; fallback is disabled"};
-        }
-    }
+    // CodexAstraLocal: Only supported renderers reach factory selection after profile migration.
     switch (graphics_api) {
 #ifdef ENABLE_SOFTWARE_RENDERER
     case Settings::GraphicsAPI::Software:

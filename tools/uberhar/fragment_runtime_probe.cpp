@@ -24,6 +24,51 @@ int main(int argc, char** argv) {
     Vulkan::DynamicTevPreparation cache;
     u64 folded_rgb = 0, folded_alpha = 0, canonical_slots = 0, controls = 0;
     const auto need = [&](bool okay, const char* why) { ++controls; if (!okay) throw std::runtime_error(why); };
+    // CodexAstraLocal: Numeric refresh must match a fresh producer after losing
+    // a prior certificate, changing profiles, and resetting title ownership.
+    // These directed controls also prove the expensive structure is reused.
+    {
+        Pica::RegsInternal regs{};
+        regs.lighting.disable.Assign(1);
+        FSConfig config{regs};
+        config.framebuffer.alpha_test_func.Assign(Pica::FramebufferRegs::CompareFunc::Always);
+        for (auto& stage : config.texture.tev_stages) stage = {0x000f000f, 0, 0, 0};
+        config.texture.tev_stages[5] = {0x000e000e, 0, 0, 0};
+        Vulkan::DynamicTevPreparation changing;
+        GLSL::FragmentRuntimeValues values{};
+        values.available = true;
+        const auto compare_fresh = [&](const Profile& current) {
+            auto expected = GLSL::MakeDynamicTevState(config, current);
+            GLSL::ApplyFragmentRuntime(expected, current, values);
+            const auto actual = changing.Get(config, current, values);
+            need(std::memcmp(&actual, &expected, sizeof(actual)) == 0,
+                 "numeric refresh differs from fresh exact preparation");
+            return actual;
+        };
+        auto state = compare_fresh(profile);
+        need(state.stages[5].operations & GLSL::TevConstantRgb, "endpoint witness did not qualify");
+        values.constants.fill(0x7F7F7F7FU);
+        state = compare_fresh(profile);
+        need(!(state.stages[5].operations & GLSL::TevConstantBits),
+             "nonendpoint refresh inherited certificate");
+        values.constants.fill(0xFFFFFFFFU);
+        state = compare_fresh(profile);
+        need((state.stages[5].operations & GLSL::TevConstantBits) == GLSL::TevConstantBits,
+             "new endpoint refresh inherited prior result");
+        values.available = false;
+        state = compare_fresh(profile);
+        need(!(state.stages[5].operations & GLSL::TevConstantBits),
+             "unavailable refresh inherited certificate");
+        compare_fresh(profile);
+        need(changing.Stats().structural_builds == 1 && changing.Stats().value_updates == 3 &&
+             changing.Stats().hits == 1, "numeric refresh rebuilt structural analysis");
+        compare_fresh(original);
+        need(changing.Stats().structural_builds == 2, "changed profile reused structural bytes");
+        changing.Reset();
+        compare_fresh(profile);
+        need(changing.Stats().structural_builds == 1 && changing.Stats().value_updates == 0 &&
+             changing.Stats().hits == 0, "reset retained structural ownership");
+    }
     constexpr u32 cases = 144;
     for (u32 n = 0; n < cases; ++n) {
         Pica::RegsInternal regs{};
@@ -134,6 +179,28 @@ int main(int argc, char** argv) {
             need(!(invalid_state.lighting_luts_hi >> 24), "nonfinite direction admitted");
         }
         const auto plan = GLSL::MakeStaticTevPlan(state);
+        // CodexAstraLocal: Every actual endpoint/nonendpoint assignment must be
+        // a subset of the compile-time possible-channel mask. Vary each byte
+        // independently, including unknown texture/lighting inputs in this
+        // corpus; a zero product cannot turn such inputs into known values.
+        const auto possible = GLSL::StaticTevConstantCandidates(plan);
+        for (u32 variation = 0; variation < 17; ++variation) {
+            auto varied_values = values;
+            varied_values.available = variation != 16;
+            for (u32 i = 0; i < varied_values.constants.size(); ++i)
+                varied_values.constants[i] = variation < 16
+                    ? ((variation & 1U) ? 255U : 0U) |
+                      ((variation & 2U) ? 0xFF00U : 0U) |
+                      ((variation & 4U) ? 0xFF0000U : 0U) |
+                      ((variation & 8U) ? 0xFF000000U : 0U)
+                    : 0x7F80FE01U;
+            varied_values.buffer = varied_values.constants[0];
+            auto varied = state;
+            GLSL::ApplyFragmentRuntime(varied, profile, varied_values);
+            for (u32 i = 0; i < varied.stages.size(); ++i)
+                need((varied.stages[i].operations & (GLSL::TevConstantRgb | GLSL::TevConstantAlpha) &
+                     ~possible[i]) == 0, "static pruning omitted a possible runtime certificate");
+        }
         const auto plain = GLSL::MakeDynamicTevState(config, profile);
         need(plan == GLSL::MakeStaticTevPlan(plain), "numeric values entered module identity");
         auto disabled = GLSL::MakeDynamicTevState(config, original);
@@ -152,7 +219,19 @@ int main(int argc, char** argv) {
         const auto prefix = output / std::to_string(n);
         std::ofstream(prefix.string() + "-specialized.frag") << "#version 450\n" << GLSL::GenerateFragmentShader(config, {}, original);
         std::ofstream(prefix.string() + "-generic.frag") << "#version 450\n" << GLSL::FragmentModule{family, {}, profile, true}.Generate();
-        std::ofstream(prefix.string() + "-partial.frag") << "#version 450\n" << GLSL::GenerateStaticTevFragmentShader(family, {}, profile, plan);
+        const auto partial = GLSL::GenerateStaticTevFragmentShader(family, {}, profile, plan);
+        // CodexAstraLocal: Directed varying source witnesses must remove the
+        // actual compiled branch, while constant Replace still consumes live
+        // push bits. Pixel execution below remains the arithmetic oracle.
+        if (n >= 96)
+            need(partial.find("if ((uber_tev.stages[0].z & 1024u)") == std::string::npos &&
+                 partial.find("if ((uber_tev.stages[0].z & 2048u)") == std::string::npos,
+                 "varying texture/lighting channels retained impossible certificate branches");
+        if (n >= 16 && n < 32)
+            need(partial.find("if ((uber_tev.stages[5].z & 1024u)") != std::string::npos &&
+                 partial.find("if ((uber_tev.stages[5].z & 2048u)") != std::string::npos,
+                 "constant Replace lost current-draw certificate consumer");
+        std::ofstream(prefix.string() + "-partial.frag") << "#version 450\n" << partial;
         std::ofstream(prefix.string() + "-off.frag") << "#version 450\n" << GLSL::FragmentModule{family, {}, original, true}.Generate();
         Binary(prefix.string() + "-state.bin", state); Binary(prefix.string() + "-off-state.bin", disabled);
         Binary(prefix.string() + "-uniforms.bin", uniforms);
@@ -173,7 +252,8 @@ int main(int argc, char** argv) {
     need(Vulkan::StaticTevPolicy::AllowCheapAdmission(5, 47, 8, 64), "cheap capacity refused early");
     need(!Vulkan::StaticTevPolicy::AllowCheapAdmission(6, 47, 8, 64), "reserved owner leaked");
     need(!Vulkan::StaticTevPolicy::AllowCheapAdmission(5, 48, 8, 64), "reserved attempts leaked");
-    std::ofstream(output / "counts.json") << fmt::format("{{\"cases\":{},\"controls\":{},\"rgb\":{},\"alpha\":{},\"canonical_slots\":{},\"cache_hits\":{}}}\n",
-        cases, controls, folded_rgb, folded_alpha, canonical_slots, cache.Stats().hits);
+    std::ofstream(output / "counts.json") << fmt::format("{{\"cases\":{},\"controls\":{},\"rgb\":{},\"alpha\":{},\"canonical_slots\":{},\"cache_hits\":{},\"structural_builds\":{},\"numeric_only_updates\":{}}}\n",
+        cases, controls, folded_rgb, folded_alpha, canonical_slots, cache.Stats().hits,
+        cache.Stats().structural_builds, cache.Stats().value_updates);
     fmt::print("PASS runtime preparation: {} controls, RGB{} alpha{} canonical{}\n", controls, folded_rgb, folded_alpha, canonical_slots);
 }

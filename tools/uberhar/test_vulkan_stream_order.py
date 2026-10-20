@@ -6,7 +6,7 @@ seams execute with recording driver/packet/selection endpoints. All original ord
 deferred draws are added because permanent compute rejection cannot reserve a query.
 The actual pass methods also preserve old/new attachment barrier metadata and
 natural profiling boundaries, with an executed old-order defect control.
-The scheduler's optional Calculated tracker stays null; adapters reject activation.
+CodexAstraLocal: Shared stream ownership remains covered after renderer retirement.
 No Vulkan execution, pixels, executor behavior, diagnostic packet behavior or full
 cached-UBO/LUT proof follows.
 """
@@ -61,9 +61,7 @@ def main():
         header=read(source_root/'src/video_core/renderer_vulkan/vk_stream_buffer.h')
         schedule=read(ROOT/'src/video_core/renderer_vulkan/vk_scheduler.cpp')
         read(source_root/'src/video_core/renderer_vulkan/vk_scheduler.h')
-        # CodexAstraLocal: Bind the interface behind the null observer adapters;
-        # Wait/SubmitExecution remain complete, unmodified production extracts.
-        read(source_root/'src/video_core/renderer_vulkan/compute_failure_packet.h')
+        # CodexAstraLocal: Retired packet observers have no provenance input; shared scheduler extracts stay complete.
         render=read(ROOT/'src/video_core/renderer_vulkan/vk_render_manager.cpp')
         render_header=read(ROOT/'src/video_core/renderer_vulkan/vk_render_manager.h')
         # CodexAstraLocal: Reuse the real category declarations; timing/query
