@@ -24,6 +24,9 @@
 #include <type_traits>
 #include <utility>
 #include <vector>
+// CodexAstraLocal: Extracted pass methods use the actual containment certificate;
+// do not replace new production dependencies with a handwritten always-false stub.
+#include "video_core/renderer_vulkan/uberhar_image_work.h"
 
 using u8 = std::uint8_t;
 using u32 = std::uint32_t;
@@ -393,6 +396,10 @@ public:
     std::array<vk::ImageAspectFlags, 2> aspects{};
     bool shadow_rendering{};
     RenderPass pass{};
+    // CodexAstraLocal: Mirror the production pass owner and diagnostic counter;
+    // preserve every existing ordinary/deferred ordering assertion below.
+    GpuWork pass_kind{GpuWork::Utility};
+    u64 contained_area_reuses{};
     u32 num_draws{};
     void BeginRendering(const Framebuffer*, Common::Rectangle<u32>);
     void BeginRendering(const RenderPass&, GpuWork = GpuWork::Utility);

@@ -64,6 +64,8 @@ def main():
         # CodexAstraLocal: Retired packet observers have no provenance input; shared scheduler extracts stay complete.
         render=read(ROOT/'src/video_core/renderer_vulkan/vk_render_manager.cpp')
         render_header=read(ROOT/'src/video_core/renderer_vulkan/vk_render_manager.h')
+        # CodexAstraLocal: Hash/copy the real dependency executed by extracted pass bodies.
+        read(ROOT/'src/video_core/renderer_vulkan/uberhar_image_work.h')
         # CodexAstraLocal: Reuse the real category declarations; timing/query
         # behavior belongs to the separate complete WorkProfile method gate.
         profile_header=read(ROOT/'src/video_core/renderer_vulkan/vk_work_profile.h')
@@ -154,7 +156,8 @@ def main():
             ['    class DeferredMapping final {','    class DeferredUpload final {'])
         (output/'stream-deferred-types.inc').write_text(nested+'\n')
         (output/'fixture.cpp').write_text(fixture)
-        argv=['c++','-std=c++20','-O2','-g0','-DNDEBUG','-pthread',str(output/'fixture.cpp'),'-o',str(output/'test')]
+        # CodexAstraLocal: Resolve the real containment helper included by the fixture.
+        argv=['c++','-std=c++20','-O2','-g0','-DNDEBUG','-pthread','-I'+str(ROOT/'src'),str(output/'fixture.cpp'),'-o',str(output/'test')]
         built=subprocess.run(argv,cwd=ROOT,capture_output=True,timeout=90)
         (output/'compile.stdout').write_bytes(built.stdout);(output/'compile.stderr').write_bytes(built.stderr)
         proof['compile_argv']=argv;proof['compile_exit']=built.returncode
