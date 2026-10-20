@@ -56,6 +56,8 @@ def main():
     # CodexAstraLocal: Focus new grouping/publication/ready-prefix behavior in
     # local checks; the default CI invocation still runs every older control.
     parser.add_argument('--groups-only', action='store_true')
+    # CodexAstraLocal: One bounded local port check; default CI remains complete.
+    parser.add_argument('--cpu-preparation-only', action='store_true')
     args = parser.parse_args()
     root = args.root.resolve()
     source_root = (args.source_root or root / 'src').resolve()
@@ -209,11 +211,14 @@ inline struct { Setting uberhar_test_mode; } values;
     header_path = source / logical[2]
     header = header_path.read_text()
     instrumented = '// CodexAstraLocal: Test-only deterministic exceptional boundaries.\n' + \
-        'namespace PacketProbe { void BeforeWave(); void BeforeInvocation(); }\n' + original
-    instrumented = change(instrumented, '                const auto result = pool.Run(',
-        '                PacketProbe::BeforeWave();\n                const auto result = pool.Run(')
+        'namespace PacketProbe { void BeforeWave(); void BeforeInvocation(); void BeforeThreadStart(); }\n' + original
+    instrumented = change(instrumented, '                const auto result = pool->Run(',
+        '                PacketProbe::BeforeWave();\n                const auto result = pool->Run(')
     instrumented = change(instrumented, '                    context.Run(unit);',
         '                    PacketProbe::BeforeInvocation();\n                    context.Run(unit);')
+    # CodexAstraLocal: Only the copied test source injects resource failure.
+    instrumented = change(instrumented, '            pool = std::make_unique<Common::Uberhar::ParallelWork>(',
+        '            PacketProbe::BeforeThreadStart();\n            pool = std::make_unique<Common::Uberhar::ParallelWork>(')
     variants = [
         ('positive', instrumented, header, 'all', None),
         ('missing_active_completion', change(instrumented,
@@ -274,16 +279,30 @@ inline struct { Setting uberhar_test_mode; } values;
             'if (false)\n        throw VideoCore::ShaderRecoveryError{"Uberhar deferred CPU draw failed"};\n    result ='),
             header, 'groups', 'ready error skipped or replayed'),
         ('missing_progress_reservation', change(instrumented,
-            'asynchronous{processors > 1 && bool(progress_lane)}',
-            'asynchronous{processors > 1}'), header,
+            'if (!*progress_lane)', 'if (false)'), header,
             'groups', 'no-lane publication failed synchronous progress'),
     ]
-    if args.reset_only:
+    # CodexAstraLocal: Mutation checks target the new exact-key precheck/reuse and
+    # lazy-start invariants; old renderer/group policy is still exercised unchanged.
+    preparation_variants = [
+        ('forgot_cached_boolean', change(instrumented, 'effect.booleans == booleans', 'true'),
+         header, 'preparation', 'cached Boolean identity aliased'),
+        ('ignored_token_identity', change(instrumented,
+            'Impl::Matches(candidate, source.shader_lease, booleans)', 'true'),
+         header, 'preparation', 'stale Boolean token reused'),
+        ('eager_policy_start', change(instrumented,
+            '    impl->capture_at_capacity = false;\n    // CodexAstraLocal: Invalid shapes',
+            '    impl->StartProgress();\n    impl->capture_at_capacity = false;\n    // CodexAstraLocal: Invalid shapes'),
+         header, 'preparation', 'negative policy reserved progress'),
+    ]
+    if args.cpu_preparation_only:
+        variants = [('positive', instrumented, header, 'all', None)] + preparation_variants
+    elif args.reset_only:
         variants = [('positive', instrumented, header, 'resets', None)]
     elif args.groups_only:
         variants = [('positive', instrumented, header, 'groups', None)] + grouped_variants
     else:
-        variants += grouped_variants
+        variants += grouped_variants + preparation_variants
     try:
         common = [compile_one(p,p.stem) for p in actual]
         fixture = compile_one(source / 'fixture.cpp','fixture')

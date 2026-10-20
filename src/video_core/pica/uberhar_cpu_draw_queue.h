@@ -4,6 +4,7 @@
 
 #include <array>
 #include <memory>
+#include <optional> // CodexAstraLocal: Cached-only eligibility can be unknown.
 #include <span>
 #include "common/uberhar_parallel_work.h"
 #include "video_core/pica/shader_setup.h"
@@ -73,6 +74,13 @@ class CpuDrawExecutor {
 public:
     struct Statistics {
         u64 captures{}, refused{};
+        // CodexAstraLocal TEST-ONLY LOG: Owner-only CPU preparation/startup evidence;
+        // remove after the isolated .48 CPU comparison is qualified on hardware.
+        u64 cached_checks{}, cached_hits{}, cached_misses{}, cached_negative{};
+        u64 effect_hits{}, effect_builds{}, effect_reuses{}, token_missing{}, token_mismatches{};
+        u64 start_requests{}, start_refused{}, start_failed{}, async_starts{};
+        u64 lookup_samples{}, lookup_ns{}, eligibility_samples{}, eligibility_ns{};
+        u64 proof_samples{}, proof_ns{};
         u64 work_refused{};
         // CodexAstraLocal: Separate preparation avoidance, real grouped
         // admissions, and lost pre-publication opportunities from throughput.
@@ -91,7 +99,7 @@ public:
     explicit CpuDrawExecutor(unsigned processors = Common::Uberhar::AvailableProcessors(),
                              std::size_t max_packets = 64,
                              std::size_t max_bytes = 8 * 1024 * 1024,
-                             void (*worker_start)() = nullptr);
+                             void (*worker_start)() = nullptr, bool sampled_costs = false);
     ~CpuDrawExecutor();
     CpuDrawExecutor(const CpuDrawExecutor&) = delete;
     CpuDrawExecutor& operator=(const CpuDrawExecutor&) = delete;
@@ -101,6 +109,9 @@ public:
     // misses/copies and Submit rechecks the still-pending group atomically.
     // A refusal counts one capture/refusal; success is counted by Capture only.
     bool AllowsShaderWork(const ShaderRunLease& lease, u16 booleans, u32 input_count);
+    // CodexAstraLocal: Reuse a retained exact proof before redundant owner setup;
+    // unknown code preserves the .48 setup path and every real capture is rechecked.
+    std::optional<bool> CachedShaderWork(const ShaderRunLease& lease, u16 booleans, u32 input_count);
     // CodexAstraLocal: Advisory only, before small-draw preparation/allocation.
     // A stale false merely misses an opportunity; locked admission stays final.
     bool HasPendingSeed() const noexcept;
@@ -123,6 +134,8 @@ public:
     // disappeared. No task is published on false, so the owner can run serially.
     bool Submit(const std::shared_ptr<CpuDrawPacket>& packet);
     void Drain();
+    // CodexAstraLocal: Called by the same owner as Capture/Submit/Drain; workers
+    // retain locks for their own publication counters, never write owner counters.
     Statistics GetStatistics() const;
 
 private:

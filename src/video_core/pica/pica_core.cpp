@@ -73,7 +73,9 @@ struct PicaCore::DeferredVertexState {
     u64 ready_prefix_packets{}, fallback_boundaries{};
     explicit DeferredVertexState(unsigned processors)
         : executor{processors, PacketLimit, 8 * 1024 * 1024,
-                   +[] { Common::SetCurrentThreadName("PICA draw pool"); }} {
+                   +[] { Common::SetCurrentThreadName("PICA draw pool"); }, true} {
+        // CodexAstraLocal TEST-ONLY LOG: Sparse preparation costs use the existing
+        // report cadence; remove after this isolated CPU comparison is qualified.
         pending.reserve(PacketLimit);
     }
 };
@@ -713,6 +715,23 @@ void PicaCore::ReportVirtualVertices(const char* kind, std::chrono::steady_clock
             deferred.preparation_reuses, deferred.refused_path_samples,
             deferred.refused_path_ns / 1e6, deferred.ready_prefix_packets,
             deferred.fallback_boundaries);
+        // CodexAstraLocal TEST-ONLY LOG: Attribute actual CPU preparation reuse,
+        // startup/refusal and sampled wall; remove after CPU-only .48 qualification.
+        // These costs overlap broader capture timing and are not measured savings.
+        LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
+            "Uberhar CPU048 preparation {}: schema=1 cached_checks={} cached_hits={} "
+            "cached_misses={} cached_negative={} effect_hits={} effect_builds={} effect_reuses={} "
+            "token_missing={} token_mismatches={} start_requests={} start_refused={} "
+            "start_failed={} async_starts={} lookup_samples={} lookup_ms={:.3f} "
+            "eligibility_samples={} eligibility_ms={:.3f} proof_samples={} proof_ms={:.3f} "
+            "policy=048_unchanged costs=sampled_host_not_saved_time period=1024",
+            kind, statistics.cached_checks, statistics.cached_hits, statistics.cached_misses,
+            statistics.cached_negative, statistics.effect_hits, statistics.effect_builds,
+            statistics.effect_reuses, statistics.token_missing, statistics.token_mismatches,
+            statistics.start_requests, statistics.start_refused, statistics.start_failed,
+            statistics.async_starts, statistics.lookup_samples, statistics.lookup_ns / 1e6,
+            statistics.eligibility_samples, statistics.eligibility_ns / 1e6,
+            statistics.proof_samples, statistics.proof_ns / 1e6);
     }
     // AstraPro: Existing five-second/final reporting gate. Periodic
     // samples can alias recurring draw patterns; never extrapolate a GPU budget.
@@ -875,9 +894,15 @@ void PicaCore::ReportVirtualVertices(const char* kind, std::chrono::steady_clock
     // not vertex-cache hits or a measured speedup. No game data is retained.
     // CodexAstraUlt Log Line: Replace AstraPro's blocking progress enqueue; totals stay reliable.
     LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
-             "Uberhar native plan {}: schema=1 hits={} builds={} capacity=1 "
-             "scope=pica_lifetime reuse=register_semantics_only",
-             kind, native_plan_cache.Hits(), native_plan_cache.Builds());
+             // CodexAstraLocal TEST-ONLY LOG: Distinguish recurring exact mapping
+             // reuse and sparse lookup/build costs; remove after CPU-only qualification.
+             "Uberhar native plan {}: schema=2 hits={} builds={} capacity=4 "
+             "history_hits={} evictions={} hit_samples={} hit_ms={:.3f} "
+             "build_samples={} build_ms={:.3f} scope=pica_lifetime reuse=register_semantics_only",
+             kind, native_plan_cache.Hits(), native_plan_cache.Builds(),
+             native_plan_cache.HistoryHits(), native_plan_cache.Evictions(),
+             native_plan_cache.HitSamples(), native_plan_cache.HitNs() / 1e6,
+             native_plan_cache.BuildSamples(), native_plan_cache.BuildNs() / 1e6);
     virtual_window_start = now;
     virtual_last_ns = virtual_vertex_ns;
     virtual_last_inputs = virtual_vertex_inputs;
@@ -2224,6 +2249,16 @@ bool PicaCore::TryDeferredVertices(bool is_indexed,
         // CodexAstraLocal TEST-ONLY LOG: Reuse the already-read batch timestamp;
         // sample at most one refused path in 1024 attempted captures.
         preparation.sample_refused_path = (++state.preparation_attempts & 1023U) == 0;
+        // CodexAstraLocal: .48's renderer eligibility check still ran above. Only
+        // an exact current CPU JIT binding may avoid redundant loader/setup work;
+        // stale code/entry or unknown policy preserves the original preparation.
+        const auto early_lease = shader_engine->LeaseForDraw(vs_setup);
+        const auto early_booleans = ParallelVertexBooleanUniforms(vs_setup.uniforms);
+        std::optional<bool> early_policy;
+        if (early_lease && early_lease.EntryPoint() == regs.internal.vs.main_offset)
+            early_policy = state.executor.CachedShaderWork(early_lease, early_booleans,
+                                                           pipeline.num_vertices);
+        if (early_policy && !*early_policy) return false;
         ReconcileDeferredVertices(false);
         if (state.pending.size() == DeferredVertexState::PacketLimit) {
             ++state.capacity_drains;
@@ -2263,8 +2298,14 @@ bool PicaCore::TryDeferredVertices(bool is_indexed,
         // CodexAstraLocal: Consult the immutable shader policy before copying
         // uniforms/defaults or mapping attributes. Capture still validates actual
         // FIFO misses and byte ownership; a refusal reuses this draw's setup.
-        if (!state.executor.AllowsShaderWork(
-                lease, ParallelVertexBooleanUniforms(vs_setup.uniforms), pipeline.num_vertices))
+        // CodexAstraLocal: Setup may change the lease. Reuse a positive precheck
+        // only for the exact same code owner/entry/Boolean state; Capture still
+        // enforces .48 FIFO work, copy credit, and final pending-group checks.
+        const auto booleans = ParallelVertexBooleanUniforms(vs_setup.uniforms);
+        const bool policy_ready = early_policy && *early_policy &&
+            early_lease.OwnerIdentity() == lease.OwnerIdentity() &&
+            early_lease.EntryPoint() == lease.EntryPoint() && early_booleans == booleans;
+        if (!policy_ready && !state.executor.AllowsShaderWork(lease, booleans, pipeline.num_vertices))
             return false;
         CpuDrawCapture source;
         source.shader_lease = std::move(lease);

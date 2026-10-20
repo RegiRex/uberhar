@@ -85,7 +85,12 @@ void Gate(bool open) { { std::lock_guard lock{gate_mutex}; gate_open = open; } g
 // CodexAstraLocal: The driver injects these calls only into a copied CPP. They
 // force the otherwise rare terminal boundaries without replacing JIT execution.
 namespace PacketProbe {
-std::atomic<bool> fail_packet{}, fail_wave{};
+// CodexAstraLocal: Deterministic thread-resource refusal tests serial progress.
+std::atomic<bool> fail_packet{}, fail_wave{}, fail_start{};
+void BeforeThreadStart() {
+    if (fail_start.exchange(false))
+        throw std::system_error{std::make_error_code(std::errc::resource_unavailable_try_again)};
+}
 std::mutex mutex;
 std::condition_variable cv;
 bool entered{}, release{};
@@ -686,6 +691,109 @@ void Groups(const std::vector<CarryChallenge::Case>& programs) {
 // CodexAstraLocal: Read the actual PICA ordered-prefix implementation using real
 // packets in deliberately different readiness orders. Unpublished later work
 // represents an unavailable result; the reader must not drain or skip it.
+// CodexAstraLocal: Exercise the actual CPU-only .48 fast paths against serial
+// output. No GPU routing/grouping policy is adapted for this comparison fixture.
+void PreparationReuse(const std::vector<CarryChallenge::Case>& programs) {
+    // CodexAstraLocal: Existing Normal() covers all FP modes. These fixtures
+    // compare exact output/tail/FIFO state while isolating preparation decisions.
+    const auto equal = [](const CpuDrawPacket& packet, const Expected& expected) {
+        const auto bytes = packet.HardwareBytes();
+        Need(bytes.size() == expected.hardware.size() &&
+             !std::memcmp(bytes.data(), expected.hardware.data(), bytes.size()), "preparation output differs");
+        const auto result = packet.CompletedResult();
+        Need(!std::memcmp(result.last_pair.data(), expected.pair.data(), sizeof(result.last_pair)) &&
+             result.counts.hits == expected.counts.hits && result.counts.invocations == expected.counts.invocations,
+             "preparation tail or FIFO differs");
+        ++comparisons;
+    };
+    Shader::JitEngine engine; ShaderSetup setup;
+    const auto floor = WorkProgram(35);
+    const auto heavy = WorkProgram(200);
+    const auto floor_lease = Lease(engine, setup, floor);
+    const auto heavy_lease = Lease(engine, setup, heavy);
+    {
+        const auto reservations = Common::Uberhar::AuxiliaryBudget::Global().GetStatistics().reservations;
+        CpuDrawExecutor queue{4};
+        Need(!queue.CachedShaderWork(floor_lease, 0, 3).has_value(), "unknown cached policy invented");
+        Need(!queue.AllowsShaderWork(floor_lease, 0, 3), "tiny policy admitted");
+        const auto builds = queue.GetStatistics().effect_builds;
+        Need(queue.CachedShaderWork(floor_lease, 0, 3) == std::optional<bool>{false},
+             "negative policy not cached");
+        Need(queue.GetStatistics().effect_builds == builds && queue.GetStatistics().start_requests == 0 &&
+             Common::Uberhar::AuxiliaryBudget::Global().GetStatistics().reservations == reservations,
+             "negative policy reserved progress");
+        Need(!queue.CachedShaderWork(floor_lease, 1, 3).has_value(), "cached Boolean identity aliased");
+        Live live{heavy_lease, heavy, 96, 1, false};
+        const auto expected = Serial(live);
+        Need(queue.AllowsShaderWork(heavy_lease, 0, 96), "qualified standalone seed rejected");
+        auto packet = queue.Capture(live.source, VideoCore::ActualWriter);
+        const auto before = queue.GetStatistics();
+        Need(packet && before.effect_reuses == 1 && before.seed_submitted == 0 &&
+             before.start_requests == 0, "accepted proof or lazy capture contract");
+        Need(queue.Submit(packet), "standalone seed publication"); queue.Drain();
+        equal(*packet, expected);
+        Need(queue.GetStatistics().start_requests == 1 && queue.GetStatistics().seed_submitted == 1,
+             "lazy progress startup count");
+    }
+    // CodexAstraLocal: An accepted token does not authorize changed Booleans,
+    // entry/code or a replacement cache slot; the fallback still shades exact data.
+    {
+        CpuDrawExecutor queue{4};
+        Live live{heavy_lease, heavy, 96, 1, false};
+        Need(queue.AllowsShaderWork(heavy_lease, 0, 96), "token source rejected");
+        live.source.uniforms.b[0] = true;
+        auto packet = queue.Capture(live.source, VideoCore::ActualWriter);
+        Need(packet && queue.GetStatistics().token_mismatches == 1 &&
+             queue.GetStatistics().effect_reuses == 0, "stale Boolean token reused");
+        Need(queue.Submit(packet), "token fallback publication"); queue.Drain();
+        equal(*packet, Serial(live));
+    }
+    {
+        CpuDrawExecutor queue{1};
+        Need(queue.AllowsShaderWork(heavy_lease, 0, 96), "eviction token source rejected");
+        for (u16 booleans = 1; booleans <= 16; ++booleans) {
+            Live changed{heavy_lease, heavy, 96, 1, false};
+            for (unsigned b = 0; b < 16; ++b) changed.source.uniforms.b[b] = (booleans >> b) & 1;
+            Need(bool(queue.Capture(changed.source, VideoCore::ActualWriter)), "replacement proof capture");
+        }
+        Live restored{heavy_lease, heavy, 96, 1, false};
+        const auto reused = queue.GetStatistics().effect_reuses;
+        auto packet = queue.Capture(restored.source, VideoCore::ActualWriter);
+        Need(packet && queue.GetStatistics().effect_reuses == reused,
+             "overwritten proof token reused");
+        Need(queue.Submit(packet), "replacement fallback publication"); queue.Drain();
+        equal(*packet, Serial(restored));
+    }
+    // CodexAstraLocal: Optional thread failure occurs before publication and
+    // releases progress credit; the exact draw still completes synchronously.
+    {
+        CpuDrawExecutor queue{4};
+        Live live{heavy_lease, heavy, 96, 1, false};
+        const auto reservations = Common::Uberhar::AuxiliaryBudget::Global().GetStatistics().reservations;
+        PacketProbe::fail_start = true;
+        auto packet = queue.Capture(live.source, VideoCore::ActualWriter);
+        Need(packet && queue.Submit(packet), "thread-failure serial publication"); queue.Drain();
+        equal(*packet, Serial(live));
+        const auto stats = queue.GetStatistics();
+        Need(stats.start_failed == 1 && stats.async_starts == 0 && stats.peak_threads == 1 &&
+             Common::Uberhar::AuxiliaryBudget::Global().GetStatistics().reservations == reservations,
+             "thread-failure progress credit leaked");
+    }
+    // CodexAstraLocal: Lookup/proof prices remain disabled without clock reads;
+    // enabled counters describe actual work and preserve the same admission.
+    for (bool diagnostics : {false, true}) {
+        CpuDrawExecutor queue{4, 64, 8 * 1024 * 1024, nullptr, diagnostics};
+        Need(!queue.AllowsShaderWork(floor_lease, 0, 3), "diagnostic tiny admission");
+        for (unsigned i = 0; i < 2048; ++i)
+            Need(queue.CachedShaderWork(floor_lease, 0, 3) == std::optional<bool>{false},
+                 "diagnostic control changed eligibility");
+        const auto stats = queue.GetStatistics();
+        Need(stats.cached_checks == 2048 && stats.start_requests == 0 &&
+             stats.lookup_samples == (diagnostics ? 2U : 0U) &&
+             stats.eligibility_samples == (diagnostics ? 2U : 0U), "feature cost sample routing");
+    }
+}
+
 void ReadyPrefix(const std::vector<CarryChallenge::Case>& programs) {
     Shader::JitEngine engine; ShaderSetup setup;
     auto lease = Lease(engine, setup, programs[0]);
@@ -745,6 +853,9 @@ int main(int argc, char** argv) try {
     if (selected == "all" || selected == "work") WorkFloor(programs);
     if (selected == "all" || selected == "resets" || selected == "groups") Resets(programs);
     if (selected == "all" || selected == "groups") { Groups(programs); ReadyPrefix(programs); }
+    // CodexAstraLocal: CPU-only preparation regressions join the existing output
+    // fixture; full CI still covers all inherited carry/group/terminal contracts.
+    if (selected == "all" || selected == "preparation") PreparationReuse(programs);
     original.Apply();
     std::cout << Json{{"passed", true}, {"checks", checks}, {"comparisons", comparisons},
         {"programs", programs.size()}, {"fp_modes", ModeCount},

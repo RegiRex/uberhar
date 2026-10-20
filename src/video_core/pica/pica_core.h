@@ -538,7 +538,9 @@ private:
     u64 native_index_retries{}, native_scanned_indices{}, native_index_rescues{},
         native_rescued_vertices{}, native_index_escapes{};
     // AstraPro: Pure mapping reuse also accelerates CPU fallback inside Combo.
-    NativeVertexPlanCache native_plan_cache;
+    // CodexAstraLocal TEST-ONLY LOG: Bounded mapping cost samples accompany
+    // exact four-entry CPU plan reuse; remove after isolated CPU qualification.
+    NativeVertexPlanCache native_plan_cache{true};
     NativeVertexSamples native_samples;
     // AstraEH: Host-only admission state; ordinary batches add no diagnostic clock reads.
     NativeVertexSampleBudget native_sample_budget;
