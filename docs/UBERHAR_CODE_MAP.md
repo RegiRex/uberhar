@@ -1,3 +1,21 @@
+<!-- CodexAstraLocal: Map .52 logical changes and preserve the attribution of retained historical implementations. -->
+## 0.1.52 — admission, image work and selectable modes
+
+- `UBERHAR_VERSION` and `docs/releases/0.1.52.md` identify this candidate.
+- `uberhar_adaptive_cpu_policy.h`, `uberhar_static_tev_policy.h` and
+  `vk_pipeline_cache.cpp` admit replacement demand without breaking lighting
+  reservations, immutable ownership or bounded optional compilation.
+- `glsl_fs_shader_gen.*` uses safe first-use locals and a real unpruned emitter
+  when Remove unused fragment work is off; independent controls remain independent.
+- `uberhar_image_work.h`, `vk_render_manager.*` and `vk_texture_runtime.*` preserve
+  scissors/ownership while reducing redundant pass endings and exact RGBA8 blits.
+  `test_image_work.*` validates region guards and actual Vulkan transfer pixels.
+- Shared test-profile policy, Android Kotlin/config/UI and `video_core.cpp` retire
+  standalone Software/generic Combo and explicitly migrate saved modes/API0.
+  Internal Software references remain capability-gated; no CPU pixel switch ships.
+- `.github/workflows/uberhar-alpha.yml` isolates the exact-.48 CPU comparison's
+  historical shader gates and signed artifact without altering ordinary releases.
+
 <!-- CodexAstraLocal: Preserve historical evidence while making the current retirement explicit. -->
 ## 0.1.51 — Calculated retired
 

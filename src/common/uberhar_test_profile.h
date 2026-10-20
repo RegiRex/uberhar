@@ -7,11 +7,10 @@
 
 namespace Settings {
 
-// CodexAstraUlt: Centralize preset capabilities so the comparison changes only optional
-// fragment specialization. Both Combo presets retain identical ready-vertex and compute rules;
-// mandatory specialized recovery for unsupported generic states is never disabled here.
+// CodexAstraLocal: Shared policy for the remaining Native/Combo profiles.
 constexpr bool UsesReadyGpuVertices(UberharTestMode mode) {
-    return mode == UberharTestMode::Automatic || mode == UberharTestMode::ComboGeneric;
+    // CodexAstraLocal: Retire the generic-only profile while keeping Combo capability.
+    return mode == UberharTestMode::Automatic;
 }
 
 constexpr bool AllowsSpecializedFragments(UberharTestMode mode) {
@@ -19,14 +18,13 @@ constexpr bool AllowsSpecializedFragments(UberharTestMode mode) {
 }
 
 // CodexAstraLocal: CPU fragment preparation is independent of GPU vertex
-// promotion. Native and full Combo may reuse bounded static TEV; the explicit
-// ComboGeneric comparison retains its current path.
+// promotion. Native and Combo may reuse bounded static TEV.
 constexpr bool AllowsStaticCpuTev(UberharTestMode mode) {
     return mode == UberharTestMode::Native || mode == UberharTestMode::Automatic;
 }
 
 // CodexAstraLocal: CPU-produced vertices may use an exact ready full fragment
-// without granting GPU vertex execution. Keep the generic comparison isolated.
+// without granting GPU vertex execution.
 // CodexAstraLocal: Native-only fragment control leaves Combo policy independent.
 constexpr bool AllowsFullCpuFragments(UberharTestMode mode, bool native_full = true) {
     return (mode == UberharTestMode::Native && native_full) ||
@@ -34,7 +32,8 @@ constexpr bool AllowsFullCpuFragments(UberharTestMode mode, bool native_full = t
 }
 
 constexpr bool UsesAutomaticCompute(UberharTestMode mode) {
-    return mode == UberharTestMode::Automatic || mode == UberharTestMode::ComboGeneric;
+    // CodexAstraLocal: Retire the generic-only profile while keeping Combo capability.
+    return mode == UberharTestMode::Automatic;
 }
 
 constexpr bool AllowsComputeRendering(UberharTestMode mode) {
@@ -42,14 +41,17 @@ constexpr bool AllowsComputeRendering(UberharTestMode mode) {
     return UsesAutomaticCompute(mode);
 }
 
-// CodexAstraLocal: Legacy configuration 2 resolves to Native without reusing its ID.
+// CodexAstraLocal: Retired persisted IDs migrate without reusing their values.
 constexpr UberharTestMode MigrateUberharTestMode(UberharTestMode mode) {
-    return static_cast<u32>(mode) == 2 ? UberharTestMode::Native : mode;
+    // CodexAstraLocal: Existing IDs are never recycled. Software is retired,
+    // not relabeled as CPU pixels; frontend migration reports the new Native route.
+    const auto id = static_cast<u32>(mode);
+    return id == 2 || id == 5 ? UberharTestMode::Native
+                             : id == 4 ? UberharTestMode::Automatic : mode;
 }
 
 constexpr bool IsUberharTestProfile(UberharTestMode mode) {
-    return mode == UberharTestMode::Software || mode == UberharTestMode::Native ||
-           AllowsComputeRendering(mode);
+    return mode == UberharTestMode::Native || AllowsComputeRendering(mode);
 }
 
 // AstraEH: Apply ONLY after the frontend has reloaded the user's saved settings.
@@ -59,35 +61,9 @@ inline void ApplyUberharTestProfile() {
     // CodexAstraLocal: Migrate before applying any effective renderer settings.
     const auto mode = MigrateUberharTestMode(values.uberhar_test_mode.GetValue());
     values.uberhar_test_mode = mode;
-    // CodexAstraUlt: Replace the original three-profile whitelist with the shared policy,
-    // preserving invalid-value recovery while accepting the appended diagnostic preset.
+    // CodexAstraLocal: Preserve invalid-value recovery after retiring legacy profiles.
     if (!IsUberharTestProfile(mode)) {
         values.uberhar_test_mode = UberharTestMode::Custom;
-        return;
-    }
-    // CodexAstraLocal: CPU graphics is an explicit 1x implementation, not a
-    // Native fallback. Keep guest CPU, audio and completion timing
-    // choices intact while disabling hardware guest graphics and shortcuts.
-    if (mode == UberharTestMode::Software) {
-        values.graphics_api = GraphicsAPI::Software;
-        values.resolution_factor = 1;
-        values.use_hw_shader = false;
-        values.use_shader_jit = true;
-        values.shaders_accurate_mul = true;
-        values.uberhar_hybrid_tev = false;
-        values.uberhar_force_tev = false;
-        values.uberhar_cpu_vertex_bridge = false;
-        values.use_disk_shader_cache = false;
-        values.texture_filter = TextureFilter::NoFilter;
-        values.texture_sampling = TextureSampling::GameControlled;
-        values.render_3d = StereoRenderOption::Off;
-        values.factor_3d = 0;
-        values.render_3d_which_display = StereoWhichDisplay::None;
-        values.disable_right_eye_render = false;
-        values.swap_eyes_3d = false;
-        values.dump_textures = false;
-        values.custom_textures = false;
-        values.use_skip_duplicate_frames = false;
         return;
     }
     values.graphics_api = GraphicsAPI::Vulkan;
@@ -96,9 +72,7 @@ inline void ApplyUberharTestProfile() {
     values.disable_spirv_optimizer = true;
     values.async_shader_compilation = false;
     values.uberhar_hybrid_tev = true;
-    // CodexAstraUlt: Replace AstraPro's Automatic-only comparison with the shared fragment
-    // policy. Existing presets are unchanged; ComboGeneric retains ready GPU vertices while
-    // forcing covered fragments through the generic path. Saved custom values remain separate.
+    // CodexAstraLocal: Native/Combo preserve their original fragment policies.
     values.uberhar_force_tev = !AllowsSpecializedFragments(mode);
     values.uberhar_cpu_vertex_bridge = false;
     // AstraEH: 0.0.10's reference interpreter limited battle speed even at 1x.

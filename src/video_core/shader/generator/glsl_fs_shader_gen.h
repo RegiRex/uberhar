@@ -209,7 +209,8 @@ private:
     // CodexAstraLocal: Bake only prepared TEV choices, preserving consumed-operand
     // order, one fetch per referenced texture, byte rounding and delayed writes.
     void WriteStaticTev();
-    std::string GetStaticTevSource(u32 source, u32 stage);
+    // CodexAstraLocal: Track dominated first use only for branch-free static plans.
+    std::string GetStaticTevSource(u32 source, u32 stage, u32& sampled, bool local_samples);
 
     void AppendProcTexShiftOffset(std::string_view v, Pica::TexturingRegs::ProcTexShift mode,
                                   Pica::TexturingRegs::ProcTexClamp clamp_mode);

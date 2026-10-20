@@ -21,6 +21,7 @@
 #include "common/microprofile.h"
 #include "common/settings.h" // CodexAstraLocal: Snapshot independent transfer controls at startup.
 #include "video_core/custom_textures/material.h"
+#include "video_core/renderer_vulkan/uberhar_image_work.h" // CodexAstraLocal: Exact 1:1 regions.
 #include "video_core/rasterizer_cache/texture_codec.h"
 #include "video_core/rasterizer_cache/utils.h"
 #include "video_core/renderer_vulkan/pica_to_vk.h"
@@ -322,12 +323,14 @@ void TextureRuntime::ReportTransferSavings(bool final) noexcept {
         "copy_coordinates_refused={} feedback_disabled={} feedback_missing={} "
         "feedback_allocation={} feedback_epoch={} identity_safety_always=true "
         "copy_gate_samples={} copy_gate_ns={} blit_gate_samples={} blit_gate_ns={} feedback_gate_samples={} feedback_gate_ns={} "
+        "blit_copy_regions={} blit_copy_bytes={} blit_copy_gate_samples={} blit_copy_gate_ns={} "
         "epoch_scope=any_recorded_command_after_first_snapshot saved_gpu_ms=unknown cumulative=true",
         transfer_sequence, final, feedback_reuse_enabled, copy_regions, identity_regions,
         feedback_requests, feedback_reuses, blit_requests, identity_blits, copy_image_refused,
         copy_subresource_refused, copy_coordinates_refused, feedback_disabled,
         feedback_missing, feedback_allocation, feedback_epoch, reuse_gate_samples[0], reuse_gate_ns[0],
-        reuse_gate_samples[1], reuse_gate_ns[1], reuse_gate_samples[2], reuse_gate_ns[2]);
+        reuse_gate_samples[1], reuse_gate_ns[1], reuse_gate_samples[2], reuse_gate_ns[2],
+        blit_copy_regions, blit_copy_bytes, blit_copy_gate_samples, blit_copy_gate_ns);
     } catch (...) { /* CodexAstraLocal: Optional reporting cannot interrupt image work or teardown. */ }
 }
 
@@ -679,6 +682,52 @@ bool TextureRuntime::BlitTextures(Surface& source, Surface& dest,
         renderpass_cache.EndRendering(RenderManager::EndReason::Blit);
         ++identity_blits;
         return true;
+    }
+    // CodexAstraLocal: An unscaled RGBA8 transfer has exact texel correspondence;
+    // use the existing copy path instead of filtering/reconverting the same
+    // values. Keep its visibility barriers and all caller ownership/IRQ updates.
+    // Reject aliasing, custom/converted formats, flipping, scaling and invalid
+    // physical mip/layer bounds rather than extending a GPU-to-CPU fallback.
+    const auto copy_gate_start = sample_gate ? std::chrono::steady_clock::now() :
+        std::chrono::steady_clock::time_point{};
+    const auto& src = blit.src_rect;
+    const auto& dst = blit.dst_rect;
+    const auto& src_handle = source.handles[source.current];
+    const auto& dst_handle = dest.handles[dest.current];
+    const bool direct_copy = source.Image() != dest.Image() && !source.IsCustom() &&
+        !dest.IsCustom() && source.pixel_format == PixelFormat::RGBA8 &&
+        dest.pixel_format == PixelFormat::RGBA8 &&
+        source.traits.native == vk::Format::eR8G8B8A8Unorm &&
+        dest.traits.native == vk::Format::eR8G8B8A8Unorm &&
+        source.texture_type == TextureType::Texture2D && dest.texture_type == TextureType::Texture2D &&
+        // CodexAstraLocal: CopyTextures retains whole-image barriers. Restrict
+        // this fast path to single-mip images so it cannot widen the old blit's
+        // requested-mip synchronization scope just to replace its GPU command.
+        src_handle.levels == 1 && dst_handle.levels == 1 &&
+        blit.src_layer == 0 && blit.dst_layer == 0 &&
+        blit.src_level < src_handle.levels && blit.dst_level < dst_handle.levels &&
+        blit.src_level < 32 && blit.dst_level < 32 &&
+        ImageWork::EqualPositiveRegions(src.left, src.bottom, src.right, src.top,
+                                        dst.left, dst.bottom, dst.right, dst.top) &&
+        src.right <= std::max(1U, src_handle.width >> blit.src_level) &&
+        src.top <= std::max(1U, src_handle.height >> blit.src_level) &&
+        dst.right <= std::max(1U, dst_handle.width >> blit.dst_level) &&
+        dst.top <= std::max(1U, dst_handle.height >> blit.dst_level);
+    if (sample_gate) {
+        ++blit_copy_gate_samples;
+        blit_copy_gate_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now() - copy_gate_start).count();
+    }
+    if (direct_copy) {
+        ++blit_copy_regions;
+        blit_copy_bytes += u64{src.right - src.left} * (src.top - src.bottom) * 4;
+        const VideoCore::TextureCopy copy{
+            .src_level = blit.src_level, .dst_level = blit.dst_level,
+            .src_layer = 0, .dst_layer = 0,
+            .src_offset = {src.left, src.bottom}, .dst_offset = {dst.left, dst.bottom},
+            .extent = {src.right - src.left, src.top - src.bottom},
+        };
+        return CopyTextures(source, dest, std::span{&copy, std::size_t{1}});
     }
     const bool is_depth_stencil = source.type == VideoCore::SurfaceType::DepthStencil;
     const auto& depth_traits = instance.GetTraits(source.pixel_format);

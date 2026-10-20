@@ -31,8 +31,8 @@ Its development goals are:
   with a 100% speed limit, complete graphics and consistent frame pacing.
 - **Useful adaptive CPU multicore work:** distribute independent work within the
   available CPU budget, preserve dependent work in order, and judge improvement
-  by complete frames. Three useful app CPU core-equivalents is a 0.2.0 development
-  target, not an achieved result or a reason to create unnecessary load.
+  by complete frames. Use additional CPU capacity when it improves sustained
+  performance; earlier three/four-core targets are stepping stones, not ceilings.
   One core-equivalent means one core fully occupied over the measured interval;
   it does not require pinning work to a particular physical core.
 - **Renderer choices with clear ownership:** retain CPU vertex execution where
@@ -40,14 +40,13 @@ Its development goals are:
   without silently substituting a different mode.
 
 These are development targets. Native and Combo have completed device game runs,
-but substantial slowdowns and visual defects remain. CPU Software remains
-experimental and has failed tested game scenes; local correctness checks
+but substantial slowdowns and visual defects remain. Local correctness checks
 and successful builds do not establish playable whole-game support. Read the
 notes attached to each [published release](https://github.com/RegiRex/uberhar/releases)
 for its scope. The source branch may contain changes awaiting release or device
 qualification.
 
-<!-- CodexAstraLocal: Describe actual guest-work placement so Native, GPU compute and CPU Software cannot be mistaken for equivalent backends. -->
+<!-- CodexAstraLocal: Describe surviving modes and retire unsuccessful standalone experiments without implying that CPU shader preparation executes GPU fragments. -->
 ## Rendering modes
 
 All modes still emulate the guest CPU on the host CPU. The table describes
@@ -57,21 +56,24 @@ All modes still emulate the guest CPU on the host CPU. The table describes
 | --- | --- | --- |
 | **Native** — “Virtual PICA: native rasterization” | Guest vertex shaders run on the CPU; Vulkan rasterization and fragment shading run on the GPU. Eligible CPU work can use workers. | Main CPU-vertex rendering path. Generic and ready prepared fragment shaders reduce first-use work, but compilation stalls and rendering defects remain possible. |
 | **Combo** — “Virtual PICA: automatic combination” | CPU vertices combine with ready GPU vertex execution for eligible draws, Vulkan rasterization and bounded fragment specialization. | Compare mixed work placement with Native. It is not the independent compute renderer. Pending optional specialization retains a complete rendering path. |
-| **CPU Software** | Guest rasterization, texture sampling and fragment operations run on the CPU at **1×**. OpenGL ES presents completed frames. | Experimental CPU graphics with **1 / 2 / Automatic** rendering participants. Ordering and feedback can require serial work; game compatibility remains incomplete. |
 
-**Combo (generic fragments)** is a comparison mode that keeps Combo's vertex
-policy while limiting optional fragment specialization. **Custom** exposes the
-inherited graphics settings; it does not carry the same preset behavior.
+**Custom** exposes the inherited graphics settings; it does not carry the same
+preset behavior. Complete generic shaders remain an internal cold-rendering path
+in Native/Combo while optional specialization becomes ready.
 
 Choose a mode in Android's **Graphics** settings and restart the game after
 changing it. The presets apply their own effective graphics settings. Native
-and Combo use Vulkan; CPU Software uses its separate 1× path. The
+and Combo use Vulkan. The
 **Native mode** name does not mean **1× native resolution**.
 
 <!-- CodexAstraLocal: Document the actual removal and safe legacy migration. -->
-Calculated is removed starting with 0.1.51. Its saved mode value migrates to Native;
-the other mode IDs and saved settings keep their meanings. Historical results remain
-available, but do not describe a selectable mode in this version.
+Calculated was removed in 0.1.51. Starting with 0.1.52, CPU Software and Combo
+(generic fragments) are also retired from Android's selectable modes. Saved
+Calculated/Software modes migrate to Native; generic Combo migrates to Combo.
+The inherited software engine remains an internal reference, not an Android
+performance feature. A CPU pixel switch is not included: changing its presenter
+would not resolve the measured low rasterization throughput. Historical results
+remain available and are not claims about selectable modes in this version.
 
 <!-- CodexAstraLocal: Route installs to this fork and state the actual Android package/minimum SDK without borrowing upstream desktop or store qualification. -->
 ## Downloads and setup

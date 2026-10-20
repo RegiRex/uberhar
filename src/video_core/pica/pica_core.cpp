@@ -703,10 +703,11 @@ PicaCore::PicaCore(Memory::MemorySystem& memory_, std::shared_ptr<DebugContext> 
       // CodexAstraLocal: Once-read CPU policy; no hot-path configuration calls.
       cpu_adaptive{Settings::values.uberhar_cpu_adaptive_participation.GetValue()},
       cpu_feature_diagnostics{Settings::values.uberhar_feature_diagnostics.GetValue()},
-      // CodexAstraLocal TEST-ONLY LOG: Immutable mode admission keeps producer
-      // observation out of Native/Combo workers and deferred packets.
+      // CodexAstraLocal TEST-ONLY LOG: Internal CPU backend admission keeps producer
+      // observation out of Native/Combo workers and deferred packets. Remove
+      // producer diagnostics after the internal Software reference is qualified.
       software_producer_diagnostics{
-          Settings::values.uberhar_test_mode.GetValue() == Settings::UberharTestMode::Software},
+          Settings::GetWorkingGraphicsAPI() == Settings::GraphicsAPI::Software},
       // CodexAstraLocal: Merge Software read provenance with Native/Combo's
       // immutable preparation diagnostics; neither changes the other's policy.
       software_input_provenance{software_producer_diagnostics && Settings::software_renderer_diagnostics.GetValue()},
@@ -2537,9 +2538,11 @@ void PicaCore::LoadVertices(bool is_indexed, std::chrono::steady_clock::time_poi
     // recorded source draw rather than assuming the terminal draw owns them.
     if (software_semantic_mask) ++software_source_draw;
 
-    // AstraEH: Experimental no-GS draws can reuse final rasterizer vertices. Keep
-    // Custom, debugger and geometry-shader execution on their established path.
-    const bool virtual_test =
+    // CodexAstraLocal: The retained Software backend must keep its certified
+    // prepared-input/batch path after retiring mode 5. GPU Custom, debugger and
+    // geometry-shader draws retain their established paths; no deferred-write
+    // capability or read-range certificate is broadened here.
+    const bool virtual_test = software_producer_diagnostics ||
         Settings::values.uberhar_test_mode.GetValue() != Settings::UberharTestMode::Custom;
     if (virtual_test && !debug_context && pipeline.use_gs == PipelineRegs::UseGS::No) {
         // AstraPro: Refresh on exact mapping changes; live inputs and uniforms
@@ -2601,7 +2604,8 @@ void PicaCore::LoadVertices(bool is_indexed, std::chrono::steady_clock::time_poi
             // shade-ahead, FIFO change or generic deferred-renderer capability.
             bool software_scope=false;
             MemoryRef software_indices;
-            if(Settings::values.uberhar_test_mode.GetValue()==Settings::UberharTestMode::Software &&
+            // CodexAstraLocal: Internal CPU backend capability survives UI-model retirement.
+            if(software_producer_diagnostics &&
                input_plan.Ready() && rasterizer->WantsCpuRasterBatch()) {
                 std::array<VideoCore::RasterizerInterface::CpuRasterReadRange,17> reads;
                 u32 read_count{},mapped{};bool qualified=true;

@@ -184,6 +184,8 @@ private:
     const bool transfer_diagnostics;
     u64 copy_regions{}, identity_regions{}, identity_blits{}, feedback_requests{}, feedback_reuses{};
     u64 copy_image_refused{}, copy_subresource_refused{}, copy_coordinates_refused{}, blit_requests{};
+    // CodexAstraLocal TEST-ONLY LOG: Remove after exact blit/copy substitution is qualified.
+    u64 blit_copy_regions{}, blit_copy_bytes{}, blit_copy_gate_samples{}, blit_copy_gate_ns{};
     u64 feedback_disabled{}, feedback_missing{}, feedback_allocation{}, feedback_epoch{};
     // CodexAstraLocal TEST-ONLY LOG: Sparse predicate cost excludes copy/visibility execution.
     std::array<u64, 3> reuse_gate_samples{}, reuse_gate_ns{};

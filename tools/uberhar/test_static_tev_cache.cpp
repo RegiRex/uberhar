@@ -458,12 +458,96 @@ void RuntimeFeatureAttribution() {
             "actual advance preserves two reserved full owners");
 }
 
+// CodexAstraLocal: Cold module endpoints and extracted production advance must
+// recover from menu occupancy, not only from a direct Bank::Observe fixture.
+// Two old lit owners deliberately precede six cheap menu PSOs, so an unpaired
+// oldest-victim implementation would discard lighting for the blocked race miss.
+void ColdMenuToRaceReservation() {
+    for (bool partial : {false, true}) {
+        PipelineCache p;
+        p.lit_specialization = true;
+        p.allow_full_cpu_fragments = !partial;
+        auto cheap = Config(1);
+        for (auto& stage : cheap.texture.tev_stages) stage = {0x000f000f, 0, 0, 0};
+        cheap.texture.tev_stages[0] = {0x00030003, 0, 0, 0};
+        auto lit = cheap;
+        lit.lighting.enable.Assign(1);
+        lit.lighting.src_num.Assign(1);
+        lit.texture.tev_stages[0] = {0x00010001, 0, 0, 0};
+        const auto info = [](unsigned id) {
+            auto value = Info();
+            value.state.blending.color_write_mask = id + 1;
+            return value;
+        };
+        const auto tier = partial ? 1U : 0U;
+        Require(p.curr_disk_cache->ready_fragments.empty() &&
+                p.curr_disk_cache->static_tev_fragments.empty(), "menu starts module-cold");
+        for (unsigned id = 0; id < 8; ++id) {
+            bool selected = false;
+            for (unsigned frame = 0; frame < 32 && !selected; ++frame) {
+                for (unsigned draw = 0; draw < 16; ++draw) {
+                    const auto token = DrawCpu(p, info(id), id < 2 ? lit : cheap);
+                    selected |= token && CpuFragmentPartitions::Index(
+                        *p.ready_cpu_bank->AllSlots()[token.slot].observation) == tier;
+                }
+                p.ready_vertex_worker->WaitForRequests(); Advance(p);
+            }
+            Require(selected, "cold menu reaches intended fragment tier");
+        }
+        Require(p.ready_cpu_bank->Owned(tier) == 8 && p.ready_cpu_bank->CheapOwned(tier) == 6,
+                "cold menu preserves six cheap plus two lit owners");
+        const auto attempts = p.ready_cpu_bank->Attempts(tier);
+        bool raced = false;
+        for (unsigned frame = 0; frame < 32 && !raced; ++frame) {
+            // Keep five cheap residents recent; the two oldest lit owners must
+            // survive while the sixth cheap owner is replaced after its GPU use.
+            for (unsigned id = 2; id < 7; ++id) DrawCpu(p, info(id), cheap);
+            for (unsigned draw = 0; draw < 16; ++draw) {
+                const auto token = DrawCpu(p, info(8), cheap);
+                raced |= token && CpuFragmentPartitions::Index(
+                    *p.ready_cpu_bank->AllSlots()[token.slot].observation) == tier;
+            }
+            p.ready_vertex_worker->WaitForRequests(); Advance(p);
+        }
+        Require(raced && p.ready_cpu_bank->Attempts(tier) == attempts + 1,
+                "cold menu quota admits compatible race replacement");
+        Require(p.ready_cpu_bank->Owned(tier) == 8 && p.ready_cpu_bank->CheapOwned(tier) == 6 &&
+                p.ready_cpu_bank->stats.lit_replacements == 0 &&
+                p.ready_cpu_bank->stats.cheap_replacements > 0 &&
+                p.ready_cpu_bank->stats.cheap_observations_at_quota > 0,
+                "quota replacement protects oldest lit owners and records progress");
+        // Ready lookup is still before all terminal admission checks.
+        p.ready_optional_attempts = 256;
+        const auto before = p.ready_cpu_bank->stats.retirements;
+        for (unsigned frame = 0; frame < 12; ++frame) {
+            Require(bool(DrawCpu(p, info(8), cheap)), "race ready survives terminal shared budget");
+            for (unsigned draw = 0; draw < 16; ++draw) DrawCpu(p, info(9), cheap);
+            Advance(p);
+        }
+        Require(p.ready_cpu_bank->stats.retirements == before,
+                "terminal shared budget cannot retire for unusable race demand");
+    }
+    // CodexAstraLocal: Six cheap owners with empty protected slots still need
+    // cheap replacement; twelve failed partial attempts remain non-refundable.
+    PipelineCache p;
+    p.ready_cpu_bank->SetLightingReservation(true);
+    for (unsigned i = 0; i < 12; ++i)
+        Require(Spend(p, true, 600 + i), "cheap quota replaces while lit slots remain empty");
+    Require(p.ready_cpu_bank->Owned(1) == 6 && p.ready_cpu_bank->Attempts(1) == 12,
+            "cheap partial attempts and physical quota stay bounded");
+    const auto before = p.ready_cpu_bank->stats.retirements;
+    const auto observed = p.ready_cpu_bank->stats.observations;
+    Require(!Spend(p, true, 612) && p.ready_cpu_bank->stats.retirements == before &&
+            p.ready_cpu_bank->stats.observations == observed,
+            "terminal cheap attempt budget creates no demand or retirement");
+}
+
 int main() {
     try {
         Probe::partial_tier=true;
         PromotionAndPriority(); ColdBridge(); PartitionPressure(); TerminalBudgetsKeepHits();
         PartialTransportAndIdentity(); FourRouteBindings(); NativeAndFailureFallback();
-        LazyTransportAndExactReuse(); RuntimeFeatureAttribution();
+        LazyTransportAndExactReuse(); RuntimeFeatureAttribution(); ColdMenuToRaceReservation();
         Require(Probe::optional_waits==0 && Probe::lifetime_errors==0,
                 "no optional wait or borrowed shader destruction");
         std::cout<<"PASS checks="<<Probe::checks<<" builds="<<Probe::pipeline_builds

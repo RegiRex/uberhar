@@ -370,6 +370,19 @@ void Config::ReadValues() {
     ReadSetting("WebService", Settings::values.web_api_url);
     ReadSetting("WebService", Settings::values.network_token);
 
+    // CodexAstraLocal: Permanent once-per-reload migration evidence distinguishes
+    // retired CPU rendering from the actual Native GPU-pixel route now selected.
+    const auto saved_mode = Settings::values.uberhar_test_mode.GetValue();
+    const auto migrated_mode = Settings::MigrateUberharTestMode(saved_mode);
+    if (saved_mode != migrated_mode)
+        LOG_INFO(Config, "Uberhar retired renderer migration: saved_mode={} effective_mode={} "
+                         "guest_pixels=GPU cpu_pixel_replacement=false",
+                 static_cast<u32>(saved_mode), static_cast<u32>(migrated_mode));
+    if (Settings::values.graphics_api.GetValue() == Settings::GraphicsAPI::Software) {
+        Settings::values.graphics_api = Settings::GraphicsAPI::Vulkan;
+        LOG_INFO(Config, "Uberhar retired Android graphics API: saved_api=0 effective_api=2 "
+                         "guest_pixels=GPU cpu_pixel_replacement=false");
+    }
     // AstraEH: Apply last, after reloading every saved setting; never write these overrides to INI.
     Settings::ApplyUberharTestProfile();
 }

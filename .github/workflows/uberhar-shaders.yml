@@ -56,6 +56,10 @@ jobs:
           /tmp/uberhar-test-env/bin/pip install moderngl==5.12.0 glcontext==3.0.0
       - name: Compile production generator and emit cases
         run: bash tools/uberhar/build_probe.sh
+      # CodexAstraLocal: The exact RGBA8 copy fast path must preserve translated
+      # texels; region guards reject scaling/flips/out-of-area pass reuse.
+      - name: Check exact image-work reductions
+        run: python3 tools/uberhar/test_image_work.py
       # CodexAstraLocal: Keep the old gates and require exact UBO/proctex/
       # lighting-fog output when a clean later draw outlives its allocation tick.
       - name: Execute Vulkan cached buffer lifetime
@@ -169,6 +173,7 @@ jobs:
       # CodexAstraLocal: Retain descriptor pixels, sources and failure controls.
       # CodexAstraLocal: Preserve proof-cache extraction and compiler failures.
       # CodexAstraLocal: Retain bounded GPU-query ownership and injected-failure evidence.
+      # CodexAstraLocal: Keep exact-copy output and failure provenance alongside coordination evidence.
       - name: Upload CPU coordination contract evidence
         if: always()
         uses: actions/upload-artifact@v7
@@ -206,6 +211,7 @@ jobs:
             build/uberhar-probe/cached-buffer-draw-use/**
             build/uberhar-probe/cached-buffer-lifetime-vulkan/**
             build/uberhar-probe/image-descriptors/**
+            build/uberhar-probe/image-work/**
             build/uberhar-probe/software-renderer/**/provenance.json
             build/uberhar-probe/software-renderer/**/results.xml
             build/uberhar-probe/software-renderer/**/*.stdout

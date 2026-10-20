@@ -1,3 +1,10 @@
+<!-- CodexAstraLocal: Record the regression-triggered .52 interaction review without resetting the historical full-code audit scope. -->
+**Current checkpoint: [0.1.52 scoped integration review](UBERHAR_REVIEW_0.1.52.md).**
+Independent review covers scene-change shader replacement, fragments, image work,
+Android retirement and the exact-.48 CPU-only comparison. It caught and corrected
+broader mip synchronization. Focused checks and integrated release gates are
+separate from pending Dark Moon hardware qualification. Historical entries follow.
+
 # Architecture review ledger
 
 <!-- CodexAstraLocal: Supersede the .50 source checkpoint with the regression-triggered scoped .51 review, preserving historical cadence and hardware limits. -->

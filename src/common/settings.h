@@ -32,9 +32,7 @@ enum class UberharTestMode : u32 {
     Native = 1,
     // CodexAstraLocal: Retired mode 2 stays unused; migrate its saved value to Native.
     Automatic = 3,
-    ComboGeneric = 4,
-    // CodexAstraLocal: Append CPU graphics without changing persisted older modes.
-    Software = 5,
+    // CodexAstraLocal: Retired IDs 4/5 are migration inputs, never selectable modes.
 };
 
 enum class InitClock : u32 {

@@ -172,6 +172,27 @@ void CheckGraphicsOptimizations() {
     const auto all_live = MakeDynamicTevState(overwritten, off);
     need((all_live.stages[0].operations & (TevLiveRgb | TevLiveAlpha)) == (TevLiveRgb | TevLiveAlpha),
         "Liveness OFF retained eliminated outputs");
+    // CodexAstraLocal: OFF must change actual emitter shape, not only set live
+    // uniform bits; source structure complements independently rendered pixels.
+    const auto unguarded = FragmentModule{family, {}, off, true}.Generate();
+    need(unguarded.find("live_rgb") == std::string::npos &&
+         unguarded.find("live_alpha") == std::string::npos &&
+         unguarded.find("if ((uber_tev.buffer_mask & 2048u)") == std::string::npos &&
+         unguarded.find("uber_tev.stages[tev_index].z & 256u") == std::string::npos &&
+         unguarded.find("uber_tev.stages[tev_index].z & 512u") == std::string::npos,
+         "Liveness OFF retained runtime guard instructions");
+    // A varying texture plan has no possible endpoint branch. Its single
+    // declaration must dominate RGB/alpha uses without a dynamic cache mask.
+    for (bool memo : {false, true}) {
+        auto local_profile = profile; local_profile.fragment_memo = memo;
+        const auto local_family = MakeDynamicTevFamilyConfig(config, local_profile);
+        const auto local_plan = MakeStaticTevPlan(MakeDynamicTevState(config, local_profile));
+        const auto local = GenerateStaticTevFragmentShader(local_family, {}, local_profile, local_plan);
+        const auto first = local.find("vec4 uber_static_texel0 = ");
+        need(first != std::string::npos && local.find("uber_static_sampled") == std::string::npos &&
+             local.find("vec4 uber_static_texel0 = ", first + 1) == std::string::npos,
+             "Branch-free static texture did not use one dominated local");
+    }
     need(dynamic.find("uber_texel0 = uber_shared_tex0") == std::string::npos,
         "Generic ordinary sampler retained duplicate cache");
     std::printf("PASS %u graphics liveness/memo/transport/evidence controls\n", checks);

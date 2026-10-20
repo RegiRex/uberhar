@@ -75,12 +75,16 @@ private:
     std::array<vk::ImageAspectFlags, 2> aspects;
     bool shadow_rendering{};
     RenderPass pass{};
+    // CodexAstraLocal: Utility/clear passes cannot inherit graphics-only reuse.
+    GpuWork pass_kind{GpuWork::Utility};
     u32 num_draws{};
     // CodexAstraLocal TEST-ONLY LOG: Owner-only cumulative dependency reasons;
     // remove after precise barrier populations are qualified, never remove required visibility.
     const bool dependency_diagnostics;
     std::array<u64, static_cast<u32>(EndReason::Count)> dependency_ends{};
     u64 dependency_attachments{}, dependency_shadow{}, dependency_sequence{};
+    // CodexAstraLocal TEST-ONLY LOG: Remove after contained-area reuse is qualified.
+    u64 contained_area_reuses{};
     u32 dependency_prescale{};
     std::chrono::steady_clock::time_point dependency_report_time{std::chrono::steady_clock::now()};
 };

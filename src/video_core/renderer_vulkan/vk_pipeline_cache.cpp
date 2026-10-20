@@ -1267,26 +1267,19 @@ GraphicsPipeline* PipelineCache::PrepareReadyCpuFragment(
         // maintenance never waits and never replaces the already selected draw.
         const auto advance = [&](Candidate& candidate) noexcept {
             if (candidate.slot) return;
-            // CodexAstraLocal: A ready lookup above always wins. New cheap
-            // demand cannot consume the reserved live-light portion; retain
-            // existing exact probation and all compiler/GPU retirement guards.
+            // CodexAstraLocal: Preserve terminal work limits before copying a
+            // key, but let occupancy-blocked demand enter bounded probation so
+            // stale cheap menu owners can be replaced by cheap gameplay owners.
             const auto tier = candidate.partial ? 1U : 0U;
             const bool live_lit = virtual_fs_config->lighting.enable &&
                                  (tev_constants.buffer_mask & GLSL::TevLiveLighting);
-            if (lit_specialization && !live_lit) {
-                std::size_t cheap_owned = 0;
-                for (const auto& slot : ready_cpu_bank->AllSlots())
-                    cheap_owned += slot.observation && !slot.lit &&
-                                   CpuFragmentPartitions::Index(*slot.observation) == tier;
-                if (!StaticTevPolicy::AllowCheapAdmission(cheap_owned, fragment_cheap_attempts[tier],
-                        CpuFragmentPartitions::Owners(tier), CpuFragmentPartitions::Attempts(tier))) {
-                    ++fragment_lit_reserved_refusals;
-                    return;
-                }
+            ready_cpu_bank->SetLightingReservation(lit_specialization);
+            if (!live_lit && !ready_cpu_bank->CheapAttemptAvailable(tier)) {
+                ++ready_cpu_bank->stats.cheap_attempt_refusals;
+                ++fragment_lit_reserved_refusals;
+                return;
             }
-            // CodexAstraLocal: Keep terminal misses cheap: tier identity is
-            // already known, so reject its budget before copying state/profile.
-            if (!ready_cpu_bank->AcceptingDemand(ready_optional_attempts, candidate.partial ? 1 : 0)) {
+            if (!ready_cpu_bank->AcceptingDemand(ready_optional_attempts, tier, live_lit)) {
                 ++ready_cpu_bank->stats.exhausted;
                 ++ready_cpu_capped;
                 return;
@@ -1297,12 +1290,19 @@ GraphicsPipeline* PipelineCache::PrepareReadyCpuFragment(
                     instance.IsExtendedDynamicStateSupported(),
                     candidate.partial ? std::optional{plan} : std::nullopt};
                 const u64 observed_hash = observation.Hash();
-                const bool qualified = ready_cpu_bank->Observe(observed_hash, observation);
+                const bool qualified = ready_cpu_bank->Observe(observed_hash, observation, live_lit);
                 const bool pending =
                     (warming_ready_vertex && !warming_ready_vertex->IsDone()) ||
                     curr_disk_cache->OptionalFragmentPending();
                 const bool capacity = ready_cpu_bank->CanCreate(ready_vertex_pipelines.size(),
-                    ready_optional_attempts, pending, observation);
+                    ready_optional_attempts, pending, observation, live_lit);
+                // CodexAstraLocal TEST-ONLY LOG: Preserve the old aggregate
+                // while separating owner pressure from attempt exhaustion below;
+                // remove the temporary breakdown after .52 admission qualification.
+                if (lit_specialization && !live_lit &&
+                    ready_cpu_bank->CheapOwned(tier) >=
+                        CpuFragmentPartitions::Owners(tier) * 3 / 4)
+                    ++fragment_lit_reserved_refusals;
                 if (!candidate.fragment) {
                     ++ready_cpu_dependencies;
                     if (qualified && capacity) {
@@ -2295,7 +2295,7 @@ void PipelineCache::ReportUberharStats(const char* kind) {
             // CodexAstraLocal Log Line: Counts show bounded reuse and fallback,
             // never GPU duration, guest frames or an opaque-driver memory ceiling.
             LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
-                "Uberhar adaptive CPU PSOs {}: schema=1 scope=current_title swap={} "
+                "Uberhar adaptive CPU PSOs {}: schema=2 scope=current_title swap={} "
                 "empty={} reserved={} building={} ready={} failed={} retired={} destroy_queued={} "
                 "owned={} max_owned={} cpu_attempts={} combined_attempts={} "
                 "observations={} probation={} collisions={} retirements={} destroyed={} failed_keys={} "
@@ -2303,7 +2303,9 @@ void PipelineCache::ReportUberharStats(const char* kind) {
                 "max_cpu=16 max_cpu_attempts=80 max_combined_attempts=256 "
                 "full_owned={} partial_owned={} full_attempts={} partial_attempts={} "
                 "max_full=8 max_partial=8 max_full_attempts=64 max_partial_attempts=16 "
-                "partial_generator=static_tev_runtime_lighting",
+                "partial_generator=static_tev_runtime_lighting "
+                "cheap_owner_refusals={} cheap_attempt_refusals={} cheap_observations_at_quota={} "
+                "cheap_replacements={} lit_replacements={}",
                 kind, ready_cpu_bank->Swap(), ownership[0], ownership[1], ownership[2],
                 ownership[3], ownership[4], ownership[5], ownership[6], ReadyCpuOwned(),
                 adaptation.max_owned, ready_cpu_bank->Attempts(), ready_optional_attempts,
@@ -2311,7 +2313,10 @@ void PipelineCache::ReportUberharStats(const char* kind) {
                 adaptation.destroyed, adaptation.failed_keys, adaptation.queue_failures,
                 adaptation.exhausted, adaptation.stale_tokens, ready_cpu_bank->Disabled(),
                 ready_cpu_bank->Owned(0), ready_cpu_bank->Owned(1),
-                ready_cpu_bank->Attempts(0), ready_cpu_bank->Attempts(1));
+                ready_cpu_bank->Attempts(0), ready_cpu_bank->Attempts(1),
+                adaptation.cheap_owner_refusals, adaptation.cheap_attempt_refusals,
+                adaptation.cheap_observations_at_quota, adaptation.cheap_replacements,
+                adaptation.lit_replacements);
             // CodexAstraLocal Log Line: Final-only, at most80 attempted keys,
             // including failed/retired owners. The observation hash is a bucket,
             // not actor identity or a replacement for exact key equality.

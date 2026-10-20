@@ -401,11 +401,12 @@ void TestEffectiveAdmission() {
         om.alpha_blending.factor_dest_a.Assign(FB::BlendFactor::OneMinusSourceAlpha);
         return f;
     };
-    for (M mode : {M::Custom, M::Native, M::Automatic, M::ComboGeneric}) {
+    for (M mode : {M::Custom, M::Native, M::Automatic, static_cast<M>(4)}) {
         Fixture f = expanded(); f.compute_rect = &f.owned;
         f.owned.mode = mode;
         f.owned.selected = true;
-        const bool enabled = mode == M::Automatic || mode == M::ComboGeneric;
+        // CodexAstraLocal: Raw retired mode 4 cannot grant compute before migration.
+        const bool enabled = mode == M::Automatic;
         Check(ComputeRectStateRejections(f.regs) == 1026, "expanded fixture retains exact raw mask");
         Check(f.Route() == enabled && f.owned.compute_draws == enabled &&
               f.owned.native_draws == !enabled, "expanded state selects complete draw");
@@ -458,7 +459,7 @@ void TestEffectiveAdmission() {
 void TestSupportedFallback() {
     using namespace Vulkan;
     using M = Settings::UberharTestMode;
-    for (M mode : {M::Custom, M::Native, M::Automatic, M::ComboGeneric}) {
+    for (M mode : {M::Custom, M::Native, M::Automatic, static_cast<M>(4)}) {
         for (unsigned failure=0;failure<7;++failure) {
             Fixture f{mode};f.regs=Registers(0);f.vertex_batch=Vertices(6);f.owned.selected=true;
             if(failure==0)f.regs=Registers(4);

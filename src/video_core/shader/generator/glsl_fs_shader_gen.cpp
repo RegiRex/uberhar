@@ -760,7 +760,11 @@ vec4 secondary_fragment_color = vec4(0.0);
     // CodexAstraLocal: Runtime demand comes from the original draw, never its
     // reduced family. This branch is uniform and leaves first texture use inside
     // lighting; static/full generation removes the unused lighting body outright.
-    if (dynamic_tev && !static_tev) {
+    // CodexAstraLocal: Liveness OFF restores the unguarded lighting emitter,
+    // rather than merely uploading an always-true mask to the same GPU branch.
+    if (dynamic_tev && !static_tev && !profile.fragment_liveness) {
+        WriteLighting();
+    } else if (dynamic_tev && !static_tev) {
         out += "if ((uber_tev.buffer_mask & 2048u) != 0u) {\n";
         WriteLighting();
         out += "}\n";
@@ -1338,12 +1342,16 @@ uint color_op = instruction.z & 15u;
 uint alpha_op = (instruction.z >> 16u) & 15u;
 float color_multiplier = float(instruction.w & 7u);
 float alpha_multiplier = float((instruction.w >> 16u) & 7u);
-// CodexAstraLocal: Independent live channels retain Dot3_RGBA's alpha-to-RGB dependency.
+)";
+    // CodexAstraLocal: OFF emits no liveness reads or guards; preserve the same
+    // RGB-before-alpha arithmetic and Dot3_RGBA dependency in either emitter.
+    if (profile.fragment_liveness) out += R"(
 bool live_rgb = (instruction.z & 256u) != 0u;
 bool live_alpha = (instruction.z & 512u) != 0u;
-vec3 color_output = vec3(0.0);
-if (live_rgb || (live_alpha && color_op == 7u)) {
 )";
+    out += "vec3 color_output = vec3(0.0);\n";
+    if (profile.fragment_liveness)
+        out += "if (live_rgb || (live_alpha && color_op == 7u)) {\n";
     // CodexAstraLocal: Qualified endpoint results replace only their channel;
     // unqualified runtime values execute the exact original GPU expression.
     if (profile.fragment_constant_tev) out += R"(
@@ -1381,7 +1389,8 @@ color_output = vec3(float((instruction.z >> 12u) & 1u),
     out += "default: color_output = vec3(0.0); break;\n}\n"
            "color_output = byteround(color_output);\n";
     if (profile.fragment_constant_tev) out += "}\n";
-    out += "}\nif (live_alpha) {\nfloat alpha_output;\n";
+    if (profile.fragment_liveness) out += "}\nif (live_alpha) {\n";
+    out += "float alpha_output;\n";
     if (profile.fragment_constant_tev)
         out += "if ((instruction.z & 2048u) != 0u) "
                "alpha_output = float((instruction.z >> 15u) & 1u); else {\n";
@@ -1415,21 +1424,23 @@ alpha_output = byteround(alpha_output);
 }
 )";
     if (profile.fragment_constant_tev) out += "}\n";
-    out += R"(
-combiner_output.a = clamp(alpha_output * alpha_multiplier, 0.0, 1.0);
-}
-if (live_rgb) combiner_output.rgb = clamp(color_output * color_multiplier, vec3(0.0), vec3(1.0));
+    // CodexAstraLocal: OFF retains exact round-before-scale and delayed buffer
+    // semantics while removing only conditions whose masks are all-live.
+    out += "combiner_output.a = clamp(alpha_output * alpha_multiplier, 0.0, 1.0);\n";
+    if (profile.fragment_liveness) out += "}\nif (live_rgb) ";
+    out += R"(combiner_output.rgb = clamp(color_output * color_multiplier, vec3(0.0), vec3(1.0));
 }
 combiner_buffer = next_combiner_buffer;
-)";
-    // AstraEH: Buffer writes take effect one stage later; only stages 0-3 have write masks.
-    out += R"(
 if (tev_index < 4u) {
-    if ((uber_tev.buffer_mask & (1u << tev_index)) != 0u &&
-        (uber_tev.stages[tev_index].z & 256u) != 0u)
+    if ((uber_tev.buffer_mask & (1u << tev_index)) != 0u)";
+    if (profile.fragment_liveness)
+        out += " && (uber_tev.stages[tev_index].z & 256u) != 0u";
+    out += R"()
         next_combiner_buffer.rgb = combiner_output.rgb;
-    if ((uber_tev.buffer_mask & (1u << (tev_index + 4u))) != 0u &&
-        (uber_tev.stages[tev_index].z & 512u) != 0u)
+    if ((uber_tev.buffer_mask & (1u << (tev_index + 4u))) != 0u)";
+    if (profile.fragment_liveness)
+        out += " && (uber_tev.stages[tev_index].z & 512u) != 0u";
+    out += R"()
         next_combiner_buffer.a = combiner_output.a;
 }
 }
@@ -1439,7 +1450,8 @@ if (tev_index < 4u) {
 // CodexAstraLocal: Emit each first consumed texture read at its original stage
 // and operand position. Static structure removes the runtime source/cache switch
 // without moving reads ahead of lighting or materializing unused operands.
-std::string FragmentModule::GetStaticTevSource(u32 source, u32 stage) {
+std::string FragmentModule::GetStaticTevSource(u32 source, u32 stage, u32& sampled,
+                                             bool local_samples) {
     switch (source) {
     case 0:
         return "rounded_primary_color";
@@ -1457,6 +1469,19 @@ std::string FragmentModule::GetStaticTevSource(u32 source, u32 stage) {
             config.texture.texture0_type == TextureType::Projection2D ||
             config.texture.texture0_type == TextureType::TextureCube ||
             config.texture.texture0_type == TextureType::Disabled);
+        // CodexAstraLocal: With no possible certificate branch, the first
+        // exact operand dominates all later TEV uses. Keep a compile-time local
+        // there, including one shared-lighting memo read, without hoisting any
+        // texture/derivative access across rejection or conditional arithmetic.
+        if (local_samples) {
+            if ((sampled & (1U << unit)) == 0) {
+                out += fmt::format("vec4 uber_static_texel{} = {};\n", unit,
+                    profile.fragment_memo && ordinary ? TextureSample(unit)
+                                                     : fmt::format("sampleTexUnit{}()", unit));
+                sampled |= 1U << unit;
+            }
+            return fmt::format("uber_static_texel{}", unit);
+        }
         // CodexAstraLocal: Repeated ordinary reads use the one shared cache;
         // single readers are direct. Typed/proctex and control-OFF keep TEV-local
         // first-use storage outside runtime arithmetic branch scopes.
@@ -1491,8 +1516,14 @@ void FragmentModule::WriteStaticTev() {
         return operation == 0 ? 1U : operation == 4 || operation == 8 || operation == 9 ? 3U : 2U;
     };
     out += "// CodexAstraLocal: Exact prepared TEV plan; other fragment state stays runtime.\n";
-    out += "uint uber_static_sampled = 0u;\nvec4 uber_static_texel0, uber_static_texel1, "
-           "uber_static_texel2, uber_static_texel3;\n";
+    // CodexAstraLocal: A conservative whole-plan proof keeps runtime first-use
+    // caching whenever any certificate branch could skip a declaration.
+    const bool local_samples = std::all_of(constant_candidates.begin(), constant_candidates.end(),
+                                          [](u32 mask) { return mask == 0; });
+    u32 sampled = 0;
+    if (!local_samples)
+        out += "uint uber_static_sampled = 0u;\nvec4 uber_static_texel0, uber_static_texel1, "
+               "uber_static_texel2, uber_static_texel3;\n";
     for (u32 stage = 0; stage < end; ++stage) {
         // CodexAstraLocal: The immutable static key includes the exact liveness
         // flags; only demanded outputs can feed later previous/buffer consumers.
@@ -1520,7 +1551,7 @@ void FragmentModule::WriteStaticTev() {
                     "float((uber_tev.stages[{0}].z >> 14u) & 1u));\n}} else {{\n", stage);
             for (u32 input = 0; input < arity(color_op); ++input) {
                 const auto source = GetStaticTevSource(
-                    (instruction.sources >> (input * 4)) & 15U, stage);
+                    (instruction.sources >> (input * 4)) & 15U, stage, sampled, local_samples);
                 const u32 modifier = (instruction.modifiers >> (input * 4)) & 15U;
                 const u32 component = modifier >> 1;
                 std::string value = component == 4 ? fmt::format("{}.rgb", source)
@@ -1553,7 +1584,7 @@ void FragmentModule::WriteStaticTev() {
             } else {
                 for (u32 input = 0; input < arity(alpha_op); ++input) {
                     const auto source = GetStaticTevSource(
-                        (instruction.sources >> (16 + input * 4)) & 15U, stage);
+                        (instruction.sources >> (16 + input * 4)) & 15U, stage, sampled, local_samples);
                     const u32 modifier = (instruction.modifiers >> (12 + input * 4)) & 7U;
                     std::string value = fmt::format("{}.{}", source, components[modifier >> 1]);
                     if ((modifier & 1U) != 0) {

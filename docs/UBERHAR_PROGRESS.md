@@ -1,3 +1,18 @@
+<!-- CodexAstraLocal: Current .52 implementation supersedes historical mode lists and holds below. -->
+## 0.1.52 — shader selection recovery and narrower Android modes
+
+Replacement-aware bounded admission, static fragment cleanup, genuine liveness-OFF
+emission, contained-area reuse and exact single-mip RGBA8 copies are implemented.
+CPU Software/generic Combo are retired from Android selection with explicit saved
+value migration; Native/Combo retain complete cold-rendering paths. No slow CPU
+wrapper is repackaged. High CPU demand is acceptable when it improves throughput.
+
+Independent source review found no remaining blocker; focused and integrated gates
+are underway. Dark Moon qualification is authorized after the gated release, with
+.48 lows as the recovery target. A separate exact-.48 CPU-only comparison retains
+its GPU implementation for owner testing. See [release notes](releases/0.1.52.md)
+and [review](UBERHAR_REVIEW_0.1.52.md). No device gain is claimed yet.
+
 <!-- CodexAstraLocal: Preserve historical evidence while making the current retirement explicit. -->
 ## 0.1.51 — regression correction and Calculated retirement
 

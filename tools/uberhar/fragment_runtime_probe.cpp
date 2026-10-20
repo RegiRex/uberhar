@@ -233,6 +233,15 @@ int main(int argc, char** argv) {
                  "constant Replace lost current-draw certificate consumer");
         std::ofstream(prefix.string() + "-partial.frag") << "#version 450\n" << partial;
         std::ofstream(prefix.string() + "-off.frag") << "#version 450\n" << GLSL::FragmentModule{family, {}, original, true}.Generate();
+        // CodexAstraLocal: Exercise liveness OFF independently while endpoint,
+        // memo and direction controls stay ON, including Dot3/delayed buffer.
+        auto no_liveness = profile; no_liveness.fragment_liveness = false;
+        auto no_liveness_state = GLSL::MakeDynamicTevState(config, no_liveness);
+        GLSL::ApplyFragmentRuntime(no_liveness_state, no_liveness, values);
+        const auto no_liveness_family = GLSL::MakeDynamicTevFamilyConfig(config, no_liveness);
+        std::ofstream(prefix.string() + "-liveness-off.frag") << "#version 450\n"
+            << GLSL::FragmentModule{no_liveness_family, {}, no_liveness, true}.Generate();
+        Binary(prefix.string() + "-liveness-off-state.bin", no_liveness_state);
         Binary(prefix.string() + "-state.bin", state); Binary(prefix.string() + "-off-state.bin", disabled);
         Binary(prefix.string() + "-uniforms.bin", uniforms);
         // CodexAstraLocal: Retain exact normalization inputs for a bit-level
@@ -246,12 +255,9 @@ int main(int argc, char** argv) {
 
     }
     // CodexAstraLocal: Actual preparation and qualification must be exercised,
-    // not merely helper text. Capacity negatives preserve the fixed old limits.
+    // not merely helper text. Integrated bank controls own admission/retirement.
     need(folded_rgb >= 13 && folded_alpha >= 13 && canonical_slots > 10, "empty arithmetic coverage");
     need(cache.Stats().hits >= cases && cache.Stats().builds >= cases, "cache controls did not execute");
-    need(Vulkan::StaticTevPolicy::AllowCheapAdmission(5, 47, 8, 64), "cheap capacity refused early");
-    need(!Vulkan::StaticTevPolicy::AllowCheapAdmission(6, 47, 8, 64), "reserved owner leaked");
-    need(!Vulkan::StaticTevPolicy::AllowCheapAdmission(5, 48, 8, 64), "reserved attempts leaked");
     std::ofstream(output / "counts.json") << fmt::format("{{\"cases\":{},\"controls\":{},\"rgb\":{},\"alpha\":{},\"canonical_slots\":{},\"cache_hits\":{},\"structural_builds\":{},\"numeric_only_updates\":{}}}\n",
         cases, controls, folded_rgb, folded_alpha, canonical_slots, cache.Stats().hits,
         cache.Stats().structural_builds, cache.Stats().value_updates);

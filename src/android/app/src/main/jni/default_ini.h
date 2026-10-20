@@ -99,7 +99,7 @@ software_renderer_features = 15
 software_renderer_diagnostics = true
 # CodexAstraLocal: Retired renderer controls are omitted; preserve every supported default key.
 # Whether to render using OpenGL
-# CodexAstraLocal: 0: CPU Software (1x, GPU presentation only), 1: OpenGL ES, 2: Vulkan.
+# CodexAstraLocal: 1: OpenGL ES, 2: Vulkan. Retired Android API 0 migrates to Vulkan.
 )") DECLARE_KEY(graphics_api) BOOST_HANA_STRING(R"(
 
 # CodexAstraLocal: Total CPU raster participants including caller; clamped to allowed CPUs.
@@ -119,8 +119,7 @@ software_renderer_diagnostics = true
 )") DECLARE_KEY(uberhar_force_tev) BOOST_HANA_STRING(R"(
 
 # CodexAstraLocal: 0=custom, 1=Native, 3=Combo. Retired value 2 migrates to Native.
-# CodexAstraUlt: 4=Combo with generic fragments; keeps Combo vertices and compute selection.
-# CodexAstraLocal: 5=CPU Software at 1x; GPU use is presentation only.
+# CodexAstraLocal: Retired 4 migrates to Combo; retired 5 migrates to Native (GPU pixels).
 # Requires a game restart. Custom graphics settings are preserved.
 )") DECLARE_KEY(uberhar_test_mode) BOOST_HANA_STRING(R"(
 

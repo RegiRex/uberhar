@@ -46,6 +46,8 @@ jobs:
   shaders:
     # CodexAstraUlt: Only the owner's exact same-repository comparison PR can run
     # these jobs. Retain main pushes and deliberate main/comparison manual runs.
+    # CodexAstraLocal: The isolated .48 CPU comparison uses its own reusable
+    # workflow below, so current main shader steps cannot run on historical code.
     if: >-
       (github.event_name == 'pull_request' &&
        github.event.pull_request.base.ref == 'uberhar/hybrid-shaders' &&
@@ -60,18 +62,40 @@ jobs:
       # CodexAstraUlt: Test the exact comparison head, not GitHub's synthetic merge.
       checkout_ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
+  # CodexAstraLocal: Keep the comparison's historical shader gate definition
+  # with its source branch while checking out the immutable event head. Only the
+  # exact owner-repository branch is trusted; forks and other PR heads stay out.
+  comparison_shaders:
+    if: >-
+      github.repository == 'RegiRex/uberhar' &&
+      ((github.event_name == 'pull_request' &&
+        github.event.pull_request.base.ref == 'uberhar/hybrid-shaders' &&
+        github.event.pull_request.head.repo.full_name == github.repository &&
+        github.event.pull_request.head.ref == 'uberhar/cpu-only-048-comparison') ||
+       (github.event_name == 'workflow_dispatch' &&
+        github.ref == 'refs/heads/uberhar/cpu-only-048-comparison'))
+    uses: RegiRex/uberhar/.github/workflows/uberhar-shaders.yml@uberhar/cpu-only-048-comparison
+    with:
+      checkout_ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
   android:
     # CodexAstraUlt: Repeat the trust guard on the signing job itself; it must not
     # depend on a shader-job result to exclude untrusted branches and fork PRs.
+    # CodexAstraLocal: Admit only the additional exact CPU comparison head; the
+    # inherited restore-only key path and certificate pin still fail closed.
     if: >-
       (github.event_name == 'pull_request' &&
        github.event.pull_request.base.ref == 'uberhar/hybrid-shaders' &&
        github.event.pull_request.head.repo.full_name == github.repository &&
-       github.event.pull_request.head.ref == 'uberhar/codexastra-diag-comparison') ||
+       (github.event.pull_request.head.ref == 'uberhar/codexastra-diag-comparison' ||
+        (github.repository == 'RegiRex/uberhar' &&
+         github.event.pull_request.head.ref == 'uberhar/cpu-only-048-comparison'))) ||
       (github.event_name == 'push' && github.ref == 'refs/heads/uberhar/hybrid-shaders') ||
       (github.event_name == 'workflow_dispatch' &&
        (github.ref == 'refs/heads/uberhar/hybrid-shaders' ||
-        github.ref == 'refs/heads/uberhar/codexastra-diag-comparison'))
+        github.ref == 'refs/heads/uberhar/codexastra-diag-comparison' ||
+        (github.repository == 'RegiRex/uberhar' &&
+         github.ref == 'refs/heads/uberhar/cpu-only-048-comparison')))
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     outputs:
@@ -345,7 +369,9 @@ jobs:
 
       - uses: actions/upload-artifact@v7
         with:
-          name: uberhar-${{ steps.version.outputs.value }}-arm64
+          # CodexAstraLocal: Distinguish the experiment download without changing
+          # numeric app version, package identity, signing or ordinary releases.
+          name: uberhar-${{ steps.version.outputs.value }}${{ (github.head_ref == 'uberhar/cpu-only-048-comparison' || github.ref == 'refs/heads/uberhar/cpu-only-048-comparison') && '-cpu-only-comparison' || '' }}-arm64
           path: artifacts/
           if-no-files-found: error
           retention-days: 30

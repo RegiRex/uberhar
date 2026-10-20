@@ -184,8 +184,11 @@ for i in range(counts["cases"]):
     state.write(raw)
     expected_color, expected_depth = draw(cases / f"{i}-specialized.frag")
     row = {"case": i, "reference": hashlib.sha256(expected_color + expected_depth).hexdigest()}
-    for route in ("generic", "partial", "off"):
-        if route == "off": state.write((cases / f"{i}-off-state.bin").read_bytes())
+    # CodexAstraLocal: Independent liveness OFF must retain arithmetic/memo
+    # consumers; compare exact output instead of treating all-OFF as equivalent.
+    for route in ("generic", "partial", "off", "liveness-off"):
+        state.write((cases / f"{i}-{route}-state.bin").read_bytes()
+                    if route in ("off", "liveness-off") else raw)
         actual_color, actual_depth = draw(cases / f"{i}-{route}.frag")
         expected = struct.unpack("<1024f", expected_depth)
         actual = struct.unpack("<1024f", actual_depth)

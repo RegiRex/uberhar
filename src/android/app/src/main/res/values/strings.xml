@@ -278,14 +278,7 @@
     <!-- Graphics settings strings -->
     <string name="renderer">Renderer</string>
     <string name="graphics_api">Graphics API</string>
-    <!-- CodexAstraLocal: Distinguish CPU guest graphics from presentation-only GPU use. -->
-    <string name="uberhar_test_software">CPU Software</string>
-    <string name="uberhar_test_software_description">Render guest graphics on the CPU at 1×. The GPU only displays completed frames. Keeps CPU emulation, audio and GPU timing settings. Requires a game restart.</string>
-    <string name="software_renderer_workers">CPU Software workers</string>
-    <string name="software_renderer_workers_description">Total CPU rendering participants, limited to available processors. Applies only to CPU Software after a game restart.</string>
-    <string name="software_workers_auto">Automatic</string>
-    <string name="software_workers_one">1 participant</string>
-    <string name="software_workers_two">2 participants</string>
+    <!-- CodexAstraLocal: Standalone Software labels removed; no replacement CPU-speed claim. -->
     <string name="spirv_shader_gen">Enable SPIR-V shader generation</string>
     <string name="spirv_shader_gen_description">Emits the fragment shader used to emulate PICA using SPIR-V instead of GLSL</string>
     <string name="disable_spirv_optimizer">Disable SPIR-V Optimizer</string>
@@ -300,11 +293,9 @@
     <!-- CodexAstraLocal: Retired mode 2 migrates to Native; expose supported choices only. -->
     <string name="uberhar_test_auto">Virtual PICA: automatic combination</string>
     <!-- AstraPro: Combo now opts into ready-only GPU vertices; not full compute. -->
-    <!-- CodexAstraLocal: Describe the added CPU-vertex fragment tier without claiming Native remains generic-only or promising a measured speedup. -->
-    <string name="uberhar_test_auto_description">Experimental Vulkan mode: combines CPU rendering, ready GPU vertices for eligible independent triangle lists, and bounded fragment specialization. Complete generic rendering covers pending and unsupported specialization; performance may vary by game. Not a full compute renderer. Restart the game after changing.</string>
-    <!-- CodexAstraUlt: One persisted diagnostic preset isolates optional fragments while retaining Combo vertices. -->
-    <string name="uberhar_test_combo_generic">Virtual PICA: Combo (generic fragments)</string>
-    <string name="uberhar_test_combo_generic_description">Comparison mode: keeps Combo’s ready GPU vertices and rectangle rendering, but uses generic fragments where supported. Other states retain accurate recovery. Compare the same scene with Native and automatic combination. Restart the game after changing.</string>
+    <!-- CodexAstraLocal: Distinguish CPU vertex preparation from GPU pixel rendering; promise no measured speedup. -->
+    <string name="uberhar_test_auto_description">Experimental Vulkan mode: combines CPU vertex preparation, ready GPU vertices for eligible independent triangle lists, and bounded fragment specialization. Complete generic rendering covers pending and unsupported specialization; performance may vary by game. Not a full compute renderer. Restart the game after changing.</string>
+    <!-- CodexAstraLocal: Generic-only Combo is retired; Native/Combo remain selectable. -->
     <string name="uberhar_test_locked">Turn off the active Virtual PICA test mode to edit custom graphics settings. Your saved custom values are preserved.</string>
     <string name="uberhar_hybrid_tev">Uberhar hybrid TEV (experimental)</string>
     <string name="uberhar_separate_folder_title">Use an empty folder for Uberhar</string>
@@ -322,7 +313,7 @@
     <string name="uberhar_parallel_texture_decode">Parallel CPU texture decoding</string>
     <string name="uberhar_parallel_texture_decode_description">Share large texture conversions across CPU workers in Native and Combo. Turn off for a serial comparison. Restart the game after changing.</string>
 
-    <string name="uberhar_cpu_vertex_only_description">Keep guest vertex calculations on the CPU in either Combo mode, using workers for eligible batches. Fragment policy stays unchanged. Performance may vary by game. Restart the game after changing.</string>
+    <string name="uberhar_cpu_vertex_only_description">Keep guest vertex calculations on the CPU in Combo, using workers for eligible batches. Fragment policy stays unchanged. Performance may vary by game. Restart the game after changing.</string>
     <string name="uberhar_cpu_vertex_bridge_description">Requires hybrid TEV. Uses the CPU for eligible vertex work while an optimized GPU pipeline compiles. Turn off to compare performance. Restart the game after changing.</string>
     <string name="uberhar_force_tev">Force TEV fallback for comparison</string>
     <string name="uberhar_force_tev_description">Requires hybrid TEV. Uses the fallback for every supported draw to check image correctness. May be much slower. Restart the game after changing.</string>

@@ -14,17 +14,9 @@ inline constexpr std::size_t MaxModuleAttempts = 16;
 inline constexpr std::size_t MaxPsoOwners = 8;
 inline constexpr std::size_t MaxPsoAttempts = 16;
 inline constexpr u32 CpuInterface = 1; // Trivial VS / original 88-byte CPU vertices.
-// CodexAstraLocal: ABI9 static code consumes current endpoint certificates;
-// old modules must not alias the new runtime-dependent arithmetic interface.
-inline constexpr u32 GeneratorPolicy = 2;
-
-// CodexAstraLocal: Protect a finite quarter of existing optional capacity for
-// live lighting. This structural priority is not a measured GPU-cost model;
-// control OFF bypasses it and no existing limit grows.
-constexpr bool AllowCheapAdmission(std::size_t cheap_owned, std::size_t cheap_attempts,
-                                   std::size_t owners, std::size_t attempts) {
-    return cheap_owned < owners - owners / 4 && cheap_attempts < attempts - attempts / 4;
-}
+// CodexAstraLocal: Policy3 restores dominated first-use texture locals. Older
+// generated static modules must not hide the new emitter during warm execution.
+inline constexpr u32 GeneratorPolicy = 3;
 
 struct Key {
     Pica::Shader::FSConfig family;

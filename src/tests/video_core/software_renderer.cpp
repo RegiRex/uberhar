@@ -630,13 +630,14 @@ TEST_CASE("Software producer capsule preserves demanded inputs and carry limits"
     using Access = Pica::SoftwareProducerTestAccess;
     using Semantic = Pica::RasterizerRegs::VSOutputAttributes;
     using Stage = Pica::TexturingRegs::TevStageConfig;
-    const auto old_mode = Settings::values.uberhar_test_mode.GetValue();
+    // CodexAstraLocal: Exercise the retained core directly, without a retired UI profile.
+    const auto old_mode = Settings::values.graphics_api.GetValue();
     const auto old_jit = Settings::values.use_shader_jit.GetValue();
     struct Restore {
-        Settings::UberharTestMode mode; bool jit;
-        ~Restore() { Settings::values.uberhar_test_mode = mode; Settings::values.use_shader_jit = jit; }
+        Settings::GraphicsAPI mode; bool jit;
+        ~Restore() { Settings::values.graphics_api = mode; Settings::values.use_shader_jit = jit; }
     } restore{old_mode, old_jit};
-    Settings::values.uberhar_test_mode = Settings::UberharTestMode::Software;
+    Settings::values.graphics_api = Settings::GraphicsAPI::Software;
     Settings::values.use_shader_jit = false;
     Core::System system;
     Memory::MemorySystem memory{system};
@@ -840,13 +841,14 @@ TEST_CASE("Software geometry capsule owns the producing emit and entry carry",
     using Op = nihstro::OpCode::Id;
     using Dest = nihstro::DestRegister;
     using Source = nihstro::SourceRegister;
-    const auto old_mode = Settings::values.uberhar_test_mode.GetValue();
+    // CodexAstraLocal: Exercise the retained core directly, without a retired UI profile.
+    const auto old_mode = Settings::values.graphics_api.GetValue();
     const auto old_jit = Settings::values.use_shader_jit.GetValue();
     struct Restore {
-        Settings::UberharTestMode mode; bool jit;
-        ~Restore() { Settings::values.uberhar_test_mode = mode; Settings::values.use_shader_jit = jit; }
+        Settings::GraphicsAPI mode; bool jit;
+        ~Restore() { Settings::values.graphics_api = mode; Settings::values.use_shader_jit = jit; }
     } restore{old_mode, old_jit};
-    Settings::values.uberhar_test_mode = Settings::UberharTestMode::Software;
+    Settings::values.graphics_api = Settings::GraphicsAPI::Software;
     Settings::values.use_shader_jit = false;
     Core::System system;
     Memory::MemorySystem memory{system};
@@ -1119,11 +1121,12 @@ TEST_CASE("Software actual triangle budgets and alias admission", "[software]") 
     // neighboring fields. Restore global controls; use actual tiled guest memory,
     // actual rasterization/TEV/depth and synchronous worker joins for each mode.
     const auto old_workers=Settings::values.software_renderer_workers.GetValue();
-    const auto old_mode=Settings::values.uberhar_test_mode.GetValue();
-    struct Restore { u32 workers; Settings::UberharTestMode mode; ~Restore() {
-        Settings::values.software_renderer_workers=workers; Settings::values.uberhar_test_mode=mode;
+    // CodexAstraLocal: Exercise the retained core directly, without a retired UI profile.
+    const auto old_mode=Settings::values.graphics_api.GetValue();
+    struct Restore { u32 workers; Settings::GraphicsAPI mode; ~Restore() {
+        Settings::values.software_renderer_workers=workers; Settings::values.graphics_api=mode;
     }} restore{old_workers,old_mode};
-    Settings::values.uberhar_test_mode=Settings::UberharTestMode::Software;
+    Settings::values.graphics_api=Settings::GraphicsAPI::Software;
     Core::System system;
     Memory::MemorySystem memory{system};
     Pica::PicaCore pica{memory,{}};
@@ -1388,11 +1391,17 @@ TEST_CASE("Software PICA input scope closes before return and exception", "[soft
         void DrawTriangles()override{} void FlushAll()override{}void FlushRegion(PAddr,u32)override{}
         void InvalidateRegion(PAddr,u32)override{}void FlushAndInvalidateRegion(PAddr,u32)override{}void ClearAll(bool)override{}
     };
-    const auto old_mode=Settings::values.uberhar_test_mode.GetValue();
+    // CodexAstraLocal: Exercise the retained core directly, without a retired UI profile.
+    const auto old_mode=Settings::values.graphics_api.GetValue();
+    const auto old_profile=Settings::values.uberhar_test_mode.GetValue();
     const auto old_diag=Settings::software_renderer_diagnostics.GetValue();
-    struct Restore { Settings::UberharTestMode mode;bool diag;~Restore(){Settings::values.uberhar_test_mode=mode;
-        Settings::software_renderer_diagnostics=diag;} }restore{old_mode,old_diag};
-    Settings::values.uberhar_test_mode=Settings::UberharTestMode::Software;Settings::software_renderer_diagnostics=false;
+    struct Restore { Settings::GraphicsAPI mode;Settings::UberharTestMode profile;bool diag;
+        ~Restore(){Settings::values.graphics_api=mode;Settings::values.uberhar_test_mode=profile;
+        Settings::software_renderer_diagnostics=diag;} }restore{old_mode,old_profile,old_diag};
+    // CodexAstraLocal: Prove the retained core's checked scope is independent of
+    // a selectable profile, including diagnostics OFF and exception unwinding.
+    Settings::values.uberhar_test_mode=Settings::UberharTestMode::Custom;
+    Settings::values.graphics_api=Settings::GraphicsAPI::Software;Settings::software_renderer_diagnostics=false;
     for(bool observe:{false,true})for(bool fail:{false,true})for(bool indexed:{false,true}) {
         Settings::software_renderer_diagnostics=observe;
         Core::System system;Memory::MemorySystem memory{system};Sink sink;sink.fail=fail;Pica::PicaCore pica{memory,{}};

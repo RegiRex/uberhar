@@ -292,7 +292,8 @@ void PerfStats::LogUberharSettings(const char* event) {
     // CodexAstraUlt: Append the persisted diagnostic mode without relabeling older log modes.
     // CodexAstraLocal: Preserve supported log IDs; legacy slot 2 migrates to Native
     // before execution and must not advertise a retired renderer if observed raw.
-    const std::array mode_names{"Custom", "Native", "Retired", "Automatic", "ComboGeneric", "Software"};
+    // CodexAstraLocal: Retired persisted IDs must not advertise executable profiles.
+    const std::array mode_names{"Custom", "Native", "Retired", "Automatic", "Retired", "Retired"};
     const std::array api_names{"Software", "OpenGL", "Vulkan"};
     const auto mode_index = static_cast<std::size_t>(mode);
     const auto api_index = static_cast<std::size_t>(api);
@@ -322,7 +323,7 @@ void PerfStats::LogUberharSettings(const char* event) {
         values.preload_textures.GetValue(), values.use_skip_duplicate_frames.GetValue(),
         values.delay_game_render_thread_us.GetValue(), values.simulate_3ds_gpu_timings.GetValue(),
         // CodexAstraUlt: Replace AstraPro's Automatic-only labels with the shared policies;
-        // ID4 retains GPU vertices but cannot warm/select optional specialized fragments.
+        // CodexAstraLocal: Retired IDs are migrated before a session begins.
         Settings::UsesReadyGpuVertices(mode) ? "independent_lists_v2" : "disabled",
         Settings::UsesReadyGpuVertices(mode)
             ? (Settings::AllowsSpecializedFragments(mode) && !values.uberhar_force_tev.GetValue()

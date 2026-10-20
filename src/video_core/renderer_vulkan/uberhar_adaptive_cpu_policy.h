@@ -54,6 +54,10 @@ public:
     struct Stats {
         u64 observations{}, collisions{}, probation{}, retirements{}, destroyed{},
             failed_keys{}, queue_failures{}, exhausted{}, stale_tokens{}, max_owned{};
+        // CodexAstraLocal TEST-ONLY LOG: Separate capacity pressure from terminal
+        // work refusal and compatible replacements; remove after .52 qualification.
+        u64 cheap_owner_refusals{}, cheap_attempt_refusals{}, cheap_observations_at_quota{},
+            cheap_replacements{}, lit_replacements{};
     } stats;
 
     Cache() = default;
@@ -92,15 +96,22 @@ public:
 
     // CodexAstraLocal: Exact-key fixed-table probation counts all requests in an
     // eight-swap window, with at most16 per interval. A collision only loses demand.
-    bool Observe(u64 hash, const Key& key) {
-        if (!DemandBudget(Partitions::Index(key))) return false;
+    // CodexAstraLocal: The title control changes admission only. Existing ready
+    // owners remain reusable, and all physical/failed work remains accounted.
+    void SetLightingReservation(bool enabled) { lighting_reservation = enabled; }
+    bool Observe(u64 hash, const Key& key, bool lit = false) {
+        const auto partition = Partitions::Index(key);
+        if (!DemandBudget(partition, lit)) return false;
+        stats.cheap_observations_at_quota += lighting_reservation && !lit &&
+                                            CheapOwned(partition) >= CheapOwnerLimit(partition);
         ++stats.observations;
         if (Failed(hash, key)) { ++stats.failed_keys; return false; }
         auto& entry = observations[ObservationIndex(hash, key)];
-        if (!entry.key || entry.hash != hash || !(*entry.key == key)) {
+        if (!entry.key || entry.hash != hash || !(*entry.key == key) || entry.lit != lit) {
             stats.collisions += entry.key.has_value();
             entry.key = key;
             entry.hash = hash;
+            entry.lit = lit;
             entry.last_swap = swap;
             entry.counts = {};
         } else if (swap != entry.last_swap) {
@@ -126,10 +137,18 @@ public:
     }
     // CodexAstraLocal: Exhaustion of one tier stops only its new demand; ready
     // lookup and the other tier remain usable, including after terminal budgets.
-    bool AcceptingDemand(std::size_t combined_attempts, std::size_t partition) const {
+    bool AcceptingDemand(std::size_t combined_attempts, std::size_t partition,
+                         bool lit = true) const {
         return partition < Partitions::Count && combined_attempts < CombinedLimit &&
-               DemandBudget(partition);
+               DemandBudget(partition, lit);
     }
+    // CodexAstraLocal: Cheap lifetime attempts are terminal, owner occupancy is
+    // not. Fixed producer counters include retired owners until physical release.
+    bool CheapAttemptAvailable(std::size_t partition) const {
+        const auto limit = Partitions::Attempts(partition);
+        return !lighting_reservation || cheap_attempts[partition] < limit - limit / 4;
+    }
+    std::size_t CheapOwned(std::size_t partition) const { return cheap_owned[partition]; }
 
     bool CanCreate(std::size_t other_owned, std::size_t combined_attempts,
                    bool external_pending) {
@@ -147,9 +166,15 @@ public:
     // CodexAstraLocal: Count in-flight, failed and retiring owners against their
     // original partition until physical destruction publishes completion.
     bool CanCreate(std::size_t other_owned, std::size_t combined_attempts,
-                   bool external_pending, const Key& key) {
+                   bool external_pending, const Key& key, bool lit = false) {
         const auto partition = Partitions::Index(key);
-        if (!DemandBudget(partition)) { ++stats.exhausted; return false; }
+        if (!DemandBudget(partition, lit)) { ++stats.exhausted; return false; }
+        // CodexAstraLocal: Check capacity only after observation. A request at
+        // quota can qualify to replace cheap work, but cannot borrow a lit slot.
+        if (lighting_reservation && !lit && CheapOwned(partition) >= CheapOwnerLimit(partition)) {
+            ++stats.cheap_owner_refusals;
+            return false;
+        }
         return Owned(partition) < Partitions::Owners(partition) &&
                CanCreate(other_owned, combined_attempts, external_pending);
     }
@@ -158,11 +183,11 @@ public:
     // allocation. Allocation/queue failures cannot create an unaccounted owner.
     Slot* Reserve(u64 hash, const Key& key, bool lit, std::size_t other_owned,
                   std::size_t& combined_attempts, bool external_pending) {
-        if (!CanCreate(other_owned, combined_attempts, external_pending, key) || Failed(hash, key))
+        if (!CanCreate(other_owned, combined_attempts, external_pending, key, lit) || Failed(hash, key))
             return nullptr;
         const auto& seen = observations[ObservationIndex(hash, key)];
         if (!seen.key || seen.hash != hash || !(*seen.key == key) ||
-            seen.last_swap != swap || !Qualified(seen)) return nullptr;
+            seen.last_swap != swap || (lighting_reservation && seen.lit != lit) || !Qualified(seen)) return nullptr;
         for (auto& slot : slots) {
             if (slot.state != State::Empty) continue;
             if (slot.generation == std::numeric_limits<u64>::max()) {
@@ -182,6 +207,9 @@ public:
             ++attempts;
             ++combined_attempts;
             ++owned;
+            // CodexAstraLocal: Charge before allocation and never refund attempts.
+            cheap_owned[Partitions::Index(key)] += !lit;
+            cheap_attempts[Partitions::Index(key)] += !lit;
             if constexpr (Partitions::Count > 1) {
                 ++partition_owned[Partitions::Index(key)];
                 ++partition_attempts[Partitions::Index(key)];
@@ -247,6 +275,9 @@ public:
                 slot.state = State::Empty;
                 if constexpr (Partitions::Count > 1)
                     --partition_owned[Partitions::Index(*slot.observation)];
+                // CodexAstraLocal: Retired/destroy-queued owners still consume
+                // their class quota until the worker publishes destruction.
+                cheap_owned[Partitions::Index(*slot.observation)] -= !slot.lit;
                 slot.observation.reset();
                 --owned;
                 ++stats.destroyed;
@@ -283,6 +314,8 @@ public:
                 oldest->state = State::Retired;
                 invalidate(oldest->owner.get());
                 ++stats.retirements;
+                stats.cheap_replacements += !oldest->lit;
+                stats.lit_replacements += oldest->lit;
             }
         }
         if (external_pending || AnyJob()) return;
@@ -320,6 +353,8 @@ public:
         swap = attempts = owned = 0;
         partition_owned = {};
         partition_attempts = {};
+        cheap_owned = {};
+        cheap_attempts = {};
         last_admission.reset();
         disabled = false;
         stats = {};
@@ -357,6 +392,9 @@ private:
         std::optional<Key> key;
         u64 hash{}, last_swap{};
         std::array<std::uint8_t, Window> counts{};
+        // CodexAstraLocal: Class belongs to this exact observed candidate, so
+        // fresh demand can choose a compatible victim without retaining more keys.
+        bool lit{};
     };
     struct Attempt { std::optional<Key> key; u64 hash{}; bool failed{}; };
     static bool Active(State state) {
@@ -381,12 +419,22 @@ private:
     static std::size_t ObservationIndex(u64 hash, const Key& key) {
         return Partitions::Index(key) * Observations + hash % Observations;
     }
-    bool FreshDemand(std::optional<std::size_t> partition = {}) const {
+    bool FreshDemand(std::optional<std::size_t> partition = {}, const Slot* victim = nullptr,
+                     std::size_t other_owned = 0) const {
         for (const auto& seen : observations) {
             if (!seen.key || seen.last_swap != swap - 1 || !Qualified(seen) ||
                 (partition && Partitions::Index(*seen.key) != *partition) ||
-                (Partitions::Count > 1 && !DemandBudget(Partitions::Index(*seen.key))) ||
+                !DemandBudget(Partitions::Index(*seen.key), seen.lit) ||
                 Failed(seen.hash, *seen.key)) continue;
+            // CodexAstraLocal: Pair candidate and victim within the same tier.
+            // At six cheap owners a cheap miss may replace cheap, never lit;
+            // below quota it may use excess lit capacity while preserving two.
+            if (victim && !(Owned(*partition) >= Partitions::Owners(*partition) ||
+                            other_owned >= CombinedLimit - owned ||
+                            (!seen.lit && ClassPressure(*partition)))) continue;
+            if (victim && lighting_reservation && !seen.lit &&
+                CheapOwned(Partitions::Index(*seen.key)) - !victim->lit >=
+                    CheapOwnerLimit(Partitions::Index(*seen.key))) continue;
             bool resident = false;
             for (const auto& slot : slots)
                 resident |= Active(slot.state) && slot.observation &&
@@ -398,23 +446,30 @@ private:
     // CodexAstraLocal: A ninth full owner must be able to replace an idle full
     // owner even when the partial half is empty. Conversely, partial pressure
     // cannot evict a full owner. Both demand and victim belong to the same tier.
-    bool DemandBudget(std::size_t partition) const {
+    bool DemandBudget(std::size_t partition, bool lit = true) const {
         return !disabled && attempts < CpuAttempts &&
-               Attempts(partition) < Partitions::Attempts(partition);
+               Attempts(partition) < Partitions::Attempts(partition) &&
+               (lit || CheapAttemptAvailable(partition));
+    }
+    static constexpr std::size_t CheapOwnerLimit(std::size_t partition) {
+        const auto limit = Partitions::Owners(partition);
+        return limit - limit / 4;
+    }
+    // CodexAstraLocal: Six cheap owners create replacement pressure even while
+    // both protected lit slots are empty; total fullness alone freezes this case.
+    bool ClassPressure(std::size_t partition) const {
+        return lighting_reservation && CheapOwned(partition) >= CheapOwnerLimit(partition);
     }
     bool PartitionPressure() const {
-        if constexpr (Partitions::Count == 1) return false;
         for (std::size_t i = 0; i < Partitions::Count; ++i)
-            if (Owned(i) >= Partitions::Owners(i) && DemandBudget(i) && FreshDemand(i))
+            if ((Owned(i) >= Partitions::Owners(i) || ClassPressure(i)) &&
+                DemandBudget(i) && FreshDemand(i))
                 return true;
         return false;
     }
     bool ReplacementDemand(const Slot& slot, std::size_t other_owned) const {
-        if constexpr (Partitions::Count == 1) return true;
         const auto partition = Partitions::Index(*slot.observation);
-        return DemandBudget(partition) && FreshDemand(partition) &&
-               (Owned(partition) >= Partitions::Owners(partition) ||
-                other_owned >= CombinedLimit - owned);
+        return DemandBudget(partition) && FreshDemand(partition, &slot, other_owned);
     }
     std::array<Slot, Slots> slots;
     std::array<Observation, Observations * Partitions::Count> observations;
@@ -423,6 +478,9 @@ private:
     std::size_t attempts{}, owned{};
     std::array<std::size_t, Partitions::Count> partition_owned{}, partition_attempts{};
     std::optional<u64> last_admission;
-    bool disabled{};
+    // CodexAstraLocal: Two fixed class counters per tier avoid rescanning all
+    // owners on each miss and preserve charges through asynchronous retirement.
+    std::array<std::size_t, Partitions::Count> cheap_owned{}, cheap_attempts{};
+    bool lighting_reservation{}, disabled{};
 };
 } // namespace Vulkan::AdaptiveCpu

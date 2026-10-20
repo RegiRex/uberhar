@@ -10,6 +10,7 @@
 #include "video_core/renderer_vulkan/vk_render_manager.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/renderer_vulkan/vk_texture_runtime.h"
+#include "video_core/renderer_vulkan/uberhar_image_work.h" // CodexAstraLocal: Exact area containment.
 
 namespace Vulkan {
 
@@ -36,10 +37,10 @@ void RenderManager::ReportDependencies(bool final) noexcept {
             Common::Log::Delivery::Diagnostic,
             "Uberhar attachment dependency: feature=attachment_dependency.v1 sequence={} final={} "
             "other={} pass_change={} copy={} blit={} feedback={} attachments={} shadow={} "
-            "barriers_removed=0 gpu_cost=unavailable cumulative=true",
+            "contained_area_reuses={} gpu_cost=unavailable cumulative=true",
             ++dependency_sequence, final, dependency_ends[0], dependency_ends[1],
             dependency_ends[2], dependency_ends[3], dependency_ends[4], dependency_attachments,
-            dependency_shadow);
+            dependency_shadow, contained_area_reuses);
     } catch (...) { /* CodexAstraLocal: Diagnostics cannot interrupt rendering or teardown. */ }
 }
 
@@ -62,6 +63,23 @@ void RenderManager::BeginRendering(const Framebuffer* framebuffer,
         .clear = {},
         .do_clear = false,
     };
+    // CodexAstraLocal: A narrower draw already fits the live LOAD/STORE pass;
+    // retain its original area and attachments instead of ending/restarting it.
+    // Clear, utility, shadow-storage, expanded and different-attachment requests
+    // keep the previous path. The rasterizer still sets each draw's own scissor.
+    const auto& area = pass.render_area;
+    const bool contained = pass.render_pass && pass_kind == GpuWork::Graphics &&
+        !pass.do_clear && !shadow_rendering && !framebuffer->shadow_rendering &&
+        pass.framebuffer == new_pass.framebuffer && pass.render_pass == new_pass.render_pass &&
+        area != render_area && ImageWork::ContainsArea(
+            area.offset.x, area.offset.y, area.extent.width, area.extent.height,
+            render_area.offset.x, render_area.offset.y, render_area.extent.width,
+            render_area.extent.height);
+    if (contained) {
+        ++num_draws;
+        if (dependency_diagnostics) ++contained_area_reuses;
+        return;
+    }
     BeginRendering(new_pass, GpuWork::Graphics);
     // CodexAstraLocal: Close the previous pass with its own attachments before
     // installing the new metadata; EndRendering clears the previous ownership.
@@ -92,6 +110,7 @@ void RenderManager::BeginRendering(const RenderPass& new_pass, GpuWork kind) {
     });
 
     pass = new_pass;
+    pass_kind = kind; // CodexAstraLocal: Freeze classification with actual pass ownership.
 }
 
 void RenderManager::EndRendering(EndReason reason) {
