@@ -260,7 +260,12 @@ def main() -> None:
             ('pending-full-blocks','return select(partial);',
              'if (!curr_disk_cache->OptionalFragmentPending() && !(warming_ready_vertex && !warming_ready_vertex->IsDone())) return select(partial);\n            return nullptr;',
              'partial remains complete during full advancement'),
-            ('missing-partial-push','selected_fallback || static_tev_cpu','selected_fallback','partial retains exact per-draw runtime transport'),
+            # CodexAstraLocal: Mutate the executed upload condition, not the same
+            # predicate used by sampled identity hashing; retain the pixel-state oracle.
+            ('missing-partial-push',
+             'if (selected_fallback || static_tev_cpu) {\n            tev_push_constants.UploadIfChanged(',
+             'if (selected_fallback) {\n            tev_push_constants.UploadIfChanged(',
+             'partial retains exact per-draw runtime transport'),
             ('native-worker-gpu','!allow_ready_gpu_vertices || !ready_vertex_worker || !ReadyVertexShaders()',
              '!ready_vertex_worker || !ReadyVertexShaders()','Native CPU compiler does not admit GPU vertices'),
             ('partial-key-alias','!(entry.key.plan == plan) ||','false ||','exact partial key rejects same-hash aliases'),
