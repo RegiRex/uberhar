@@ -15,7 +15,6 @@
 #include "common/param_package.h"
 #include "common/setting_keys.h"
 #include "common/settings.h"
-#include "common/uberhar_software_controls.h" // CodexAstraLocal: Persist restart-only Software comparisons.
 #include "common/uberhar_test_profile.h" // AstraEH: Temporary renderer experiment overrides.
 #include "core/core.h"
 #include "core/hle/service/cfg/cfg.h"
@@ -146,9 +145,6 @@ void Config::ReadValues() {
     ReadSetting("Renderer", Settings::values.graphics_api);
     // CodexAstraLocal: Reload the persisted restart-only CPU raster budget.
     ReadSetting("Renderer", Settings::values.software_renderer_workers);
-    // CodexAstraLocal: Native INI controls survive profile application unchanged.
-    ReadSetting("Renderer", Settings::software_renderer_features);
-    ReadSetting("Renderer", Settings::software_renderer_diagnostics);
     ReadSetting("Renderer", Settings::values.async_presentation);
     ReadSetting("Renderer", Settings::values.async_shader_compilation);
     // AstraEH: Load the same opt-in flags exposed in Android's Graphics settings.
@@ -160,23 +156,8 @@ void Config::ReadValues() {
     ReadSetting("Renderer", Settings::values.uberhar_cpu_vertex_only);
     // CodexAstraLocal: Load comparison controls before constructing renderer owners.
     ReadSetting("Renderer", Settings::values.uberhar_native_full_fragments);
-    // CodexAstraLocal: Retired renderer controls are no longer loaded.
     ReadSetting("Renderer", Settings::values.uberhar_cpu_prefix_overlap);
     ReadSetting("Renderer", Settings::values.uberhar_parallel_texture_decode);
-    // CodexAstraLocal: Independent restart-only .50 controls are snapshotted by each owner;
-    // profiling stays optional so comparison runs do not pay GPU timestamp overhead.
-    ReadSetting("Renderer", Settings::values.uberhar_cpu_adaptive_participation);
-    ReadSetting("Renderer", Settings::values.uberhar_cpu_execution_census);
-    ReadSetting("Renderer", Settings::values.uberhar_feature_diagnostics);
-    ReadSetting("Renderer", Settings::values.uberhar_fragment_memo);
-    ReadSetting("Renderer", Settings::values.uberhar_constant_tev);
-    ReadSetting("Renderer", Settings::values.uberhar_directional_precompute);
-    ReadSetting("Renderer", Settings::values.uberhar_lit_specialization);
-    ReadSetting("Renderer", Settings::values.uberhar_fragment_liveness);
-    ReadSetting("Renderer", Settings::values.uberhar_alpha_never);
-    ReadSetting("Renderer", Settings::values.uberhar_gpu_timestamps);
-    ReadSetting("Renderer", Settings::values.uberhar_image_reuse);
-    ReadSetting("Renderer", Settings::values.uberhar_cpu_transfers);
 
     // AstraEH: Read the profile before applying its temporary in-memory overrides.
     ReadSetting("Renderer", Settings::values.uberhar_test_mode);
@@ -370,19 +351,6 @@ void Config::ReadValues() {
     ReadSetting("WebService", Settings::values.web_api_url);
     ReadSetting("WebService", Settings::values.network_token);
 
-    // CodexAstraLocal: Permanent once-per-reload migration evidence distinguishes
-    // retired CPU rendering from the actual Native GPU-pixel route now selected.
-    const auto saved_mode = Settings::values.uberhar_test_mode.GetValue();
-    const auto migrated_mode = Settings::MigrateUberharTestMode(saved_mode);
-    if (saved_mode != migrated_mode)
-        LOG_INFO(Config, "Uberhar retired renderer migration: saved_mode={} effective_mode={} "
-                         "guest_pixels=GPU cpu_pixel_replacement=false",
-                 static_cast<u32>(saved_mode), static_cast<u32>(migrated_mode));
-    if (Settings::values.graphics_api.GetValue() == Settings::GraphicsAPI::Software) {
-        Settings::values.graphics_api = Settings::GraphicsAPI::Vulkan;
-        LOG_INFO(Config, "Uberhar retired Android graphics API: saved_api=0 effective_api=2 "
-                         "guest_pixels=GPU cpu_pixel_replacement=false");
-    }
     // AstraEH: Apply last, after reloading every saved setting; never write these overrides to INI.
     Settings::ApplyUberharTestProfile();
 }

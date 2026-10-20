@@ -428,10 +428,7 @@ public:
                             backend.Write(entry);
                             backend.Flush();
                         });
-                    },
-                    // CodexAstraLocal: The borrowed message is inspected only
-                    // after failed insertion, which preserves its owning entry.
-                    new_entry.message);
+                    });
     }
 
     static Entry CreateEntry(Class log_class, Level log_level, const char* filename,
@@ -538,28 +535,21 @@ private:
         if (!diagnostic_omissions.Pending() || !sink_available()) {
             return;
         }
-        const auto snapshot = diagnostic_omissions.Due(std::chrono::steady_clock::now(), force);
-        if (!snapshot.Total()) {
+        const auto count = diagnostic_omissions.Due(std::chrono::steady_clock::now(), force);
+        if (!count) {
             return;
         }
-        // CodexAstraLocal TEST-ONLY LOG: Fixed per-family bins expose lost progress
-        // at the existing five-second/flush/stop cadence. Remove family detail after
-        // feature-capture qualification; preserve reliable total omission evidence.
+        // CodexAstraUlt Log Line: At most one per five seconds plus explicit flush/stop;
+        // only opted-in diagnostics were omitted, not lifecycle/error records or draws.
         const auto report = CreateEntry(
             Class::Log, Level::Warning, TrimSourcePath(__FILE__), __LINE__, __func__,
-            fmt::format("Uberhar log omissions: schema=2 optional_records={} "
-                        "cpu_draw={} prefix={} decode={} adaptive={} fragment={} "
-                        "gpu_identity={} gpu_cost={} software={} other={} "
+            fmt::format("Uberhar log omissions: schema=1 optional_records={} "
                         "reason=queue_full_or_contended scope=since_previous_report",
-                        snapshot.Total(), snapshot[DiagnosticFamily::CpuDraw],
-                        snapshot[DiagnosticFamily::Prefix], snapshot[DiagnosticFamily::Decode],
-                        snapshot[DiagnosticFamily::Adaptive], snapshot[DiagnosticFamily::Fragment],
-                        snapshot[DiagnosticFamily::GpuIdentity], snapshot[DiagnosticFamily::GpuCost],
-                        snapshot[DiagnosticFamily::Software], snapshot[DiagnosticFamily::Other]),
+                        count),
             time_origin);
         ForEachBackend([&report](Backend& backend) { backend.Write(report); });
         if (sink_available()) {
-            diagnostic_omissions.Acknowledge(snapshot);
+            diagnostic_omissions.Acknowledge(count);
         }
     }
 

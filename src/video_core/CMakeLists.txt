@@ -49,6 +49,9 @@ add_library(video_core STATIC EXCLUDE_FROM_ALL
     pica/output_vertex.h
     pica/primitive_assembly.cpp
     pica/primitive_assembly.h
+    # CodexAstraLocal: Value-owned semantic tails cross the compute boundary;
+    # the existing serialized PICA assembler remains the only persistent owner.
+    pica/compute_assembly.h
     pica/regs_external.h
     pica/regs_framebuffer.h
     pica/regs_internal.cpp
@@ -91,6 +94,10 @@ add_library(video_core STATIC EXCLUDE_FROM_ALL
     shader/debug_data.h
     shader/generator/glsl_fs_shader_gen.cpp
     shader/generator/glsl_fs_shader_gen.h
+    # CodexAstraLocal: Independent original-input compute translation reuses
+    # the production guest decompiler; it is not a graphics vertex fallback.
+    shader/generator/glsl_compute_vertex_shader_gen.cpp
+    shader/generator/glsl_compute_vertex_shader_gen.h
     shader/generator/glsl_shader_decompiler.cpp
     shader/generator/glsl_shader_decompiler.h
     shader/generator/glsl_shader_gen.cpp
@@ -143,11 +150,6 @@ if (ENABLE_SOFTWARE_RENDERER)
         renderer_software/sw_proctex.h
         renderer_software/sw_rasterizer.cpp
         renderer_software/sw_rasterizer.h
-        # CodexAstraLocal: Immutable preparation and exact row-work policies.
-        renderer_software/sw_tev_preparation.h
-        renderer_software/sw_raster_work.h
-        # CodexAstraLocal TEST-ONLY LOG: Bounded source-value provenance; remove after terminal reproduction.
-        renderer_software/sw_source_provenance.h
         renderer_software/sw_texturing.cpp
         renderer_software/sw_texturing.h
     )
@@ -204,8 +206,27 @@ if (ENABLE_VULKAN)
         # AstraEH: Startup-compiled compute subset and measured automatic routing.
         renderer_vulkan/vk_compute_rect.cpp
         renderer_vulkan/vk_compute_rect.h
-        # CodexAstraLocal: Independent compute runtime/shaders and scratch benchmark are retired.
+        # CodexAstraLocal: Original guest shading, ordered compute fragments and
+        # native-format transfers share the existing Vulkan resource ownership.
+        renderer_vulkan/vk_compute_raster.cpp
+        renderer_vulkan/vk_compute_raster.h
+        renderer_vulkan/uberhar_compute_raster_shader.h
+        renderer_vulkan/uberhar_compute_target_format.h
+        # CodexAstraLocal: Compute creation failures retain bounded incident evidence
+        # and use the existing typed stop; fragment transport reuse is owner-only.
+        renderer_vulkan/uberhar_compute_pipeline.h
         renderer_vulkan/uberhar_dynamic_tev_preparation.h
+        renderer_vulkan/uberhar_compute_shadow.h
+        renderer_vulkan/vk_compute_vertex.cpp
+        renderer_vulkan/vk_compute_vertex.h
+        # CodexAstraLocal: Actual Calculated terminal paths share one owned packet writer.
+        renderer_vulkan/compute_failure_packet.cpp
+        renderer_vulkan/compute_failure_packet.h
+        # CodexAstraLocal: Default-off fixed scratch comparison shares actual
+        # compute commands but owns its request, pipelines, queries and readbacks.
+        renderer_vulkan/uberhar_compute_benchmark.h
+        renderer_vulkan/vk_compute_benchmark.cpp
+        renderer_vulkan/vk_compute_benchmark.h
         # AstraEH: Validated persistent generic-module envelope.
         renderer_vulkan/uberhar_spirv_cache.h
         renderer_vulkan/uberhar_compute_rect.h
@@ -238,9 +259,6 @@ if (ENABLE_VULKAN)
         renderer_vulkan/uberhar_vertex_capture_policy.h
         renderer_vulkan/vk_rasterizer_cache.cpp
         renderer_vulkan/vk_scheduler.cpp
-        # CodexAstraLocal: Bounded asynchronous Native/Combo GPU attribution.
-        renderer_vulkan/vk_work_profile.cpp
-        renderer_vulkan/vk_work_profile.h
         renderer_vulkan/vk_scheduler.h
         renderer_vulkan/vk_resource_pool.cpp
         renderer_vulkan/vk_resource_pool.h
@@ -269,7 +287,6 @@ if (ENABLE_VULKAN)
         shader/generator/spv_fs_shader_gen.h
     )
     target_link_libraries(video_core PRIVATE vulkan-headers vma sirit SPIRV glslang)
-    # CodexAstraLocal: No independent compute lowering remains to link SPIRV-Tools-opt.
     # CodexAstraLocal: Branch build tags may report native version "0". Stamp
     # opt-in evidence with the app's actual fork version without changing shaders.
     file(READ "${CMAKE_SOURCE_DIR}/UBERHAR_VERSION" UBERHAR_CAPTURE_VERSION LIMIT 64)

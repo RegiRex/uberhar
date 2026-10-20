@@ -27,15 +27,32 @@ std::unique_ptr<RendererBase> CreateRenderer(Frontend::EmuWindow& emu_window,
                                              Frontend::EmuWindow* secondary_window,
                                              Pica::PicaCore& pica, Core::System& system) {
     const auto graphics_api = Settings::GetWorkingGraphicsAPI();
-    // CodexAstraLocal: Retired profiles are migrated before this factory. Keep
-    // the reusable internal Software backend, without a standalone UI model.
-    // CodexAstraLocal: Only supported renderers reach factory selection after profile migration.
+    // CodexAstraLocal: An explicit CPU Software profile must fail closed when
+    // stale/invalid effective settings point elsewhere; no substitute PICA path.
+    if (Settings::values.uberhar_test_mode.GetValue() == Settings::UberharTestMode::Software &&
+        graphics_api != Settings::GraphicsAPI::Software) {
+        throw ShaderRecoveryError{"CPU Software mode requires the Software backend; fallback is disabled"};
+    }
+    // CodexAstraLocal: Calculated isolation cannot silently select OpenGL or
+    // software when Vulkan is unavailable. Other profiles retain the existing
+    // backend resolver and default behavior; initial-load callers contain this
+    // typed failure before any substitute renderer can be constructed.
+    if (Settings::values.uberhar_test_mode.GetValue() == Settings::UberharTestMode::Compute) {
+#ifdef ENABLE_VULKAN
+        const bool available = graphics_api == Settings::GraphicsAPI::Vulkan;
+#else
+        const bool available = false;
+#endif
+        if (!available) {
+            throw ShaderRecoveryError{
+                "Isolated Calculated rendering requires the Vulkan backend; fallback is disabled"};
+        }
+    }
     switch (graphics_api) {
-// CodexAstraLocal: Retain the desktop/reference core, but compile no Android selection route.
-#if defined(ENABLE_SOFTWARE_RENDERER) && !defined(ANDROID)
+#ifdef ENABLE_SOFTWARE_RENDERER
     case Settings::GraphicsAPI::Software:
-        // CodexAstraLocal: Keep the reusable desktop/reference CPU renderer isolated
-        // from guest GPU rasterization; Android cannot select this constructor.
+        // CodexAstraLocal: Both Android displays consume completed CPU frames;
+        // no accelerated PICA rasterizer is constructed for this selection.
         return std::make_unique<SwRenderer::RendererSoftware>(system, pica, emu_window,
                                                              secondary_window);
 #else
@@ -65,7 +82,7 @@ std::unique_ptr<RendererBase> CreateRenderer(Frontend::EmuWindow& emu_window,
         return std::make_unique<OpenGL::RendererOpenGL>(system, pica, emu_window, secondary_window);
 #elif ENABLE_VULKAN
         return std::make_unique<Vulkan::RendererVulkan>(system, pica, emu_window, secondary_window);
-#elif defined(ENABLE_SOFTWARE_RENDERER) && !defined(ANDROID)
+#elif ENABLE_SOFTWARE_RENDERER
         return std::make_unique<SwRenderer::RendererSoftware>(system, pica, emu_window,
                                                              secondary_window);
 #else

@@ -84,7 +84,6 @@ public:
 
     /// Notify the cache that a new frame has been queued
     void TickFrame();
-    void ReportCpuTransfers(bool final = false) noexcept; // CodexAstraLocal TEST-ONLY LOG: Remove after placement qualification.
 
     /// Perform hardware accelerated texture copy according to the provided configuration
     bool AccelerateTextureCopy(const Pica::DisplayTransferConfig& config);
@@ -236,22 +235,6 @@ private:
     // CodexAstraLocal: One lazy joined decoder belongs to this cache and cannot
     // outlive the owner of its mapped upload resources.
     ParallelTextureDecoder texture_decoder;
-    // CodexAstraLocal TEST-ONLY LOG: Owner-only admission/cost counters for the
-    // exact raw CPU transfer; remove after placement is qualified on hardware.
-    const bool cpu_transfer_applicable;
-    const bool cpu_transfers_enabled;
-    const bool cpu_transfer_diagnostics;
-    struct CpuTransferStatistics {
-        u64 attempts{}, shape_refused{}, dirty_refused{}, writer_refused{}, mapping_refused{};
-        u64 accepted{}, bytes{}, admission_ns{}, invalidation_ns{};
-        u64 disabled{}, source_dirty{}, dest_dirty{}, host_alias{}, failures{};
-        u64 sampled_attempts{}, sampled_accepted{}, copy_ns{};
-        std::array<u64, 7> shape_reasons{};
-        std::array<u64, 5> prefilter{};
-        u64 sequence{};
-        u32 report_prescale{};
-    } cpu_transfer_stats;
-    std::chrono::steady_clock::time_point cpu_transfer_report_time{std::chrono::steady_clock::now()};
 };
 
 } // namespace VideoCore

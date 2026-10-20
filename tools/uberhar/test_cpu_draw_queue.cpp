@@ -85,7 +85,12 @@ void Gate(bool open) { { std::lock_guard lock{gate_mutex}; gate_open = open; } g
 // CodexAstraLocal: The driver injects these calls only into a copied CPP. They
 // force the otherwise rare terminal boundaries without replacing JIT execution.
 namespace PacketProbe {
-std::atomic<bool> fail_packet{}, fail_wave{};
+// CodexAstraLocal: Deterministic thread-resource refusal tests serial progress.
+std::atomic<bool> fail_packet{}, fail_wave{}, fail_start{};
+void BeforeThreadStart() {
+    if (fail_start.exchange(false))
+        throw std::system_error{std::make_error_code(std::errc::resource_unavailable_try_again)};
+}
 std::mutex mutex;
 std::condition_variable cv;
 bool entered{}, release{};
@@ -514,9 +519,7 @@ void WorkFloor(const std::vector<CarryChallenge::Case>& programs) {
             b.Arithmetic(Op::ADD,Dst::MakeTemporary(0),15,
                 n ? Src::MakeTemporary(0) : Src::MakeInput(0),Src::MakeInput(0));
         b.Arithmetic(Op::MOV,Dst::MakeOutput(0),15,Src::MakeTemporary(0));
-        // CodexAstraLocal: The rejected 34-instruction case must independently
-        // pay the work threshold, so removing the arithmetic floor is detectable.
-        const auto c=b.Finish(); Live live{Lease(engine,setup,c),c,arithmetic==34?102U:96U,1,false,3};
+        const auto c=b.Finish(); Live live{Lease(engine,setup,c),c,96,1,false,3};
         const auto packet=queue.Capture(live.source,VideoCore::ActualWriter);
         Need(bool(packet)==(arithmetic==35),"arithmetic floor boundary");
     }
@@ -528,9 +531,7 @@ void WorkFloor(const std::vector<CarryChallenge::Case>& programs) {
     }
     auto source=live.source; source.indexed=false; source.base_vertex=0;
     source.count=93;
-    // CodexAstraLocal: Below96 standalone work must stay synchronous even for
-    // expensive shaders; the removed expansion cannot be enabled by any policy.
-    Need(!queue.Capture(source,VideoCore::ActualWriter),"conservative seed admitted93");
+    Need(!queue.Capture(source,VideoCore::ActualWriter)&&!queue.LastCaptureAtCapacity(),"miss floor accepted93");
     source.count=96;
     Need(bool(queue.Capture(source,VideoCore::ActualWriter)),"miss floor rejected96");
     source.available_attributes=9; source.shader.max_input_attribute_index.Assign(8);
@@ -540,9 +541,7 @@ void WorkFloor(const std::vector<CarryChallenge::Case>& programs) {
     for(u32 n=0;n<9;++n)source.attributes[n].stride=71;
     source.attributes[9]={70,71,1,PipelineRegs::VertexAttributeFormat::UBYTE,false};
     Need(!queue.Capture(source,VideoCore::ActualWriter)&&!queue.LastCaptureAtCapacity(),"raw copy floor accepted71");
-    // CodexAstraLocal: Conservative default adds the93miss standalone refusal;
-    // that draw remains executable through the synchronous path.
-    Need(queue.GetStatistics().work_refused==5,"work refusal accounting");
+    Need(queue.GetStatistics().work_refused>=5,"work refusal accounting");
 
     // A long branch cannot inflate a guaranteed work floor; a Boolean snapshot
     // fixes the choice, while per-invocation condition branches retain minimum0.
@@ -592,9 +591,8 @@ void Groups(const std::vector<CarryChallenge::Case>& programs) {
     {
         Gate(false); CpuDrawExecutor queue{4, 8, 8 * 1024 * 1024, Start};
         struct ReleaseGate { ~ReleaseGate() { Gate(true); } } release;
-        // CodexAstraLocal: Assert actual admission/publication behavior instead
-        // of the obsolete production advisory mirror; all functional guards remain.
-        Need(!queue.AllowsShaderWork(floor_lease, 0, 93), "unseeded small admission");
+        Need(!queue.HasPendingSeed(), "empty seed hint");
+        Need(!queue.AllowsShaderWork(heavy_lease, 0, 93), "unseeded small admission");
         auto stats = queue.GetStatistics();
         Need(stats.captures == 1 && stats.refused == 1 && stats.early_refused == 1,
              "early refusal counted twice");
@@ -604,7 +602,7 @@ void Groups(const std::vector<CarryChallenge::Case>& programs) {
         std::vector<std::shared_ptr<CpuDrawPacket>> packets;
         std::vector<Expected> expected;
         for (u32 n = 0; n < 4; ++n) {
-            const u32 sizes[]{255, 12, 18, 90};
+            const u32 sizes[]{255, 3, 18, 93};
             Live live{n ? carry_lease : heavy_lease, n ? programs[1] : heavy,
                       sizes[n], n + 1, false};
             environment.Apply(); expected.push_back(Serial(live)); environment.Apply();
@@ -613,6 +611,7 @@ void Groups(const std::vector<CarryChallenge::Case>& programs) {
             auto packet = queue.Capture(live.source, ObservedWriter);
             Need(bool(packet) && queue.Submit(packet), "seeded small publication refused");
             packets.push_back(packet); live.Mutate();
+            Need(queue.HasPendingSeed(), "pending seed hint absent");
         }
         CpuDrawPacket::Completion result;
         Need(!packets[0]->TryCompletedResult(result), "pending result reported ready");
@@ -633,7 +632,12 @@ void Groups(const std::vector<CarryChallenge::Case>& programs) {
              "group admission accounting");
         Need(stats.work_grains == 2 && stats.coordinator_packets + stats.auxiliary_packets == 4,
              "weighted grain accounting");
+        Need(!queue.HasPendingSeed(), "executing seed stayed pending");
         packets.clear(); Need(queue.GetStatistics().resident_packets == 0, "group credit leaked");
+        // CodexAstraLocal: Lazy startup rejects the initial empty queue before
+        // reaching the seed guard. Recheck after a real group drains with the
+        // coordinator active: completed seeds cannot fund new small packets.
+        Need(!queue.AllowsShaderWork(heavy_lease, 0, 93), "unseeded small admission");
     }
     {
         Gate(false); CpuDrawExecutor queue{4, 8, 8 * 1024 * 1024, Start};
@@ -643,7 +647,7 @@ void Groups(const std::vector<CarryChallenge::Case>& programs) {
         Need(packet && queue.Submit(packet), "exact baseline seed publication");
         Need(!queue.AllowsShaderWork(floor_lease, 0, 3), "aggregate work charge omitted");
         Live indexed{floor_lease, floor, 192, 1, true};
-        for (u32 n = 0; n < indexed.indices.size(); ++n) indexed.indices[n] = n % 3;
+        for (u32 n = 0; n < indexed.indices.size(); ++n) indexed.indices[n] = n % 64;
         Need(queue.AllowsShaderWork(floor_lease, 0, 192), "upper-bound policy required raw indices");
         Need(!queue.Capture(indexed.source, VideoCore::ActualWriter), "group used inputs instead of misses");
         Gate(true); queue.Drain();
@@ -684,99 +688,116 @@ void Groups(const std::vector<CarryChallenge::Case>& programs) {
         Need(bytes.size() == expected.hardware.size() &&
              !std::memcmp(bytes.data(), expected.hardware.data(), bytes.size()), "no-lane hardware differs");
         ++comparisons;
-        Need(queue.GetStatistics().peak_threads == 1, "no-lane async work");
-    }
-    // CodexAstraLocal: Retain lazy startup and exact proof reuse for worthwhile
-    // standalone work. Cached negative policy creates no reservation; a same-
-    // key accepted proof is reused through owned capture before lazy startup.
-    {
-        const auto reservations = Common::Uberhar::AuxiliaryBudget::Global().GetStatistics().reservations;
-        CpuDrawExecutor queue{4};
-        Need(!queue.CachedShaderWork(floor_lease,0,3).has_value(),"unknown cached policy invented");
-        Need(!queue.AllowsShaderWork(floor_lease,0,3),"tiny floor policy admitted");
-        const auto built=queue.GetStatistics().effect_builds;
-        Need(queue.CachedShaderWork(floor_lease,0,3)==std::optional<bool>{false},"negative policy not cached");
-        Need(queue.GetStatistics().effect_builds==built && queue.GetStatistics().start_requests==0 &&
-             Common::Uberhar::AuxiliaryBudget::Global().GetStatistics().reservations==reservations,
-             "negative policy reserved progress");
-        Need(!queue.CachedShaderWork(floor_lease,1,3).has_value(),"cached Boolean identity aliased");
-        Live live{heavy_lease,heavy,96,1,false};
-        const auto expected=Serial(live);
-        Need(queue.AllowsShaderWork(heavy_lease,0,96),"qualified standalone seed rejected");
-        auto packet=queue.Capture(live.source,VideoCore::ActualWriter);
-        auto before=queue.GetStatistics();
-        Need(packet && before.effect_reuses==1 && before.original_seeded==0 && before.start_requests==0,
-             "accepted proof or lazy capture contract");
-        Need(queue.Submit(packet),"standalone seed publication"); queue.Drain();
-        const auto bytes=packet->HardwareBytes();
-        Need(bytes.size()==expected.hardware.size() &&
-             !std::memcmp(bytes.data(),expected.hardware.data(),bytes.size()),"standalone seed hardware differs");
-        ++comparisons;
-        Need(queue.GetStatistics().start_requests==1 && queue.GetStatistics().original_seeded==1,
-             "lazy progress startup count");
-    }
-    // CodexAstraLocal: The removed expansion means an exact heavy48 draw must
-    // not start/reserve anything. A Boolean-mismatched accepted token falls back
-    // to the actual policy, never borrowing the old proof or skipping rendering.
-    {
-        CpuDrawExecutor queue{4};
-        Live small{heavy_lease,heavy,48,1,false};
-        Need(!queue.AllowsShaderWork(heavy_lease,0,48) &&
-             !queue.Capture(small.source,VideoCore::ActualWriter), "standalone miss floor ignored");
-        Need(queue.GetStatistics().start_requests==0,"small standalone work started coordinator");
-        Live original{heavy_lease,heavy,96,1,false};
-        Need(queue.AllowsShaderWork(heavy_lease,0,96),"original policy rejected");
-        original.source.uniforms.b[0] = true;
-        auto packet=queue.Capture(original.source,VideoCore::ActualWriter);
-        Need(packet && queue.GetStatistics().token_mismatches==1 &&
-             queue.GetStatistics().effect_reuses==0,"stale Boolean token reused");
-        Need(queue.Submit(packet),"original seed not published"); queue.Drain();
-        const auto expected=Serial(original); const auto bytes=packet->HardwareBytes();
-        Need(bytes.size()==expected.hardware.size() &&
-             !std::memcmp(bytes.data(),expected.hardware.data(),bytes.size()),"token fallback output differs");
-        ++comparisons;
-        const auto stats=queue.GetStatistics();
-        Need(stats.original_seeded==1 && stats.group_submitted==0,
-             "seed classes not exclusive");
-    }
-    // CodexAstraLocal: Diagnostics independently prices actual cached lookup
-    // and eligibility. OFF keeps admission/owner counters but reads no clocks.
-    for(bool diagnostics : {false,true}) {
-        CpuDrawExecutor queue{4,64,8*1024*1024,nullptr,{.sampled_costs=diagnostics}};
-        Need(!queue.AllowsShaderWork(floor_lease,0,3),"diagnostic gate admitted tiny work");
-        for(unsigned i=0;i<2048;++i)
-            Need(queue.CachedShaderWork(floor_lease,0,3)==std::optional<bool>{false},
-                 "diagnostic control changed eligibility");
-        const auto stats=queue.GetStatistics();
-        Need(stats.cached_checks==2048 && stats.start_requests==0 &&
-             stats.lookup_samples==(diagnostics?2U:0U) &&
-             stats.eligibility_samples==(diagnostics?2U:0U),"feature cost sample routing");
-    }
-    // CodexAstraLocal: Aggregate work alone cannot admit an unpartitionable
-    // cheap tail. Exercise both the member bound and per-member dispatch charge.
-    for (u32 member_size : {12U,30U}) {
-        Gate(false); CpuDrawExecutor queue{4,8,8*1024*1024,Start};
-        struct ReleaseGate { ~ReleaseGate() { Gate(true); } } release;
-        Live seed{floor_lease,floor,96,1,false};
-        auto first=queue.Capture(seed.source,VideoCore::ActualWriter);
-        Need(first&&queue.Submit(first),"partition seed publication");
-        std::vector<std::shared_ptr<CpuDrawPacket>> packets{first};
-        for (unsigned i=0;i<3;++i) {
-            Live member{floor_lease,floor,member_size,i+1,false};
-            auto packet=queue.Capture(member.source,VideoCore::ActualWriter);
-            Need(packet&&queue.Submit(packet),"valid four-member partition refused"); packets.push_back(packet);
-        }
-        Live tail{floor_lease,floor,member_size,7,false};
-        Need(!queue.Capture(tail.source,VideoCore::ActualWriter),
-             member_size==12 ? "oversized grain admitted" : "member charge omitted");
-        Gate(true); queue.Drain();
-        Need(queue.GetStatistics().work_grains==1,"partition dispatch disagreed with admission");
+        Need(queue.GetStatistics().peak_threads == 1 && !queue.HasPendingSeed(), "no-lane async work");
     }
 }
 
 // CodexAstraLocal: Read the actual PICA ordered-prefix implementation using real
 // packets in deliberately different readiness orders. Unpublished later work
 // represents an unavailable result; the reader must not drain or skip it.
+// CodexAstraLocal: Exercise the actual CPU-only .48 fast paths against serial
+// output. No GPU routing/grouping policy is adapted for this comparison fixture.
+void PreparationReuse(const std::vector<CarryChallenge::Case>& programs) {
+    // CodexAstraLocal: Existing Normal() covers all FP modes. These fixtures
+    // compare exact output/tail/FIFO state while isolating preparation decisions.
+    const auto equal = [](const CpuDrawPacket& packet, const Expected& expected) {
+        const auto bytes = packet.HardwareBytes();
+        Need(bytes.size() == expected.hardware.size() &&
+             !std::memcmp(bytes.data(), expected.hardware.data(), bytes.size()), "preparation output differs");
+        const auto result = packet.CompletedResult();
+        Need(!std::memcmp(result.last_pair.data(), expected.pair.data(), sizeof(result.last_pair)) &&
+             result.counts.hits == expected.counts.hits && result.counts.invocations == expected.counts.invocations,
+             "preparation tail or FIFO differs");
+        ++comparisons;
+    };
+    Shader::JitEngine engine; ShaderSetup setup;
+    const auto floor = WorkProgram(35);
+    const auto heavy = WorkProgram(200);
+    const auto floor_lease = Lease(engine, setup, floor);
+    const auto heavy_lease = Lease(engine, setup, heavy);
+    {
+        const auto reservations = Common::Uberhar::AuxiliaryBudget::Global().GetStatistics().reservations;
+        CpuDrawExecutor queue{4};
+        Need(!queue.CachedShaderWork(floor_lease, 0, 3).has_value(), "unknown cached policy invented");
+        Need(!queue.AllowsShaderWork(floor_lease, 0, 3), "tiny policy admitted");
+        const auto builds = queue.GetStatistics().effect_builds;
+        Need(queue.CachedShaderWork(floor_lease, 0, 3) == std::optional<bool>{false},
+             "negative policy not cached");
+        Need(queue.GetStatistics().effect_builds == builds && queue.GetStatistics().start_requests == 0 &&
+             Common::Uberhar::AuxiliaryBudget::Global().GetStatistics().reservations == reservations,
+             "negative policy reserved progress");
+        Need(!queue.CachedShaderWork(floor_lease, 1, 3).has_value(), "cached Boolean identity aliased");
+        Live live{heavy_lease, heavy, 96, 1, false};
+        const auto expected = Serial(live);
+        Need(queue.AllowsShaderWork(heavy_lease, 0, 96), "qualified standalone seed rejected");
+        auto packet = queue.Capture(live.source, VideoCore::ActualWriter);
+        const auto before = queue.GetStatistics();
+        Need(packet && before.effect_reuses == 1 && before.seed_submitted == 0 &&
+             before.start_requests == 0, "accepted proof or lazy capture contract");
+        Need(queue.Submit(packet), "standalone seed publication"); queue.Drain();
+        equal(*packet, expected);
+        Need(queue.GetStatistics().start_requests == 1 && queue.GetStatistics().seed_submitted == 1,
+             "lazy progress startup count");
+    }
+    // CodexAstraLocal: An accepted token does not authorize changed Booleans,
+    // entry/code or a replacement cache slot; the fallback still shades exact data.
+    {
+        CpuDrawExecutor queue{4};
+        Live live{heavy_lease, heavy, 96, 1, false};
+        Need(queue.AllowsShaderWork(heavy_lease, 0, 96), "token source rejected");
+        live.source.uniforms.b[0] = true;
+        auto packet = queue.Capture(live.source, VideoCore::ActualWriter);
+        Need(packet && queue.GetStatistics().token_mismatches == 1 &&
+             queue.GetStatistics().effect_reuses == 0, "stale Boolean token reused");
+        Need(queue.Submit(packet), "token fallback publication"); queue.Drain();
+        equal(*packet, Serial(live));
+    }
+    {
+        CpuDrawExecutor queue{1};
+        Need(queue.AllowsShaderWork(heavy_lease, 0, 96), "eviction token source rejected");
+        for (u16 booleans = 1; booleans <= 16; ++booleans) {
+            Live changed{heavy_lease, heavy, 96, 1, false};
+            for (unsigned b = 0; b < 16; ++b) changed.source.uniforms.b[b] = (booleans >> b) & 1;
+            Need(bool(queue.Capture(changed.source, VideoCore::ActualWriter)), "replacement proof capture");
+        }
+        Live restored{heavy_lease, heavy, 96, 1, false};
+        const auto reused = queue.GetStatistics().effect_reuses;
+        auto packet = queue.Capture(restored.source, VideoCore::ActualWriter);
+        Need(packet && queue.GetStatistics().effect_reuses == reused,
+             "overwritten proof token reused");
+        Need(queue.Submit(packet), "replacement fallback publication"); queue.Drain();
+        equal(*packet, Serial(restored));
+    }
+    // CodexAstraLocal: Optional thread failure occurs before publication and
+    // releases progress credit; the exact draw still completes synchronously.
+    {
+        CpuDrawExecutor queue{4};
+        Live live{heavy_lease, heavy, 96, 1, false};
+        const auto reservations = Common::Uberhar::AuxiliaryBudget::Global().GetStatistics().reservations;
+        PacketProbe::fail_start = true;
+        auto packet = queue.Capture(live.source, VideoCore::ActualWriter);
+        Need(packet && queue.Submit(packet), "thread-failure serial publication"); queue.Drain();
+        equal(*packet, Serial(live));
+        const auto stats = queue.GetStatistics();
+        Need(stats.start_failed == 1 && stats.async_starts == 0 && stats.peak_threads == 1 &&
+             Common::Uberhar::AuxiliaryBudget::Global().GetStatistics().reservations == reservations,
+             "thread-failure progress credit leaked");
+    }
+    // CodexAstraLocal: Lookup/proof prices remain disabled without clock reads;
+    // enabled counters describe actual work and preserve the same admission.
+    for (bool diagnostics : {false, true}) {
+        CpuDrawExecutor queue{4, 64, 8 * 1024 * 1024, nullptr, diagnostics};
+        Need(!queue.AllowsShaderWork(floor_lease, 0, 3), "diagnostic tiny admission");
+        for (unsigned i = 0; i < 2048; ++i)
+            Need(queue.CachedShaderWork(floor_lease, 0, 3) == std::optional<bool>{false},
+                 "diagnostic control changed eligibility");
+        const auto stats = queue.GetStatistics();
+        Need(stats.cached_checks == 2048 && stats.start_requests == 0 &&
+             stats.lookup_samples == (diagnostics ? 2U : 0U) &&
+             stats.eligibility_samples == (diagnostics ? 2U : 0U), "feature cost sample routing");
+    }
+}
+
 void ReadyPrefix(const std::vector<CarryChallenge::Case>& programs) {
     Shader::JitEngine engine; ShaderSetup setup;
     auto lease = Lease(engine, setup, programs[0]);
@@ -833,9 +854,12 @@ int main(int argc, char** argv) try {
     if (selected == "all" || selected == "normal") Normal(programs);
     if (selected == "all" || selected == "bounds") Boundaries(programs);
     if (selected == "all" || selected == "failures") Failures(programs);
-    if (selected == "all" || selected == "work" || selected == "features") WorkFloor(programs);
-    if (selected == "all" || selected == "resets" || selected == "groups" || selected == "features") Resets(programs);
-    if (selected == "all" || selected == "groups" || selected == "features") { Groups(programs); ReadyPrefix(programs); }
+    if (selected == "all" || selected == "work") WorkFloor(programs);
+    if (selected == "all" || selected == "resets" || selected == "groups") Resets(programs);
+    if (selected == "all" || selected == "groups") { Groups(programs); ReadyPrefix(programs); }
+    // CodexAstraLocal: CPU-only preparation regressions join the existing output
+    // fixture; full CI still covers all inherited carry/group/terminal contracts.
+    if (selected == "all" || selected == "preparation") PreparationReuse(programs);
     original.Apply();
     std::cout << Json{{"passed", true}, {"checks", checks}, {"comparisons", comparisons},
         {"programs", programs.size()}, {"fp_modes", ModeCount},

@@ -4,8 +4,6 @@
 
 #pragma once
 
-#include <chrono> // CodexAstraLocal: Bounded transfer-cost reporting cadence.
-
 #include <span>
 #include "video_core/rasterizer_cache/framebuffer_base.h"
 #include "video_core/rasterizer_cache/rasterizer_cache_base.h"
@@ -162,9 +160,6 @@ public:
 
     /// Returns true if the provided pixel format needs convertion
     bool NeedsConversion(const Surface& surface) const;
-    // CodexAstraLocal TEST-ONLY LOG: Owner-only savings census, removed after
-    // exact-copy/feedback reuse qualification; periodic delivery is nonblocking.
-    void ReportTransferSavings(bool final = false) noexcept;
 
 private:
     /// Clears a partial texture rect using a clear rectangle
@@ -178,20 +173,6 @@ private:
     StreamBuffer upload_buffer;
     StreamBuffer download_buffer;
     u32 num_swapchain_images;
-    // CodexAstraLocal: Immutable owner controls; exact self-copy no-ops remain
-    // mandatory because overlapping identity copies are invalid Vulkan commands.
-    const bool feedback_reuse_enabled;
-    const bool transfer_diagnostics;
-    u64 copy_regions{}, identity_regions{}, identity_blits{}, feedback_requests{}, feedback_reuses{};
-    u64 copy_image_refused{}, copy_subresource_refused{}, copy_coordinates_refused{}, blit_requests{};
-    // CodexAstraLocal TEST-ONLY LOG: Remove after exact blit/copy substitution is qualified.
-    u64 blit_copy_regions{}, blit_copy_bytes{}, blit_copy_gate_samples{}, blit_copy_gate_ns{};
-    u64 feedback_disabled{}, feedback_missing{}, feedback_allocation{}, feedback_epoch{};
-    // CodexAstraLocal TEST-ONLY LOG: Sparse predicate cost excludes copy/visibility execution.
-    std::array<u64, 3> reuse_gate_samples{}, reuse_gate_ns{};
-    u64 transfer_sequence{};
-    u32 transfer_report_prescale{};
-    std::chrono::steady_clock::time_point transfer_report_time{std::chrono::steady_clock::now()};
 };
 
 class Surface : public VideoCore::SurfaceBase {
@@ -241,8 +222,10 @@ public:
     }
 
     /// Returns a copy of the upscaled image handle, used for feedback loops.
-    // CodexAstraLocal: Supported graphics feedback reads the sampled color snapshot.
-    vk::ImageView CopyImageView() noexcept;
+    // CodexAstraLocal: Compute feedback needs the original typed view after a
+    // full-aspect snapshot, including R32 shadow and depth sampling views.
+    vk::ImageView CopyImageView(ViewType view_type = ViewType::Sample,
+                               bool compute = false) noexcept;
 
     /// Returns the framebuffer view of the surface image
     vk::ImageView FramebufferView() noexcept {
@@ -302,16 +285,15 @@ public:
     Scheduler& scheduler;
     FormatTraits traits;
     std::array<Handle, Type::Num> handles;
-    // CodexAstraLocal: Reuse only within an unchanged recorder epoch and exact
-    // source/copy allocations. This is not a cross-draw content-generation cache.
-    vk::Image snapshot_source{}, snapshot_dest{};
-    u64 snapshot_epoch{};
     Type current{};
     vk::UniqueImageView depth_view;
     vk::UniqueImageView stencil_view;
     vk::UniqueImageView storage_view;
     bool is_framebuffer{};
     bool is_storage{};
+    // CodexAstraLocal: Sampling is also a compute access. Cache transfers must
+    // not infer its pipeline stage solely from storage-image writes.
+    bool is_compute{};
 };
 
 class Framebuffer : public VideoCore::FramebufferParams {

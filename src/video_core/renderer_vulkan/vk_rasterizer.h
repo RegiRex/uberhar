@@ -10,7 +10,12 @@
 // CodexAstraLocal: Keep the recovered optional output guard owned by the renderer.
 #include "video_core/renderer_vulkan/uberhar_gpu_output_policy.h"
 #include "video_core/renderer_vulkan/vk_compute_rect.h" // AstraEH: Bounded compute test path.
-// CodexAstraLocal: Independent Calculated runtime owners are retired.
+// CodexAstraLocal: Calculated joins original-input compute guest execution
+// and the ordered resource/merger owner without a CPU-prepared vertex bridge.
+#include "video_core/renderer_vulkan/vk_compute_raster.h"
+#include "video_core/renderer_vulkan/vk_compute_vertex.h" // CodexAstraLocal: Original-input producer.
+// CodexAstraLocal: Explicit scratch diagnostics have separate ownership/counters.
+#include "video_core/renderer_vulkan/vk_compute_benchmark.h"
 #include "video_core/renderer_vulkan/vk_descriptor_update_queue.h"
 #include "video_core/renderer_vulkan/vk_pipeline_cache.h"
 #include "video_core/renderer_vulkan/vk_render_manager.h"
@@ -55,6 +60,13 @@ public:
                                   const VideoCore::DiskResourceLoadCallback& callback) override;
 
     void DrawTriangles() override;
+    bool DrawComputeBatch(bool is_indexed, const Pica::ComputeAssemblyState& assembly,
+                          Pica::ComputeAssemblyResult& completed,
+                          const Pica::AttributeBuffer* immediate = nullptr) override;
+    void ReportComputeFailure(const char* reason, bool indexed,
+                              const Pica::ComputeAssemblyState& entry,
+                              const Pica::ComputeAssemblyResult* attempted,
+                              const Pica::AttributeBuffer* immediate) noexcept override;
     // CodexAstraLocal: Ordered state preparation and independently owned CPU
     // vertices meet only at the final coherent upload command.
     DeferredHardwareWriter PrepareDeferredVertices(u32 count) const override;
@@ -91,19 +103,26 @@ private:
     void SyncAndUploadLUTsLF();
 
     /// Syncs all enabled PICA texture units
-    // CodexAstraLocal: Only graphics shader consumers bind sampled textures.
-    void SyncTextureUnits(const Framebuffer* framebuffer);
+    void SyncTextureUnits(const Framebuffer* framebuffer,
+                          ComputeRasterizer::TextureBindings* compute_bindings = nullptr);
+
+    // CodexAstraLocal: Typed compute reads snapshot an aliased attachment
+    // before its ordered writes and register their stage with cache transfers.
+    vk::ImageView ComputeTextureView(Surface& surface, const Framebuffer* framebuffer,
+                                     bool shadow);
 
     /// Syncs all utility textures in the fragment shader.
     void SyncUtilityTextures(const Framebuffer* framebuffer);
 
     /// Binds the PICA shadow cube required for shadow mapping
-    // CodexAstraLocal: Graphics shadow sampling has no retired compute feedback argument.
-    void BindShadowCube(const Pica::TexturingRegs::FullTextureConfig& texture);
+    void BindShadowCube(const Pica::TexturingRegs::FullTextureConfig& texture,
+                        const Framebuffer* framebuffer,
+                        ComputeRasterizer::TextureBindings* compute_bindings);
 
     /// Binds a texture cube to texture unit 0
-    // CodexAstraLocal: Graphics cube sampling keeps only its actual texture input.
-    void BindTextureCube(const Pica::TexturingRegs::FullTextureConfig& texture);
+    void BindTextureCube(const Pica::TexturingRegs::FullTextureConfig& texture,
+                         const Framebuffer* framebuffer,
+                         ComputeRasterizer::TextureBindings* compute_bindings);
 
     /// Upload the uniform blocks to the uniform buffer object
     void UploadUniforms(bool accelerate_draw);
@@ -116,7 +135,12 @@ private:
     // CodexAstraLocal: Deferred CPU output changes only geometry readiness;
     // live draw state and every resource decision stay on the current owner.
     bool Draw(bool accelerate, bool is_indexed,
-              const std::shared_ptr<Pica::CpuDrawPacket>& deferred = {});
+              const std::shared_ptr<Pica::CpuDrawPacket>& deferred = {},
+              const ComputeVertexProducer::Batch* computed = nullptr);
+
+    // CodexAstraLocal: Report original-input success, state-only completion and
+    // terminal failures independently of optional rectangle routing in other modes.
+    void ReportStrictCompute() const;
 
     /// Internal implementation for AccelerateDrawBatch
     bool AccelerateDrawBatchInternal(bool is_indexed);
@@ -133,6 +157,10 @@ private:
     // CodexAstraLocal: Both cold loading and rights switches use this one-shot
     // diagnostic initializer; Native/Custom never read the optional sidecar.
     void InitializeVertexCapture(u64 title) noexcept;
+    // CodexAstraLocal: Attempt the one-shot scratch request only at cold startup;
+    // rights switches cannot rearm an ID or turn it into a guest fallback.
+    void InitializeComputeBenchmark(u64 title);
+
     /// Setup vertex shader for AccelerateDrawBatch
     bool SetupVertexShader();
 
@@ -153,7 +181,22 @@ private:
 
     // AstraEH: Created only for a selected test profile; custom rendering allocates nothing.
     std::unique_ptr<ComputeRectRenderer> compute_rect;
-    // CodexAstraLocal: Combo rectangle resources retain their existing ownership.
+    // CodexAstraLocal: Only strict Calculated owns this experimental compute
+    // consumer. Unsupported domains terminate; Native/Combo stay unchanged.
+    std::unique_ptr<ComputeRasterizer> compute_raster;
+    // CodexAstraLocal: The same renderer drain protects original-input output
+    // allocations until their final ordered compute-raster use.
+    std::unique_ptr<ComputeVertexProducer> compute_vertices;
+    // CodexAstraLocal: Default-off, bounded, private resources remain alive until
+    // the same scheduler/GPU drain that already protects compute ownership.
+    std::unique_ptr<ComputeBenchmark> compute_benchmark;
+    bool compute_benchmark_attempted{};
+    // CodexAstraLocal: Freeze isolation for this renderer lifetime. Counters
+    // cover actual original-input calls, including state-only and failed ones.
+    const bool strict_compute;
+    struct StrictComputeStats {
+        u64 attempts{}, computed{}, rasterized{}, empty_batches{}, no_target{}, terminal_failures{};
+    } strict_compute_stats;
     VertexLayout software_layout;
     std::array<u32, 16> binding_offsets{};
     std::array<bool, 16> enable_attributes{};

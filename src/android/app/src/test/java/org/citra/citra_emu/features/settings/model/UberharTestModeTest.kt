@@ -39,10 +39,8 @@ class UberharTestModeTest {
     @Test fun loadedModeAndUnknownValuesAreHandled() {
         val backing = Backing()
         backing.int = 2
-        // CodexAstraLocal: The legacy persisted ID activates Native, never Combo or Software.
-        assertTrue(UberharTestModeSwitch(backing, UberharTestMode.NATIVE).boolean)
-        assertFalse(UberharTestModeSwitch(backing, UberharTestMode.AUTOMATIC).boolean)
-        assertEquals(UberharTestMode.NATIVE, UberharTestMode.from(2))
+        assertTrue(UberharTestModeSwitch(backing, UberharTestMode.COMPUTE).boolean)
+        assertFalse(UberharTestModeSwitch(backing, UberharTestMode.NATIVE).boolean)
         assertEquals(UberharTestMode.CUSTOM, UberharTestMode.from(99))
         assertFalse(UberharTestModeSwitch(backing, UberharTestMode.AUTOMATIC).isRuntimeEditable)
     }
@@ -50,15 +48,15 @@ class UberharTestModeTest {
     // CodexAstraUlt: Persisted IDs remain stable and the effective UI fragment choice matches
     // the native preset policy. The existing exclusivity test includes the appended mode.
     @Test fun fragmentIsolationPreservesIdsAndEffectiveDisplayPolicy() {
-        // CodexAstraLocal: Retired profiles migrate; only unchanged Native/Combo IDs remain.
-        assertEquals(listOf(0, 1, 3), UberharTestMode.entries.map { it.id })
-        assertEquals(UberharTestMode.AUTOMATIC, UberharTestMode.from(4))
-        assertEquals(UberharTestMode.NATIVE, UberharTestMode.from(5))
+        // CodexAstraLocal: Append Software without changing persisted renderer choices.
+        assertEquals(listOf(0, 1, 2, 3, 4, 5), UberharTestMode.entries.map { it.id })
+        assertEquals(UberharTestMode.COMBO_GENERIC, UberharTestMode.from(4))
+        assertEquals(UberharTestMode.SOFTWARE, UberharTestMode.from(5))
         for (mode in UberharTestMode.entries) {
             assertEquals(mode == UberharTestMode.AUTOMATIC, mode.allowsSpecializedFragments)
         }
         val backing = Backing().apply { int = 4 }
-        val generic = UberharTestModeSwitch(backing, UberharTestMode.AUTOMATIC)
+        val generic = UberharTestModeSwitch(backing, UberharTestMode.COMBO_GENERIC)
         assertTrue(generic.boolean)
         assertFalse(generic.isRuntimeEditable)
         generic.boolean = false

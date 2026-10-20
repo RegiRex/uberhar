@@ -14,9 +14,7 @@ inline constexpr std::size_t MaxModuleAttempts = 16;
 inline constexpr std::size_t MaxPsoOwners = 8;
 inline constexpr std::size_t MaxPsoAttempts = 16;
 inline constexpr u32 CpuInterface = 1; // Trivial VS / original 88-byte CPU vertices.
-// CodexAstraLocal: Policy3 restores dominated first-use texture locals. Older
-// generated static modules must not hide the new emitter during warm execution.
-inline constexpr u32 GeneratorPolicy = 3;
+inline constexpr u32 GeneratorPolicy = 1; // Optimized static TEV, runtime ABI7 remainder.
 
 struct Key {
     Pica::Shader::FSConfig family;

@@ -142,7 +142,6 @@ RendererVulkan::~RendererVulkan() {
     scheduler.Finish();
     main_present_window.WaitPresent();
     device.waitIdle();
-    scheduler.FinishWorkProfile(); // CodexAstraLocal: Nonblocking final query retirement after existing idle.
 
     device.destroyShaderModule(present_vertex_shader);
     for (u32 i = 0; i < PRESENT_PIPELINES; i++) {
@@ -231,9 +230,6 @@ void RendererVulkan::PrepareDraw(Frame* frame, const Layout::FramebufferLayout& 
             .pClearValues = &clear,
         };
 
-        // CodexAstraLocal TEST-ONLY LOG: Presentation is a separate natural GPU
-        // pass, excluding guest rendering. Remove after .49 cost qualification.
-        scheduler.BeginGpuPass(cmdbuf, GpuWork::Presentation);
         cmdbuf.beginRenderPass(renderpass_begin_info, vk::SubpassContents::eInline);
         cmdbuf.bindPipeline(vk::PipelineBindPoint::eGraphics, present_pipelines[index]);
         cmdbuf.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, layout, 0, present_set, {});
@@ -1070,10 +1066,7 @@ void RendererVulkan::DrawScreens(Frame* frame, const Layout::FramebufferLayout& 
 
     DrawCursor(layout);
 
-    scheduler.Record([this](vk::CommandBuffer cmdbuf) {
-        cmdbuf.endRenderPass();
-        scheduler.EndGpuPass(cmdbuf);
-    });
+    scheduler.Record([](vk::CommandBuffer cmdbuf) { cmdbuf.endRenderPass(); });
 }
 
 void RendererVulkan::DrawCursor(const Layout::FramebufferLayout& layout) {

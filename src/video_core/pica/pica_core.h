@@ -37,14 +37,7 @@ namespace VideoCore {
 class RasterizerInterface;
 }
 
-// CodexAstraLocal TEST-ONLY LOG: Allocate the bounded history only after a
-// demanded nonfinite source; remove after terminal provenance qualification.
-namespace SwRenderer {
-class SoftwareSourceHistory;
-}
-
 namespace Pica {
-struct NativeInputReadTrace; // CodexAstraLocal: Optional actual-read Software provenance.
 
 class DebugContext;
 class ShaderEngine;
@@ -141,10 +134,6 @@ public:
     void ProcessCmdList(PAddr list, u32 size, bool ignore_list);
 
     Vulkan::ReadyVertexPolicy::Admission GetReadyGpuVertexAdmission() const;
-    // CodexAstraLocal TEST-ONLY LOG: Owner-only after workers join; describes
-    // exact source-value matches, never replay or a unique original writer.
-    std::string DescribeSoftwareTerminalSources(
-        std::span<const OutputVertex* const, 3> source) const;
 
 private:
     void InitializeRegs();
@@ -216,11 +205,10 @@ private:
         const ShaderUnit& unit, u32 index, u32 vertex, const char* route,
         bool fresh_unit, bool post_shader, u64 title,
         const SoftwareGeometryEntry* geometry_entry = nullptr,
-        const AttributeBuffer* geometry_slot = nullptr,
-        const NativeInputReadTrace* input_trace = nullptr) const;
+        const AttributeBuffer* geometry_slot = nullptr) const;
     void ObserveSoftwareProducer(u32 mask, const OutputVertex& output, ShaderSetup& setup,
         const ShaderUnit& unit, u32 index, u32 vertex, const char* route,
-        bool fresh_unit, bool post_shader, const NativeInputReadTrace* input_trace = nullptr) noexcept;
+        bool fresh_unit, bool post_shader) noexcept;
     void WriteSoftwareProducerSnapshot(const SoftwareProducerSnapshot& snapshot,
         const char* route, u32 mask, u32 invalid, u32 index, u32 vertex) const;
     void BeginSoftwareGeometry(SoftwareGeometryEntry& entry, bool begin) noexcept;
@@ -506,24 +494,10 @@ private:
     const bool cpu_vertex_only;
     // CodexAstraLocal: Prefix comparison is frozen independently of CPU placement.
     const bool cpu_prefix_overlap;
-    // CodexAstraLocal: Independent .50 controls are frozen for this title and
-    // propagate to lazy owners; changing Settings cannot mutate active work.
-    const bool cpu_adaptive, cpu_feature_diagnostics;
     // CodexAstraLocal TEST-ONLY LOG: One candidate/attempt per constructed PICA
     // owner, including write failure. Remove with the producer diagnostic above.
     const bool software_producer_diagnostics;
     bool software_producer_attempted{};
-    // CodexAstraLocal TEST-ONLY LOG: Bound post-candidate input observation by
-    // actual shader invocations; remove after the terminal fault is reproduced.
-    std::unique_ptr<SwRenderer::SoftwareSourceHistory> software_terminal_sources;
-    u32 software_terminal_remaining{};
-    u64 software_source_draw{};
-    u64 software_terminal_samples{}, software_terminal_ns{};
-    // CodexAstraLocal TEST-ONLY LOG: Immutable independent evidence control;
-    // clocks/counts stay on the owner and cover only the bounded candidate tail.
-    const bool software_input_provenance;
-    u64 software_trace_draws{},software_trace_loads{},software_trace_bytes{},software_trace_samples{};
-    u64 software_trace_ns{},software_trace_refused{},software_trace_errors{};
     // CodexAstraLocal: Draw-synchronous CPU workers and bounded host certificates
     // never enter guest save state; their borrowed jobs finish before each draw returns.
     struct ParallelVertexState;
@@ -564,7 +538,9 @@ private:
     u64 native_index_retries{}, native_scanned_indices{}, native_index_rescues{},
         native_rescued_vertices{}, native_index_escapes{};
     // AstraPro: Pure mapping reuse also accelerates CPU fallback inside Combo.
-    NativeVertexPlanCache native_plan_cache;
+    // CodexAstraLocal TEST-ONLY LOG: Bounded mapping cost samples accompany
+    // exact four-entry CPU plan reuse; remove after isolated CPU qualification.
+    NativeVertexPlanCache native_plan_cache{true};
     NativeVertexSamples native_samples;
     // AstraEH: Host-only admission state; ordinary batches add no diagnostic clock reads.
     NativeVertexSampleBudget native_sample_budget;

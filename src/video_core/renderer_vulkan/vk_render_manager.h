@@ -4,13 +4,10 @@
 
 #pragma once
 
-#include <array>
-#include <chrono> // CodexAstraLocal: Bounded owner-cadence dependency diagnostics.
 #include <mutex>
 
 #include "common/math_util.h"
 #include "video_core/renderer_vulkan/vk_common.h"
-#include "video_core/renderer_vulkan/vk_work_profile.h" // CodexAstraLocal: Natural-pass attribution.
 
 namespace VideoCore {
 enum class PixelFormat : u32;
@@ -49,13 +46,10 @@ public:
     void BeginRendering(const Framebuffer* framebuffer, Common::Rectangle<u32> draw_rect);
 
     /// Begins a new renderpass with the provided render state.
-    void BeginRendering(const RenderPass& new_pass, GpuWork kind = GpuWork::Utility);
+    void BeginRendering(const RenderPass& new_pass);
 
-    // CodexAstraLocal: Record the known next owner rather than infer a GPU
-    // bottleneck from a broad attachment barrier. Unknown callers stay Other.
-    enum class EndReason : u32 { Other, PassChange, Copy, Blit, Feedback, Count };
-    void EndRendering(EndReason reason = EndReason::Other);
-    void ReportDependencies(bool final = false) noexcept;
+    /// Exits from any currently active renderpass instance
+    void EndRendering();
 
     /// Returns the renderpass associated with the color-depth format pair
     vk::RenderPass GetRenderpass(VideoCore::PixelFormat color, VideoCore::PixelFormat depth,
@@ -75,18 +69,7 @@ private:
     std::array<vk::ImageAspectFlags, 2> aspects;
     bool shadow_rendering{};
     RenderPass pass{};
-    // CodexAstraLocal: Utility/clear passes cannot inherit graphics-only reuse.
-    GpuWork pass_kind{GpuWork::Utility};
     u32 num_draws{};
-    // CodexAstraLocal TEST-ONLY LOG: Owner-only cumulative dependency reasons;
-    // remove after precise barrier populations are qualified, never remove required visibility.
-    const bool dependency_diagnostics;
-    std::array<u64, static_cast<u32>(EndReason::Count)> dependency_ends{};
-    u64 dependency_attachments{}, dependency_shadow{}, dependency_sequence{};
-    // CodexAstraLocal TEST-ONLY LOG: Remove after contained-area reuse is qualified.
-    u64 contained_area_reuses{};
-    u32 dependency_prescale{};
-    std::chrono::steady_clock::time_point dependency_report_time{std::chrono::steady_clock::now()};
 };
 
 } // namespace Vulkan

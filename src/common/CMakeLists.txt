@@ -78,8 +78,6 @@ add_library(citra_common STATIC EXCLUDE_FROM_ALL
     setting_keys.h
     settings.cpp
     settings.h
-    uberhar_software_controls.h # CodexAstraLocal: Independent Software comparisons.
-    # CodexAstraLocal: Retired renderer feature controls are absent from the build.
     slot_vector.h
     serialization/atomic.h
     serialization/boost_discrete_interval.hpp

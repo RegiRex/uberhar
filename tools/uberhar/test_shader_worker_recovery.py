@@ -32,7 +32,30 @@ template<typename F> bool Typed(F&& function) {
     try { function(); } catch (const VideoCore::ShaderRecoveryError&) { return true; }
     return false;
 }
-// CodexAstraLocal: Retain the shared terminal worker proof after packet observer retirement.
+// CodexAstraLocal: Optional diagnostic endpoints are modeled separately from
+// the real terminal latch. They retain only call placement; archive contents
+// are checked by the production packet writer tests, not this worker adapter.
+enum class ComputeFailureStage { Allocation, ResourcePreparation };
+struct ComputeFailurePacket {
+    bool& execution_locked;
+    unsigned notices{}, flushes{};
+    bool notice_unlocked{}, flush_locked{};
+    ComputeFailureStage stage{};
+    explicit ComputeFailurePacket(bool& locked) : execution_locked{locked} {}
+    bool HasNotice() const { return notices != 0; }
+    void Notice(ComputeFailureStage value, std::string_view, int = 0) noexcept {
+        ++notices; stage = value; notice_unlocked |= !execution_locked;
+    }
+    void FlushNotices() noexcept { ++flushes; flush_locked |= execution_locked; }
+};
+namespace vk {
+// CodexAstraLocal: Compile the production typed Vulkan catch without creating
+// a driver/device. The unrelated runtime_error control remains distinct.
+struct SystemError : std::runtime_error {
+    using std::runtime_error::runtime_error;
+    std::error_code code() const { return std::make_error_code(std::errc::io_error); }
+};
+}
 // CodexAstraLocal: Only command execution/allocation are modeled. The exact
 // production boundary decides whether failures latch and later work is canceled.
 struct Harness {
@@ -40,6 +63,7 @@ struct Harness {
         VideoCore::ShaderFailureState& state;
         bool submit{};
         unsigned executed{}, discarded{};
+        std::shared_ptr<ComputeFailurePacket> failure;
         bool HasSubmit() const { return submit; }
         void ExecuteAll(int) { ++executed; if (submit) state.Submitted(1); }
         void Discard() { ++discarded; }
@@ -49,16 +73,23 @@ struct Harness {
     int current_cmdbuf{7}, fault{};
     unsigned allocations{};
     bool execution_locked{};
-    Harness(bool submit, int fault_)
-        : work{std::make_unique<Chunk>(shader_failure, submit)}, fault{fault_} {}
+    std::shared_ptr<ComputeFailurePacket> packet;
+    Harness(bool submit, int fault_, bool observed = false)
+        : work{std::make_unique<Chunk>(shader_failure, submit)}, fault{fault_} {
+        if (observed) {
+            packet = std::make_shared<ComputeFailurePacket>(execution_locked);
+            work->failure = packet;
+        }
+    }
     void AllocateWorkerCommandBuffers() {
         ++allocations;
         if (fault == 1) throw VideoCore::ShaderRecoveryError{"next command-buffer allocation failed"};
         if (fault == 2) throw std::runtime_error{"unrelated driver failure"};
     }
     void Run() {
+        std::shared_ptr<ComputeFailurePacket> failure;
         // CodexAstraLocal: This scope stands for the execution lock. Its closing
-        // brace comes from the actual source.
+        // brace and the unlocked flush/reset tail come from the actual source.
         {
         struct ExecutionScope {
             bool& locked;
@@ -102,6 +133,21 @@ int main() {
         bool propagated = false;
         try { unrelated.Run(); } catch (const std::runtime_error&) { propagated = true; }
         Check(propagated && !unrelated.shader_failure.Failed(), "unrelated failures are not mislabeled recoverable");
+        // CodexAstraLocal: The existing null-packet cases above cover Native.
+        // An optional packet may record the same allocation failure, but cannot
+        // move serialization under the execution lock or retain recycled work.
+        for (int fault : {0, 1}) {
+            Harness observed{true, fault, true};
+            observed.Run();
+            Check(observed.shader_failure.Failed() == bool(fault), "observer cannot change terminal result");
+            Check(observed.packet->notices == unsigned(fault), "only failed allocation records a notice");
+            if (fault) Check(observed.packet->stage == ComputeFailureStage::Allocation,
+                             "post-submit allocation keeps its actual failure stage");
+            Check(!observed.packet->notice_unlocked, "worker notice is published before execution unlock");
+            Check(observed.packet->flushes == 1 && !observed.packet->flush_locked,
+                  "diagnostic flush runs once after execution unlock");
+            Check(!observed.work->failure, "recycled work releases its packet capture");
+        }
         std::printf("Worker allocation recovery: %u checks; exact production boundary, controlled operations\n", checks);
         return 0;
     } catch (const std::exception& error) {
@@ -124,11 +170,14 @@ def main():
     source = root / "src/video_core/renderer_vulkan/vk_scheduler.cpp"
     text = source.read_text()
     start = text.index("const bool has_submit = work->HasSubmit();")
-    # CodexAstraLocal: Keep the execution-scope close; reserve recycling is the next stable boundary.
+    # CodexAstraLocal: Keep the execution-scope close AND the new unlocked
+    # FlushNotices/reset tail. Reserve recycling is the next stable boundary.
     end = text.index("\n        {\n            std::scoped_lock rl", start)
     seam = text[start:end]
     assert seam.count("AllocateWorkerCommandBuffers();") == 1
     assert seam.count("VideoCore::ExecuteShaderCommands(") == 1
+    assert seam.count("failure->FlushNotices();") == 1
+    assert seam.count("work->failure.reset();") == 1
     boundary_end = "}, [&] { work->Discard(); });"
     assert seam.count(boundary_end) == 1
     mutant = seam.replace("AllocateWorkerCommandBuffers();", "/* defect: allocation escapes the boundary */")
@@ -138,10 +187,11 @@ def main():
         "\nif (has_submit && !shader_failure.Failed()) AllocateWorkerCommandBuffers();\n")
     args.output.mkdir(parents=True, exist_ok=True)
     run = Path(tempfile.mkdtemp(prefix="run-", dir=args.output.resolve()))
-    report = {"scope": "exact worker boundary and real terminal latch; modeled commands/allocation",
+    report = {"scope": "exact worker boundary/unlocked tail and real terminal latch; modeled commands/allocation/optional notices",
               "inputs": {str(p.relative_to(root)): sha(p) for p in
                          (source, Path(__file__).resolve(), root / "src/video_core/shader_build_failure.h",
-                          root / "src/video_core/shader_recovery_error.h")}, "results": []}
+                          root / "src/video_core/shader_recovery_error.h",
+                          root / "src/video_core/renderer_vulkan/compute_failure_packet.h")}, "results": []}
     started = time.monotonic()
     status = {"state": "running"}
     (run / "status.json").write_text(json.dumps(status) + "\n")

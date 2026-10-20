@@ -134,13 +134,6 @@ int main(int argc, char** argv) {
         std::ofstream(prefix.string() + ".frag")
             << "#version 450\n"
             << Generator::GLSL::FragmentModule{config, user, profile}.Generate();
-        // CodexAstraLocal: OpenGL retains the inherited unpruned TEV emitter.
-        // Keep it as an independent arithmetic baseline, not the newly optimized
-        // full shader that could otherwise share a liveness bug with generic/static.
-        auto reference_profile = profile;
-        reference_profile.is_vulkan = false;
-        std::ofstream(prefix.string() + ".reference")
-            << Generator::GLSL::FragmentModule{config, user, reference_profile}.Generate();
         // AstraEH: Serialize the production 128-byte runtime-state transport.
         std::ofstream constants(prefix.string() + ".bin", std::ios::binary);
         const auto state = Generator::GLSL::MakeDynamicTevState(config, profile);
@@ -162,10 +155,6 @@ int main(int argc, char** argv) {
         std::ofstream raw(prefix.string() + ".raw", std::ios::binary);
         raw.write(reinterpret_cast<const char*>(effective.texture.tev_stages.data()),
                   sizeof(effective.texture.tev_stages));
-        // CodexAstraLocal: The forward dependency oracle needs the ORIGINAL
-        // delayed-buffer mask, never a candidate-prepared transport field.
-        const u32 raw_buffer_mask = effective.texture.combiner_buffer_input.Value();
-        raw.write(reinterpret_cast<const char*>(&raw_buffer_mask), sizeof(raw_buffer_mask));
     }
     // AstraEH: Full fragment modules exercise Vulkan bindings and code outside
     // TEV too.

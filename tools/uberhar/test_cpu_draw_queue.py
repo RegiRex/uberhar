@@ -56,14 +56,14 @@ def main():
     # CodexAstraLocal: Focus new grouping/publication/ready-prefix behavior in
     # local checks; the default CI invocation still runs every older control.
     parser.add_argument('--groups-only', action='store_true')
-    # CodexAstraLocal: One local .50 run covers changed seed/token/group guards;
-    # CI's default still retains the full existing output/failure campaign.
-    parser.add_argument('--features-only', action='store_true')
-    # CodexAstraLocal: Resume an interrupted local gate without repeating passed
-    # controls; default CI still checks the full positive population and defects.
-    parser.add_argument('--start-variant')
-    parser.add_argument('--positive-scope', choices=('all', 'work'), default='all')
+    # CodexAstraLocal: One bounded local port check; default CI remains complete.
+    parser.add_argument('--cpu-preparation-only', action='store_true')
+    # CodexAstraLocal: Focus the lazy-start seed-fixture repair without repeating
+    # unrelated controls. CI does not pass this flag and retains every check.
+    parser.add_argument('--pending-seed-only', action='store_true')
     args = parser.parse_args()
+    if args.pending_seed_only and (args.reset_only or args.groups_only or args.cpu_preparation_only):
+        parser.error('--pending-seed-only cannot be combined with another focused check')
     root = args.root.resolve()
     source_root = (args.source_root or root / 'src').resolve()
     output_root = args.output_root or root / 'build/uberhar-probe/cpu-draw-queue'
@@ -216,11 +216,14 @@ inline struct { Setting uberhar_test_mode; } values;
     header_path = source / logical[2]
     header = header_path.read_text()
     instrumented = '// CodexAstraLocal: Test-only deterministic exceptional boundaries.\n' + \
-        'namespace PacketProbe { void BeforeWave(); void BeforeInvocation(); }\n' + original
+        'namespace PacketProbe { void BeforeWave(); void BeforeInvocation(); void BeforeThreadStart(); }\n' + original
     instrumented = change(instrumented, '                const auto result = pool->Run(',
         '                PacketProbe::BeforeWave();\n                const auto result = pool->Run(')
     instrumented = change(instrumented, '                    context.Run(unit);',
         '                    PacketProbe::BeforeInvocation();\n                    context.Run(unit);')
+    # CodexAstraLocal: Only the copied test source injects resource failure.
+    instrumented = change(instrumented, '            pool = std::make_unique<Common::Uberhar::ParallelWork>(',
+        '            PacketProbe::BeforeThreadStart();\n            pool = std::make_unique<Common::Uberhar::ParallelWork>(')
     variants = [
         ('positive', instrumented, header, 'all', None),
         ('missing_active_completion', change(instrumented,
@@ -242,11 +245,7 @@ inline struct { Setting uberhar_test_mode; } values;
             'bounds','late external effect escaped proof'),
         ('missing_arithmetic_floor',change(instrumented,'if (effect.minimum_arithmetic < 35)',
             'if (effect.minimum_arithmetic < 0)'),header,'work','arithmetic floor boundary'),
-        # CodexAstraLocal: The conservative standalone floor now uses FIFO misses
-        # directly; challenge that decision rather than an obsolete expansion cost.
-        ('input_count_as_misses',change(instrumented,
-            'const bool standalone_seed = misses >= 96;',
-            'const bool standalone_seed = source.count >= 96;'),
+        ('input_count_as_misses',change(instrumented,'if (misses < 96)','if (source.count < 96)'),
             header,'work','FIFO miss floor boundary'),
         ('missing_copy_floor',change(instrumented,'if (raw_size > u64(misses) * 70)',
             'if (raw_size > u64(misses) * 700)'),header,'work','raw copy floor accepted71'),
@@ -261,24 +260,21 @@ inline struct { Setting uberhar_test_mode; } values;
     # completed-prefix behavior, with actual JIT bytes rather than mock results.
     grouped_variants = [
         ('missing_pending_seed', change(instrumented,
-            'return policy.broader_groups && asynchronous && !stopping && !terminal &&\n'
-            '               pending_seed && !pending.empty() && Partition(pending, work);',
-            'return work >= MemberWorkUnit;'), header,
+            'pending_seed && !pending.empty()', 'true'), header,
             'groups', 'unseeded small admission'),
         ('missing_member_charge', change(instrumented,
-            'work >= GroupWorkUnit + MemberWorkUnit * (members - 1)',
-            'work >= GroupWorkUnit'), header,
-            'groups', 'member charge omitted'),
-        # CodexAstraLocal: A large seed cannot sponsor an oversized cheap tail.
-        ('missing_group_bound', change(instrumented,
-            'MaxGroupMembers = 4, MaxPackets = 64', 'MaxGroupMembers = 8, MaxPackets = 64'),
-            header, 'groups', 'oversized grain admitted'),
+            'pending_work + work >= GroupWorkUnit * (pending.size() + 1)',
+            'pending_work + work >= GroupWorkUnit'), header,
+            'groups', 'aggregate work charge omitted'),
         ('missing_submit_recheck', change(instrumented,
             'if (packet->impl->requires_group && !impl->PendingGroupFits(packet->impl->guaranteed_work))',
             'if (false)'), header, 'groups', 'lost seed published small packet'),
+        ('group_inputs_as_work', change(instrumented,
+            'const u64 guaranteed_work = u64(misses) * effect.minimum_arithmetic;',
+            'const u64 guaranteed_work = u64(source.count) * effect.minimum_arithmetic;'), header,
+            'groups', 'group used inputs instead of misses'),
         ('unweighted_tiny_claims', change(instrumented,
-            'prior[end] = static_cast<int>(end - members); break;',
-            'prior[end] = static_cast<int>(end - 1); break;'), header,
+            'if (work >= GroupWorkUnit)', 'if (work)'), header,
             'groups', 'weighted grain accounting'),
         ('group_copy_limit', change(instrumented,
             'if (raw_size > u64(misses) * 70)', 'if (raw_size > u64(misses) * 700)'), header,
@@ -291,39 +287,29 @@ inline struct { Setting uberhar_test_mode; } values;
             'if (!*progress_lane)', 'if (false)'), header,
             'groups', 'no-lane publication failed synchronous progress'),
     ]
-    if args.reset_only:
+    # CodexAstraLocal: Mutation checks target the new exact-key precheck/reuse and
+    # lazy-start invariants; old renderer/group policy is still exercised unchanged.
+    preparation_variants = [
+        ('forgot_cached_boolean', change(instrumented, 'effect.booleans == booleans', 'true'),
+         header, 'preparation', 'cached Boolean identity aliased'),
+        ('ignored_token_identity', change(instrumented,
+            'Impl::Matches(candidate, source.shader_lease, booleans)', 'true'),
+         header, 'preparation', 'stale Boolean token reused'),
+        ('eager_policy_start', change(instrumented,
+            '    impl->capture_at_capacity = false;\n    // CodexAstraLocal: Invalid shapes',
+            '    impl->StartProgress();\n    impl->capture_at_capacity = false;\n    // CodexAstraLocal: Invalid shapes'),
+         header, 'preparation', 'negative policy reserved progress'),
+    ]
+    if args.pending_seed_only:
+        variants = [('positive', instrumented, header, 'groups', None), grouped_variants[0]]
+    elif args.cpu_preparation_only:
+        variants = [('positive', instrumented, header, 'all', None)] + preparation_variants
+    elif args.reset_only:
         variants = [('positive', instrumented, header, 'resets', None)]
     elif args.groups_only:
         variants = [('positive', instrumented, header, 'groups', None)] + grouped_variants
     else:
-        variants += grouped_variants
-    # CodexAstraLocal: Actual policy and token defects must fail their distinct
-    # assertions; positive scope compares real JIT/FIFO/88-byte output too.
-    feature_variants = [
-        ('ignored_seed_control', change(instrumented,
-            'const bool standalone_seed = misses >= 96;',
-            'const bool standalone_seed = guaranteed_work >= GroupWorkUnit;'),
-            header, 'work', 'conservative seed admitted93'),
-        ('stale_accepted_token', change(instrumented,
-            'Impl::Matches(candidate, source.shader_lease, booleans)', 'true'),
-            header, 'groups', 'stale Boolean token reused'),
-    ]
-    variants += feature_variants
-    if args.features_only:
-        names = {'positive', 'missing_arithmetic_floor', 'input_count_as_misses',
-                 'missing_copy_floor', 'missing_pending_seed', 'missing_member_charge',
-                 'missing_group_bound', 'missing_submit_recheck', 'missing_progress_reservation',
-                 'ignored_seed_control', 'stale_accepted_token'}
-        variants = [v for v in variants if v[0] in names]
-        variants[0] = ('positive', instrumented, header, 'features', None)
-    if args.positive_scope != 'all':
-        variants[0] = ('positive', instrumented, header, args.positive_scope, None)
-    if args.start_variant:
-        names = [variant[0] for variant in variants]
-        if args.start_variant not in names[1:]:
-            raise ValueError('Unknown negative-control resume point: ' + args.start_variant)
-        variants = variants[:1] + variants[names.index(args.start_variant):]
-    proof['selection'] = {'positive_scope': variants[0][3], 'start_variant': args.start_variant}
+        variants += grouped_variants + preparation_variants
     try:
         common = [compile_one(p,p.stem) for p in actual]
         fixture = compile_one(source / 'fixture.cpp','fixture')
@@ -342,13 +328,8 @@ inline struct { Setting uberhar_test_mode; } values;
             run(name+'-link',flags+[selected_fixture,queue,*common,*link_flags,'-o',binary])
             result = json.loads(run(name+'-run',[*prefix,binary,selected],0 if expected is None else 1).stdout)
             if expected is None:
-                # CodexAstraLocal: The focused .50 population has11actual byte
-                # comparisons. Full/normal coverage retains its larger minimum;
-                # a new selection must not masquerade as that complete corpus.
-                minimum = (11 if selected == 'features' else 0 if selected == 'work'
-                           else 4 if args.reset_only else 9 if args.groups_only
-                           else (1024 if args.a64 else 512))
-                if result.get('passed') is not True or result.get('comparisons',0) < minimum or result.get('checks',0) == 0:
+                minimum = 4 if args.reset_only else 9 if (args.groups_only or args.pending_seed_only) else (1024 if args.a64 else 512)
+                if result.get('passed') is not True or result.get('comparisons',0) < minimum:
                     raise RuntimeError('Incomplete positive population')
                 proof['result'] = result
             elif result.get('passed') is not False or result.get('error') != expected:
@@ -356,37 +337,38 @@ inline struct { Setting uberhar_test_mode; } values;
             proof['variants'].append({'name':name,'source_sha256':sha(cpp),'header_sha256':sha(header_path),
                                       'binary_sha256':sha(binary),'result':result})
             print(name+': '+str(result),flush=True)
-        # CodexAstraLocal: Two targeted controls prove the new regression detects
-        # a restored redundant drain and failure to retain the serialized tail.
-        header_path.write_text(header)
-        queue_cpp = out / 'reset-queue.cpp'; queue_cpp.write_text(instrumented)
-        queue_obj = compile_one(queue_cpp, 'reset-queue')
-        controls = [
-            ('redundant_reset_drain', change(owner, '    void Restart() {',
-                '    void Restart() {\n        ReconcileDeferredVertices();'),
-                'redundant reset drained packets'),
-            ('missing_reset_pair', change(owner,
-                '        primitive_assembler.AdoptCompletedTriangleTail(result.last_pair);', ''),
-                'reset saved pair differs'),
-        ]
-        if not args.reset_only:
-            controls.append(('skip_nonready_prefix', change(owner,
-                'else if (!packet->TryCompletedResult(result))\n            break;',
-                'else if (!packet->TryCompletedResult(result))\n            continue;'),
-                'nonready predecessor skipped'))
-        for name, mutated_owner, expected in controls:
-            owner_path.write_text(mutated_owner)
-            (out / (name + '-owner.h')).write_text(mutated_owner)
-            fixture_obj = compile_one(source / 'fixture.cpp', name + '-fixture')
-            binary = out / name
-            run(name + '-link', flags + [fixture_obj, queue_obj, *common, *link_flags, '-o', binary])
-            selected = 'groups' if name == 'skip_nonready_prefix' else 'resets'
-            result = json.loads(run(name + '-run', [*prefix, binary, selected], 1).stdout)
-            if result.get('passed') is not False or result.get('error') != expected:
-                raise RuntimeError('Wrong reset negative-control failure: ' + str(result))
-            proof['variants'].append({'name': name, 'owner_sha256': sha(owner_path),
-                                     'binary_sha256': sha(binary), 'result': result})
-            print(name + ': ' + str(result), flush=True)
+        if not args.pending_seed_only:
+            # CodexAstraLocal: Two targeted controls prove the new regression detects
+            # a restored redundant drain and failure to retain the serialized tail.
+            header_path.write_text(header)
+            queue_cpp = out / 'reset-queue.cpp'; queue_cpp.write_text(instrumented)
+            queue_obj = compile_one(queue_cpp, 'reset-queue')
+            controls = [
+                ('redundant_reset_drain', change(owner, '    void Restart() {',
+                    '    void Restart() {\n        ReconcileDeferredVertices();'),
+                    'redundant reset drained packets'),
+                ('missing_reset_pair', change(owner,
+                    '        primitive_assembler.AdoptCompletedTriangleTail(result.last_pair);', ''),
+                    'reset saved pair differs'),
+            ]
+            if not args.reset_only:
+                controls.append(('skip_nonready_prefix', change(owner,
+                    'else if (!packet->TryCompletedResult(result))\n            break;',
+                    'else if (!packet->TryCompletedResult(result))\n            continue;'),
+                    'nonready predecessor skipped'))
+            for name, mutated_owner, expected in controls:
+                owner_path.write_text(mutated_owner)
+                (out / (name + '-owner.h')).write_text(mutated_owner)
+                fixture_obj = compile_one(source / 'fixture.cpp', name + '-fixture')
+                binary = out / name
+                run(name + '-link', flags + [fixture_obj, queue_obj, *common, *link_flags, '-o', binary])
+                selected = 'groups' if name == 'skip_nonready_prefix' else 'resets'
+                result = json.loads(run(name + '-run', [*prefix, binary, selected], 1).stdout)
+                if result.get('passed') is not False or result.get('error') != expected:
+                    raise RuntimeError('Wrong reset negative-control failure: ' + str(result))
+                proof['variants'].append({'name': name, 'owner_sha256': sha(owner_path),
+                                         'binary_sha256': sha(binary), 'result': result})
+                print(name + ': ' + str(result), flush=True)
         proof['passed'] = True
     finally:
         header_path.write_text(header)

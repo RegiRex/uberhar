@@ -951,31 +951,53 @@ class SettingsFragmentPresenter(private val fragmentView: SettingsFragmentView) 
 
     private fun addGraphicsSettings(sl: ArrayList<SettingsItem>) {
         settingsActivity.setToolbarTitle(settingsActivity.getString(R.string.preferences_graphics))
-        // CodexAstraLocal: Only Native/Combo remain selectable; preserve saved custom values.
+        // CodexAstraUlt: Extend AstraEH's exclusive presets with the generic-fragment Combo
+        // comparison. All choices share one persisted mode; custom settings remain untouched.
         val mode = UberharTestMode.from(IntSetting.UBERHAR_TEST_MODE.int)
-        // CodexAstraLocal: Persist legacy mode migration before exposing the active switch.
-        if (IntSetting.UBERHAR_TEST_MODE.int in listOf(2, 4, 5))
-            IntSetting.UBERHAR_TEST_MODE.int = mode.id
-        // CodexAstraLocal: Retired standalone CPU API cannot reappear through Custom.
-        if (IntSetting.GRAPHICS_API.int == 0) IntSetting.GRAPHICS_API.int = 2
         sl.add(HeaderSetting(R.string.uberhar_test_modes))
         val modes = listOf(
+            // CodexAstraLocal: Explicit CPU raster mode shares existing controls/lifecycle.
+            Triple(
+                UberharTestMode.SOFTWARE,
+                R.string.uberhar_test_software,
+                R.string.uberhar_test_software_description
+            ),
             Triple(
                 UberharTestMode.NATIVE,
                 R.string.uberhar_test_native,
                 R.string.uberhar_test_native_description
             ),
             Triple(
+                UberharTestMode.COMPUTE,
+                R.string.uberhar_test_compute,
+                R.string.uberhar_test_compute_description
+            ),
+            Triple(
                 UberharTestMode.AUTOMATIC,
                 R.string.uberhar_test_auto,
                 R.string.uberhar_test_auto_description
+            ),
+            Triple(
+                UberharTestMode.COMBO_GENERIC,
+                R.string.uberhar_test_combo_generic,
+                R.string.uberhar_test_combo_generic_description
             )
         )
         for ((choice, title, description) in modes) {
             val setting = UberharTestModeSwitch(IntSetting.UBERHAR_TEST_MODE, choice)
             sl.add(SwitchSetting(setting, title, description, setting.key))
         }
-        // CodexAstraLocal: Retired Software worker controls are not exposed in Native/Combo.
+        // CodexAstraLocal: A Software worker budget remains editable while the
+        // effective renderer/1x settings are locked; it takes effect on restart.
+        sl.add(SingleChoiceSetting(
+            IntSetting.SOFTWARE_RENDERER_WORKERS,
+            R.string.software_renderer_workers,
+            R.string.software_renderer_workers_description,
+            R.array.softwareWorkerNames,
+            R.array.softwareWorkerValues,
+            IntSetting.SOFTWARE_RENDERER_WORKERS.key,
+            IntSetting.SOFTWARE_RENDERER_WORKERS.defaultValue
+        ))
         // CodexAstraLocal: Keep placement editable beside the presets. It affects
         // only Combo guest vertices and is captured when the game starts.
         sl.add(SwitchSetting(
@@ -1008,25 +1030,6 @@ class SettingsFragmentPresenter(private val fragmentView: SettingsFragmentView) 
             BooleanSetting.UBERHAR_PARALLEL_TEXTURE_DECODE.key,
             BooleanSetting.UBERHAR_PARALLEL_TEXTURE_DECODE.defaultValue
         ))
-        // CodexAstraLocal: Keep independent comparisons available in every preset;
-        // owners freeze controls at launch instead of changing queued work in flight.
-        val optimizationControls = listOf(
-            Triple(BooleanSetting.UBERHAR_CPU_ADAPTIVE_PARTICIPATION, R.string.uberhar_cpu_adaptive_participation, R.string.uberhar_cpu_adaptive_participation_description),
-            Triple(BooleanSetting.UBERHAR_CPU_EXECUTION_CENSUS, R.string.uberhar_cpu_execution_census, R.string.uberhar_cpu_execution_census_description),
-            Triple(BooleanSetting.UBERHAR_FEATURE_DIAGNOSTICS, R.string.uberhar_feature_diagnostics, R.string.uberhar_feature_diagnostics_description),
-            Triple(BooleanSetting.UBERHAR_FRAGMENT_MEMO, R.string.uberhar_fragment_memo, R.string.uberhar_fragment_memo_description),
-            Triple(BooleanSetting.UBERHAR_CONSTANT_TEV, R.string.uberhar_constant_tev, R.string.uberhar_constant_tev_description),
-            Triple(BooleanSetting.UBERHAR_DIRECTIONAL_PRECOMPUTE, R.string.uberhar_directional_precompute, R.string.uberhar_directional_precompute_description),
-            Triple(BooleanSetting.UBERHAR_LIT_SPECIALIZATION, R.string.uberhar_lit_specialization, R.string.uberhar_lit_specialization_description),
-            Triple(BooleanSetting.UBERHAR_FRAGMENT_LIVENESS, R.string.uberhar_fragment_liveness, R.string.uberhar_fragment_liveness_description),
-            Triple(BooleanSetting.UBERHAR_ALPHA_NEVER, R.string.uberhar_alpha_never, R.string.uberhar_alpha_never_description),
-            Triple(BooleanSetting.UBERHAR_GPU_TIMESTAMPS, R.string.uberhar_gpu_timestamps, R.string.uberhar_gpu_timestamps_description),
-            Triple(BooleanSetting.UBERHAR_IMAGE_REUSE, R.string.uberhar_image_reuse, R.string.uberhar_image_reuse_description),
-            Triple(BooleanSetting.UBERHAR_CPU_TRANSFERS, R.string.uberhar_cpu_transfers, R.string.uberhar_cpu_transfers_description)
-        )
-        for ((setting, title, description) in optimizationControls) {
-            sl.add(SwitchSetting(setting, title, description, setting.key, setting.defaultValue))
-        }
         val customStart = sl.size
         sl.apply {
             add(HeaderSetting(R.string.renderer))
@@ -1339,7 +1342,8 @@ class SettingsFragmentPresenter(private val fragmentView: SettingsFragmentView) 
         // values of the session profile without overwriting the user's custom settings.
         if (mode != UberharTestMode.CUSTOM) {
             for (item in sl.subList(customStart, sl.size)) {
-                if (item.setting == IntSetting.RESOLUTION_FACTOR ||
+                if ((item.setting == IntSetting.RESOLUTION_FACTOR &&
+                     mode != UberharTestMode.SOFTWARE) ||
                     item.setting == BooleanSetting.USE_INTEGER_SCALING ||
                     item.type == SettingsItem.TYPE_HEADER
                 ) continue

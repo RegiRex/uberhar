@@ -19,9 +19,6 @@
 #include "common/logging/log.h"
 #include "common/thread_worker.h"
 #include "video_core/shader/generator/pica_fs_config.h"
-// CodexAstraLocal: Both ordinary and static worker fixtures execute the real
-// liveness helper; do not depend on a static-only header's transitive include.
-#include "video_core/pica/uberhar_tev_liveness.h"
 #include "video_core/renderer_vulkan/uberhar_fragment_policy.h"
 #ifdef UBERHAR_STATIC_TEV_WORKER
 #include "video_core/renderer_vulkan/uberhar_static_tev_policy.h"
@@ -107,8 +104,6 @@ void FmtLogMessageImpl(Class, Level, const char*, unsigned, const char*, fmt::st
 #define LOG_ERROR(...) ::Probe::Log()
 
 namespace Pica::Shader::Generator::GLSL {
-// CodexAstraLocal: Pure liveness is production code; only the compiler is modeled.
-#include "lighting-demand.inc"
 // CodexAstraLocal: Record the immutable generator inputs before returning a tiny
 // sentinel source. The independent selection/ABI suites exercise real generation.
 std::string GenerateFragmentShader(const FSConfig& config, const UserConfig&,
@@ -174,9 +169,6 @@ struct Parent {
     Queue* ready_vertex_worker=&shader_workers;
     Shader* warming_ready_vertex{};
     bool allow_static_cpu_tev=true;
-    // CodexAstraLocal: Worker failure controls retain original admission; finite
-    // priority/capacity is exercised separately by the ready-fragment fixture.
-    bool lit_specialization=false, feature_diagnostics=false;
 };
 class ShaderDiskCache {
 public:

@@ -87,9 +87,7 @@ void Compare(ParallelVertexState& cache, ShaderSetup& setup, u32 outputs,
 
 int main() {
     ShaderSetup setup;
-    // CodexAstraLocal: Match the production title-frozen policy constructor;
-    // explicit enabled policies retain this fixture's existing cache oracle.
-    auto cache = std::make_unique<ParallelVertexState>(true, true);
+    auto cache = std::make_unique<ParallelVertexState>();
     ProgramCode safe{};
     safe.fill(Flow(O::END));
     safe[0] = Arithmetic(O::MOV, D::MakeOutput(0), S::MakeInput(0));
@@ -222,8 +220,7 @@ int main() {
     setup.UpdateSwizzleData(0, identity.hex);
     const auto domain_revision = setup.GetCodeRevision();
     for (unsigned order = 0; order < 2; ++order) {
-        // CodexAstraLocal: Both proof domains use the same frozen worker policy.
-        auto domain_cache = std::make_unique<ParallelVertexState>(true, true);
+        auto domain_cache = std::make_unique<ParallelVertexState>();
         for (unsigned round = 0; round < 12; ++round) {
             const auto contract = ((round + order) & 1)
                 ? ParallelVertexContract::SelectedOutputValues

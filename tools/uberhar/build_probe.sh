@@ -81,30 +81,24 @@ python3 tools/uberhar/test_adaptive_cpu_cache.py --mutants
 # CodexAstraLocal: Actual compute admission/report hooks must preserve exact
 # interval counts, final flushes and bounded diagnostics without changing draws.
 python3 tools/uberhar/test_compute_census.py
-# CodexAstraLocal: Supported backend failures retain terminal frontend handling;
-# Software must never silently select accelerated guest graphics.
-python3 tools/uberhar/test_renderer_backend.py
+# CodexAstraLocal: Strict isolation must also reject unavailable backends through
+# the existing terminal frontend path instead of silently selecting graphics.
+python3 tools/uberhar/test_strict_compute_backend.py
 # CodexAstraLocal: Exercise CPU Software framebuffer capture and production
 # sampling through the same cases as native tests before publishing Android.
 python3 tools/uberhar/test_software_renderer.py
-# CodexAstraLocal: Gate exact Software preparation identities, checked coverage
-# spans and read-time provenance without requiring a second full emulator build.
-c++ -std=c++20 -O2 -DFMT_HEADER_ONLY -ffunction-sections -fdata-sections \
-  -Isrc -Iexternals/fmt/include -Iexternals/boost -Iexternals/nihstro/include \
-  tools/uberhar/test_software_work.cpp src/video_core/pica/shader_unit.cpp -Wl,--gc-sections \
-  -o build/uberhar-probe/test-software-work
-build/uberhar-probe/test-software-work
 # CodexAstraLocal: Prove new masked/endpoint admission with original CPU vertices
 # and immutable command capture; shader CI separately executes the pixel fixtures.
 python3 tools/uberhar/test_compute_rect_pixels.py
+# CodexAstraLocal: The default-off scratch owner must consume requests once,
+# preserve completion/resource horizons and reject intentional lifecycle defects.
+# Its exact emitted original-input pixels run in the separate mandatory shader step.
+python3 tools/uberhar/test_compute_benchmark.py --mutants
 # CodexAstraUlt-2: Terminal readback errors must leave noexcept cleanup safely.
 python3 tools/uberhar/test_download_recovery.py
 # CodexAstraUlt: Verify real resource reuse/failed-allocation cleanup and event-only memory counters.
 python3 tools/uberhar/test_resource_pool_reuse.py
 python3 tools/uberhar/test_stream_buffer_ownership.py
-# CodexAstraLocal: Exercise the actual bounded query owner against deterministic
-# completion/failure endpoints; this does not claim driver timing or GPU pixels.
-python3 tools/uberhar/test_work_profile.py
 # CodexAstraLocal: A CPU upload wait must precede final pass/pipeline setup,
 # while Commit retains the final draw tick. Recording controls require both
 # late-Map and early-Commit defects to fail; this is not Vulkan/pixel execution.

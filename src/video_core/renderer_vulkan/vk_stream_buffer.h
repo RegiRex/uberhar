@@ -100,7 +100,11 @@ public:
         return buffer;
     }
 
-    // CodexAstraLocal: The retired independent producer no longer queries private upload capacity.
+    // CodexAstraLocal: Calculated validates complete bridge uploads against the
+    // actual allocation after the inherited reduced-size allocation retries.
+    u64 Capacity() const noexcept {
+        return stream_buffer_size;
+    }
 
 private:
     struct Watch {

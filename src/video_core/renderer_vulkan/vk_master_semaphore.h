@@ -16,6 +16,7 @@ namespace Vulkan {
 
 class Instance;
 class Scheduler;
+class ComputeFailureTracker;
 
 class MasterSemaphore {
 public:
@@ -46,11 +47,24 @@ public:
     /// Submits the provided command buffer for execution
     virtual void SubmitWork(vk::CommandBuffer cmdbuf, vk::Semaphore wait, vk::Semaphore signal,
                             u64 signal_value) = 0;
+    // CodexAstraLocal: Shared ownership outlives the fence thread. Null keeps
+    // all existing Native/Combo behavior and adds no diagnostic allocation.
+    void SetComputeFailureTracker(std::shared_ptr<ComputeFailureTracker> tracker) {
+        std::atomic_store_explicit(&compute_failures, std::move(tracker), std::memory_order_seq_cst);
+    }
 
 protected:
-    // CodexAstraLocal: Shared submission watermarks outlive all supported renderer commands.
+    // CodexAstraLocal: NDK27 libc++ has the atomic shared_ptr free functions,
+    // but not atomic<shared_ptr>. Keep the original seq_cst publication and
+    // return a retained owner before any fence-thread/error-path use. Every
+    // access to this slot uses these atomic functions, including replacement.
+    std::shared_ptr<ComputeFailureTracker> GetComputeFailureTracker() const {
+        return std::atomic_load_explicit(&compute_failures, std::memory_order_seq_cst);
+    }
+
     std::atomic<u64> gpu_tick{0};     ///< Current known GPU tick.
     std::atomic<u64> current_tick{1}; ///< Current logical tick.
+    std::shared_ptr<ComputeFailureTracker> compute_failures;
 };
 
 class MasterSemaphoreTimeline : public MasterSemaphore {

@@ -410,10 +410,7 @@ bool BlitHelper::ConvertDS24S8ToRGBA8(Surface& source, Surface& dest,
     update_queue.AddStorageImage(descriptor_set, 2, dest.ImageView());
 
     renderpass_cache.EndRendering();
-    // CodexAstraLocal TEST-ONLY LOG: Inherited utility compute is distinct from
-    // the retired independent renderer; preserve the shared barriers and descriptors.
-    scheduler.RecordGpuWork(GpuWork::Utility, 0,
-        [this, descriptor_set, copy, src_image = source.Image(),
+    scheduler.Record([this, descriptor_set, copy, src_image = source.Image(),
                       dst_image = dest.Image()](vk::CommandBuffer cmdbuf) {
         const std::array pre_barriers = {
             vk::ImageMemoryBarrier{
@@ -525,10 +522,7 @@ bool BlitHelper::DepthToBuffer(Surface& source, vk::Buffer buffer,
                            vk::DescriptorType::eStorageBuffer);
 
     renderpass_cache.EndRendering();
-    // CodexAstraLocal TEST-ONLY LOG: Inherited utility compute is distinct from
-    // the retired independent renderer; preserve the shared barriers and descriptors.
-    scheduler.RecordGpuWork(GpuWork::Utility, 0,
-        [this, descriptor_set, copy, src_image = source.Image(),
+    scheduler.Record([this, descriptor_set, copy, src_image = source.Image(),
                       extent = source.RealExtent(false)](vk::CommandBuffer cmdbuf) {
         const vk::ImageMemoryBarrier pre_barrier = {
             .srcAccessMask = vk::AccessFlagBits::eDepthStencilAttachmentWrite,

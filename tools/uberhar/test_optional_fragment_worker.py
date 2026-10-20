@@ -89,14 +89,6 @@ def main():
     text = header.read_text()
     members = text[text.index('    struct ReadyFragmentKey {'):
                    text.index('    std::unordered_map<size_t, Shader> fixed_geometry_shaders;')]
-    # CodexAstraLocal: Live-light optional admission consumes the actual pure
-    # dependency analyzer; fixture compiler endpoints do not invent its answer.
-    generator=source_root/'src/video_core/shader/generator/glsl_fs_shader_gen.cpp'
-    generator_text=generator.read_text()
-    # The earlier declaration is not the definition; start at its real body.
-    passthrough=generator_text.index('static bool IsPassThroughTevStage(const Pica::TexturingRegs::TevStageConfig& stage) {')
-    write(out/'lighting-demand.inc', extract(generator_text[passthrough:], 'static bool IsPassThroughTevStage(')
-          + '\n' + extract(generator_text, 'Pica::TevLiveness::Plan GraphicsTevLiveness('))
     # CodexAstraLocal: The extended mode shares the real worker/completion and
     # all legacy controls; add exact partial-owned fields and actual support guards.
     static_function=''

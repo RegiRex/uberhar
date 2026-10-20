@@ -1,11 +1,3 @@
-<!-- CodexAstraLocal: Preserve historical evidence while making the current retirement explicit. -->
-## 0.1.51 — Calculated retired
-
-The independent Calculated renderer, shaders, controls and scratch benchmark are removed.
-Stored mode 2 migrates to Native; Custom=0, Native=1, Combo=3, generic Combo=4 and
-CPU Software=5 remain stable. Combo rectangle compute and shared graphics utilities remain.
-The prior design/results below are historical, not current runtime capabilities.
-
 # Calculated rendering: coverage and architecture decisions
 
 <!-- CodexAstraLocal: The owner requires direct isolation before further performance conclusions; keep the installed baseline and next implementation separate. -->

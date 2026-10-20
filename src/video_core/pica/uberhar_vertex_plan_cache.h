@@ -55,7 +55,7 @@ private:
     }
 
 public:
-    // CodexAstraLocal TEST-ONLY LOG: Remove cost census after .50 mapping
+    // CodexAstraLocal TEST-ONLY LOG: Remove cost census after CPU-only .48 mapping
     // qualification. Hit/build wall includes full lookup and is not saved time.
     u64 HitSamples() const { return hit_samples; }
     u64 HitNs() const { return hit_ns; }
@@ -64,7 +64,7 @@ public:
     u64 Hits() const { return hits; }
     u64 Builds() const { return builds; }
     // CodexAstraLocal TEST-ONLY LOG: Existing owner reports distinguish recurring
-    // mapping reuse from adjacent hits; remove after .49 hardware qualification.
+    // mapping reuse from adjacent hits; remove after CPU-only .48 hardware qualification.
     u64 HistoryHits() const { return history_hits; }
     u64 Evictions() const { return evictions; }
     void Reset() { for (auto& entry : entries) entry.reset(); last = next = 0; }

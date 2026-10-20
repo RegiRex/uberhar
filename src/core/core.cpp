@@ -12,7 +12,6 @@
 #include "common/logging/log.h"
 #include "common/scope_exit.h"
 #include "common/settings.h"
-#include "common/uberhar_cpu_work_budget.h" // CodexAstraLocal: Configure immutable process diagnostics before pools.
 #include "core/arm/arm_interface.h"
 #include "core/arm/exclusive_monitor.h"
 #include "core/hle/service/cam/cam.h"
@@ -549,15 +548,6 @@ void System::Reschedule() {
 System::ResultStatus System::Init(Frontend::EmuWindow& emu_window,
                                   Frontend::EmuWindow* secondary_window,
                                   Kernel::MemoryMode memory_mode, u32 num_cores) {
-    // CodexAstraLocal: First initialization fixes optional census instrumentation
-    // for this process; later titles cannot change counters while leases survive.
-    const bool requested_census = Settings::values.uberhar_cpu_execution_census.GetValue();
-    const auto census = Common::Uberhar::AuxiliaryBudget::Global(requested_census).GetStatistics();
-    // CodexAstraLocal TEST-ONLY LOG: Explain requested/effective differences;
-    // remove after worker accounting is qualified, retaining immutable ownership.
-    LOG_INFO(Core, "Uberhar CPU census: requested={} effective={} app_restart_required={}",
-        requested_census, census.execution_census, requested_census != census.execution_census);
-
     // Notification for system initialization (either boot or savestate).
     if (on_init_callback) {
         on_init_callback(true);

@@ -56,10 +56,6 @@ jobs:
           /tmp/uberhar-test-env/bin/pip install moderngl==5.12.0 glcontext==3.0.0
       - name: Compile production generator and emit cases
         run: bash tools/uberhar/build_probe.sh
-      # CodexAstraLocal: The exact RGBA8 copy fast path must preserve translated
-      # texels; region guards reject scaling/flips/out-of-area pass reuse.
-      - name: Check exact image-work reductions
-        run: python3 tools/uberhar/test_image_work.py
       # CodexAstraLocal: Keep the old gates and require exact UBO/proctex/
       # lighting-fog output when a clean later draw outlives its allocation tick.
       - name: Execute Vulkan cached buffer lifetime
@@ -153,7 +149,13 @@ jobs:
         env:
           LIBGL_ALWAYS_SOFTWARE: '1'
         run: /tmp/uberhar-test-env/bin/python tools/uberhar/compare_compute_rect.py --require-vulkan
-      # CodexAstraLocal: The retired independent compute benchmark no longer has a runtime gate.
+      # CodexAstraLocal: Compare both bounded scratch routes with the independent
+      # image oracle, original CPU vertices and validated production Vulkan shaders.
+      # Reuse only the source/payload-hashed fixture emitted by the preceding host gate.
+      - name: Compare isolated compute benchmark supported pixels
+        env:
+          LIBGL_ALWAYS_SOFTWARE: '1'
+        run: /tmp/uberhar-test-env/bin/python tools/uberhar/test_compute_benchmark.py --render --require-vulkan --reuse-build
 
       # CodexAstraLocal: Host compiler failures must retain the actual captured
       # transport/assembly stderr, including when a control stops the probe.
@@ -172,15 +174,12 @@ jobs:
       # CodexAstraLocal: Retain allocation and terminal worker-boundary controls.
       # CodexAstraLocal: Retain descriptor pixels, sources and failure controls.
       # CodexAstraLocal: Preserve proof-cache extraction and compiler failures.
-      # CodexAstraLocal: Retain bounded GPU-query ownership and injected-failure evidence.
-      # CodexAstraLocal: Keep exact-copy output and failure provenance alongside coordination evidence.
       - name: Upload CPU coordination contract evidence
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: uberhar-host-coordination-proof-${{ github.run_number }}
           path: |
-            build/uberhar-probe/work-profile/**
             build/uberhar-probe/parallel-transport/**/provenance.json
             build/uberhar-probe/parallel-transport/**/*.stdout
             build/uberhar-probe/parallel-transport/**/*.stderr
@@ -211,7 +210,6 @@ jobs:
             build/uberhar-probe/cached-buffer-draw-use/**
             build/uberhar-probe/cached-buffer-lifetime-vulkan/**
             build/uberhar-probe/image-descriptors/**
-            build/uberhar-probe/image-work/**
             build/uberhar-probe/software-renderer/**/provenance.json
             build/uberhar-probe/software-renderer/**/results.xml
             build/uberhar-probe/software-renderer/**/*.stdout

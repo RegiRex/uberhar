@@ -44,8 +44,7 @@ def main():
             result=subprocess.run([str(case/'fixture')],capture_output=True,timeout=15)
             (case/'run.stdout').write_bytes(result.stdout);(case/'run.stderr').write_bytes(result.stderr)
             if error:require(result.returncode==23 and result.stderr==error,'wrong draw-use defect: '+label+' '+result.stderr.decode())
-            # CodexAstraLocal: 64 actual draw cases plus two supported no-target cases remain after retirement.
-            else:require(result.returncode==0 and result.stdout.startswith(b'PASS draw-use cases=66 '),'draw-use candidate '+result.stderr.decode())
+            else:require(result.returncode==0 and result.stdout.startswith(b'PASS draw-use cases=68 '),'draw-use candidate '+result.stderr.decode())
             proof['variants'].append({'name':label,'argv':argv,'returncode':result.returncode})
             print(label+': PASS',flush=True)
         proof['status']='PASS'

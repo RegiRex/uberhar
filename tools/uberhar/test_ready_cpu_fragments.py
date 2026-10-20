@@ -152,23 +152,9 @@ def main() -> None:
         return p.read_text()
     cpp=read('src/video_core/renderer_vulkan/vk_pipeline_cache.cpp')
     check_final_image_capture(function(cpp, 'bool PipelineCache::BindPipeline('))
-    # CodexAstraLocal: Source-derived selected-route metadata ensures the actual
-    # worker closure can populate and expose feature counters in this fixture.
-    pipeline_header=read('src/video_core/renderer_vulkan/vk_pipeline_cache.h')
-    runtime_start=pipeline_header.index('    // CodexAstraLocal TEST-ONLY LOG: Fixed sampled metadata')
-    runtime_end=pipeline_header.index('    // AstraEH: This state belongs', runtime_start)
-    (out/'fragment_runtime_members.inc').write_text(pipeline_header[runtime_start:runtime_end])
     graphics=read('src/video_core/renderer_vulkan/vk_graphics_pipeline.cpp')
     parts=[function(graphics,'u64 GraphicsPipeline::Key()').replace('GraphicsPipeline::Key()','GraphicsPipeline::ActualKey()'),
            function(graphics,'bool GraphicsPipeline::MatchesExecution(')]
-    # CodexAstraLocal: Diagnostic accessors must inspect the real immutable
-    # selected owner rather than a fixture-maintained duplicate implementation.
-    graphics_header = read('src/video_core/renderer_vulkan/vk_graphics_pipeline.h')
-    for signature, name in (
-        ('const StaticPipelineInfo& DiagnosticState()', 'DiagnosticState'),
-        ('std::array<u64, MAX_SHADER_STAGES> DiagnosticShaderIds()', 'DiagnosticShaderIds'),
-    ):
-        parts.append(function(graphics_header, signature).replace(name+'()', 'GraphicsPipeline::'+name+'()'))
     for signature in ('bool PipelineCache::PreferReadySpecializedFragment(',
                       'bool PipelineCache::ReadyVertexShaders()',
                       'GraphicsPipeline* PipelineCache::PrepareReadyCpuFragment(',
@@ -260,33 +246,13 @@ def main() -> None:
             ('pending-full-blocks','return select(partial);',
              'if (!curr_disk_cache->OptionalFragmentPending() && !(warming_ready_vertex && !warming_ready_vertex->IsDone())) return select(partial);\n            return nullptr;',
              'partial remains complete during full advancement'),
-            # CodexAstraLocal: Mutate the executed upload condition, not the same
-            # predicate used by sampled identity hashing; retain the pixel-state oracle.
-            ('missing-partial-push',
-             'if (selected_fallback || static_tev_cpu) {\n            tev_push_constants.UploadIfChanged(',
-             'if (selected_fallback) {\n            tev_push_constants.UploadIfChanged(',
-             'partial retains exact per-draw runtime transport'),
+            ('missing-partial-push','selected_fallback || static_tev_cpu','selected_fallback','partial retains exact per-draw runtime transport'),
             ('native-worker-gpu','!allow_ready_gpu_vertices || !ready_vertex_worker || !ReadyVertexShaders()',
              '!ready_vertex_worker || !ReadyVertexShaders()','Native CPU compiler does not admit GPU vertices'),
             ('partial-key-alias','!(entry.key.plan == plan) ||','false ||','exact partial key rejects same-hash aliases'),
             ('shared-attempt-cap','if (full.ready) {',
              'if (ready_cpu_bank->Attempts(0) < 64 && full.ready) {','full ready hit survives 64 full attempts')]:
             cases.append((name,replace_once(body,old,new),expected))
-        # CodexAstraLocal: Recreate the .50 freeze in actual advance, and prove
-        # that merely moving observation earlier cannot evict protected lighting.
-        # Preserve the old refusal counter so the race-progress oracle, rather
-        # than an earlier diagnostic-only assertion, detects the injected defect.
-        cases.append(('quota-before-observe', replace_once(body,
-            'const bool qualified = ready_cpu_bank->Observe(observed_hash, observation, live_lit);',
-            'if (lit_specialization && !live_lit && ready_cpu_bank->CheapOwned(tier) >= 6) '
-            '{ ++fragment_lit_reserved_refusals; return; }\n'
-            'const bool qualified = ready_cpu_bank->Observe(observed_hash, observation, live_lit);'),
-            'cold menu quota admits compatible race replacement'))
-        header_mutations['quota-incompatible-victim'] = (
-            'if (victim && lighting_reservation && !seen.lit &&',
-            'if (false && victim && lighting_reservation && !seen.lit &&')
-        cases.append(('quota-incompatible-victim', body,
-                      'quota replacement protects oldest lit owners and records progress'))
         for name,old,new,expected in [
             ('total-only-pressure','PartitionPressure();','false;','full partition pressure permits ninth full replacement'),
             ('shared-probation','Partitions::Index(key) * Observations + hash % Observations','hash % Observations',

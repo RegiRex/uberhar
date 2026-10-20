@@ -16,9 +16,6 @@ def main():
     root = Path(__file__).resolve().parents[2]
     inputs = [Path(__file__).resolve(), Path(__file__).with_suffix('.cpp')] + [root / p for p in [
         'src/video_core/rasterizer_cache/texture_decode_work.h',
-        # CodexAstraLocal: Bind raw transfer shape and shared-budget behavior too.
-        'src/video_core/rasterizer_cache/uberhar_cpu_transfer_policy.h',
-        'src/common/uberhar_cpu_work_budget.h',
         'src/video_core/rasterizer_cache/texture_codec.h',
         'src/video_core/rasterizer_cache/utils.cpp',
         'src/video_core/texture/etc1.cpp', 'src/common/uberhar_parallel_work.h']]

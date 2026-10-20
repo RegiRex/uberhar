@@ -38,11 +38,8 @@ public:
     static constexpr u32 Grain = 64;
 
     explicit NativeParallelBatch(unsigned processors = Common::Uberhar::AvailableProcessors(),
-                                 void (*worker_start)() = nullptr,
-                                 bool adaptive = true, bool diagnostics = true)
-        // CodexAstraLocal: Explicit title-frozen policy reaches the real worker.
-        : pool{processors, worker_start, Common::Uberhar::AuxiliaryBudget::Global(),
-               nullptr, adaptive, diagnostics} {}
+                                 void (*worker_start)() = nullptr)
+        : pool{processors, worker_start} {}
 
     unsigned Available() const { return pool.Available(); }
     unsigned CreatedWorkers() const { return pool.CreatedWorkers(); }
@@ -52,9 +49,6 @@ public:
     // CodexAstraLocal TEST-ONLY LOG: Owner-cadence scheduling evidence; remove
     // this diagnostic accessor after adaptive participation is qualified.
     auto Scheduling() const { return pool.Scheduling(); }
-    // CodexAstraLocal: A trial follows an exact shader proof, not just its FIFO
-    // miss count; unrelated draws still receive their static helper ceiling.
-    void SetWorkIdentity(u64 identity) { pool.SetWorkIdentity(identity); }
     const Work& LastWork() const { return work; }
 
     bool Prepare(u32 inputs) {

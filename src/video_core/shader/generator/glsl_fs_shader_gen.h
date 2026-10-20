@@ -26,25 +26,9 @@ enum class LightingFamilyKey { Current, Alpha13, Alpha14 };
 FSConfig MakeDynamicTevFamilyConfig(const FSConfig& config, const Profile& profile,
                                     LightingFamilyKey lighting_key = LightingFamilyKey::Current);
 
-// CodexAstraLocal: ABI 9 retains backwards RGB/alpha liveness in spare instruction
-// bits and live external-source demand in buffer_mask, retaining Vulkan's
-// 128-byte minimum. Source-derived disk identities also invalidate old modules.
-inline constexpr u32 DynamicTevAbiVersion = 9;
-inline constexpr u32 TevLiveRgb = 1U << 8;
-inline constexpr u32 TevLiveAlpha = 1U << 9;
-inline constexpr u32 TevLiveLighting = 1U << 11;
-// CodexAstraLocal: ABI9 spends only unused instruction bits on exact endpoint
-// results. The top lighting-LUT byte carries canonical directional slot proofs.
-// These mutable bits are explicitly excluded from optional static module keys.
-inline constexpr u32 TevConstantRgb = 1U << 10;
-inline constexpr u32 TevConstantAlpha = 1U << 11;
-inline constexpr u32 TevConstantBits = 0xFC00U;
-inline constexpr u32 TevMemoShift = 22;
-static_assert((TevConstantBits & (TevLiveRgb | TevLiveAlpha | 0x000F000FU)) == 0);
-// CodexAstraLocal: Neither liveness flags nor source demand overlap the legacy
-// decoded color/alpha operations, delayed writes, loop bound or stage activity.
-static_assert(((TevLiveRgb | TevLiveAlpha) & 0x000F000FU) == 0);
-static_assert(((TevLiveLighting | (15U << 12)) & (255U | (7U << 8) | (63U << 16))) == 0);
+// AstraEH: Version 7 of the private Vulkan fallback ABI. Fit Vulkan's
+// 128-byte minimum push-constant limit; specialized/disk shader layouts are unchanged.
+inline constexpr u32 DynamicTevAbiVersion = 7;
 // AstraEH: Prepared instructions are deliberately distinct from guest registers.
 // Source fields retain their nibble positions, with stage-0 Previous resolved once.
 // Color modifiers encode (component << 1) | invert: RGBA=0..3, RGB=4, zero=5.
@@ -58,8 +42,7 @@ struct DynamicTevStage {
 static_assert(sizeof(DynamicTevStage) == 16);
 struct DynamicTevState {
     std::array<DynamicTevStage, 6> stages;
-    // CodexAstraLocal: Buffer writes [0:7], loop end [8:10], live lighting [11],
-    // live TEV texture units [12:15], and non-passthrough stages [16:21].
+    // AstraEH: Buffer writes [0:7], loop end [8:10], active stages [16:21].
     u32 buffer_mask;
     u32 framebuffer; // alpha function [0:2], scissor [3:4], W buffering [5].
     u32 texture;     // border axes [0:5], coord2 [6], fog [7], flip [8], tex0 type [10:12].
@@ -90,39 +73,6 @@ static_assert(offsetof(DynamicTevState, lighting_ops_hi) == 124);
 
 /// AstraEH: Capture effective runtime state before family canonicalization removes it.
 DynamicTevState MakeDynamicTevState(const FSConfig& config, const Profile& profile);
-// CodexAstraLocal: Only live register values copied by the draw owner enter the
-// bounded arithmetic cache. No guest pointer, texture data or shader key owns
-// these mutable values; unavailable fixtures retain the original GPU formulas.
-struct FragmentRuntimeValues {
-    std::array<u32, 6> constants{};
-    u32 buffer{};
-    std::array<u64, 8> light_positions{};
-    bool available{};
-    bool operator==(const FragmentRuntimeValues&) const = default;
-};
-FragmentRuntimeValues CaptureFragmentRuntimeValues(const Pica::RegsInternal& regs,
-                                                   const FSConfig& config, const Profile& profile);
-void ApplyFragmentRuntime(DynamicTevState& state, const Profile& profile,
-                          const FragmentRuntimeValues& values);
-u32 FragmentMemoMask(const FSConfig& config, const Pica::TevLiveness::Plan& live);
-// CodexAstraLocal: Original-config analysis is shared by generation and bounded
-// evidence; callers must never analyze a canonical generic family as a guest draw.
-Pica::TevLiveness::Plan GraphicsTevLiveness(const FSConfig& config);
-
-// CodexAstraLocal TEST-ONLY LOG: Structural evidence for Native/Combo candidate
-// qualification. Remove with its bounded reporter after hardware acceptance;
-// these counts never authorize arithmetic substitutions or estimate GPU time.
-struct FragmentWorkEvidence {
-    u32 live_rgb{}, live_alpha{}, dead_rgb{}, dead_alpha{};
-    u32 live_textures{}, lighting_texture_overlap{}, constant_rgb{}, constant_alpha{};
-    u32 directional_slots{};
-    u32 memo_mask{};
-    // CodexAstraLocal TEST-ONLY LOG: Bounded sampled structural branch counts;
-    // remove after static-certificate pruning is qualified on hardware.
-    u32 static_constant_tests{}, static_constant_omitted{};
-    bool lighting_dead{}, alpha_never{};
-};
-FragmentWorkEvidence AnalyzeFragmentWork(const FSConfig& config, const Profile& profile);
 
 // CodexAstraLocal: Own the exact prepared TEV structure while leaving framebuffer,
 // textures, lighting controls and uniform values in the existing runtime ABI.
@@ -135,17 +85,32 @@ struct StaticTevPlan {
 static_assert(sizeof(StaticTevPlan) == 100);
 static_assert(offsetof(StaticTevPlan, buffer_mask) == 96);
 StaticTevPlan MakeStaticTevPlan(const DynamicTevState& state);
-// CodexAstraLocal: A compile-time upper bound on runtime endpoint eligibility,
-// never a substituted result or a value-dependent specialization key.
-std::array<u32, 6> StaticTevConstantCandidates(const StaticTevPlan& plan);
 
-// CodexAstraLocal: The independent compute evaluator is retired; graphics arithmetic stays shared.
+// CodexAstraLocal: Calculated shares production fragment arithmetic but supplies
+// interpolants/quad gradients and owns the ordered output merger itself. Refuse
+// unsupported domains before compilation; an absent evaluator is never fallback.
+enum class ComputeFragmentSupport {
+    Ready,
+    NonVulkan,
+    TextureType,
+    ProceduralTexture,
+    GasFog,
+    CustomShader,
+};
+ComputeFragmentSupport CheckComputeFragmentSupport(const FSConfig& config, const UserConfig& user,
+                                                   const Profile& profile);
+// CodexAstraLocal: Only fields consumed by the completing fragment state need
+// finite interpolation. Position remains mandatory; raw semantic tails retain
+// every original word for a later draw with different consumers.
+u32 ComputeLiveSemanticMask(const FSConfig& config);
+
 class FragmentModule {
 public:
     // AstraEH: Existing callers stay specialized; Vulkan fallback callers opt into dynamic TEV.
     explicit FragmentModule(const FSConfig& config, const UserConfig& user, const Profile& profile,
                             bool dynamic_tev = false,
-                            std::optional<StaticTevPlan> static_tev = std::nullopt);
+                            std::optional<StaticTevPlan> static_tev = std::nullopt,
+                            bool compute_evaluator = false);
     ~FragmentModule();
 
     /// Emits GLSL source corresponding to the provided pica fragment configuration
@@ -209,8 +174,7 @@ private:
     // CodexAstraLocal: Bake only prepared TEV choices, preserving consumed-operand
     // order, one fetch per referenced texture, byte rounding and delayed writes.
     void WriteStaticTev();
-    // CodexAstraLocal: Track dominated first use only for branch-free static plans.
-    std::string GetStaticTevSource(u32 source, u32 stage, u32& sampled, bool local_samples);
+    std::string GetStaticTevSource(u32 source, u32 stage, u32& sampled);
 
     void AppendProcTexShiftOffset(std::string_view v, Pica::TexturingRegs::ProcTexShift mode,
                                   Pica::TexturingRegs::ProcTexClamp clamp_mode);
@@ -222,6 +186,9 @@ private:
 
     void DefineExtensions();
     void DefineInterface();
+    // CodexAstraLocal: Compute has explicit invocation-local varyings instead of
+    // graphics inputs; functions below consume the same names and formulas.
+    void DefineComputeInterface();
     void DefineBindingsVK();
     void DefineBindingsGL();
     void DefineHelpers();
@@ -229,10 +196,6 @@ private:
     void DefineShadowHelpers();
     void DefineProcTexSampler();
     void DefineTexUnitSampler(u32 i);
-    // CodexAstraLocal: Reuse only the same ordinary color unit at its first use;
-    // typed shadow/procedural/custom domains keep their original accessors.
-    void DefineSharedTextureSamples();
-    std::string TextureSample(u32 unit) const;
 
 private:
     FSConfig config;
@@ -243,14 +206,10 @@ private:
         dynamic_tev{}; // AstraEH: Select runtime TEV instructions instead of baked stage constants.
     // CodexAstraLocal: The optional compiler owns its plan beyond the submitting draw.
     std::optional<StaticTevPlan> static_tev;
-    // CodexAstraLocal: Shared graphics liveness survives independent compute retirement.
+    // CodexAstraLocal: Select an explicit callable compute interface; graphics
+    // callers keep the original entry point and output-merger behavior.
+    bool compute_evaluator{};
     Pica::TevLiveness::Plan compute_liveness{};
-    // CodexAstraLocal: Keep OpenGL/custom generation unchanged;
-    // Vulkan graphics uses the same proven dependency semantics independently.
-    bool graphics_optimizations{};
-    // CodexAstraLocal: One ordinary-unit memo only where another exact consumer
-    // exists; dynamic families qualify the same mask from original draw state.
-    u32 sample_memo_mask{};
     bool use_blend_fallback{};
     bool use_fragment_shader_interlock{};
     bool use_fragment_shader_barycentric{};
@@ -269,5 +228,22 @@ std::string GenerateFragmentShader(const FSConfig& config, const UserConfig& use
 // family/profile/interface key. Only TEV is static; all other dynamic state stays live.
 std::string GenerateStaticTevFragmentShader(const FSConfig& family, const UserConfig& user,
                                           const Profile& profile, const StaticTevPlan& plan);
+
+// CodexAstraLocal: Returns a library, not a dispatch entry point. The consumer
+// appends its ordered raster kernel and calls UberharEvaluateFragment with
+// perspective-correct varyings, Vulkan window Z/reciprocal W, and derivatives
+// formed from the same primitive at the surrounding 2x2 pixel-quad centers.
+// CodexAstraLocal: The texture0_dx0/dx1/dy0/dy1 fields additionally carry exact
+// perspective-correct (u,v,texture0_w) helper coordinates, before texture
+// projection or cube-face selection. Shadow output returns unrounded TEV color
+// so the ordered merger can truncate its green component like WriteShadow.
+// CodexAstraLocal: proctex_dx0/dx1/dy0/dy1 are the selected procedural UV's
+// original vec2 helper values. The evaluator applies abs before differencing;
+// LUT resources remain in the production set-0 bindings 4/5.
+// Descriptor sets 0/1 retain the production FS uniform/LUT/sampler ABI. Color,
+// depth/stencil, blend and logic operations are committed only by the consumer.
+std::optional<std::string> GenerateComputeFragmentEvaluator(const FSConfig& config,
+                                                           const UserConfig& user,
+                                                           const Profile& profile);
 
 } // namespace Pica::Shader::Generator::GLSL

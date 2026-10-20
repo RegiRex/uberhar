@@ -198,12 +198,10 @@ public:
     explicit ParallelWork(unsigned processors = AvailableProcessors(),
                           void (*worker_start)() = nullptr,
                           AuxiliaryBudget& shared_budget = AuxiliaryBudget::Global(),
-                          AuxiliaryBudget::ProgressLane* progress = nullptr,
-                          bool adaptive = true, bool diagnostics = true)
+                          AuxiliaryBudget::ProgressLane* progress = nullptr)
         : available{std::max(1U, processors)}, worker_limit{available - 1},
           on_worker_start{worker_start}, budget{shared_budget}, progress_lane{progress},
-          // CodexAstraLocal: Owner-snapshotted controls never read Settings inside jobs.
-          participation{available - 1, adaptive}, policy_diagnostics{diagnostics} {}
+          participation{available - 1} {}
     ParallelWork(const ParallelWork&) = delete;
     ParallelWork& operator=(const ParallelWork&) = delete;
 
@@ -236,15 +234,7 @@ public:
     unsigned StartupFailures() const { return startup_failures; }
     // CodexAstraLocal: Owner-only reporting exposes whether sampled policy
     // actually changed participation, without logging per draw or per worker.
-    AdaptiveParticipation::Statistics Scheduling() const {
-        auto result = participation.GetStatistics();
-        result.prepare_samples = policy_prepare_samples; result.prepare_ns = policy_prepare_ns;
-        result.observe_samples = policy_observe_samples; result.observe_ns = policy_observe_ns;
-        return result;
-    }
-    // CodexAstraLocal: The owner identifies exact executable work generations;
-    // zero opts mixed/unidentified jobs out of adaptation, not out of execution.
-    void SetWorkIdentity(std::uint64_t identity) { work_identity = identity; }
+    AdaptiveParticipation::Statistics Scheduling() const { return participation.GetStatistics(); }
     // CodexAstraLocal: Report the immutable runtime choice at the existing
     // cadence; a compiled Linux target can still select CV after a denied probe.
     const char* WaitTransport() const {
@@ -273,19 +263,6 @@ public:
     }
 
 private:
-    // CodexAstraLocal TEST-ONLY LOG: Sparse observation cost excludes shader
-    // execution/waits and is never added to overlapping pool wall time. Remove
-    // these measurements after adaptive maintenance is hardware-qualified.
-    void ObserveParticipation(const AdaptiveParticipation::Sample& sample) {
-        const bool measure = policy_diagnostics && (++policy_observations % 64 == 0);
-        const auto start = measure ? std::chrono::steady_clock::now()
-                                   : std::chrono::steady_clock::time_point{};
-        participation.Observe(sample);
-        if (measure) {
-            ++policy_observe_samples;
-            policy_observe_ns += Elapsed(start, std::chrono::steady_clock::now());
-        }
-    }
     template <bool HasHook, typename Function, typename Prepare, typename Hook>
     Result RunImpl(std::uint32_t count, std::uint32_t grain, Function&& function,
                    Prepare&& prepare, Hook&& hook, bool measure) {
@@ -295,23 +272,12 @@ private:
         grain = std::max(1U, grain);
         const bool nested = AuxiliaryBudget::HasPermit();
         const unsigned helper_capacity = budget.HelperCapacity();
-        // CodexAstraLocal TEST-ONLY LOG: Price controller preparation separately
-        // from dispatched work, one in1024jobs; remove after .50 qualification.
-        const bool price_policy = policy_diagnostics && (++policy_calls % 1024 == 0);
-        const auto policy_start = price_policy ? std::chrono::steady_clock::now()
-                                               : std::chrono::steady_clock::time_point{};
         participation.Limit(std::min(available - 1, helper_capacity));
-        participation.Prepare(count, grain, HasHook, work_identity);
+        participation.Prepare(count, grain, HasHook);
         const unsigned requested = !nested && ParallelFloatEnvironment::AllowsParallel()
             ? std::min(available, std::max(1U, count / grain)) : 1U;
-        // CodexAstraLocal: Sampled expiry must restore the static cap before
-        // this job selects helpers, never halfway through an admitted trial.
-        const bool sample = requested > 1 && participation.SelectSample(count, grain);
         const unsigned wanted = std::min({requested - 1, participation.Desired(), helper_capacity});
-        if (price_policy) {
-            ++policy_prepare_samples;
-            policy_prepare_ns += Elapsed(policy_start, std::chrono::steady_clock::now());
-        }
+        const bool sample = requested > 1 && participation.SelectSample(count, grain);
         const bool timed = measure || sample;
         EnsureWorkers(wanted);
         const unsigned active = std::min(wanted, CreatedWorkers());
@@ -324,11 +290,11 @@ private:
                 auto permit = progress_lane && !nested ? progress_lane->Enter() : AuxiliaryBudget::Permit{};
                 if (count != 0) function(0, count);
             } catch (...) {
-                if (sample) ObserveParticipation({.failed = true});
+                if (sample) participation.Observe({.failed = true});
                 throw;
             }
             const auto elapsed = timed ? Elapsed(start, std::chrono::steady_clock::now()) : 0;
-            if (sample) ObserveParticipation({count, grain, count, 0, 0, elapsed, elapsed, 0, 0,
+            if (sample) participation.Observe({count, grain, count, 0, 0, elapsed, elapsed, 0, 0,
                 wanted != participation.Desired(), false});
             return {count, 0, count != 0 ? 1U : 0U, measure ? elapsed : 0, 0};
         }
@@ -441,7 +407,7 @@ private:
             // CodexAstraLocal: Never learn from failed or capacity-contended
             // work. Hook work is separately compared so a different amount of
             // useful prefix append cannot masquerade as a faster shader batch.
-            if (sample) ObserveParticipation({count, grain, result.owner_items,
+            if (sample) participation.Observe({count, grain, result.owner_items,
                 result.worker_items, active, Elapsed(dispatch_start, end),
                 Elapsed(owner_start, owner_end), Elapsed(join_start, end),
                 hook_ran ? Elapsed(owner_end, join_start) : 0,
@@ -621,13 +587,6 @@ private:
     AuxiliaryBudget& budget;
     AuxiliaryBudget::ProgressLane* progress_lane;
     AdaptiveParticipation participation;
-    // CodexAstraLocal: Immutable diagnostic policy, owner-only integer counters.
-    const bool policy_diagnostics;
-    std::uint64_t policy_calls{}, policy_observations{}, policy_prepare_samples{}, policy_prepare_ns{};
-    std::uint64_t policy_observe_samples{}, policy_observe_ns{};
-    // CodexAstraLocal: Fixed-purpose pools retain their own domain; shader pools
-    // replace this identity with an exact retained proof generation per draw.
-    std::uint64_t work_identity{1};
     unsigned startup_failures{};
     std::vector<std::unique_ptr<Worker>> workers;
     std::mutex mutex;

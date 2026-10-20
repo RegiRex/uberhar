@@ -51,8 +51,8 @@ namespace Pica { struct PicaCore {}; }
 namespace Core { struct System; }
 namespace Settings {
 enum class GraphicsAPI { Software, OpenGL, Vulkan, Unknown };
-// CodexAstraLocal: Supported model IDs; raw retired IDs cannot control the factory.
-enum class UberharTestMode { Custom=0, Native=1, Automatic=3 };
+// CodexAstraLocal: Include CPU Software in the real factory isolation matrix.
+enum class UberharTestMode { Custom, Native, Compute, Automatic, ComboGeneric, Software };
 template<class T> struct Setting { T value{}; T GetValue() const {return value;} };
 inline struct Values {
     Setting<GraphicsAPI> graphics_api;
@@ -214,18 +214,19 @@ int main() {
         using namespace Settings;
         auto& system=Core::System::GetInstance();
         Pica::PicaCore pica;
-        // CodexAstraLocal: Retired IDs do not restore Android Software selection.
-        for(unsigned mode : {0U,1U,3U,4U,5U}) for(unsigned api=0;api<4;++api) {
+        // CodexAstraLocal: Both explicitly isolated methods refuse another backend.
+        for(unsigned mode=0;mode<6;++mode) for(unsigned api=0;api<4;++api) {
             values.uberhar_test_mode.value=static_cast<UberharTestMode>(mode);
             values.graphics_api.value=static_cast<GraphicsAPI>(api);
             constructed=0; bool refused=false;
             try {auto renderer=VideoCore::CreateRenderer(system.window,nullptr,pica,system);}
             catch(const VideoCore::ShaderRecoveryError& error) {
                 refused=true;
-                Check(std::string{error.what()}.find("CPU Software")!=std::string::npos,
+                Check(std::string{error.what()}.find(mode==2 ? "fallback is disabled" : "CPU Software")!=std::string::npos,
                       "strict refusal lost purpose");
             }
-            const bool must_refuse=api==0 && (!HAS_SOFTWARE || HAS_ANDROID);
+            const bool must_refuse=(mode==2 && !(HAS_VULKAN && api==2)) ||
+                (mode==5 && !(HAS_SOFTWARE && api==0)) || (api==0 && !HAS_SOFTWARE);
             Check(refused==must_refuse,"strict backend route changed");
             Check(constructed==(must_refuse?0U:1U),"substitute constructed on refusal");
             if(!refused) {
@@ -325,7 +326,7 @@ def main():
         "src/core/core.cpp", "src/citra_libretro/citra_libretro.cpp",
         "src/core/core.h", "src/android/app/src/main/jni/native.cpp",
         "src/citra_qt/bootmanager.cpp", "src/citra_qt/citra_qt.cpp",
-        "tools/uberhar/test_renderer_backend.py",
+        "tools/uberhar/test_strict_compute_backend.py",
         "src/common/scope_exit.h", "src/common/common_funcs.h", "src/common/common_types.h")]
     hashes = {str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest() for p in paths}
     factory, _, core, retro, _, android, qt_worker, qt_ui = [p.read_text() for p in paths[:8]]
@@ -371,7 +372,7 @@ def main():
                        "ANDROID_LOAD_EXIT": android_load_exit,
                        "RETRO_TERMINAL": retro_terminal}.items():
         source = source.replace(key, value)
-    parent = ROOT / "build/uberhar-probe/renderer-backend"
+    parent = ROOT / "build/uberhar-probe/strict-compute-backend"
     parent.mkdir(parents=True, exist_ok=True)
     out = Path(tempfile.mkdtemp(prefix="run-", dir=parent))
     (out / "stub.h").write_text(STUB)
@@ -385,10 +386,10 @@ def main():
     (out / "common/logging/log.h").write_text(
         '#pragma once\n#define LOG_CRITICAL(...) ((void)0)\n#define LOG_ERROR(...) ((void)0)\n'
         '#define LOG_INFO(...) ((void)0)\n')
-    # CodexAstraLocal: A mutant restoring Android's retired Software constructor
-    # must fail, while the internal desktop reference remains callable.
-    software_strict = "#if defined(ENABLE_SOFTWARE_RENDERER) && !defined(ANDROID)"
-    assert factory.count(software_strict) == 1
+    strict = block(factory, "if (Settings::values.uberhar_test_mode.GetValue() == Settings::UberharTestMode::Compute)")
+    # CodexAstraLocal: Removing Software isolation must be detected independently
+    # of compile-time backend absence and the inherited Calculated isolation.
+    software_strict = block(factory, "if (Settings::values.uberhar_test_mode.GetValue() == Settings::UberharTestMode::Software &&")
     # CodexAstraLocal: Deleting each new critical gate must fail actual executed
     # boundaries, not merely a source-string assertion. Compile four backend
     # configurations; modeled endpoints do not execute JNI, Qt events or Vulkan.
@@ -399,8 +400,8 @@ def main():
         ("software", factory, source, (0, 0, 1), True),
         # CodexAstraLocal: Android can now contain all three available backends.
         ("all-backends", factory, source, (1, 1, 1), True),
-        ("android-all-backends", factory, source, (1, 1, 1), True),
-        ("restored-android-software-route", factory.replace(software_strict, "#ifdef ENABLE_SOFTWARE_RENDERER"), source, (1, 1, 1), False),
+        ("removed-factory-guard", factory.replace(strict, ""), source, (1, 1, 1), False),
+        ("removed-software-guard", factory.replace(software_strict, ""), source, (1, 1, 1), False),
         ("false-init-success", factory, source.replace(
             "return ResultStatus::ErrorRendererRecovery;", "return ResultStatus::Success;"), (1, 1, 0), False),
         ("ignored-restore-status", factory, source.replace(
@@ -424,7 +425,8 @@ def main():
     # CodexAstraLocal: Require each injected defect's intended diagnostic so an
     # unrelated earlier failure cannot be mistaken for a working regression test.
     failures = {
-        "restored-android-software-route": "strict backend route changed",
+        "removed-factory-guard": "strict backend route changed",
+        "removed-software-guard": "strict backend route changed",
         "false-init-success": "constructor refusal did not return terminal status",
         "ignored-restore-status": "restore continued without a renderer",
         "live-failed-frontend": "context callback retained failed session",
@@ -444,11 +446,6 @@ def main():
         command = [os.environ.get("CXX", "c++"), "-std=c++20", "-O1", "-I"+str(out), "-Isrc"]
         for key, value in zip(("VULKAN", "OPENGL", "SOFTWARE_RENDERER"), flags):
             if value: command.append("-DENABLE_" + key)
-        # CodexAstraLocal: Compile actual Android factory preprocessing, without JNI.
-        android = name in ("android-all-backends", "restored-android-software-route")
-        if android:
-            command.append("-DANDROID")
-        command.append(f"-DHAS_ANDROID={int(android)}")
         command += [f"-DHAS_VULKAN={flags[0]}", f"-DHAS_OPENGL={flags[1]}",
                     f"-DHAS_SOFTWARE={flags[2]}", str(d / "factory.cpp"), str(d / "main.cpp"),
                     "-o", str(d / "test")]

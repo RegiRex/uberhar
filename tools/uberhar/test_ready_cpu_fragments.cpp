@@ -45,11 +45,6 @@ void RealSelectionAndTransport() {
     Require(rows[0].pipeline == generic->Handle() && rows[1].pipeline == special->Handle() &&
             rows[2].pipeline == special->Handle() && rows[3].pipeline == generic->Handle(),
             "actual G/S/G pipeline identity");
-    // CodexAstraLocal: Tags must follow executed binding, including the actual
-    // draw snapshot between CPU-full and the following generic command.
-    Require(rows[0].gpu_route == 0 && rows[1].gpu_route == 2 &&
-            rows[2].gpu_route == 2 && rows[3].gpu_route == 0,
-            "actual G/S/G profiler route identity");
     Require(rows[0].offsets == std::array<u32,3>{1,2,3} &&
             rows[1].offsets == std::array<u32,3>{4,5,6} &&
             rows[3].offsets == std::array<u32,3>{7,8,9}, "queued offsets immutable");
@@ -259,7 +254,7 @@ void BindTransportAndModes() {
   auto layout = SoftwareLayout();
   auto c = Config();
   for (auto mode :
-       {Settings::UberharTestMode::Native,
+       {Settings::UberharTestMode::Native, Settings::UberharTestMode::Compute,
         Settings::UberharTestMode::ComboGeneric,
         Settings::UberharTestMode::Custom}) {
     PipelineCache p;
@@ -426,24 +421,9 @@ void KeyAndDynamicState() {
     auto unlit = Config();
     auto lit = Config(1);
     lit.lighting.enable.Assign(1);
-    // CodexAstraLocal: Reservation now follows consumed lighting, not merely
-    // the unit enable bit. Give the lit witness a real final RGB consumer and
-    // retain a check that enabled-but-unused lighting does not qualify.
-    using Source = Pica::TexturingRegs::TevStageConfig::Source;
-    Require(!GLSL::GraphicsTevLiveness(lit).Uses(Source::PrimaryFragmentColor),
-            "enabled unused lighting is not a live consumer");
-    Pica::TexturingRegs::TevStageConfig final_stage = lit.texture.tev_stages[5];
-    final_stage.color_source1.Assign(Source::PrimaryFragmentColor);
-    lit.texture.tev_stages[5].sources_raw = final_stage.sources_raw;
-    Require(GLSL::GraphicsTevLiveness(lit).Uses(Source::PrimaryFragmentColor),
-            "lit occupancy witness consumes lighting");
     auto info = Info();
     auto layout = SoftwareLayout();
-    // CodexAstraLocal: This legacy fixture otherwise owns synthetic payload
-    // bytes. Lighting attribution needs the actual draw's prepared demand bits.
-    p.tev_constants = GLSL::MakeDynamicTevState(unlit, p.profile);
     WarmPipeline(p, info, unlit);
-    p.tev_constants = GLSL::MakeDynamicTevState(lit, p.profile);
     WarmPipeline(p, info, lit);
     // CodexAstraLocal: The production report snapshots this same fixed metadata;
     // no test or reporter inspects a destruction-queued unique owner.
@@ -454,7 +434,6 @@ void KeyAndDynamicState() {
             "bank occupancy records lit and unlit admissions");
     for (const auto &c : {unlit, lit, lit}) {
       p.Fresh(c);
-      p.tev_constants = GLSL::MakeDynamicTevState(c, p.profile);
       Require(p.BindPipeline(info, true, nullptr, true, nullptr, &layout, &token),
               "lit/unlit ready draw");
     }

@@ -4,7 +4,6 @@
 
 #include <bit>       // AstraEH: Count per-draw active TEV stages without fragment-side decoding.
 #include <chrono>    // AstraEH: Measure actual scheduler waits for pipeline compilation.
-#include <cmath>     // CodexAstraLocal: Evidence classifies original directions; no substitution.
 #include <cstring>   // AstraEH: Select the already-drained final statistics path.
 #include <optional>  // AstraEH: Android path-query declarations use optional strings.
 #include <stdexcept> // AstraEH: Recover experimental compilation failures through specialization.
@@ -134,10 +133,7 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
       // CodexAstraLocal: PicaCore selects its CPU engine at construction. Freeze
       // the same choice for this renderer; never change a shader-map policy live.
       shader_jit_enabled{(CITRA_ARCH(x86_64) || CITRA_ARCH(arm64)) &&
-                         Settings::values.use_shader_jit.GetValue()},
-      // CodexAstraLocal: Per-feature controls freeze at renderer construction.
-      feature_diagnostics{Settings::values.uberhar_feature_diagnostics.GetValue()},
-      lit_specialization{Settings::values.uberhar_lit_specialization.GetValue()} {
+                         Settings::values.use_shader_jit.GetValue()} {
     // AstraPro: Diagnostics 19 adds bounded GPU promotion and rescued-input observations.
     // AstraEH: Record effective settings so a device log identifies the tested path.
     // AstraEH Log Line: bounded renderer diagnostics; see docs/UBERHAR_DIAGNOSTICS.md.
@@ -146,17 +142,13 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
     LOG_INFO(
         Render_Vulkan,
         "Uberhar: hybrid_tev={} force_tev={} async_shaders={} spirv_generator={} "
-        "diagnostics=23 first_ready=true compact_tev=true canonical_tev=true dynamic_fragment=true "
+        "diagnostics=22 first_ready=true compact_tev=true canonical_tev=true dynamic_fragment=true "
         "cpu_bridge={} bridge_policy=ready_only fallback_abi={} push_bytes={} "
         "runtime_lighting_luts=true runtime_lighting_enables=true runtime_light_loop=true "
         "runtime_tev_plan=true prepared_tev_operands=true phase_diagnostics=1 "
         "host_pipeline_identity=true "
         "bridge_assembly=isolated_lists_strips_fans "
-        "compiler_workers={} static_cpu_tev={} full_cpu_pso_attempts=64 static_cpu_pso_attempts=16 "
-        "shader_controls=reported_separately arithmetic_scope=generic_static "
-        // CodexAstraLocal: Independent Calculated was retired; retain truthful
-        // boundaries for the graphics shader optimization report.
-        "unchanged_shader_domains=opengl_custom_spirv_generator",
+        "compiler_workers={} static_cpu_tev={} full_cpu_pso_attempts=64 static_cpu_pso_attempts=16",
         hybrid_tev, force_tev, Settings::values.async_shader_compilation.GetValue(),
         Settings::values.spirv_shader_gen.GetValue(), cpu_vertex_bridge, GLSL::DynamicTevAbiVersion,
         sizeof(TevPushConstants), num_worker_threads, allow_static_cpu_tev);
@@ -192,23 +184,7 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
         .vk_disable_spirv_optimizer = Settings::values.disable_spirv_optimizer.GetValue(),
         .vk_use_spirv_generator = Settings::values.spirv_shader_gen.GetValue(),
         .is_vulkan = true,
-        // CodexAstraLocal: Profile equality and generated-source fingerprints
-        // include every frozen shader control, including independent OFF paths.
-        .fragment_liveness = Settings::values.uberhar_fragment_liveness.GetValue(),
-        .fragment_alpha_never = Settings::values.uberhar_alpha_never.GetValue(),
-        .fragment_memo = Settings::values.uberhar_fragment_memo.GetValue(),
-        .fragment_constant_tev = Settings::values.uberhar_constant_tev.GetValue(),
-        .fragment_directional_precompute = Settings::values.uberhar_directional_precompute.GetValue(),
     };
-    // CodexAstraLocal TEST-ONLY LOG: One effective-session record; remove after
-    // independent shader feature qualification, retaining permanent failures.
-    LOG_INFO(Render_Vulkan, "Uberhar shader controls: schema=2 liveness={} alpha_never={} "
-        "fragment_memo={} constant_tev={} directional_precompute={} lit_specialization={} "
-        "diagnostics={} constant_domain=endpoint_only direction_domain=positive_z_unit "
-        "arithmetic_routes=generic_static transport_abi={}",
-        profile.fragment_liveness, profile.fragment_alpha_never, profile.fragment_memo,
-        profile.fragment_constant_tev, profile.fragment_directional_precompute,
-        lit_specialization, feature_diagnostics, GLSL::DynamicTevAbiVersion);
 
     const auto& traits = instance.GetAllTraits();
     size_t i = 0;
@@ -773,18 +749,11 @@ bool PipelineCache::BindPipeline(PipelineInfo& info, bool wait_built,
     // A full ready CPU/GPU fragment without alternatives consumes no TEV bytes.
     if (using_fallback || static_tev_cpu || alternative)
         EnsureDynamicTevState();
-    // CodexAstraLocal: Keep profiler classification inside the existing worker
-    // command so a late generic fallback win cannot be tagged as specialization.
-    const u32 prepared_gpu_route = static_tev_cpu ? 1U : specialized_cpu ? 2U : specialized_gpu ? 4U : 3U;
     // CodexAstraLocal: Resolve on the consuming tick after every preparation
     // that can flush. Record captures immutable handles immediately afterward.
     ResolveImageBindings();
     // AstraEH: Copy TEV registers into the queued command; later draws may change them.
     scheduler.Record([this, is_dirty, constants_dirty, pipeline, using_fallback, static_tev_cpu, alternative,
-                      prepared_gpu_route,
-                      fragment_sample = pending_fragment_evidence,
-                      fragment_cacheable = pending_fragment_cacheable,
-                      recovery_glsl = pending_recovery_glsl,
                       draw_id = draw_requests, alternative_was_pending, constants = tev_constants,
                       current_dynamic = current_info.dynamic_info, dynamic = info.dynamic_info,
                       descriptor_sets = bound_descriptor_sets, offsets = offsets,
@@ -903,68 +872,6 @@ bool PipelineCache::BindPipeline(PipelineInfo& info, bool wait_built,
         auto* selected =
             SelectUsablePipeline(pipeline_completion, *pipeline, alternative, prefer_fallback);
         const bool selected_fallback = using_fallback || selected == alternative;
-        scheduler.RecordGpuRoute(selected_fallback ? 0U : prepared_gpu_route);
-        // CodexAstraLocal TEST-ONLY LOG: Only existing sampled passes request
-        // these hashes. Read the actual selected immutable pipeline after a
-        // late fallback win, never the process-pointer execution key. Dynamic
-        // raster state and current transport come from this queued draw. Remove
-        // after costly-state qualification; uniforms/samplers are not captured.
-        if (scheduler.GpuIdentityRequested()) {
-            const auto ids = selected->DiagnosticShaderIds();
-            const auto state = Common::HashCombine(
-                selected->DiagnosticState().ExecutionHash(true, ids),
-                rasterization.value, depth_stencil.value, dynamic.blend_color,
-                dynamic.stencil_reference, dynamic.stencil_compare_mask, dynamic.stencil_write_mask,
-                Common::ComputeStructHash64(dynamic.viewport), Common::ComputeStructHash64(dynamic.scissor));
-            const u64 transport = selected_fallback || static_tev_cpu
-                ? Common::ComputeStructHash64(constants) : 0;
-            scheduler.RecordGpuIdentity({ids[0], ids[1], ids[2], state, transport},
-                u64{dynamic.scissor.GetWidth()} * dynamic.scissor.GetHeight());
-        }
-        // CodexAstraLocal TEST-ONLY LOG: Attribute to the actual final route on
-        // its sole worker. Sparse metadata owns original draw inputs; remove
-        // after independent hardware qualification, never infer pixel savings.
-        if (feature_diagnostics) {
-            const u32 route = selected_fallback ? 0U : prepared_gpu_route;
-            auto& selected_work = fragment_selected[route];
-            ++selected_work.draws;
-            if (fragment_sample && fragment_cacheable && (route != 3 || recovery_glsl)) {
-                const auto& work = *fragment_sample;
-                ++selected_work.samples;
-                selected_work.alpha_never += work.alpha_never &&
-                    (route >= 2 || profile.fragment_alpha_never);
-                if (!work.alpha_never) {
-                    // CodexAstraLocal TEST-ONLY LOG: Selection owns attribution;
-                    // generic/full/recovery draws cannot claim static pruning.
-                    // Remove after qualification; no per-pixel or saved-time claim.
-                    if (route == 1) {
-                        selected_work.static_constant_tests += work.static_constant_tests;
-                        selected_work.static_constant_omitted += work.static_constant_omitted;
-                    }
-                    if (profile.fragment_liveness) {
-                        selected_work.dead_rgb += work.dead_rgb;
-                        selected_work.dead_alpha += work.dead_alpha;
-                        selected_work.dead_lighting += work.lighting_dead;
-                    }
-                    if (profile.fragment_memo) selected_work.memo_units += std::popcount(work.memo_mask);
-                    u32 rgb = 0, alpha = 0, directional = 0;
-                    if (route < 2) {
-                        for (const auto& stage : constants.stages) {
-                            rgb += (stage.operations & GLSL::TevConstantRgb) != 0;
-                            alpha += (stage.operations & GLSL::TevConstantAlpha) != 0;
-                        }
-                        directional = std::popcount(constants.lighting_luts_hi >> 24);
-                        selected_work.constant_rgb += rgb;
-                        selected_work.constant_alpha += alpha;
-                        selected_work.directional_slots += directional;
-                    }
-                    selected_work.constant_refused_rgb += work.constant_rgb > rgb ? work.constant_rgb - rgb : 0;
-                    selected_work.constant_refused_alpha += work.constant_alpha > alpha ? work.constant_alpha - alpha : 0;
-                    const u32 eligible_directional = std::popcount(work.directional_slots);
-                    selected_work.directional_refused += eligible_directional > directional ? eligible_directional - directional : 0;
-                }
-            }
-        }
         if (selected == alternative && alternative_was_pending && !prefer_fallback) {
             late_fallback_draws.fetch_add(1, std::memory_order::relaxed);
         }
@@ -1267,19 +1174,9 @@ GraphicsPipeline* PipelineCache::PrepareReadyCpuFragment(
         // maintenance never waits and never replaces the already selected draw.
         const auto advance = [&](Candidate& candidate) noexcept {
             if (candidate.slot) return;
-            // CodexAstraLocal: Preserve terminal work limits before copying a
-            // key, but let occupancy-blocked demand enter bounded probation so
-            // stale cheap menu owners can be replaced by cheap gameplay owners.
-            const auto tier = candidate.partial ? 1U : 0U;
-            const bool live_lit = virtual_fs_config->lighting.enable &&
-                                 (tev_constants.buffer_mask & GLSL::TevLiveLighting);
-            ready_cpu_bank->SetLightingReservation(lit_specialization);
-            if (!live_lit && !ready_cpu_bank->CheapAttemptAvailable(tier)) {
-                ++ready_cpu_bank->stats.cheap_attempt_refusals;
-                ++fragment_lit_reserved_refusals;
-                return;
-            }
-            if (!ready_cpu_bank->AcceptingDemand(ready_optional_attempts, tier, live_lit)) {
+            // CodexAstraLocal: Keep terminal misses cheap: tier identity is
+            // already known, so reject its budget before copying state/profile.
+            if (!ready_cpu_bank->AcceptingDemand(ready_optional_attempts, candidate.partial ? 1 : 0)) {
                 ++ready_cpu_bank->stats.exhausted;
                 ++ready_cpu_capped;
                 return;
@@ -1290,19 +1187,12 @@ GraphicsPipeline* PipelineCache::PrepareReadyCpuFragment(
                     instance.IsExtendedDynamicStateSupported(),
                     candidate.partial ? std::optional{plan} : std::nullopt};
                 const u64 observed_hash = observation.Hash();
-                const bool qualified = ready_cpu_bank->Observe(observed_hash, observation, live_lit);
+                const bool qualified = ready_cpu_bank->Observe(observed_hash, observation);
                 const bool pending =
                     (warming_ready_vertex && !warming_ready_vertex->IsDone()) ||
                     curr_disk_cache->OptionalFragmentPending();
                 const bool capacity = ready_cpu_bank->CanCreate(ready_vertex_pipelines.size(),
-                    ready_optional_attempts, pending, observation, live_lit);
-                // CodexAstraLocal TEST-ONLY LOG: Preserve the old aggregate
-                // while separating owner pressure from attempt exhaustion below;
-                // remove the temporary breakdown after .52 admission qualification.
-                if (lit_specialization && !live_lit &&
-                    ready_cpu_bank->CheapOwned(tier) >=
-                        CpuFragmentPartitions::Owners(tier) * 3 / 4)
-                    ++fragment_lit_reserved_refusals;
+                    ready_optional_attempts, pending, observation);
                 if (!candidate.fragment) {
                     ++ready_cpu_dependencies;
                     if (qualified && capacity) {
@@ -1321,13 +1211,9 @@ GraphicsPipeline* PipelineCache::PrepareReadyCpuFragment(
                     return;
                 }
                 auto* slot = ready_cpu_bank->Reserve(observed_hash, observation,
-                    live_lit, ready_vertex_pipelines.size(),
+                    virtual_fs_config->lighting.enable.Value() != 0, ready_vertex_pipelines.size(),
                     ready_optional_attempts, pending);
                 if (!slot) { ++ready_cpu_deferred; return; }
-                // CodexAstraLocal: Charge attempts before throwing allocation;
-                // retained failures cannot refund a protected work allowance.
-                if (live_lit) ++fragment_lit_admissions;
-                else { ++fragment_cheap_admissions; ++fragment_cheap_attempts[tier]; }
                 // CodexAstraLocal: Both eight-owner partitions charge their own
                 // lifetime attempts before allocation. Failed/retiring owners
                 // remain charged until the inherited three-way drain releases.
@@ -1553,38 +1439,12 @@ void PipelineCache::UseFragmentShader(const Pica::RegsInternal& regs,
     // CodexAstraLocal: A new draw or GPU-to-CPU retry starts a fresh transport
     // obligation; it can never inherit a pending original config from its predecessor.
     pending_tev_transport.reset();
-    // CodexAstraLocal TEST-ONLY LOG: Sample complete owner preparation, including
-    // early route refusals and live-value capture. Remove after attribution is
-    // qualified; OFF performs no new clock read or evidence analysis.
-    pending_fragment_evidence.reset();
-    const bool sample_fragment = feature_diagnostics && ((fragment_evidence.attempts++ & 1023U) == 0);
-    const auto preparation_start = sample_fragment ? std::chrono::steady_clock::now() :
-                                                   std::chrono::steady_clock::time_point{};
-    SCOPE_EXIT({
-        if (sample_fragment) {
-            const u64 ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
-                std::chrono::steady_clock::now() - preparation_start).count();
-            ++fragment_prepare_samples;
-            fragment_prepare_ns += ns;
-            fragment_prepare_max_ns = std::max(fragment_prepare_max_ns, ns);
-        }
-    });
 
     // CodexAstraLocal: Decode guest fragment registers once for this draw. The
     // generic family mutates its TEV fields below, so keep the original value
     // for exact specialization/recovery instead of repeating all light, texture
     // and combiner register decoding on the serial draw owner.
     const FSConfig fragment_config{regs};
-    // CodexAstraLocal: Optional shaders are GLSL; recovery can be standalone
-    // SPIR-V or custom code outside this optimization domain.
-    pending_fragment_cacheable = user.IsCacheable();
-    pending_recovery_glsl = !profile.vk_use_spirv_generator || fragment_config.UsesSpirvIncompatibleConfig();
-    // CodexAstraLocal TEST-ONLY LOG: Bound CPU work to one in 1024 preparation
-    // attempts. Failure to allocate/format optional evidence cannot affect a draw.
-    if (sample_fragment) {
-        try { SampleFragmentEvidence(regs, fragment_config, preparing_ready_gpu); }
-        catch (...) { ++fragment_evidence.failures; }
-    }
 
     // AstraEH: Capture runtime controls before canonicalization. Lighting/procedural
     // structure and typed cube resources remain specialized; LUT controls/source slots are runtime.
@@ -1604,10 +1464,6 @@ void PipelineCache::UseFragmentShader(const Pica::RegsInternal& regs,
             // CodexAstraLocal: Preserve the exact original fields before family
             // canonicalization. Defer their expansion until an actual consumer.
             pending_tev_transport = fragment_config;
-            // CodexAstraLocal: FSConfig deliberately excludes numeric uniforms.
-            // Capture consumed live register bytes before the next draw changes
-            // them; no pointer or later guest-memory reread enters the cache.
-            pending_fragment_values = GLSL::CaptureFragmentRuntimeValues(regs, fragment_config, profile);
         } else if (tev_supported) {
             // AstraPro: This attempt can use only a ready specialized GPU FS or
             // return for a complete CPU draw. No generic consumer sees old data;
@@ -1644,98 +1500,9 @@ void PipelineCache::UseFragmentShader(const Pica::RegsInternal& regs,
 // readiness checks or invalidation of the worker's last uploaded constants.
 void PipelineCache::EnsureDynamicTevState() {
     if (!pending_tev_transport) return;
-    // CodexAstraLocal TEST-ONLY LOG: Pure runtime preparation/cache cost is
-    // sampled separately from the surrounding owner path, never added as GPU
-    // savings. Remove after cache/certificate cost qualification.
-    const bool sample = pending_fragment_evidence.has_value();
-    const auto start = sample ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
-    tev_constants = dynamic_tev_preparation.Get(*pending_tev_transport, profile, pending_fragment_values);
-    if (sample) {
-        const u64 ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
-            std::chrono::steady_clock::now() - start).count();
-        ++fragment_runtime_samples;
-        fragment_runtime_ns += ns;
-        fragment_runtime_max_ns = std::max(fragment_runtime_max_ns, ns);
-    }
+    tev_constants = dynamic_tev_preparation.Get(*pending_tev_transport, profile);
     pending_tev_transport.reset();
     ++tev_transport_prepared;
-}
-
-// CodexAstraLocal TEST-ONLY LOG: Preserve enough original register/value words
-// to replay candidate arithmetic offline. This records inputs, not a GPU answer;
-// Selection is reported separately after qualification and actual route choice.
-// Remove after arithmetic inputs and hardware qualification are established.
-void PipelineCache::SampleFragmentEvidence(const Pica::RegsInternal& regs,
-                                          const FSConfig& config, bool preparing_gpu) {
-    const auto begin = std::chrono::steady_clock::now();
-    SCOPE_EXIT({
-        const u64 ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
-            std::chrono::steady_clock::now() - begin).count();
-        fragment_evidence.host_ns += ns;
-        fragment_evidence.max_host_ns = std::max(fragment_evidence.max_host_ns, ns);
-    });
-    const auto work = GLSL::AnalyzeFragmentWork(config, profile);
-    pending_fragment_evidence = work;
-    auto& e = fragment_evidence;
-    ++e.samples;
-    e.dead_rgb += work.dead_rgb;
-    e.dead_alpha += work.dead_alpha;
-    e.dead_lighting += work.lighting_dead;
-    e.alpha_never += work.alpha_never;
-    e.sample_overlap += std::popcount(work.lighting_texture_overlap);
-    e.constant_rgb += work.constant_rgb;
-    e.constant_alpha += work.constant_alpha;
-    e.directional_slots += std::popcount(work.directional_slots);
-    const auto original_stages = regs.texturing.GetTevStages();
-    if (work.constant_rgb || work.constant_alpha) {
-        if (e.constant_captures < 4) {
-            const u64 id = ++e.constant_captures;
-            LOG_INFO(Render_Vulkan,
-                "Uberhar arithmetic input: schema=1 session={} title={:016X} kind=constant_tev "
-                "capture={} attempt={} preparing_gpu={} fs={:016X} buffer_mask={} buffer_rgba={:08X} "
-                "live_constant_rgb={} live_constant_alpha={} runtime_selection=separate gpu_result=unavailable "
-                "stage0=generated_glsl scope=sampled_preparation_attempt max_captures=4",
-                cache_session, GetProgramID(), id, e.attempts, preparing_gpu, config.Hash(),
-                config.texture.combiner_buffer_input.Value(), regs.texturing.tev_combiner_buffer_color.raw,
-                work.constant_rgb, work.constant_alpha);
-            for (u32 i = 0; i < 6; ++i) {
-                const auto& stage = original_stages[i];
-                LOG_INFO(Render_Vulkan,
-                    "Uberhar arithmetic TEV: session={} title={:016X} capture={} stage={} "
-                    "sources={:08X} modifiers={:08X} operations={:08X} scales={:08X} constant_rgba={:08X}",
-                    cache_session, GetProgramID(), id, i, stage.sources_raw, stage.modifiers_raw,
-                    stage.ops_raw, stage.scales_raw, stage.const_color);
-            }
-        } else ++e.capture_capped;
-    }
-    const bool capture_direction = work.directional_slots && e.directional_captures < 4;
-    const u64 direction_id = capture_direction ? ++e.directional_captures : 0;
-    if (work.directional_slots && !capture_direction) ++e.capture_capped;
-    for (u32 slot = 0; slot < 8; ++slot) {
-        if ((work.directional_slots & (1U << slot)) == 0) continue;
-        const u32 source = config.lighting.lights[slot].num;
-        const auto& light = regs.lighting.light[source];
-        const float x = Pica::f16::FromRaw(light.x).ToFloat32();
-        const float y = Pica::f16::FromRaw(light.y).ToFloat32();
-        const float z = Pica::f16::FromRaw(light.z).ToFloat32();
-        const bool finite = std::isfinite(x) && std::isfinite(y) && std::isfinite(z);
-        e.zero_direction += x == 0 && y == 0 && z == 0;
-        e.nonfinite_direction += !finite;
-        if (capture_direction) {
-            LOG_INFO(Render_Vulkan,
-                "Uberhar arithmetic direction: schema=1 session={} title={:016X} capture={} "
-                "attempt={} preparing_gpu={} fs={:016X} slot={} source={} controls={:08X} "
-                "position_raw=[{:04X},{:04X},{:04X}] position_f32=[{:08X},{:08X},{:08X}] "
-                "attenuation_raw=[{:08X},{:08X}] finite={} runtime_selection=separate "
-                "gpu_normalized=unavailable gpu_lut_index=unavailable max_captures=4 "
-                "scope=sampled_preparation_attempt",
-                cache_session, GetProgramID(), direction_id, e.attempts, preparing_gpu, config.Hash(),
-                slot, source, config.lighting.lights[slot].raw,
-                static_cast<u32>(light.x.Value()), static_cast<u32>(light.y.Value()), static_cast<u32>(light.z.Value()),
-                std::bit_cast<u32>(x), std::bit_cast<u32>(y), std::bit_cast<u32>(z),
-                static_cast<u32>(light.dist_atten_bias.Value()), static_cast<u32>(light.dist_atten_scale.Value()), finite);
-        }
-    }
 }
 
 // AstraEH: Build bounded, per-title fallback caches without changing transferable disk entries.
@@ -1747,9 +1514,7 @@ GraphicsPipeline* PipelineCache::GetTevFallback(const PipelineInfo& info, bool c
     constexpr std::size_t MaxPipelines = 1024;
     // AstraEH: Reuse pure preparation only after complete raw/native input equality.
     // A miss still observes every census dimension before pipeline admission.
-    // CodexAstraLocal: Diagnostic OFF also removes the inherited sampled
-    // structural-cache clocks; functional preparation/reuse remains enabled.
-    const bool sample = feature_diagnostics && (tev_preparation.Stats().requests & 1023U) == 0;
+    const bool sample = (tev_preparation.Stats().requests & 1023U) == 0;
     const auto sample_start =
         sample ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
     const auto prepared = tev_preparation.Get(*tev_family_config, info);
@@ -2093,17 +1858,6 @@ void PipelineCache::ClearTevFallbacks() {
     // drained title boundary; no shader handles or queued bytes are retained here.
     pending_tev_transport.reset();
     dynamic_tev_preparation.Reset();
-    // CodexAstraLocal TEST-ONLY LOG: Never carry arithmetic samples/caps across titles.
-    fragment_evidence = {};
-    // CodexAstraLocal: Both owners were drained above; no old title's route or
-    // numeric-input certificate survives a cache-session transition.
-    fragment_selected = {};
-    pending_fragment_evidence.reset();
-    pending_fragment_values = {};
-    fragment_prepare_samples = fragment_prepare_ns = fragment_prepare_max_ns = 0;
-    fragment_runtime_samples = fragment_runtime_ns = fragment_runtime_max_ns = 0;
-    fragment_cheap_attempts = {};
-    fragment_lit_reserved_refusals = fragment_lit_admissions = fragment_cheap_admissions = 0;
     tev_prepare_hit_samples = tev_prepare_miss_samples = 0;
     tev_prepare_hit_ns = tev_prepare_miss_ns = 0;
     tev_census_capped = false;
@@ -2125,29 +1879,6 @@ void PipelineCache::ReportTevPushStats(const char* kind) {
                               ? Common::Log::Delivery::Diagnostic
                               : Common::Log::Delivery::Reliable;
     const auto& stats = tev_push_constants.Stats();
-    // CodexAstraLocal TEST-ONLY LOG: Reliable finals and queued progress read
-    // worker-owned actual-route counters without cross-thread atomics. Remove
-    // after feature qualification; samples are draws, never fragment counts.
-    if (feature_diagnostics) {
-        for (u32 route = 0; route < fragment_selected.size(); ++route) {
-            const auto& work = fragment_selected[route];
-            LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
-                "Uberhar fragment selected {}: schema=3 session={} title={:016X} route={} "
-                "draws={} samples={} period_preparations=1024 dead_rgb={} dead_alpha={} "
-                "dead_lighting={} alpha_never={} memo_units={} constant_rgb={} constant_alpha={} "
-                "canonical_direction_slots={} constant_unqualified_rgb={} constant_unqualified_alpha={} "
-                "direction_unqualified_slots={} route_names=generic,static,full,recovery,gpu_full "
-                "static_constant_tests={} static_constant_omitted={} "
-                "features=1,6,7,11,12 arithmetic_routes=generic_static weighting=sampled_draws "
-                "refusal=nonendpoint_or_disabled_or_route direction_refusal=noncanonical_or_disabled_or_route "
-                "scope=current_title gpu_cost=unmeasured",
-                kind, cache_session, GetProgramID(), route, work.draws, work.samples,
-                work.dead_rgb, work.dead_alpha, work.dead_lighting, work.alpha_never, work.memo_units,
-                work.constant_rgb, work.constant_alpha, work.directional_slots,
-                work.constant_refused_rgb, work.constant_refused_alpha, work.directional_refused,
-                work.static_constant_tests, work.static_constant_omitted);
-        }
-    }
     // AstraEH: Same five-second/final cadence; completed worker commands only.
     // CodexAstraUlt Log Line: Replace AstraEH's blocking progress enqueue; totals stay reliable.
     LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
@@ -2164,43 +1895,6 @@ void PipelineCache::ReportUberharStats(const char* kind) {
     const auto delivery = std::strcmp(kind, "progress") == 0
                               ? Common::Log::Delivery::Diagnostic
                               : Common::Log::Delivery::Reliable;
-    // CodexAstraLocal TEST-ONLY LOG: Sampled structural opportunity and reporter
-    // overhead, never actual fragment invocations or measured GPU savings. Remove
-    // after liveness/sample-reuse qualification and the arithmetic decision.
-    const auto& e = fragment_evidence;
-    if (feature_diagnostics) LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
-        "Uberhar fragment evidence {}: schema=1 session={} title={:016X} "
-        "attempts={} samples={} period_attempts=1024 dead_rgb={} dead_alpha={} dead_lighting={} "
-        "alpha_never={} lighting_tev_sample_overlap={} constant_rgb={} constant_alpha={} "
-        "directional_slots={} zero_direction={} nonfinite_direction={} constant_captures={} "
-        "directional_captures={} capture_capped={} capture_failures={} host_ms={:.3f} host_max_ms={:.3f} "
-        "scope=sampled_preparation_attempts weighting=not_pixels gpu_cost=unknown "
-        "runtime_substitutions=separate_final_route_record arithmetic_domain=endpoints_canonical_direction",
-        kind, cache_session, GetProgramID(), e.attempts, e.samples, e.dead_rgb, e.dead_alpha,
-        e.dead_lighting, e.alpha_never, e.sample_overlap, e.constant_rgb, e.constant_alpha,
-        e.directional_slots, e.zero_direction, e.nonfinite_direction, e.constant_captures,
-        e.directional_captures, e.capture_capped, e.failures, e.host_ns / 1e6, e.max_host_ns / 1e6);
-    // CodexAstraLocal TEST-ONLY LOG: Whole owner and pure-runtime intervals can
-    // overlap; never add them or extrapolate a saved-time counterfactual. Remove
-    // after feature cost qualification. Diagnostic OFF has zero sample clocks.
-    if (feature_diagnostics) {
-        LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
-            "Uberhar shader preparation {}: schema=3 session={} title={:016X} "
-            "owner_samples={} owner_ns={} owner_max_ns={} runtime_samples={} runtime_ns={} runtime_max_ns={} "
-            "arithmetic_requests={} arithmetic_hits={} arithmetic_builds={} "
-            "structural_builds={} numeric_only_updates={} "
-            "lit_reservation={} reserved_refusals={} lit_admissions={} cheap_admissions={} "
-            "cheap_full_attempts={} cheap_static_attempts={} "
-            "features=1,6,7,11,12,lit_admission scope=current_title timing=sampled_owner_wall "
-            "owner_includes_early_refusals=true intervals_may_overlap=true",
-            kind, cache_session, GetProgramID(), fragment_prepare_samples, fragment_prepare_ns,
-            fragment_prepare_max_ns, fragment_runtime_samples, fragment_runtime_ns, fragment_runtime_max_ns,
-            dynamic_tev_preparation.Stats().requests, dynamic_tev_preparation.Stats().hits,
-            dynamic_tev_preparation.Stats().builds, dynamic_tev_preparation.Stats().structural_builds,
-            dynamic_tev_preparation.Stats().value_updates, lit_specialization, fragment_lit_reserved_refusals,
-            fragment_lit_admissions, fragment_cheap_admissions,
-            fragment_cheap_attempts[0], fragment_cheap_attempts[1]);
-    }
     // CodexAstraLocal TEST-ONLY LOG: Remove after descriptor reuse is qualified
     // on hardware; these are work counts, not CPU time or speedup estimates.
     LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
@@ -2295,7 +1989,7 @@ void PipelineCache::ReportUberharStats(const char* kind) {
             // CodexAstraLocal Log Line: Counts show bounded reuse and fallback,
             // never GPU duration, guest frames or an opaque-driver memory ceiling.
             LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
-                "Uberhar adaptive CPU PSOs {}: schema=2 scope=current_title swap={} "
+                "Uberhar adaptive CPU PSOs {}: schema=1 scope=current_title swap={} "
                 "empty={} reserved={} building={} ready={} failed={} retired={} destroy_queued={} "
                 "owned={} max_owned={} cpu_attempts={} combined_attempts={} "
                 "observations={} probation={} collisions={} retirements={} destroyed={} failed_keys={} "
@@ -2303,9 +1997,7 @@ void PipelineCache::ReportUberharStats(const char* kind) {
                 "max_cpu=16 max_cpu_attempts=80 max_combined_attempts=256 "
                 "full_owned={} partial_owned={} full_attempts={} partial_attempts={} "
                 "max_full=8 max_partial=8 max_full_attempts=64 max_partial_attempts=16 "
-                "partial_generator=static_tev_runtime_lighting "
-                "cheap_owner_refusals={} cheap_attempt_refusals={} cheap_observations_at_quota={} "
-                "cheap_replacements={} lit_replacements={}",
+                "partial_generator=static_tev_runtime_lighting",
                 kind, ready_cpu_bank->Swap(), ownership[0], ownership[1], ownership[2],
                 ownership[3], ownership[4], ownership[5], ownership[6], ReadyCpuOwned(),
                 adaptation.max_owned, ready_cpu_bank->Attempts(), ready_optional_attempts,
@@ -2313,10 +2005,7 @@ void PipelineCache::ReportUberharStats(const char* kind) {
                 adaptation.destroyed, adaptation.failed_keys, adaptation.queue_failures,
                 adaptation.exhausted, adaptation.stale_tokens, ready_cpu_bank->Disabled(),
                 ready_cpu_bank->Owned(0), ready_cpu_bank->Owned(1),
-                ready_cpu_bank->Attempts(0), ready_cpu_bank->Attempts(1),
-                adaptation.cheap_owner_refusals, adaptation.cheap_attempt_refusals,
-                adaptation.cheap_observations_at_quota, adaptation.cheap_replacements,
-                adaptation.lit_replacements);
+                ready_cpu_bank->Attempts(0), ready_cpu_bank->Attempts(1));
             // CodexAstraLocal Log Line: Final-only, at most80 attempted keys,
             // including failed/retired owners. The observation hash is a bucket,
             // not actor identity or a replacement for exact key equality.
@@ -2378,10 +2067,8 @@ void PipelineCache::ReportUberharStats(const char* kind) {
         // lazy transport and exact reuse; retain the production preparation path.
         const auto& transport = dynamic_tev_preparation.Stats();
         LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
-                 "Uberhar fragment preparation {}: schema=2 requests={} reuse={} builds={} "
-                 "structural_builds={} numeric_only_updates={}",
-                 kind, transport.requests, transport.hits, transport.builds,
-                 transport.structural_builds, transport.value_updates);
+                 "Uberhar fragment preparation {}: schema=1 requests={} reuse={} builds={}",
+                 kind, transport.requests, transport.hits, transport.builds);
     }
     // AstraEH: Cumulative buckets at the existing cadence; build time and wait time overlap.
     if (hybrid_tev) {

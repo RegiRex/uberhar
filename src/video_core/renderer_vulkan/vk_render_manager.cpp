@@ -3,14 +3,11 @@
 // Refer to the license.txt file included.
 
 #include "common/assert.h"
-#include "common/settings.h" // CodexAstraLocal: Immutable dependency diagnostic control.
-#include "common/logging/log.h"
 #include "video_core/rasterizer_cache/pixel_format.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_render_manager.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/renderer_vulkan/vk_texture_runtime.h"
-#include "video_core/renderer_vulkan/uberhar_image_work.h" // CodexAstraLocal: Exact area containment.
 
 namespace Vulkan {
 
@@ -20,29 +17,9 @@ using VideoCore::PixelFormat;
 using VideoCore::SurfaceType;
 
 RenderManager::RenderManager(const Instance& instance, Scheduler& scheduler)
-    : instance{instance}, scheduler{scheduler},
-      dependency_diagnostics{Settings::values.uberhar_feature_diagnostics.GetValue()} {}
+    : instance{instance}, scheduler{scheduler} {}
 
-RenderManager::~RenderManager() { ReportDependencies(true); }
-
-void RenderManager::ReportDependencies(bool final) noexcept {
-    try {
-        if (!dependency_diagnostics || (!final && (++dependency_prescale & 63U))) return;
-        const auto now = std::chrono::steady_clock::now();
-        if (!final && now - dependency_report_time < std::chrono::seconds(10)) return;
-        dependency_report_time = now;
-        // CodexAstraLocal TEST-ONLY LOG: Counts do not estimate GPU time saved;
-        // barriers retain old-pass metadata and full required visibility.
-        LOG_INFO_WITH_DELIVERY(Render_Vulkan, final ? Common::Log::Delivery::Reliable :
-            Common::Log::Delivery::Diagnostic,
-            "Uberhar attachment dependency: feature=attachment_dependency.v1 sequence={} final={} "
-            "other={} pass_change={} copy={} blit={} feedback={} attachments={} shadow={} "
-            "contained_area_reuses={} gpu_cost=unavailable cumulative=true",
-            ++dependency_sequence, final, dependency_ends[0], dependency_ends[1],
-            dependency_ends[2], dependency_ends[3], dependency_ends[4], dependency_attachments,
-            dependency_shadow, contained_area_reuses);
-    } catch (...) { /* CodexAstraLocal: Diagnostics cannot interrupt rendering or teardown. */ }
-}
+RenderManager::~RenderManager() = default;
 
 void RenderManager::BeginRendering(const Framebuffer* framebuffer,
                                    Common::Rectangle<u32> draw_rect) {
@@ -63,42 +40,20 @@ void RenderManager::BeginRendering(const Framebuffer* framebuffer,
         .clear = {},
         .do_clear = false,
     };
-    // CodexAstraLocal: A narrower draw already fits the live LOAD/STORE pass;
-    // retain its original area and attachments instead of ending/restarting it.
-    // Clear, utility, shadow-storage, expanded and different-attachment requests
-    // keep the previous path. The rasterizer still sets each draw's own scissor.
-    const auto& area = pass.render_area;
-    const bool contained = pass.render_pass && pass_kind == GpuWork::Graphics &&
-        !pass.do_clear && !shadow_rendering && !framebuffer->shadow_rendering &&
-        pass.framebuffer == new_pass.framebuffer && pass.render_pass == new_pass.render_pass &&
-        area != render_area && ImageWork::ContainsArea(
-            area.offset.x, area.offset.y, area.extent.width, area.extent.height,
-            render_area.offset.x, render_area.offset.y, render_area.extent.width,
-            render_area.extent.height);
-    if (contained) {
-        ++num_draws;
-        if (dependency_diagnostics) ++contained_area_reuses;
-        return;
-    }
-    BeginRendering(new_pass, GpuWork::Graphics);
-    // CodexAstraLocal: Close the previous pass with its own attachments before
-    // installing the new metadata; EndRendering clears the previous ownership.
     images = framebuffer->Images();
     aspects = framebuffer->Aspects();
     shadow_rendering = framebuffer->shadow_rendering;
+    BeginRendering(new_pass);
 }
 
-void RenderManager::BeginRendering(const RenderPass& new_pass, GpuWork kind) {
+void RenderManager::BeginRendering(const RenderPass& new_pass) {
     if (pass == new_pass) [[likely]] {
         num_draws++;
         return;
     }
 
-    EndRendering(EndReason::PassChange);
-    scheduler.Record([this, info = new_pass, kind](vk::CommandBuffer cmdbuf) {
-        // CodexAstraLocal TEST-ONLY LOG: Reset/write queries outside the existing
-        // render pass. Identical passes still merge, with no diagnostic split.
-        scheduler.BeginGpuPass(cmdbuf, kind);
+    EndRendering();
+    scheduler.Record([info = new_pass](vk::CommandBuffer cmdbuf) {
         const vk::RenderPassBeginInfo renderpass_begin_info = {
             .renderPass = info.render_pass,
             .framebuffer = info.framebuffer,
@@ -110,23 +65,14 @@ void RenderManager::BeginRendering(const RenderPass& new_pass, GpuWork kind) {
     });
 
     pass = new_pass;
-    pass_kind = kind; // CodexAstraLocal: Freeze classification with actual pass ownership.
 }
 
-void RenderManager::EndRendering(EndReason reason) {
+void RenderManager::EndRendering() {
     if (!pass.render_pass) {
         return;
     }
 
-    // CodexAstraLocal: This owner has the old attachment identity before it is
-    // captured. Count real pass endings only; no additional recorder command.
-    if (dependency_diagnostics) {
-        ++dependency_ends[static_cast<u32>(reason)];
-        for (const auto image : images) dependency_attachments += bool(image);
-        dependency_shadow += shadow_rendering;
-    }
-
-    scheduler.Record([this, images = images, aspects = aspects,
+    scheduler.Record([images = images, aspects = aspects,
                       shadow_rendering = shadow_rendering](vk::CommandBuffer cmdbuf) {
         u32 num_barriers = 0;
         vk::PipelineStageFlags pipeline_flags{};
@@ -167,7 +113,6 @@ void RenderManager::EndRendering(EndReason reason) {
             };
         }
         cmdbuf.endRenderPass();
-        scheduler.EndGpuPass(cmdbuf);
         if (num_barriers == 0) {
             return;
         }

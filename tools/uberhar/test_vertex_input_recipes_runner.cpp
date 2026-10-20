@@ -330,9 +330,6 @@ __attribute__((noinline)) NativeVertexCounts OneDraw(ShaderEngine& engine,Fixtur
     auto& native_input_legacy_vertices=cap.transport.legacy;
     auto& native_input_recipe_invocations=cap.transport.recipes;
     if constexpr(Candidate) {
-        // CodexAstraLocal: This numerical runner uses ordinary Load only; the
-        // accounting fixture separately covers nonzero actual-read tracing.
-        constexpr u64 software_trace_loads=0,trace_loads_before=0;
 #include "candidate-account.inc"
     } else {
 #include "baseline-account.inc"

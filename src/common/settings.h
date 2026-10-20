@@ -26,13 +26,15 @@ enum class GraphicsAPI {
 };
 
 // AstraEH: Values match Android's mutually exclusive test switches; zero preserves custom settings.
-// CodexAstraUlt: The fragment-isolation preset was appended without shifting earlier IDs.
+// CodexAstraUlt: Append the fragment-isolation preset; persisted IDs 0–3 retain their meanings.
 enum class UberharTestMode : u32 {
     Custom = 0,
     Native = 1,
-    // CodexAstraLocal: Retired mode 2 stays unused; migrate its saved value to Native.
+    Compute = 2,
     Automatic = 3,
-    // CodexAstraLocal: Retired IDs 4/5 are migration inputs, never selectable modes.
+    ComboGeneric = 4,
+    // CodexAstraLocal: Append CPU graphics without changing persisted older modes.
+    Software = 5,
 };
 
 enum class InitClock : u32 {
@@ -562,22 +564,6 @@ struct Values {
     SwitchableSetting<bool> uberhar_native_full_fragments{true, Keys::uberhar_native_full_fragments};
     SwitchableSetting<bool> uberhar_cpu_prefix_overlap{true, Keys::uberhar_cpu_prefix_overlap};
     SwitchableSetting<bool> uberhar_parallel_texture_decode{true, Keys::uberhar_parallel_texture_decode};
-
-    // CodexAstraLocal: The inefficient standalone seed control is removed in .51.
-    // Remaining restart-only controls are snapshotted by each owner;
-    // profiling stays optional so comparison runs do not pay GPU timestamp overhead.
-    SwitchableSetting<bool> uberhar_cpu_adaptive_participation{true, Keys::uberhar_cpu_adaptive_participation};
-    SwitchableSetting<bool> uberhar_cpu_execution_census{false, Keys::uberhar_cpu_execution_census};
-    SwitchableSetting<bool> uberhar_feature_diagnostics{true, Keys::uberhar_feature_diagnostics};
-    SwitchableSetting<bool> uberhar_fragment_memo{true, Keys::uberhar_fragment_memo};
-    SwitchableSetting<bool> uberhar_constant_tev{true, Keys::uberhar_constant_tev};
-    SwitchableSetting<bool> uberhar_directional_precompute{true, Keys::uberhar_directional_precompute};
-    SwitchableSetting<bool> uberhar_lit_specialization{true, Keys::uberhar_lit_specialization};
-    SwitchableSetting<bool> uberhar_fragment_liveness{true, Keys::uberhar_fragment_liveness};
-    SwitchableSetting<bool> uberhar_alpha_never{true, Keys::uberhar_alpha_never};
-    SwitchableSetting<bool> uberhar_gpu_timestamps{false, Keys::uberhar_gpu_timestamps};
-    SwitchableSetting<bool> uberhar_image_reuse{true, Keys::uberhar_image_reuse};
-    SwitchableSetting<bool> uberhar_cpu_transfers{true, Keys::uberhar_cpu_transfers};
 
     // AstraEH: Profiles are applied after loading custom values, never written back over them.
     SwitchableSetting<UberharTestMode> uberhar_test_mode{UberharTestMode::Custom,

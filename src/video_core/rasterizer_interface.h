@@ -14,6 +14,8 @@
 
 namespace Pica {
 struct OutputVertex;
+struct ComputeAssemblyState;
+struct ComputeAssemblyResult;
 class CpuDrawPacket; // CodexAstraLocal: Forward declaration avoids renderer/queue coupling.
 }
 
@@ -60,7 +62,19 @@ public:
     /// Draw the current batch of triangles
     virtual void DrawTriangles() = 0;
 
-    // CodexAstraLocal: Retired original-input compute entry points have no runtime owner.
+    // CodexAstraLocal: Strict independent compute enters before CPU guest
+    // shading. A successful producer returns the next persistent assembly state;
+    // unsupported backends return false and the strict caller terminates.
+    virtual bool DrawComputeBatch(bool, const Pica::ComputeAssemblyState&,
+                                  Pica::ComputeAssemblyResult&,
+                                  const Pica::AttributeBuffer* = nullptr) { return false; }
+    // CodexAstraLocal TEST-ONLY LOG: Admission/commit occur outside the draw
+    // body. Retain their original state without shading/retry/fallback. Remove
+    // after the diagnosed failures have corrected replay controls.
+    virtual void ReportComputeFailure(const char*, bool, const Pica::ComputeAssemblyState&,
+                                      const Pica::ComputeAssemblyResult*,
+                                      const Pica::AttributeBuffer*) noexcept {}
+
     // CodexAstraLocal: Opt-in has no renderer side effects. Unknown backends
     // retain synchronous rendering. An admitted packet is independently running
     // before DrawDeferredVertices; that call consumes exactly one complete draw.
@@ -132,14 +146,6 @@ public:
     static void SetSwitchDiskResourcesCallback(const DiskResourceLoadCallback& callback) {
         switch_disk_resources_callback = callback;
     }
-
-    // CodexAstraLocal: Narrow Software ownership scope, not general deferred
-    // vertices. Inputs are already pinned through End; no shader/FIFO behavior
-    // changes. Other backends refuse. Append virtuals preserve earlier slots.
-    struct CpuRasterReadRange { PAddr address; std::span<const u8> bytes; };
-    virtual bool WantsCpuRasterBatch() const { return false; }
-    virtual bool BeginCpuRasterBatch(std::span<const CpuRasterReadRange>) { return false; }
-    virtual void EndCpuRasterBatch(bool) {}
 
     void SetAccurateMul(bool accurate_mul_) {
         accurate_mul = accurate_mul_;

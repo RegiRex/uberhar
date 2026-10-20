@@ -1,34 +1,4 @@
-<!-- CodexAstraLocal: Record the regression-triggered .52 interaction review without resetting the historical full-code audit scope. -->
-**Current checkpoint: [0.1.52 scoped integration review](UBERHAR_REVIEW_0.1.52.md).**
-Independent review covers scene-change shader replacement, fragments, image work,
-Android retirement and the exact-.48 CPU-only comparison. It caught and corrected
-broader mip synchronization. Focused checks and integrated release gates are
-separate from pending Dark Moon hardware qualification. Historical entries follow.
-
 # Architecture review ledger
-
-<!-- CodexAstraLocal: Supersede the .50 source checkpoint with the regression-triggered scoped .51 review, preserving historical cadence and hardware limits. -->
-**Current checkpoint: .39–.50 assessment and .51 integration review.**
-The [0.1.51 review](UBERHAR_REVIEW_0.1.51.md) separates architecture from the
-removal/consumer/comment audit. It covers the shader preparation corrections,
-CPU admission cleanup, Calculated retirement, Software work and diagnostic loss.
-Integrated release gates and hardware qualification are distinct; no full audit
-of all inherited code or recovered performance is implied.
-
-## Earlier .50 checkpoint
-
-<!-- CodexAstraLocal: Add the broad assessment and current scoped integration review without erasing historical anchors or declaring untested gameplay accepted. -->
-**Current checkpoint: 0.1.39–0.1.49 hardware assessment complete; 0.1.50 integration review.**
-The [0.1.50 review](UBERHAR_REVIEW_0.1.50.md) records independent architecture and
-separate consumer/cleanliness coverage across the scheduling, graphics, resource
-and experimental-model changes. Required release gates and owner qualification
-remain distinct. This does not claim a new line-by-line audit of all inherited
-code. Continue the owner's every-three-build review cadence, sooner for a
-material regression, and close this candidate's hardware assessment after testing.
-The latest authorization requires root to complete the actual 0.1.50 prerelease;
-older submission pauses below are historical.
-
-## Earlier .46 checkpoint
 
 <!-- CodexAstraLocal: Record current scoped review and observed failures without silently declaring a full historical audit complete. -->
 **Current checkpoint: .45 delivered and tested; .46 focused source review complete.**

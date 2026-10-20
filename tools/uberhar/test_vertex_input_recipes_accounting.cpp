@@ -26,11 +26,8 @@ struct Accounting {
     u64 native_input_fused_vertices{}, native_input_legacy_vertices{};
     std::array<u64,5> native_input_recipe_invocations{};
     static_assert(sizeof(native_input_recipe_invocations)==40);
-    // CodexAstraLocal: Model before/after actual-read counters for the extracted
-    // post-FIFO body; defaults retain all original non-traced comparisons.
     void Apply(const NativeVertexInputPlan& input_plan, NativeVertexCounts counts,
-               u64 escaped_input_vertices, u64 software_trace_loads = 0,
-               u64 trace_loads_before = 0) {
+               u64 escaped_input_vertices) {
 #include "account.inc"
     }
     std::string Report(const char* kind) {
@@ -85,17 +82,6 @@ void AccountingChecks() {
     Shape(plan,3);Shape(plan,0);Shape(plan,4);Shape(plan,2,false);
     counter.Apply(plan,{.invocations=5,.hits=15},0);
     Check(counter.native_input_recipe_invocations[0]==98&&counter.Sum()==485,"disabled recipe counts generic transport");
-    // CodexAstraLocal: Mixed and fully traced draws must enter the generic bucket
-    // exactly once, even when a recipe was recognized or prior draws were traced.
-    for(u32 slot=0;slot<5;++slot)for(u64 traced:{u64{5},u64{93}}){
-        Shape(plan,slot);Accounting observed;
-        observed.Apply(plan,{.invocations=100,.hits=80},7,19+traced,19);
-        Check(observed.native_input_recipe_invocations[0]==(slot==0?93:traced)&&
-              observed.native_input_recipe_invocations[slot]==(slot==0?93:93-traced),
-              "traced reads use generic transport");
-        Check(observed.Sum()==93&&observed.native_input_fused_vertices==93&&
-              observed.native_input_legacy_vertices==7,"trace partition preserves totals");
-    }
     counter.native_input_recipe_invocations={101,211,307,401,503};counter.native_input_fused_vertices=1523;
     for(const char* kind:{"progress","totals"}){const auto report=counter.Report(kind);
         Check(report.find(std::string("Uberhar vertex input ")+kind+": schema=2 ")!=std::string::npos,"report schema/kind");

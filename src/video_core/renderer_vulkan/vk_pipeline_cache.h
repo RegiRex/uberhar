@@ -187,10 +187,6 @@ private:
     // CodexAstraLocal: Materialize only for a live generic/static consumer; a
     // ready full fragment must not pay for controls it cannot read.
     void EnsureDynamicTevState();
-    // CodexAstraLocal TEST-ONLY LOG: Sample original arithmetic inputs without
-    // changing rendering; remove after the pending CPU-precompute decision.
-    void SampleFragmentEvidence(const Pica::RegsInternal& regs,
-                                const Pica::Shader::FSConfig& config, bool preparing_gpu);
     // CodexAstraLocal: Last potentially flushing preparation precedes this resolve.
     void ResolveImageBindings();
     // CodexAstraUlt: One gate covers optional fragment warming, binding and transport;
@@ -335,37 +331,7 @@ private:
     // CodexAstraLocal: This original-config snapshot belongs to one draw only.
     // Pure reuse below owns its key separately; queued draws own their bytes.
     std::optional<Pica::Shader::FSConfig> pending_tev_transport;
-    // CodexAstraLocal: Mutable arithmetic inputs are copied while original draw
-    // registers are current; the command ultimately owns the resulting bits.
-    Pica::Shader::Generator::GLSL::FragmentRuntimeValues pending_fragment_values;
     DynamicTevPreparation dynamic_tev_preparation;
-    // CodexAstraLocal TEST-ONLY LOG: Owner-only, fixed-size sampled evidence.
-    // Attempts may include refused GPU preparation; actual route counts stay
-    // worker-owned in the GPU profiler. No numerical replacement is enabled.
-    struct FragmentEvidenceCounters {
-        u64 attempts{}, samples{}, host_ns{}, max_host_ns{}, failures{};
-        u64 dead_rgb{}, dead_alpha{}, dead_lighting{}, alpha_never{}, sample_overlap{};
-        u64 constant_rgb{}, constant_alpha{}, directional_slots{}, zero_direction{}, nonfinite_direction{};
-        u64 constant_captures{}, directional_captures{}, capture_capped{};
-    } fragment_evidence;
-    // CodexAstraLocal TEST-ONLY LOG: Fixed sampled metadata reaches the actual
-    // selecting worker. Remove after hardware qualification; never per-pixel or
-    // inferred GPU time. Owner/worker counters have separate ownership.
-    std::optional<Pica::Shader::Generator::GLSL::FragmentWorkEvidence> pending_fragment_evidence;
-    struct FragmentSelectionCounters {
-        u64 draws{}, samples{}, dead_rgb{}, dead_alpha{}, dead_lighting{}, alpha_never{};
-        u64 memo_units{}, constant_rgb{}, constant_alpha{}, directional_slots{};
-        u64 constant_refused_rgb{}, constant_refused_alpha{}, directional_refused{};
-        // CodexAstraLocal TEST-ONLY LOG: Actual static selections only; remove
-        // after impossible-certificate branch pruning is hardware-qualified.
-        u64 static_constant_tests{}, static_constant_omitted{};
-    };
-    std::array<FragmentSelectionCounters, 5> fragment_selected{};
-    bool pending_fragment_cacheable{}, pending_recovery_glsl{};
-    u64 fragment_prepare_samples{}, fragment_prepare_ns{}, fragment_prepare_max_ns{};
-    u64 fragment_runtime_samples{}, fragment_runtime_ns{}, fragment_runtime_max_ns{};
-    std::array<u64, 2> fragment_cheap_attempts{};
-    u64 fragment_lit_reserved_refusals{}, fragment_lit_admissions{}, fragment_cheap_admissions{};
     // AstraEH: This state belongs to ordered command execution, not draw preparation.
     ExactPushConstants<TevPushConstants> tev_push_constants;
     // AstraEH: Snapshot before application-cache loading; never infer opaque driver hits.
@@ -449,10 +415,6 @@ private:
     // CodexAstraLocal: A renderer-owned cache must not reuse a config after a
     // mutable JIT toggle changes its DP4/DPH arithmetic policy; restart applies it.
     const bool shader_jit_enabled;
-    // CodexAstraLocal: Immutable renderer controls; diagnostics OFF avoids all
-    // new sampling clocks/analysis and final attribution records.
-    const bool feature_diagnostics;
-    const bool lit_specialization;
     // AstraEH: Draw counters belong to the render thread; wait counters belong to the scheduler.
     u64 draw_requests{};
     u64 specialized_pending{};

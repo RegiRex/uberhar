@@ -15,37 +15,20 @@ class DynamicTevPreparation {
 public:
     struct Counters {
         u64 requests{}, hits{}, builds{};
-        // CodexAstraLocal: Distinguish structural decoding from numeric-only
-        // certificate updates; neither counter estimates avoided CPU/GPU time.
-        u64 structural_builds{}, value_updates{};
     };
 
     const Pica::Shader::Generator::GLSL::DynamicTevState& Get(
-        const Pica::Shader::FSConfig& next, const Pica::Shader::Profile& next_profile,
-        const Pica::Shader::Generator::GLSL::FragmentRuntimeValues& next_values = {}) {
+        const Pica::Shader::FSConfig& next, const Pica::Shader::Profile& next_profile) {
         ++counters.requests;
-        const bool same_structure = config && *config == next && profile == next_profile;
-        if (same_structure && values == next_values) {
+        if (config && *config == next && profile == next_profile) {
             ++counters.hits;
             return state;
         }
-        // CodexAstraLocal: Numeric uniforms do not alter structural liveness,
-        // memo eligibility or packed TEV/lighting instructions. Reuse those
-        // exact bytes instead of rerunning their analysis on every value change.
-        if (!same_structure) {
-            structure = Pica::Shader::Generator::GLSL::MakeDynamicTevState(next, next_profile);
-            ++counters.structural_builds;
-        } else {
-            ++counters.value_updates;
-        }
-        // CodexAstraLocal: Begin each numeric refresh with certificate-free
-        // structural bytes; unavailable/nonendpoint values cannot inherit a
-        // prior draw's result. Publish the complete exact key after preparation.
-        state = structure;
-        Pica::Shader::Generator::GLSL::ApplyFragmentRuntime(state, next_profile, next_values);
+        // CodexAstraLocal: Full equality, never a hash or partial dirty-bit map,
+        // proves reuse. Publish the key only after the original producer succeeds.
+        state = Pica::Shader::Generator::GLSL::MakeDynamicTevState(next, next_profile);
         config = next;
         profile = next_profile;
-        values = next_values;
         ++counters.builds;
         return state;
     }
@@ -61,10 +44,6 @@ public:
 private:
     std::optional<Pica::Shader::FSConfig> config;
     Pica::Shader::Profile profile{};
-    Pica::Shader::Generator::GLSL::FragmentRuntimeValues values{};
-    // CodexAstraLocal: One additional 128-byte owner snapshot avoids structural
-    // rebuilds without retaining guest memory, shader owners or extra histories.
-    Pica::Shader::Generator::GLSL::DynamicTevState structure{};
     Pica::Shader::Generator::GLSL::DynamicTevState state{};
     Counters counters;
 };

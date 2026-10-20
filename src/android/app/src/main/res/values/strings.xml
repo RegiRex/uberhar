@@ -278,7 +278,14 @@
     <!-- Graphics settings strings -->
     <string name="renderer">Renderer</string>
     <string name="graphics_api">Graphics API</string>
-    <!-- CodexAstraLocal: Standalone Software labels removed; no replacement CPU-speed claim. -->
+    <!-- CodexAstraLocal: Distinguish CPU guest graphics from presentation-only GPU use. -->
+    <string name="uberhar_test_software">CPU Software</string>
+    <string name="uberhar_test_software_description">Render guest graphics on the CPU at 1×. The GPU only displays completed frames. Keeps CPU emulation, audio and GPU timing settings. Requires a game restart.</string>
+    <string name="software_renderer_workers">CPU Software workers</string>
+    <string name="software_renderer_workers_description">Total CPU rendering participants, limited to available processors. Applies only to CPU Software after a game restart.</string>
+    <string name="software_workers_auto">Automatic</string>
+    <string name="software_workers_one">1 participant</string>
+    <string name="software_workers_two">2 participants</string>
     <string name="spirv_shader_gen">Enable SPIR-V shader generation</string>
     <string name="spirv_shader_gen_description">Emits the fragment shader used to emulate PICA using SPIR-V instead of GLSL</string>
     <string name="disable_spirv_optimizer">Disable SPIR-V Optimizer</string>
@@ -290,12 +297,16 @@
     <string name="uberhar_test_native">Virtual PICA: native rasterization</string>
     <!-- CodexAstraLocal: Native retains CPU vertices and can now select ready static texture-combiner shaders; pending work still renders through the complete generic path. -->
     <string name="uberhar_test_native_description">Prototype: uses CPU shader translation with generic or ready texture-combiner fragment shaders. First-use CPU and GPU compilation can still pause. Restart the game after changing.</string>
-    <!-- CodexAstraLocal: Retired mode 2 migrates to Native; expose supported choices only. -->
+    <!-- CodexAstraLocal: Calculated now renders guest triangles independently; disclose experimental support and terminal failures before selection. -->
+    <string name="uberhar_test_compute">Virtual PICA: Calculated (experimental)</string>
+    <string name="uberhar_test_compute_description">Experimental Vulkan compute rendering with no Native fallback. Unsupported graphics stop emulation and record an error. Performance and game compatibility are still under evaluation. Restart the game after changing.</string>
     <string name="uberhar_test_auto">Virtual PICA: automatic combination</string>
     <!-- AstraPro: Combo now opts into ready-only GPU vertices; not full compute. -->
-    <!-- CodexAstraLocal: Distinguish CPU vertex preparation from GPU pixel rendering; promise no measured speedup. -->
-    <string name="uberhar_test_auto_description">Experimental Vulkan mode: combines CPU vertex preparation, ready GPU vertices for eligible independent triangle lists, and bounded fragment specialization. Complete generic rendering covers pending and unsupported specialization; performance may vary by game. Not a full compute renderer. Restart the game after changing.</string>
-    <!-- CodexAstraLocal: Generic-only Combo is retired; Native/Combo remain selectable. -->
+    <!-- CodexAstraLocal: Describe the added CPU-vertex fragment tier without claiming Native remains generic-only or promising a measured speedup. -->
+    <string name="uberhar_test_auto_description">Experimental Vulkan mode: combines CPU rendering, ready GPU vertices for eligible independent triangle lists, and bounded fragment specialization. Complete generic rendering covers pending and unsupported specialization; performance may vary by game. Not a full compute renderer. Restart the game after changing.</string>
+    <!-- CodexAstraUlt: One persisted diagnostic preset isolates optional fragments while retaining Combo vertices. -->
+    <string name="uberhar_test_combo_generic">Virtual PICA: Combo (generic fragments)</string>
+    <string name="uberhar_test_combo_generic_description">Comparison mode: keeps Combo’s ready GPU vertices and rectangle rendering, but uses generic fragments where supported. Other states retain accurate recovery. Compare the same scene with Native and automatic combination. Restart the game after changing.</string>
     <string name="uberhar_test_locked">Turn off the active Virtual PICA test mode to edit custom graphics settings. Your saved custom values are preserved.</string>
     <string name="uberhar_hybrid_tev">Uberhar hybrid TEV (experimental)</string>
     <string name="uberhar_separate_folder_title">Use an empty folder for Uberhar</string>
@@ -313,7 +324,7 @@
     <string name="uberhar_parallel_texture_decode">Parallel CPU texture decoding</string>
     <string name="uberhar_parallel_texture_decode_description">Share large texture conversions across CPU workers in Native and Combo. Turn off for a serial comparison. Restart the game after changing.</string>
 
-    <string name="uberhar_cpu_vertex_only_description">Keep guest vertex calculations on the CPU in Combo, using workers for eligible batches. Fragment policy stays unchanged. Performance may vary by game. Restart the game after changing.</string>
+    <string name="uberhar_cpu_vertex_only_description">Keep guest vertex calculations on the CPU in either Combo mode, using workers for eligible batches. Fragment policy stays unchanged. Performance may vary by game. Restart the game after changing.</string>
     <string name="uberhar_cpu_vertex_bridge_description">Requires hybrid TEV. Uses the CPU for eligible vertex work while an optimized GPU pipeline compiles. Turn off to compare performance. Restart the game after changing.</string>
     <string name="uberhar_force_tev">Force TEV fallback for comparison</string>
     <string name="uberhar_force_tev_description">Requires hybrid TEV. Uses the fallback for every supported draw to check image correctness. May be much slower. Restart the game after changing.</string>
@@ -1177,33 +1188,7 @@
     <string name="log_export_older">Older log</string>
     <string name="log_session_storage_warning">A log write or flush failed. Existing text logs may still be available. Export important logs before deleting files or clearing app data.</string>
     <string name="uberhar_renderer_stopped">Rendering stopped</string>
-    <!-- CodexAstraLocal: Shader recovery also carries Software framebuffer and graphics resource errors; describe the shared failure without misidentifying its cause. -->
+    <!-- CodexAstraLocal: Shader recovery also carries Software framebuffer and Calculated resource errors; describe the shared failure without misidentifying its cause. -->
     <string name="uberhar_renderer_stopped_description">Uberhar encountered a rendering error and stopped this game. Export the current text log to help investigate the failure. Additional evidence may be saved in log/crashes after restarting Uberhar.</string>
     <!-- AstraEH: Keep incident evidence off the ordinary current/previous/older log list. -->
-
-    <!-- CodexAstraLocal: Independent optimization and diagnostic comparisons, applied at game restart. -->
-    <string name="uberhar_cpu_adaptive_participation">Adapt CPU worker participation</string>
-    <string name="uberhar_cpu_adaptive_participation_description">Learn worker participation from recurring comparable work while retaining fixed safety limits. Restart the game after changing.</string>
-    <string name="uberhar_cpu_execution_census">Collect detailed CPU worker counts</string>
-    <string name="uberhar_cpu_execution_census_description">Collect additional active-worker counters for diagnosis. This can add CPU overhead. Fully close and restart Uberhar after changing.</string>
-    <string name="uberhar_feature_diagnostics">Collect optimization diagnostics</string>
-    <string name="uberhar_feature_diagnostics_description">Record bounded counts, refusal reasons and sampled CPU costs for individual optimizations. Restart the game after changing.</string>
-    <string name="uberhar_fragment_memo">Reuse fragment texture samples</string>
-    <string name="uberhar_fragment_memo_description">Reuse identical ordinary texture samples within a pixel shader invocation. Restart the game after changing.</string>
-    <string name="uberhar_constant_tev">Prepare constant fragment results on CPU</string>
-    <string name="uberhar_constant_tev_description">Prepare qualified constant color-combiner results before fragment execution. Restart the game after changing.</string>
-    <string name="uberhar_directional_precompute">Prepare directional lighting on CPU</string>
-    <string name="uberhar_directional_precompute_description">Avoid qualified draw-invariant lighting calculations in the fragment shader. Restart the game after changing.</string>
-    <string name="uberhar_lit_specialization">Prioritize costly lighting shaders</string>
-    <string name="uberhar_lit_specialization_description">Reserve bounded specialization opportunities for recurring lighting work. Restart the game after changing.</string>
-    <string name="uberhar_fragment_liveness">Remove unused fragment work</string>
-    <string name="uberhar_fragment_liveness_description">Avoid fragment calculations whose results cannot affect the final output. Restart the game after changing.</string>
-    <string name="uberhar_alpha_never">Reject invisible alpha tests early</string>
-    <string name="uberhar_alpha_never_description">Avoid fragment work when the alpha test unconditionally rejects the pixel. Restart the game after changing.</string>
-    <string name="uberhar_gpu_timestamps">Collect GPU timing samples</string>
-    <string name="uberhar_gpu_timestamps_description">Measure sampled GPU command spans. Leave off for ordinary performance comparisons; timing can affect GPU performance. Restart the game after changing.</string>
-    <string name="uberhar_image_reuse">Reuse exact image copies</string>
-    <string name="uberhar_image_reuse_description">Reuse unchanged feedback snapshots when ownership is proven. Exact self-copies always remain safe no-ops. Restart the game after changing.</string>
-    <string name="uberhar_cpu_transfers">Copy current RAM on CPU</string>
-    <string name="uberhar_cpu_transfers_description">Use CPU workers for eligible copies already available in RAM without GPU readback. Restart the game after changing.</string>
 </resources>

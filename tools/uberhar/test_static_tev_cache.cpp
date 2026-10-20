@@ -221,10 +221,6 @@ void FourRouteBindings() {
     Require(rows.size()==4 && rows[0].pipeline!=partial->Handle() &&
             rows[1].pipeline==partial->Handle() && rows[2].pipeline==full->Handle() &&
             rows[3].pipeline==partial->Handle(),"generic partial full partial owner sequence");
-    // CodexAstraLocal: Exercise all CPU-layout route tags through the actual
-    // queued selector, not a separately implemented classification function.
-    Require(rows[0].gpu_route==0 && rows[1].gpu_route==1 && rows[2].gpu_route==2 &&
-            rows[3].gpu_route==1,"generic partial full partial profiler sequence");
     Require(rows[1].pushes==rows[0].pushes+1 && rows[2].pushes==rows[1].pushes &&
             rows[3].pushes==rows[2].pushes+1 &&
             std::memcmp(rows[3].constants.data(),&values[3],128)==0,
@@ -368,9 +364,6 @@ void LazyTransportAndExactReuse() {
     // when the owner selected specialization. Force that route with no virtual
     // config, then mutate owner state before execution to challenge snapshotting.
     PipelineCache alternative;
-    // CodexAstraLocal: The actual worker-selected late fallback also owns the
-    // sampled semantic identity; prepared specialization cannot claim its cost.
-    alternative.scheduler.sample_gpu_identity = true;
     Settings::values.uberhar_test_mode.value = Settings::UberharTestMode::Custom;
     alternative.force_tev = true;
     alternative.UseFragmentShader(regs, {}, false);
@@ -385,161 +378,7 @@ void LazyTransportAndExactReuse() {
     alternative.scheduler.WaitWorker();
     Require(std::memcmp(alternative.scheduler.completed.back().constants.data(), &alternative_bytes, 128) == 0,
             "late generic winner retains original queued transport");
-    Require(alternative.scheduler.completed.back().gpu_route == 0,
-            "late generic winner overrides prepared profiler route");
-    Require(alternative.scheduler.completed.back().identity.transport ==
-                Common::ComputeStructHash64(alternative_bytes) &&
-            alternative.scheduler.completed.back().identity.fragment ==
-                alternative.bound_pipeline->DiagnosticShaderIds()[1],
-            "late generic winner retains selected semantic identity and queued transport");
     Settings::values.uberhar_test_mode.value = Settings::UberharTestMode::Automatic;
-}
-
-// CodexAstraLocal: Exercise production capture, queued final-route attribution
-// and diagnostic OFF. These are populated counters, not log-substring checks.
-void RuntimeFeatureAttribution() {
-    PipelineCache p;
-    // CodexAstraLocal: Model one sampled graphics span around real binding
-    // closures; work-profile's separate gate owns query cadence and mixed spans.
-    p.scheduler.sample_gpu_identity = true;
-    Pica::RegsInternal regs{};
-    regs.lighting.disable.Assign(1);
-    regs.framebuffer.output_merger.alphablend_enable.Assign(1);
-    regs.texturing.tev_stage5.sources_raw = 0x000e000e;
-    regs.texturing.tev_stage5.const_color = 0;
-    Settings::values.uberhar_test_mode.value = Settings::UberharTestMode::Automatic;
-    p.UseFragmentShader(regs, {}, false);
-    auto info = Info();
-    Require(p.BindPipeline(info, true), "runtime feature generic draw binds");
-    p.scheduler.WaitWorker();
-    const auto& work = p.fragment_selected[0];
-    Require(work.draws == 1 && work.samples == 1 && work.constant_rgb == 1 &&
-            work.constant_alpha == 1 && work.dead_rgb == 5 && work.dead_alpha == 5,
-            "actual selected worker populates independent constant/liveness fields");
-    const auto first = p.scheduler.completed.back().constants;
-    const auto identity = p.scheduler.completed.back().identity;
-    const auto handle = p.scheduler.completed.back().pipeline;
-    // CodexAstraLocal: New process-local owners with the same semantics must
-    // retain the same diagnostic identity, unlike the execution-owner key.
-    {
-        PipelineCache another;
-        another.scheduler.sample_gpu_identity = true;
-        another.UseFragmentShader(regs, {}, false);
-        auto same_info = Info();
-        Require(another.BindPipeline(same_info, true), "second semantic owner binds");
-        another.scheduler.WaitWorker();
-        Require(another.scheduler.completed.back().pipeline != handle &&
-                another.scheduler.completed.back().identity == identity,
-                "semantic identity changes with process-local owner allocation");
-    }
-    regs.texturing.tev_stage5.const_color = 0xFFFFFFFF;
-    p.fragment_evidence.attempts = 0; // Force a second diagnostic sample only.
-    p.UseFragmentShader(regs, {}, false);
-    Require(p.BindPipeline(info, true), "changed uniform same structure binds");
-    p.scheduler.WaitWorker();
-    Require(first != p.scheduler.completed.back().constants && work.constant_rgb == 2 &&
-            p.dynamic_tev_preparation.Stats().builds == 2 &&
-            p.dynamic_tev_preparation.Stats().structural_builds == 1 &&
-            p.dynamic_tev_preparation.Stats().value_updates == 1 &&
-            identity.transport != p.scheduler.completed.back().identity.transport,
-            "live numeric change invalidates cache and reaches queued consumer");
-    const auto samples = p.fragment_prepare_samples;
-    p.feature_diagnostics = false; // Explicit fixture control; production freezes at construction.
-    p.UseFragmentShader(regs, {}, false);
-    Require(p.BindPipeline(info, true), "diagnostic OFF keeps draw"); p.scheduler.WaitWorker();
-    Require(p.fragment_prepare_samples == samples && work.draws == 2,
-            "diagnostic OFF omits new clocks and selected counters");
-    PipelineCache reserved;
-    reserved.lit_specialization = true;
-    for (u32 i = 0; i < 6; ++i) Require(Spend(reserved, false, 300 + i), "seed six charged cheap owners");
-    SeedModule(reserved, Config());
-    DrawCpu(reserved, Info(), Config());
-    Require(reserved.fragment_lit_reserved_refusals > 0 && reserved.ready_cpu_bank->Owned(0) == 6,
-            "actual advance preserves two reserved full owners");
-}
-
-// CodexAstraLocal: Cold module endpoints and extracted production advance must
-// recover from menu occupancy, not only from a direct Bank::Observe fixture.
-// Two old lit owners deliberately precede six cheap menu PSOs, so an unpaired
-// oldest-victim implementation would discard lighting for the blocked race miss.
-void ColdMenuToRaceReservation() {
-    for (bool partial : {false, true}) {
-        PipelineCache p;
-        p.lit_specialization = true;
-        p.allow_full_cpu_fragments = !partial;
-        auto cheap = Config(1);
-        for (auto& stage : cheap.texture.tev_stages) stage = {0x000f000f, 0, 0, 0};
-        cheap.texture.tev_stages[0] = {0x00030003, 0, 0, 0};
-        auto lit = cheap;
-        lit.lighting.enable.Assign(1);
-        lit.lighting.src_num.Assign(1);
-        lit.texture.tev_stages[0] = {0x00010001, 0, 0, 0};
-        const auto info = [](unsigned id) {
-            auto value = Info();
-            value.state.blending.color_write_mask = id + 1;
-            return value;
-        };
-        const auto tier = partial ? 1U : 0U;
-        Require(p.curr_disk_cache->ready_fragments.empty() &&
-                p.curr_disk_cache->static_tev_fragments.empty(), "menu starts module-cold");
-        for (unsigned id = 0; id < 8; ++id) {
-            bool selected = false;
-            for (unsigned frame = 0; frame < 32 && !selected; ++frame) {
-                for (unsigned draw = 0; draw < 16; ++draw) {
-                    const auto token = DrawCpu(p, info(id), id < 2 ? lit : cheap);
-                    selected |= token && CpuFragmentPartitions::Index(
-                        *p.ready_cpu_bank->AllSlots()[token.slot].observation) == tier;
-                }
-                p.ready_vertex_worker->WaitForRequests(); Advance(p);
-            }
-            Require(selected, "cold menu reaches intended fragment tier");
-        }
-        Require(p.ready_cpu_bank->Owned(tier) == 8 && p.ready_cpu_bank->CheapOwned(tier) == 6,
-                "cold menu preserves six cheap plus two lit owners");
-        const auto attempts = p.ready_cpu_bank->Attempts(tier);
-        bool raced = false;
-        for (unsigned frame = 0; frame < 32 && !raced; ++frame) {
-            // Keep five cheap residents recent; the two oldest lit owners must
-            // survive while the sixth cheap owner is replaced after its GPU use.
-            for (unsigned id = 2; id < 7; ++id) DrawCpu(p, info(id), cheap);
-            for (unsigned draw = 0; draw < 16; ++draw) {
-                const auto token = DrawCpu(p, info(8), cheap);
-                raced |= token && CpuFragmentPartitions::Index(
-                    *p.ready_cpu_bank->AllSlots()[token.slot].observation) == tier;
-            }
-            p.ready_vertex_worker->WaitForRequests(); Advance(p);
-        }
-        Require(raced && p.ready_cpu_bank->Attempts(tier) == attempts + 1,
-                "cold menu quota admits compatible race replacement");
-        Require(p.ready_cpu_bank->Owned(tier) == 8 && p.ready_cpu_bank->CheapOwned(tier) == 6 &&
-                p.ready_cpu_bank->stats.lit_replacements == 0 &&
-                p.ready_cpu_bank->stats.cheap_replacements > 0 &&
-                p.ready_cpu_bank->stats.cheap_observations_at_quota > 0,
-                "quota replacement protects oldest lit owners and records progress");
-        // Ready lookup is still before all terminal admission checks.
-        p.ready_optional_attempts = 256;
-        const auto before = p.ready_cpu_bank->stats.retirements;
-        for (unsigned frame = 0; frame < 12; ++frame) {
-            Require(bool(DrawCpu(p, info(8), cheap)), "race ready survives terminal shared budget");
-            for (unsigned draw = 0; draw < 16; ++draw) DrawCpu(p, info(9), cheap);
-            Advance(p);
-        }
-        Require(p.ready_cpu_bank->stats.retirements == before,
-                "terminal shared budget cannot retire for unusable race demand");
-    }
-    // CodexAstraLocal: Six cheap owners with empty protected slots still need
-    // cheap replacement; twelve failed partial attempts remain non-refundable.
-    PipelineCache p;
-    p.ready_cpu_bank->SetLightingReservation(true);
-    for (unsigned i = 0; i < 12; ++i)
-        Require(Spend(p, true, 600 + i), "cheap quota replaces while lit slots remain empty");
-    Require(p.ready_cpu_bank->Owned(1) == 6 && p.ready_cpu_bank->Attempts(1) == 12,
-            "cheap partial attempts and physical quota stay bounded");
-    const auto before = p.ready_cpu_bank->stats.retirements;
-    const auto observed = p.ready_cpu_bank->stats.observations;
-    Require(!Spend(p, true, 612) && p.ready_cpu_bank->stats.retirements == before &&
-            p.ready_cpu_bank->stats.observations == observed,
-            "terminal cheap attempt budget creates no demand or retirement");
 }
 
 int main() {
@@ -547,7 +386,7 @@ int main() {
         Probe::partial_tier=true;
         PromotionAndPriority(); ColdBridge(); PartitionPressure(); TerminalBudgetsKeepHits();
         PartialTransportAndIdentity(); FourRouteBindings(); NativeAndFailureFallback();
-        LazyTransportAndExactReuse(); RuntimeFeatureAttribution(); ColdMenuToRaceReservation();
+        LazyTransportAndExactReuse();
         Require(Probe::optional_waits==0 && Probe::lifetime_errors==0,
                 "no optional wait or borrowed shader destruction");
         std::cout<<"PASS checks="<<Probe::checks<<" builds="<<Probe::pipeline_builds

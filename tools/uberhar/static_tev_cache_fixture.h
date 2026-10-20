@@ -7,7 +7,6 @@
 #include "video_core/renderer_vulkan/uberhar_dynamic_tev_preparation.h"
 #include "common/logging/log.h"
 #include "common/settings.h"
-#include "common/scope_exit.h" // CodexAstraLocal: Execute the complete sampled owner preparation.
 #include "common/uberhar_activity.h"
 #include "video_core/shader/generator/shader_gen.h"
 #include <bit>
@@ -34,9 +33,6 @@
 #include "video_core/renderer_vulkan/uberhar_push_constants.h"
 #include "video_core/renderer_vulkan/uberhar_shader_compile_policy.h"
 #include "video_core/renderer_vulkan/uberhar_wait_diagnostics.h"
-// CodexAstraLocal: Use the production diagnostic value type; no profiler or
-// Vulkan query object is constructed by this controlled command endpoint.
-#include "video_core/renderer_vulkan/vk_work_profile.h"
 #include "video_core/shader/generator/glsl_fs_shader_gen.h"
 #define MICROPROFILE_SCOPE(...) ((void)0)
 using namespace Pica::Shader::Generator;
@@ -141,9 +137,6 @@ public:
   }
   u64 ActualKey() const noexcept;
   u64 Key() const noexcept { return forged_key.value_or(ActualKey()); }
-  // CodexAstraLocal: Definitions are extracted unchanged from the real owner.
-  const StaticPipelineInfo& DiagnosticState() const noexcept;
-  std::array<u64, MAX_SHADER_STAGES> DiagnosticShaderIds() const noexcept;
   bool MatchesExecution(const PipelineInfo &, const std::array<u64, 3> &) const;
   bool HasFailed() const { return failed; }
   void MarkFailed() {
@@ -208,12 +201,6 @@ vk::ShaderModule CompileSPV(const std::vector<u32> &, vk::Device) {
 // producer mutation can be adversarial.
 struct CommandsState {
   u64 pipeline{};
-  // CodexAstraLocal: Preserve actual worker-selected route with each recorded
-  // binding; the fixture must not silently swallow the profiler integration.
-  u32 gpu_route{~0U};
-  // CodexAstraLocal: Record immutable semantic attribution beside actual binds.
-  GpuDrawIdentity identity{};
-  u64 scissor_area{};
   std::array<u32, 3> offsets{};
   std::array<vk::DescriptorSet, 3> descriptors{};
   std::array<std::byte, 128> constants{};
@@ -290,20 +277,6 @@ struct Scheduler {
   CommandsState current{};
   std::vector<CommandsState> completed;
   std::vector<std::function<void(RecordingCommands)>> records;
-  std::array<u64, 5> gpu_routes{};
-  // CodexAstraLocal: Explicit modeled sampled-pass boundary; normal controls
-  // still avoid identity work, while dedicated cases inspect actual closure use.
-  bool sample_gpu_identity{};
-  bool GpuIdentityRequested() const noexcept { return sample_gpu_identity; }
-  void RecordGpuIdentity(const GpuDrawIdentity& identity, u64 area) {
-    current.identity = identity;
-    current.scissor_area = area;
-  }
-  void RecordGpuRoute(u32 route) {
-    if (route >= gpu_routes.size()) throw std::runtime_error("invalid GPU route");
-    current.gpu_route = route;
-    ++gpu_routes[route];
-  }
   template <class F> void Record(F &&f) {
     records.emplace_back(std::forward<F>(f));
   }
@@ -365,9 +338,6 @@ public:
   // CodexAstraLocal: Exercise CPU full-fragment permission independently from
   // the original GPU-fragment/vertex capabilities in extracted production code.
   bool allow_full_cpu_fragments = true;
-  // CodexAstraLocal: Legacy budget fixtures explicitly retain OFF; new focused
-  // controls below exercise reservation ON without rewriting old cap contracts.
-  bool lit_specialization = false, feature_diagnostics = true;
   const FSConfig* prepared_cpu_family{};
   std::optional<FSConfig> owned_family;
   u64 ready_cpu_static_selected{}, ready_cpu_full_selected{}, ready_fragment_preflight_deferred{};
@@ -380,16 +350,6 @@ public:
   // CodexAstraLocal: Bind the production lazy transport owner in extracted route tests.
   std::optional<FSConfig> pending_tev_transport;
   DynamicTevPreparation dynamic_tev_preparation;
-  GLSL::FragmentRuntimeValues pending_fragment_values;
-  // CodexAstraLocal: Actual production metadata ownership and counter layout.
-#include "fragment_runtime_members.inc"
-  // CodexAstraLocal: Arithmetic-input output is a controlled endpoint here;
-  // actual route/lifetime decisions remain extracted production methods.
-  struct { u64 attempts{}, failures{}, samples{}; } fragment_evidence;
-  void SampleFragmentEvidence(const Pica::RegsInternal&, const FSConfig& config, bool) {
-    ++fragment_evidence.samples;
-    pending_fragment_evidence = GLSL::AnalyzeFragmentWork(config, profile);
-  }
   ExactPushConstants<TevPushConstants> tev_push_constants;
   std::unordered_map<u64, std::unique_ptr<Shader>> tev_shaders;
   std::unordered_map<u64, std::unique_ptr<GraphicsPipeline>> tev_pipelines,

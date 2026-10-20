@@ -35,7 +35,7 @@ def tev_body(source):
 state_start = dynamic.index("layout(push_constant)")
 state_end = dynamic.index("} uber_tev;", state_start) + len("} uber_tev;")
 helpers = (dynamic[state_start:state_end] + "\n"
-           + dynamic[dynamic.index("// CodexAstraLocal: Shared color-sample helpers begin."):dynamic.index("void main()")])
+           + dynamic[dynamic.index("// AstraEH: TEV interpreter helpers begin."):dynamic.index("void main()")])
 helpers = helpers.replace(
     "layout(push_constant) uniform UberTev",
     "layout(std430, binding=1) readonly buffer UberTev",
@@ -66,7 +66,6 @@ void main() {
     tev_combiner_buffer_color = inputs[base + 13u];
     outputs[id * 3u] = uvec4(round(specialized() * 255.0));
     fetch_counts = uvec4(0u);
-    uber_shared_sampled = 0u; uber_sampled = 0u;
     outputs[id * 3u + 1u] = uvec4(round(interpreted() * 255.0));
     outputs[id * 3u + 2u] = fetch_counts;
 }
@@ -74,41 +73,26 @@ void main() {
 
 
 def expected_fetches(raw_registers):
-    """CodexAstraLocal: Forward symbolic dependency sets, independent of backwards masks."""
-    registers = list(struct.iter_unpack("<4I", raw_registers[:96]))
-    buffer_mask, = struct.unpack("<I", raw_registers[96:])
-    previous = (set(), set())
-    buffer = (set(), set())
-    next_buffer = (set(), set())
-    for stage, (sources, modifiers, ops, scales) in enumerate(registers):
+    """AstraEH: Independently enumerate live texture operands, ignoring dead ones."""
+    used = set()
+    for stage, (sources, modifiers, ops, scales) in enumerate(
+        struct.iter_unpack("<4I", raw_registers)
+    ):
         color_op, alpha_op = ops & 15, (ops >> 16) & 15
-        identity = (color_op == alpha_op == 0 and sources & 0x000f000f == 0x000f000f
+        if (color_op == alpha_op == 0 and sources & 0x000f000f == 0x000f000f
                 and modifiers & 0x0000700f == 0
-                and scales & 3 in (0, 3) and (scales >> 16) & 3 in (0, 3))
-        def dependencies(channel, operation):
-            used = set()
+                and scales & 3 in (0, 3) and (scales >> 16) & 3 in (0, 3)):
+            continue
+        for channel, operation in ((0, color_op), (16, alpha_op)):
+            if channel == 16 and color_op == 7:
+                continue
             count = 1 if operation == 0 else 3 if operation in (4, 8, 9) else 2
             for operand in range(count):
                 source = (sources >> (channel + 4 * operand)) & 15
                 if stage == 0 and source == 15:
                     source = (sources >> (channel + 8)) & 15
-                modifier = (modifiers >> ((12 if channel else 0) + 4*operand)) & (7 if channel else 15)
-                alpha = modifier < 2 if channel else modifier in (2, 3)
                 if 3 <= source <= 6:
                     used.add(source - 3)
-                elif source == 15:
-                    used.update(previous[alpha])
-                elif source == 13:
-                    used.update(buffer[alpha])
-            return used
-        if not identity:
-            color = dependencies(0, color_op)
-            alpha = color.copy() if color_op == 7 else dependencies(16, alpha_op)
-            previous = (color, alpha)
-        buffer = tuple(x.copy() for x in next_buffer)
-        next_buffer = tuple(previous[c].copy() if stage < 4 and buffer_mask & (1 << (stage+4*c))
-                            else next_buffer[c].copy() for c in range(2))
-    used = previous[0] | previous[1]
     return tuple(int(unit in used) for unit in range(4))
 
 
@@ -138,7 +122,7 @@ files = sorted(cases.glob("*.bin"), key=lambda p: int(p.stem))
 if [int(file.stem) for file in files] != list(range(816)):
     raise AssertionError("Expected all 816 TEV cases exactly once")
 for file in files:
-    specialized = file.with_suffix(".reference").read_text()
+    specialized = file.with_suffix(".frag").read_text()
     source = (
         header + rounding + helpers
         + "vec4 specialized() {\n" + tev_body(specialized) + "}\n"
@@ -147,7 +131,7 @@ for file in files:
     shader = ctx.compute_shader(source)
     constants = file.read_bytes()
     raw_registers = file.with_suffix(".raw").read_bytes()
-    if len(constants) != 128 or len(raw_registers) != 100:
+    if len(constants) != 128 or len(raw_registers) != 96:
         raise AssertionError(f"case {file.stem}: invalid prepared/raw transport size")
     instructions.write(constants)
     fetches = expected_fetches(raw_registers)

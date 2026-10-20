@@ -16,7 +16,13 @@ std::string DecompileProgram(const Pica::ProgramCode& program_code,
                              const Pica::SwizzleData& swizzle_data, u32 main_offset,
                              const RegGetter& inputreg_getter, const RegGetter& outputreg_getter,
                              // CodexAstraLocal: The optional policy affects DP4/DPH only.
-                             // CodexAstraLocal: Only supported graphics arithmetic policy remains.
-                             bool sanitize_mul, bool precise_jit_dot = false);
+                             bool sanitize_mul, bool precise_jit_dot = false,
+                             // CodexAstraLocal: The independent compute producer
+                             // additionally uses the retained A64 DP3/RSQ tree;
+                             // existing graphics callers retain their source.
+                             bool compute_a64_math = false,
+                             // CodexAstraLocal: Compute can read the immutable
+                             // captured uniform bytes without a private bank.
+                             bool compute_uniform_reads = false);
 
 } // namespace Pica::Shader::Generator::GLSL

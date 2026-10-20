@@ -151,18 +151,7 @@ int main(int argc,char** argv) try {
     const bool mutant=argc==3;
     std::ifstream input(argv[1]);Json cases;input>>cases;
     const auto original=Env::Capture();
-    // CodexAstraLocal: This numerical proof deliberately synchronizes four
-    // participants. A fixture-owned budget and static work identity prevent
-    // host capacity or a valid adaptive trial from starving its four-way barrier;
-    // production admission/adaptation remain covered by their separate gate.
-    Common::Uberhar::AuxiliaryBudget qualification_budget{4};
-    Common::Uberhar::ParallelWork pool{4, nullptr, qualification_budget};
-    pool.SetWorkIdentity(0);
-    // CodexAstraLocal: Fail before entering the barrier if worker creation was
-    // unavailable, rather than waiting forever for an absent participant.
-    pool.Run(4, 1, [](u32, u32) {});
-    Check(pool.CreatedWorkers() == 3 && pool.StartupFailures() == 0,
-          "four-way qualification worker startup");
+    Common::Uberhar::ParallelWork pool(4);
     unsigned accepted{},rejected{};
     for(const auto& item:cases) {
         current_case=item.at("name").get<std::string>();

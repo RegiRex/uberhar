@@ -55,14 +55,12 @@ def prepare(parent):
         "config": "src/video_core/shader/generator/pica_fs_config.cpp",
         "key-family": "tools/uberhar/test_static_tev_generator.cpp",
         "tev": "tools/uberhar/shader_probe.cpp",
-        # CodexAstraLocal: Share the compiled production objects with arithmetic qualification.
-        "runtime": "tools/uberhar/fragment_runtime_probe.cpp",
     }
     commands = []
     source_paths = {ROOT / name for name in sources.values()}
     source_paths.update(ROOT / name for name in (
         "tools/uberhar/test_static_tev_generator.py", "tools/uberhar/compare_static_tev.py",
-        "tools/uberhar/compare_tev.py", "tools/uberhar/compare_fragment_runtime.py"))
+        "tools/uberhar/compare_tev.py"))
     before = {path: digest(path) for path in source_paths}
     # CodexAstraLocal: Compile shared production objects once and retain dependencies
     # per translation unit so reuse cannot accept a changed included header.
@@ -75,15 +73,15 @@ def prepare(parent):
         for item in shlex.split(dependency.split(":", 1)[1]):
             path = Path(item)
             source_paths.add(path if path.is_absolute() else ROOT / path)
-    for name in ("key-family", "tev", "runtime"):
+    for name in ("key-family", "tev"):
         command = [flags[0], str(directory / f"{name}.o"), str(directory / "generator.o"),
                    str(directory / "config.o"), "-o", str(directory / name)]
         commands.append(checked(command, directory / f"link-{name}.log"))
         commands.append(checked([str(directory / name), str(directory / name.replace("key-family", "families"))
-                                 + ("-cases" if name in ("tev", "runtime") else "")],
+                                 + ("-cases" if name == "tev" else "")],
                                 directory / f"emit-{name}.log"))
     expected = {f"{i}{suffix}" for i in range(816)
-                for suffix in (".frag", ".reference", ".bin", ".raw", "-partial.frag")}
+                for suffix in (".frag", ".bin", ".raw", "-partial.frag")}
     expected.update(f"dynamic-{i}.frag" for i in range(64))
     assert {p.name for p in (directory / "tev-cases").iterdir()} == expected
     assert {p.name for p in (directory / "families").iterdir()} == {f"{i}.frag" for i in range(64)}
@@ -119,15 +117,7 @@ def reuse(parent):
     manifest = json.loads((directory / "manifest.json").read_text())
     assert manifest["tev_cases"] == 816 and manifest["key_controls"] == 805
     assert manifest["nonempty_family_modules"] == 64
-    # CodexAstraLocal: Renderer scripts are not compiler inputs. Preserve the
-    # original preparation manifest while checking every actual C++ dependency;
-    # each new render run separately snapshots/hashes its current harness below.
-    render_scripts = {"tools/uberhar/test_static_tev_generator.py",
-                      "tools/uberhar/compare_static_tev.py", "tools/uberhar/compare_tev.py",
-                      "tools/uberhar/compare_fragment_runtime.py"}
     for name, expected in manifest["source_sha256"].items():
-        if name in render_scripts:
-            continue
         assert digest(ROOT / name) == expected, f"Changed reused source: {name}"
     for name, expected in manifest["artifacts"].items():
         assert digest(directory / name) == expected, f"Changed reused artifact: {name}"
@@ -144,18 +134,11 @@ def shader_tool(name, fallback):
 
 def render(directory, require_spirv):
     run = Path(tempfile.mkdtemp(prefix="render-", dir=directory))
-    # CodexAstraLocal: A corrected oracle must be reviewable without rebuilding
-    # unchanged shaders; retain exact harness bytes beside this new execution.
-    scripts = (Path(__file__), ROOT / "tools/uberhar/compare_static_tev.py",
-               ROOT / "tools/uberhar/compare_tev.py", ROOT / "tools/uberhar/compare_fragment_runtime.py")
-    (run / "harness").mkdir()
-    for path in scripts:
-        (run / "harness" / path.name).write_bytes(path.read_bytes())
     renderer = ROOT / "tools/uberhar/compare_static_tev.py"
     base = [sys.executable, str(renderer), str(directory / "tev-cases")]
     commands = [checked(base + ["--output", str(run / "positive")], run / "positive.log", 900)]
     report = json.loads((run / "positive/report.json").read_text())
-    assert report["cases"] == 816 and report["four_way_rgba_vectors"] == 208896
+    assert report["cases"] == 816 and report["three_way_rgba_vectors"] == 208896
     assert report["fetch_vectors_per_candidate"] == 208896
     controls = []
     # CodexAstraLocal: Defects must reach an actual output/fetch mismatch, not
@@ -170,23 +153,9 @@ def render(directory, require_spirv):
         assert result.returncode != 0 and "TEV output/fetch mismatch:" in result.stderr, defect
         failure = json.loads((output / "failure.json").read_text())
         assert 0 <= failure["case"] < 816 and 0 <= failure["sample"] < 256
-        assert (output / "failed.comp").is_file() and (output / "failed-output.bin").stat().st_size == 256*7*16
+        assert (output / "failed.comp").is_file() and (output / "failed-output.bin").stat().st_size == 256*5*16
         controls.append({"defect": defect, "argv": command, "returncode": result.returncode,
                          "elapsed_seconds": time.monotonic()-start, "failure": failure})
-    # CodexAstraLocal: Execute live mutable uniforms through both real optimized
-    # routes and control OFF, then require observable arithmetic fault controls.
-    runtime = ROOT / "tools/uberhar/compare_fragment_runtime.py"
-    runtime_command = [sys.executable, str(runtime), str(directory / "runtime-cases")]
-    commands.append(checked(runtime_command + ["--output", str(run / "runtime")], run / "runtime.log", 300))
-    for defect in ("constant_result", "canonical_direction"):
-        target = run / defect
-        result = subprocess.run(runtime_command + ["--output", str(target), "--defect", defect],
-                                cwd=ROOT, capture_output=True, text=True, timeout=180)
-        (run / f"{defect}.log").write_text(result.stdout + result.stderr)
-        assert result.returncode != 0 and "Runtime fragment output mismatch:" in result.stderr, defect
-        assert (target / "failure.json").is_file()
-        controls.append({"defect": defect, "returncode": result.returncode,
-                         "failure": json.loads((target / "failure.json").read_text())})
     modules = []
     if require_spirv:
         compiler = shader_tool("glslangValidator", "build/uberhar-validators/glslang/StandAlone/glslang")
