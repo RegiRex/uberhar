@@ -117,8 +117,9 @@ public:
 '''
 SETTINGS = r'''#pragma once
 namespace Settings {
-// CodexAstraLocal: Match appended production Software ID without changing old IDs.
-enum class UberharTestMode {Custom, Native, Compute, Automatic, ComboGeneric, Software};
+// CodexAstraLocal: Match the remaining production modes and their persisted IDs.
+// Retired IDs belong to the actual migration fixture, not live render controls.
+enum class UberharTestMode {Custom = 0, Native = 1, Automatic = 3};
 struct Mode {
     UberharTestMode value{UberharTestMode::Automatic};
     auto GetValue() const { return value; }

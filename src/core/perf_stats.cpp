@@ -291,7 +291,8 @@ void PerfStats::LogUberharSettings(const char* event) {
     const auto api = Settings::GetWorkingGraphicsAPI();
     // CodexAstraUlt: Append the persisted diagnostic mode without relabeling older log modes.
     // CodexAstraLocal: Identify explicit CPU graphics in ordinary run evidence.
-    const std::array mode_names{"Custom", "Native", "Compute", "Automatic", "ComboGeneric", "Software"};
+    // CodexAstraLocal: IDs remain stable; migrations run before session settings are logged.
+    const std::array mode_names{"Custom", "Native", "Retired", "Automatic", "Retired", "Retired"};
     const std::array api_names{"Software", "OpenGL", "Vulkan"};
     const auto mode_index = static_cast<std::size_t>(mode);
     const auto api_index = static_cast<std::size_t>(api);
@@ -303,8 +304,7 @@ void PerfStats::LogUberharSettings(const char* event) {
         "texture_filter={} texture_sampling={} custom_textures={} preload_textures={} "
         "skip_duplicate_frames={} render_thread_delay_us={} simulate_gpu_timings={} "
         "ready_gpu_vertex_policy={} ready_gpu_fragment_policy={} ready_cpu_fragment_policy={} "
-        "static_cpu_fragment_policy={} "
-        "calculated_fallback_policy={} calculated_vertex_policy={}",
+        "static_cpu_fragment_policy={} cpu_execution_census_requested={}",
         mode_index < mode_names.size() ? mode_names[mode_index] : "Unknown",
         api_index < api_names.size() ? api_names[api_index] : "Unknown",
         values.resolution_factor.GetValue(), values.resolution_factor.GetValue() ? "fixed" : "auto",
@@ -339,11 +339,8 @@ void PerfStats::LogUberharSettings(const char* event) {
         api == Settings::GraphicsAPI::Vulkan && values.uberhar_hybrid_tev.GetValue() &&
                 Settings::AllowsStaticCpuTev(mode)
             ? "software_static_tev_ready_v1" : "disabled",
-        // CodexAstraLocal: Calculated consumes original guest inputs in compute;
-        // an unsupported draw terminates rather than being omitted or retried
-        // through Native. These labels declare policy, not successful coverage.
-        Settings::RequiresComputeOnly(mode) ? "disabled_terminal_unsupported" : "graphics_allowed",
-        Settings::RequiresComputeOnly(mode) ? "original_input_compute" : "route_dependent");
+        // CodexAstraLocal: Existing budget startup record identifies whether a restart applied this request.
+        values.uberhar_cpu_execution_census.GetValue());
     const bool changed = text != uberhar_settings;
     if (changed && !uberhar_settings.empty())
         ++uberhar_settings_changes;

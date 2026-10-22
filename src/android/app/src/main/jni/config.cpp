@@ -143,6 +143,11 @@ void Config::ReadValues() {
     Settings::values.shaders_accurate_mul =
         android_config->GetBoolean("Renderer", "shaders_accurate_mul", false);
     ReadSetting("Renderer", Settings::values.graphics_api);
+    // CodexAstraLocal: Retired Android Software selection migrates without changing saves or resolution.
+    if (Settings::values.graphics_api.GetValue() == Settings::GraphicsAPI::Software) {
+        Settings::values.graphics_api = Settings::GraphicsAPI::Vulkan;
+        LOG_WARNING(Config, "Retired Software graphics API migrated to Vulkan");
+    }
     // CodexAstraLocal: Reload the persisted restart-only CPU raster budget.
     ReadSetting("Renderer", Settings::values.software_renderer_workers);
     ReadSetting("Renderer", Settings::values.async_presentation);
@@ -158,9 +163,19 @@ void Config::ReadValues() {
     ReadSetting("Renderer", Settings::values.uberhar_native_full_fragments);
     ReadSetting("Renderer", Settings::values.uberhar_cpu_prefix_overlap);
     ReadSetting("Renderer", Settings::values.uberhar_parallel_texture_decode);
+    // CodexAstraLocal: Freeze optional census before any worker owner is constructed.
+    ReadSetting("Renderer", Settings::values.uberhar_cpu_execution_census);
 
     // AstraEH: Read the profile before applying its temporary in-memory overrides.
     ReadSetting("Renderer", Settings::values.uberhar_test_mode);
+    // CodexAstraLocal: Preserve old saved IDs as explicit migration inputs.
+    const auto saved_mode = Settings::values.uberhar_test_mode.GetValue();
+    const auto migrated_mode = Settings::MigrateUberharTestMode(saved_mode);
+    if (saved_mode != migrated_mode) {
+        LOG_WARNING(Config, "Retired renderer mode {} migrated to {}", static_cast<u32>(saved_mode),
+                    static_cast<u32>(migrated_mode));
+        Settings::values.uberhar_test_mode = migrated_mode;
+    }
     ReadSetting("Renderer", Settings::values.spirv_shader_gen);
     ReadSetting("Renderer", Settings::values.disable_spirv_optimizer);
     ReadSetting("Renderer", Settings::values.use_hw_shader);

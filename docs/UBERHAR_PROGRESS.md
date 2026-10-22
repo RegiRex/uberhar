@@ -1,3 +1,88 @@
+# Current: 0.1.53 release candidate from original 0.1.48
+
+<!-- CodexAstraLocal: Latest source state supersedes historical current-build claims below. -->
+Original .48 graphics and admission are restored with selected CPU proof/lifecycle
+improvements, optional census accounting, full-GLSL pruning and compatible direct
+SPIR-V ready-full generation. Current Android mode migration and Vulkan lifetime/
+terminal-wait fixes remain. See [release notes](releases/0.1.53.md) and the
+[focused integration review](UBERHAR_REVIEW_0.1.53.md). Gates must pass before
+publication; owner hardware testing is pending. No measured recovery is claimed.
+
+---
+
+<!-- CodexAstraLocal: Current .52 implementation supersedes historical mode lists and holds below. -->
+## 0.1.52 — shader selection recovery and narrower Android modes
+
+Replacement-aware bounded admission, static fragment cleanup, genuine liveness-OFF
+emission, contained-area reuse and exact single-mip RGBA8 copies are implemented.
+CPU Software/generic Combo are retired from Android selection with explicit saved
+value migration; Native/Combo retain complete cold-rendering paths. No slow CPU
+wrapper is repackaged. High CPU demand is acceptable when it improves throughput.
+
+Independent source review found no remaining blocker; focused and integrated gates
+are underway. Dark Moon qualification is authorized after the gated release, with
+.48 lows as the recovery target. A separate exact-.48 CPU-only comparison retains
+its GPU implementation for owner testing. See [release notes](releases/0.1.52.md)
+and [review](UBERHAR_REVIEW_0.1.52.md). No device gain is claimed yet.
+
+<!-- CodexAstraLocal: Preserve historical evidence while making the current retirement explicit. -->
+## 0.1.51 — regression correction and Calculated retirement
+
+The independent Calculated renderer, shaders, controls and scratch benchmark are removed.
+Stored mode 2 migrates to Native; Custom=0, Native=1, Combo=3, generic Combo=4 and
+CPU Software=5 remain stable. Combo rectangle compute and shared graphics utilities remain.
+The prior design/results below are historical, not current runtime capabilities.
+
+<!-- CodexAstraLocal: Tie current implementation to observed wasted work and preserve the distinction between a correction and measured speed recovery. -->
+Expanded standalone CPU batches are removed, preserving useful pending grouping.
+Fragment preparation separates structural state from numeric updates, and static
+shaders omit certificate branches that cannot qualify. Existing sampled GPU passes
+carry actual selected identities; optional diagnostic omissions identify their
+feature families. CPU Software reduces raster/TEV work and adds bounded input
+provenance while retaining the unresolved nonfinite-input guard.
+
+The owner authorized existing-build and candidate Thor tests. A cold .50 baseline
+and lean Combo pair is complete; scene/condition analysis and integrated .51
+qualification are underway. No recovered frame rate is claimed before comparison.
+See [release notes](releases/0.1.51.md) and the
+[scoped integration review](UBERHAR_REVIEW_0.1.51.md).
+
+# Uberhar progress — 0.1.50 implementation
+
+<!-- CodexAstraLocal: Reconcile the completed multi-build assessment with the authorized implementation; publication and hardware qualification are separate. -->
+0.1.49 is published and its owner tests are complete. The broader .39–.49 review
+identified avoidable small-packet queue traffic, adaptive-history churn without
+useful trials, and independent shader/profiling costs. These are specific changes
+to investigate, not a claim that every slowdown has one cause.
+
+The .50 candidate restores conservative standalone CPU batch admission while
+retaining useful grouping, repairs bounded adaptive learning, removes redundant
+fragment sampling, and introduces narrowly qualified draw-invariant arithmetic.
+Independent restart controls distinguish actual optimizations from diagnostic
+cost. GPU timestamps default off; cheap cumulative counts remain available.
+Transfer and attachment diagnostics preserve current memory ownership and required
+visibility. No CPU occupancy target justifies artificial work or extra GPU readback.
+
+Previously isolated Calculated and CPU Software improvements are integrated and
+independently reviewed. Their host validation does not establish Thor game startup, graphics
+correctness or usable speed. Existing live-input and numerical failures remain
+explicit until corrected and tested. The performance goal remains correct cold
+rendering without skipped draws, sustained99%+ at2x first, then4x.
+
+<!-- CodexAstraLocal: Bind the current source review without claiming the pending release gates or hardware tests have passed. -->
+The [0.1.50 integration review](UBERHAR_REVIEW_0.1.50.md) records architectural
+contracts, separate cleanliness findings, affected compilation and validation limits.
+Calculated's primary-color specialization stays unavailable; Software's live-input
+failure remains explicit. Both modes include new functional changes and diagnostic
+coverage, rather than a claim that either is already playable on the Thor.
+
+The owner authorizes this candidate through completed checks and posted prerelease;
+root coordinates repairs and publication. Other agents stop at useful completion
+or automation waits. No automatic gameplay test or installation is authorized by
+this implementation session; owner hardware testing follows artifact qualification.
+
+## Earlier checkpoints
+
 # Uberhar progress — 0.1.48 CPU scheduling and failure correction
 
 <!-- CodexAstraLocal: Owner-approved .48 implementation supersedes historical build pauses below; separate measured .47 failures from unqualified candidate behavior. -->

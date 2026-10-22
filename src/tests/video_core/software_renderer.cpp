@@ -566,13 +566,15 @@ TEST_CASE("Software producer capsule preserves demanded inputs and carry limits"
     using Access = Pica::SoftwareProducerTestAccess;
     using Semantic = Pica::RasterizerRegs::VSOutputAttributes;
     using Stage = Pica::TexturingRegs::TevStageConfig;
-    const auto old_mode = Settings::values.uberhar_test_mode.GetValue();
+    // CodexAstraLocal: Select the retained internal backend directly after UI
+    // model retirement, then restore its prior effective API and JIT setting.
+    const auto old_api = Settings::values.graphics_api.GetValue();
     const auto old_jit = Settings::values.use_shader_jit.GetValue();
     struct Restore {
-        Settings::UberharTestMode mode; bool jit;
-        ~Restore() { Settings::values.uberhar_test_mode = mode; Settings::values.use_shader_jit = jit; }
-    } restore{old_mode, old_jit};
-    Settings::values.uberhar_test_mode = Settings::UberharTestMode::Software;
+        Settings::GraphicsAPI api; bool jit;
+        ~Restore() { Settings::values.graphics_api = api; Settings::values.use_shader_jit = jit; }
+    } restore{old_api, old_jit};
+    Settings::values.graphics_api = Settings::GraphicsAPI::Software;
     Settings::values.use_shader_jit = false;
     Core::System system;
     Memory::MemorySystem memory{system};
@@ -731,13 +733,15 @@ TEST_CASE("Software geometry capsule owns the producing emit and entry carry",
     using Op = nihstro::OpCode::Id;
     using Dest = nihstro::DestRegister;
     using Source = nihstro::SourceRegister;
-    const auto old_mode = Settings::values.uberhar_test_mode.GetValue();
+    // CodexAstraLocal: Select the retained internal backend directly after UI
+    // model retirement, then restore its prior effective API and JIT setting.
+    const auto old_api = Settings::values.graphics_api.GetValue();
     const auto old_jit = Settings::values.use_shader_jit.GetValue();
     struct Restore {
-        Settings::UberharTestMode mode; bool jit;
-        ~Restore() { Settings::values.uberhar_test_mode = mode; Settings::values.use_shader_jit = jit; }
-    } restore{old_mode, old_jit};
-    Settings::values.uberhar_test_mode = Settings::UberharTestMode::Software;
+        Settings::GraphicsAPI api; bool jit;
+        ~Restore() { Settings::values.graphics_api = api; Settings::values.use_shader_jit = jit; }
+    } restore{old_api, old_jit};
+    Settings::values.graphics_api = Settings::GraphicsAPI::Software;
     Settings::values.use_shader_jit = false;
     Core::System system;
     Memory::MemorySystem memory{system};
@@ -1009,12 +1013,14 @@ TEST_CASE("Software actual triangle budgets and alias admission", "[software]") 
     // CodexAstraLocal: Assign changes only each register field, preserving its
     // neighboring fields. Restore global controls; use actual tiled guest memory,
     // actual rasterization/TEV/depth and synchronous worker joins for each mode.
+    // CodexAstraLocal: Preserve the same internal software rasterizer contract
+    // without a retired mode enum; restore API and worker budget on every exit.
     const auto old_workers=Settings::values.software_renderer_workers.GetValue();
-    const auto old_mode=Settings::values.uberhar_test_mode.GetValue();
-    struct Restore { u32 workers; Settings::UberharTestMode mode; ~Restore() {
-        Settings::values.software_renderer_workers=workers; Settings::values.uberhar_test_mode=mode;
-    }} restore{old_workers,old_mode};
-    Settings::values.uberhar_test_mode=Settings::UberharTestMode::Software;
+    const auto old_api=Settings::values.graphics_api.GetValue();
+    struct Restore { u32 workers; Settings::GraphicsAPI api; ~Restore() {
+        Settings::values.software_renderer_workers=workers; Settings::values.graphics_api=api;
+    }} restore{old_workers,old_api};
+    Settings::values.graphics_api=Settings::GraphicsAPI::Software;
     Core::System system;
     Memory::MemorySystem memory{system};
     Pica::PicaCore pica{memory,{}};

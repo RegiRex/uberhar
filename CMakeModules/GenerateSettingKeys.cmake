@@ -50,6 +50,8 @@ foreach(KEY IN ITEMS
     "uberhar_native_full_fragments"
     "uberhar_cpu_prefix_overlap"
     "uberhar_parallel_texture_decode"
+    # CodexAstraLocal: Optional detailed worker census, independent of admission safety.
+    "uberhar_cpu_execution_census"
     # AstraEH: One mutually exclusive experimental renderer profile.
     "uberhar_test_mode"
     "async_presentation"

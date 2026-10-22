@@ -134,6 +134,16 @@ def main():
         'lookup-warms': (function.replace(lookup, ''), 'lookup', 'lookup-only'),
         'profile-alias': (function.replace(profile_token, ''), 'profile', 'profile mismatch'),
     }
+    # CodexAstraLocal: Both requested generator and compatibility must reach
+    # distinguishable endpoints; a permanent GLSL path cannot pass the new choice.
+    generator_guard = 'profile.vk_use_spirv_generator && !fs.UsesSpirvIncompatibleConfig()'
+    if function.count(generator_guard) != 1:
+        raise ValueError('Expected exactly one ordinary-compatible ready generator guard')
+    variants['ignored-generator'] = (function.replace(generator_guard, 'false'),
+                                     'generator', 'generator choice and compatibility')
+    variants['ignored-compatibility'] = (function.replace(generator_guard,
+                                        'profile.vk_use_spirv_generator'),
+                                        'incompatible', 'generator choice and compatibility')
     if args.static_tev:
         variants={name:(body+'\n'+static_function,selected,expected)
                   for name,(body,selected,expected) in variants.items()}
@@ -189,7 +199,7 @@ def main():
                     stdout=result.stdout, stderr=result.stderr)
         if expected == 'pass':
             passed = result.returncode == 0 and re.fullmatch(
-                (r'PASS checks=560 actual_thread_worker=true gpu_execution=false\n' if args.static_tev else r'PASS checks=498 actual_thread_worker=true gpu_execution=false\n'), result.stdout) is not None
+                (r'PASS checks=625 actual_thread_worker=true gpu_execution=false\n' if args.static_tev else r'PASS checks=563 actual_thread_worker=true gpu_execution=false\n'), result.stdout) is not None
         elif expected == 'abort':
             passed = result.returncode == -signal.SIGABRT
         else:

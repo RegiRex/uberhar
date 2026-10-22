@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """CodexAstraLocal: Execute exact pool methods against strict Vulkan endpoints.
 
-The extracted owner bindings/hints cover actual Calculated and shared graphics
+The extracted owner bindings/hints cover supported graphics, rectangle and utility
 consumers. Endpoint capacity/failure/completion is modeled; this gate neither
 executes a GPU draw nor qualifies Android exception delivery or title coverage.
 """
@@ -58,7 +58,7 @@ def owner_contracts(root):
     base = root / "src/video_core/renderer_vulkan"
     inputs = {}
     contracts = []
-    for filename in ("vk_compute_vertex.cpp", "vk_compute_raster.cpp", "vk_pipeline_cache.cpp",
+    for filename in ("vk_pipeline_cache.cpp",
                      "vk_blit_helper.cpp", "renderer_vulkan.cpp", "vk_compute_rect.cpp"):
         path = base / filename
         inputs[str(path.relative_to(root))] = digest(path)
@@ -72,15 +72,7 @@ def owner_contracts(root):
             body = body.replace("NumTex0", "1")
         contracts.append(f"{{ constexpr auto stage = vk::ShaderStageFlagBits::eCompute;\n"
                          f"{body}\nCheckContract({name}, {hint}, {expected}); }}")
-    add("vk_compute_vertex.cpp", "bindings", 4, 64,
-        r"make_unique<DescriptorHeap>\(instance, scheduler.GetMasterSemaphore\(\), bindings, 4\)")
-    for name in ("uniform_bindings", "texture_bindings", "raster_bindings"):
-        add("vk_compute_raster.cpp", name, 32, 128,
-            r"make_unique<DescriptorHeap>\(instance, scheduler.GetMasterSemaphore\(\),\s*" + name + r", 32\)")
-    transfer = owner_definition((base / "vk_compute_raster.cpp").read_text(),
-                                "void PrepareTransfer(")
-    add("vk_compute_raster.cpp", "bindings", 32, 128,
-        r"make_unique<DescriptorHeap>\(instance, scheduler.GetMasterSemaphore\(\),\s*bindings, 32\)", owner=transfer)
+    # CodexAstraLocal: Retired independent renderer heaps no longer own descriptor pools.
     for name, hint in (("BUFFER_BINDINGS", 32), ("TEXTURE_BINDINGS", 1024), ("UTILITY_BINDINGS", 32)):
         call = (r"DescriptorHeap\{instance, scheduler.GetMasterSemaphore\(\), TEXTURE_BINDINGS<1>\}"
                 if name == "TEXTURE_BINDINGS" else

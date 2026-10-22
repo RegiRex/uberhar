@@ -43,7 +43,7 @@ public:
         ~Permit() {
             if (!budget) return;
             --held_tokens;
-            budget->executing.fetch_sub(1, std::memory_order_relaxed);
+            if (budget->execution_census) budget->executing.fetch_sub(1, std::memory_order_relaxed);
             if (!progress) budget->state.fetch_sub(1, std::memory_order_release);
         }
         explicit operator bool() const { return budget != nullptr; }
@@ -51,10 +51,14 @@ public:
         friend class AuxiliaryBudget;
         Permit(AuxiliaryBudget* owner, bool is_progress) : budget{owner}, progress{is_progress} {
             ++held_tokens;
-            const auto active = budget->executing.fetch_add(1, std::memory_order_relaxed) + 1;
-            auto peak = budget->peak.load(std::memory_order_relaxed);
-            while (active > peak && !budget->peak.compare_exchange_weak(peak, active,
-                std::memory_order_relaxed, std::memory_order_relaxed)) {}
+            // CodexAstraLocal: Admission/nesting retain their real state contract.
+            // The optional qualification census alone pays shared peak atomics.
+            if (budget->execution_census) {
+                const auto active = budget->executing.fetch_add(1, std::memory_order_relaxed) + 1;
+                auto peak = budget->peak.load(std::memory_order_relaxed);
+                while (active > peak && !budget->peak.compare_exchange_weak(peak, active,
+                    std::memory_order_relaxed, std::memory_order_relaxed)) {}
+            }
         }
         AuxiliaryBudget* budget{};
         bool progress{};
@@ -84,11 +88,17 @@ public:
         AuxiliaryBudget* budget{};
     };
 
-    explicit AuxiliaryBudget(unsigned processors) : capacity{processors > 1 ? processors - 1 : 0} {}
+    // CodexAstraLocal: Default production work avoids diagnostic-only shared
+    // atomics; explicit host qualification can retain the exact execution census.
+    explicit AuxiliaryBudget(unsigned processors, bool census = false)
+        : capacity{processors > 1 ? processors - 1 : 0}, execution_census{census} {}
     AuxiliaryBudget(const AuxiliaryBudget&) = delete;
     AuxiliaryBudget& operator=(const AuxiliaryBudget&) = delete;
-    static AuxiliaryBudget& Global() {
-        static AuxiliaryBudget budget{AvailableProcessors()};
+    // CodexAstraLocal: First acquisition freezes optional census for the process.
+    // System initialization supplies the requested value before pools exist;
+    // later titles report requested/effective rather than racing live permits.
+    static AuxiliaryBudget& Global(bool requested_census = false) {
+        static AuxiliaryBudget budget{AvailableProcessors(), requested_census};
         return budget;
     }
     static bool HasPermit() { return held_tokens != 0; }
@@ -98,15 +108,18 @@ public:
     struct Statistics {
         unsigned capacity{}, active{}, peak{}, reservations{};
         std::uint64_t denials{};
+        bool execution_census{};
     };
     Statistics GetStatistics() const {
         return {capacity, Active(), peak.load(std::memory_order_relaxed),
             static_cast<unsigned>(state.load(std::memory_order_acquire) >> 32),
-            denials.load(std::memory_order_relaxed)};
+            denials.load(std::memory_order_relaxed), execution_census};
     }
     unsigned HelperCapacity() const {
         return capacity - static_cast<unsigned>(state.load(std::memory_order_acquire) >> 32);
     }
+    // CodexAstraLocal: With census disabled this gauge is unavailable, not zero
+    // execution. Admission relies solely on state, never this diagnostic value.
     unsigned Active() const {
         return executing.load(std::memory_order_relaxed);
     }
@@ -135,6 +148,7 @@ public:
 private:
     static constexpr std::uint64_t Reservation = std::uint64_t{1} << 32;
     const unsigned capacity;
+    const bool execution_census;
     // CodexAstraLocal: One CAS covers helper admission and coordinator capacity
     // registration, closing the registration/admission oversubscription race.
     std::atomic<std::uint64_t> state{};

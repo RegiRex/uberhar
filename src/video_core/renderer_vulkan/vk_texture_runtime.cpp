@@ -1198,11 +1198,11 @@ vk::PipelineStageFlags Surface::PipelineStageFlags() const noexcept {
 
     return vk::PipelineStageFlagBits::eTransfer | vk::PipelineStageFlagBits::eFragmentShader |
            (is_framebuffer ? attachment_flags : vk::PipelineStageFlagBits::eNone) |
-           (is_storage || is_compute ? vk::PipelineStageFlagBits::eComputeShader
+           (is_storage ? vk::PipelineStageFlagBits::eComputeShader
                        : vk::PipelineStageFlagBits::eNone);
 }
 
-vk::ImageView Surface::CopyImageView(ViewType view_type, bool compute) noexcept {
+vk::ImageView Surface::CopyImageView() noexcept {
     auto& copy_handle = handles[Type::Copy];
     vk::ImageLayout copy_layout = vk::ImageLayout::eGeneral;
     if (!copy_handle) {
@@ -1210,15 +1210,10 @@ vk::ImageView Surface::CopyImageView(ViewType view_type, bool compute) noexcept 
         if (texture_type == VideoCore::TextureType::CubeMap) {
             flags |= vk::ImageCreateFlagBits::eCubeCompatible;
         }
-        // CodexAstraLocal: A later typed shadow read may reuse this snapshot.
-        // Mirror the source allocation's compatible RGBA8/R32 view contract at
-        // creation instead of creating an invalid integer view on demand.
-        const bool mutable_format = traits.native == vk::Format::eR8G8B8A8Unorm &&
-                                    traits.storage_support;
-        if (mutable_format) flags |= vk::ImageCreateFlagBits::eMutableFormat;
+        // CodexAstraLocal: Graphics feedback needs only the sampled copy's original
+        // format; omit the format-list extension without mutable-format views.
         copy_handle.Create(GetScaledWidth(), GetScaledHeight(), levels, texture_type, traits.native,
-                           traits.usage, flags, traits.aspect,
-                           mutable_format && instance.IsImageFormatListSupported());
+                           traits.usage, flags, traits.aspect, false);
         copy_layout = vk::ImageLayout::eUndefined;
     }
 
@@ -1227,24 +1222,17 @@ vk::ImageView Surface::CopyImageView(ViewType view_type, bool compute) noexcept 
     const RecordParams params = {
         .aspect = Aspect(),
         .pipeline_flags = PipelineStageFlags(),
-        .src_access = AccessFlags(),
         .src_image = Image(),
         .dst_image = copy_handle.image,
     };
 
     scheduler.Record([params, copy_layout, levels = this->levels, width = GetScaledWidth(),
-                      height = GetScaledHeight(), layers = copy_handle.layers,
-                      compute](vk::CommandBuffer cmdbuf) {
-        // CodexAstraLocal: Ordered compute can read depth or shadow images and
-        // overwrite an earlier snapshot. All preceding users and every copied
-        // aspect participate; ordinary graphics preserves its existing stages.
-        const auto stages = compute ? vk::PipelineStageFlags{vk::PipelineStageFlagBits::eAllCommands}
-                                    : params.pipeline_flags;
-        const auto source_access = compute ? params.src_access :
-            vk::AccessFlags{vk::AccessFlagBits::eColorAttachmentWrite};
-        const auto sample_access = compute ?
-            vk::AccessFlags{vk::AccessFlagBits::eMemoryRead | vk::AccessFlagBits::eMemoryWrite} :
-            vk::AccessFlags{vk::AccessFlagBits::eShaderRead};
+                      height = GetScaledHeight()](vk::CommandBuffer cmdbuf) {
+        // CodexAstraLocal: Preserve the original graphics feedback barriers and
+        // sampled-color access after independent compute feedback retirement.
+        const auto stages = params.pipeline_flags;
+        const vk::AccessFlags source_access = vk::AccessFlagBits::eColorAttachmentWrite;
+        const vk::AccessFlags sample_access = vk::AccessFlagBits::eShaderRead;
         std::array pre_barriers = {
             vk::ImageMemoryBarrier{
                 .srcAccessMask = source_access,
@@ -1292,32 +1280,24 @@ vk::ImageView Surface::CopyImageView(ViewType view_type, bool compute) noexcept 
 
         boost::container::small_vector<vk::ImageCopy, 3> image_copies;
         for (u32 level = 0; level < levels; level++) {
-            // CodexAstraLocal: Vulkan image copies select one aspect at a time;
-            // depth/stencil feedback retains both, while its sampled view can
-            // select only depth. Copy every actual cube layer when applicable.
-            for (const auto aspect : {vk::ImageAspectFlagBits::eColor,
-                                      vk::ImageAspectFlagBits::eDepth,
-                                      vk::ImageAspectFlagBits::eStencil}) {
-                if (compute ? !(params.aspect & aspect) : aspect != vk::ImageAspectFlagBits::eColor)
-                    continue;
-                image_copies.push_back(vk::ImageCopy{
-                    .srcSubresource{
-                        .aspectMask = aspect,
-                        .mipLevel = level,
-                        .baseArrayLayer = 0,
-                        .layerCount = compute ? layers : 1,
-                    },
-                    .srcOffset = {0, 0, 0},
-                    .dstSubresource{
-                        .aspectMask = aspect,
-                        .mipLevel = level,
-                        .baseArrayLayer = 0,
-                        .layerCount = compute ? layers : 1,
-                    },
-                    .dstOffset = {0, 0, 0},
-                    .extent = {std::max(1u, width >> level), std::max(1u, height >> level), 1},
-                });
-            }
+            // CodexAstraLocal: Preserve supported graphics color feedback copy coverage.
+            image_copies.push_back(vk::ImageCopy{
+                .srcSubresource{
+                    .aspectMask = vk::ImageAspectFlagBits::eColor,
+                    .mipLevel = level,
+                    .baseArrayLayer = 0,
+                    .layerCount = 1,
+                },
+                .srcOffset = {0, 0, 0},
+                .dstSubresource{
+                    .aspectMask = vk::ImageAspectFlagBits::eColor,
+                    .mipLevel = level,
+                    .baseArrayLayer = 0,
+                    .layerCount = 1,
+                },
+                .dstOffset = {0, 0, 0},
+                .extent = {std::max(1u, width >> level), std::max(1u, height >> level), 1},
+            });
         }
 
         cmdbuf.pipelineBarrier(stages, vk::PipelineStageFlagBits::eTransfer,
@@ -1330,7 +1310,7 @@ vk::ImageView Surface::CopyImageView(ViewType view_type, bool compute) noexcept 
                                vk::DependencyFlagBits::eByRegion, {}, {}, post_barriers);
     });
 
-    return ImageView(view_type, Type::Copy);
+    return ImageView(ViewType::Sample, Type::Copy);
 }
 
 vk::ImageView Surface::ImageView(ViewType view_type, Type type) noexcept {

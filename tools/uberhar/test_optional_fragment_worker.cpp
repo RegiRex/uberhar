@@ -31,6 +31,8 @@ using Pica::Shader::UserConfig;
 namespace Probe {
 unsigned checks{};
 std::atomic<unsigned> generate_calls{}, compile_calls{}, module_calls{}, log_calls{};
+// CodexAstraLocal: Distinct recording endpoints make generator selection observable.
+std::atomic<unsigned> glsl_calls{}, spirv_calls{};
 std::atomic<unsigned> shader_births{}, shader_deaths{};
 std::atomic<int> failure{};
 std::atomic<bool> logger_throws{}, optimizer_disabled{};
@@ -53,6 +55,7 @@ void Require(bool condition, const char* message) {
 void Reset() {
     failure = 0; logger_throws = false; generate_calls = 0; compile_calls = 0;
     module_calls = 0; log_calls = 0; optimizer_disabled = true;
+    glsl_calls = 0; spirv_calls = 0;
     std::lock_guard lock(mutex);
     pause = entered = released = false;
     observed_config.reset(); observed_profile.reset();
@@ -103,11 +106,11 @@ void FmtLogMessageImpl(Class, Level, const char*, unsigned, const char*, fmt::st
 #undef LOG_ERROR
 #define LOG_ERROR(...) ::Probe::Log()
 
-namespace Pica::Shader::Generator::GLSL {
+namespace Probe {
 // CodexAstraLocal: Record the immutable generator inputs before returning a tiny
-// sentinel source. The independent selection/ABI suites exercise real generation.
-std::string GenerateFragmentShader(const FSConfig& config, const UserConfig&,
-                                  const Profile& profile) {
+// sentinel source. Independent ABI suites exercise GLSL generation and its
+// compiled SPIR-V, not direct SPIRV::GenerateFragmentShader module/link/pixels.
+void RecordGeneration(const FSConfig& config, const Profile& profile) {
     ++Probe::generate_calls;
     {
         std::unique_lock lock(Probe::mutex);
@@ -121,7 +124,26 @@ std::string GenerateFragmentShader(const FSConfig& config, const UserConfig&,
     }
     if (Probe::failure == 5) throw std::runtime_error("generator standard");
     if (Probe::failure == 6) throw 612;
+}
+}
+
+namespace Pica::Shader::Generator::GLSL {
+std::string GenerateFragmentShader(const FSConfig& config, const UserConfig&,
+                                  const Profile& profile) {
+    ++Probe::glsl_calls;
+    Probe::RecordGeneration(config, profile);
     return "private shader sentinel";
+}
+}
+
+// CodexAstraLocal: This is a distinct direct-generator endpoint, not a call to
+// GLSL. Empty/throwing generation must retain the same terminal fallback policy.
+namespace Pica::Shader::Generator::SPIRV {
+std::vector<u32> GenerateFragmentShader(const FSConfig& config, const Profile& profile) {
+    ++Probe::spirv_calls;
+    Probe::RecordGeneration(config, profile);
+    if (Probe::failure == 9) return {};
+    return {0x07230203, 0x535056};
 }
 }
 
@@ -140,6 +162,7 @@ std::string GenerateStaticTevFragmentShader(const FSConfig& family,const UserCon
 
 namespace Vulkan {
 namespace GLSL = Pica::Shader::Generator::GLSL;
+namespace SPIRV = Pica::Shader::Generator::SPIRV;
 class Instance { public: vk::Device GetDevice() const { return {}; } };
 
 // CodexAstraLocal: Extract the real Shader completion/failed-state declaration;
@@ -236,8 +259,11 @@ void Demand(Fixture& fixture, const FSConfig& config, unsigned count = 16,
 
 // CodexAstraLocal: A paused real task proves pending lookup is nonblocking and
 // queued config/profile are owned snapshots despite producer mutation/rehash.
-void SnapshotAndPending() {
+void SnapshotAndPending(bool direct = false) {
     Probe::Reset(); Fixture f; auto config = Config(4); const auto original = config;
+    // CodexAstraLocal: Hold either generator on the real worker and mutate its
+    // producer settings; both must finish from the immutable queued snapshot.
+    f.parent.profile.vk_use_spirv_generator = direct;
     const auto profile = f.parent.profile;
     { std::lock_guard lock(Probe::mutex); Probe::pause = true; }
     Demand(f, config, 15);
@@ -255,11 +281,15 @@ void SnapshotAndPending() {
     f.cache.ready_fragments.reserve(256);
     config.texture.tev_stages[0].sources_raw ^= 1;
     f.parent.profile.enable_accurate_mul = true;
+    // CodexAstraLocal: The queued generator must not follow a later UI/profile change.
+    f.parent.profile.vk_use_spirv_generator = !direct;
     Probe::Release(); f.parent.shader_workers.WaitForRequests();
     Require(shader->IsDone() && !shader->HasFailed() && shader->Handle(), "successful module published");
     Require(*Probe::observed_config == original && *Probe::observed_profile == profile,
             "actual worker must consume immutable config/profile");
-    Require(!Probe::optimizer_disabled, "optional optimizer must remain enabled");
+    Require(direct ? Probe::compile_calls == 0 && Probe::spirv_calls == 1
+                   : !Probe::optimizer_disabled,
+            "optional optimizer applies only to GLSL; direct SPIRV bypasses frontend");
     Require(!f.cache.UseReadyFragmentShader(original, {}, false), "profile mismatch must reject");
     f.parent.profile = profile;
     auto result = f.cache.UseReadyFragmentShader(original, {}, false);
@@ -270,6 +300,44 @@ void SnapshotAndPending() {
     entry->key.config = original;
     UserConfig custom{}; custom.raw = 1;
     Require(!f.cache.UseReadyFragmentShader(original, custom), "noncacheable user cannot borrow ready owner");
+}
+
+// CodexAstraLocal: Exercise the existing public choice and ordinary compatibility
+// guard independently, without changing ready admission or testing driver pixels.
+void GeneratorChoice(bool requested, bool incompatible) {
+    Probe::Reset(); Fixture f; auto config = Config(80);
+    f.parent.profile.vk_use_spirv_generator = requested;
+    config.framebuffer.shadow_rendering.Assign(incompatible);
+    Demand(f, config); f.parent.shader_workers.WaitForRequests();
+    const bool direct = requested && !incompatible;
+    Require(Probe::spirv_calls == direct && Probe::glsl_calls == !direct,
+            "generator choice and compatibility guard select exact endpoint");
+    Require(Probe::compile_calls == !direct && Probe::module_calls == 1,
+            "direct SPIRV bypasses GLSL frontend only");
+    Require(f.cache.ready_fragment_spirv_builds == direct &&
+            f.cache.ready_fragment_glsl_builds == !direct,
+            "effective generator attempt diagnostics match actual endpoint");
+    Require(f.cache.UseReadyFragmentShader(config, {}, false).has_value(),
+            "selected generator publishes ready module");
+    f.parent.profile.vk_use_spirv_generator = !requested;
+    Require(!f.cache.UseReadyFragmentShader(config, {}, false),
+            "generator profile mismatch cannot reuse prior module");
+}
+
+void DirectFailure(unsigned failure) {
+    Probe::Reset(); Fixture f; const auto config = Config(81);
+    f.parent.profile.vk_use_spirv_generator = true;
+    Probe::failure = failure;
+    Demand(f, config); f.parent.shader_workers.WaitForRequests();
+    const auto& entry = *f.cache.ready_fragments.at(config.Hash());
+    Require(entry.shader.IsDone() && entry.shader.HasFailed(),
+            "direct generator failure publishes terminal fallback");
+    Require(Probe::spirv_calls == 1 && Probe::glsl_calls == 0 && Probe::compile_calls == 0,
+            "direct failure reached SPIRV endpoint without GLSL retry");
+    Require(Probe::module_calls == (failure == 4 || failure == 7 || failure == 8),
+            "direct failure reached intended module boundary");
+    Require(!f.cache.UseReadyFragmentShader(config, {}, false),
+            "failed direct module cannot be borrowed");
 }
 
 // CodexAstraLocal: Lookup-only must not silently warm demand. Module capacity is
@@ -402,8 +470,14 @@ int main(int argc, char** argv) {
         else if (which == "queue") QueueFailure();
         else if (which == "lookup") LookupAndCapacity();
         else if (which == "profile") SnapshotAndPending();
+        else if (which == "generator") GeneratorChoice(true, false);
+        else if (which == "incompatible") GeneratorChoice(true, true);
         else {
             SnapshotAndPending(); LookupAndCapacity(); QueueFailure(); Allocations(); BoundedLogging();
+            SnapshotAndPending(true);
+            for (bool requested : {false, true})
+                for (bool incompatible : {false, true}) GeneratorChoice(requested, incompatible);
+            for (unsigned failure : {4U, 5U, 6U, 7U, 8U, 9U}) DirectFailure(failure);
 #ifdef UBERHAR_STATIC_TEV_WORKER
             PartialSnapshot(); PartialLimits(); PartialFailures(); SharedLane();
 #endif

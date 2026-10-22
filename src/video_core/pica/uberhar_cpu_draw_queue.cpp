@@ -5,9 +5,11 @@
 
 #include <atomic>
 #include <condition_variable>
+#include <chrono> // CodexAstraLocal: Sparse owner-only CPU feature costs.
 #include <cstring>
 #include <exception>
 #include <limits>
+#include <system_error> // CodexAstraLocal: Optional worker startup keeps serial progress.
 #include <mutex>
 #include <thread>
 #include <vector>
@@ -21,6 +23,23 @@ using Environment = Common::Uberhar::ParallelFloatEnvironment;
 // CodexAstraLocal: Charge the prior smallest admitted draw once per grouped
 // packet. The proxy bounds expansion; it does not predict a device speedup.
 constexpr u64 GroupWorkUnit = 96 * 35;
+
+// CodexAstraLocal TEST-ONLY LOG: Sparse disjoint feature spans never count as
+// saved time or GPU execution; remove after CPU-only .48 qualification. No shared atomics.
+struct ScopedCost {
+    bool enabled; u64& samples; u64& nanoseconds;
+    std::chrono::steady_clock::time_point start;
+    ScopedCost(bool measure, u64& count, u64& total)
+        : enabled{measure}, samples{count}, nanoseconds{total},
+          start{measure ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{}} {}
+    ~ScopedCost() {
+        if (enabled) {
+            ++samples;
+            nanoseconds += std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now() - start).count();
+        }
+    }
+};
 
 // CodexAstraLocal: Credit follows the last CPU/renderer reference, not merely
 // completion. Canceled command captures release safely without waiting, and
@@ -163,6 +182,7 @@ struct CpuDrawExecutor::Impl {
         u16 booleans{};
         bool valid{}, accepted{};
         u32 minimum_arithmetic{};
+        u64 identity{}; // CodexAstraLocal: Saturating exact proof generation.
     };
     // CodexAstraLocal: This new coordinator owns the unchanged synchronous pool.
     // It can run without the emulator/Vulkan owners, closing the Record/Map/wait
@@ -170,9 +190,13 @@ struct CpuDrawExecutor::Impl {
     // CodexAstraLocal: Capacity reservation guarantees coordinator progress but
     // holds no active permit while idle or joining. Without a reserved lane,
     // Submit keeps its existing synchronous forward-progress path.
-    Common::Uberhar::AuxiliaryBudget::ProgressLane progress_lane;
-    Common::Uberhar::ParallelWork pool;
-    const bool asynchronous;
+    // CodexAstraLocal: Rejected policy lookups create no helpers or reserved lane;
+    // the first accepted packet starts progress before it becomes worker-visible.
+    std::optional<Common::Uberhar::AuxiliaryBudget::ProgressLane> progress_lane;
+    std::unique_ptr<Common::Uberhar::ParallelWork> pool;
+    bool asynchronous{}, start_attempted{};
+    const unsigned processors;
+    const bool sampled_costs;
     const std::size_t max_packets, max_bytes;
     void (*worker_start)();
     std::shared_ptr<Budget> budget{std::make_shared<Budget>()};
@@ -189,15 +213,21 @@ struct CpuDrawExecutor::Impl {
     std::exception_ptr terminal;
     std::thread coordinator;
     Statistics statistics;
+    // CodexAstraLocal: Refusal/proof accounting has only one owner writer and
+    // cannot contend with coordinator completion; snapshot merges under its lock.
+    Statistics owner_statistics;
     std::array<Effect, 16> effects{};
     u32 next_effect{};
+    mutable std::size_t last_effect{};
+    // CodexAstraLocal: A slot token avoids another shared ownership copy but
+    // validates generation, code owner, entry and Boolean state before reuse.
+    struct Approval { std::size_t slot{}; u64 generation{}; };
+    std::optional<Approval> approved_effect;
+    u64 effect_generation{}, eligibility_calls{}, proof_calls{};
 
-    Impl(unsigned processors, std::size_t packets, std::size_t bytes, void (*start)())
-        : progress_lane{processors > 1 ? Common::Uberhar::AuxiliaryBudget::Global().ReserveProgress()
-                                       : Common::Uberhar::AuxiliaryBudget::ProgressLane{}},
-          pool{std::max(1U, processors > 1 ? processors - 1 : 1U), start,
-               Common::Uberhar::AuxiliaryBudget::Global(), progress_lane ? &progress_lane : nullptr},
-          asynchronous{processors > 1 && bool(progress_lane)}, max_packets{packets}, max_bytes{bytes}, worker_start{start} {
+    Impl(unsigned available, std::size_t packets, std::size_t bytes, void (*start)(), bool costs)
+        : processors{available}, sampled_costs{costs}, max_packets{packets},
+          max_bytes{bytes}, worker_start{start} {
         if (!max_packets || max_packets > std::numeric_limits<u32>::max() || !max_bytes)
             throw std::invalid_argument{"invalid CPU draw queue limits"};
         // CodexAstraLocal: Both queues reserve their fixed credit cap before the
@@ -205,8 +235,31 @@ struct CpuDrawExecutor::Impl {
         pending.reserve(max_packets);
         wave.reserve(max_packets);
         grains.reserve(max_packets);
-        statistics.scheduling = pool.Scheduling();
-        if (asynchronous) coordinator = std::thread{[this] { Loop(); }};
+    }
+    // CodexAstraLocal: All allocations and optional thread startup precede packet
+    // publication. Exhausted progress capacity or startup failure stays serial.
+    void StartProgress() {
+        if (start_attempted) return;
+        start_attempted = true;
+        ++owner_statistics.start_requests;
+        if (processors < 2) { ++owner_statistics.start_refused; return; }
+        progress_lane.emplace(Common::Uberhar::AuxiliaryBudget::Global().ReserveProgress());
+        if (!*progress_lane) { progress_lane.reset(); ++owner_statistics.start_refused; return; }
+        try {
+            pool = std::make_unique<Common::Uberhar::ParallelWork>(
+                std::max(1U, processors - 1), worker_start,
+                Common::Uberhar::AuxiliaryBudget::Global(), &*progress_lane);
+            statistics.scheduling = pool->Scheduling();
+            asynchronous = true;
+            coordinator = std::thread{[this] { Loop(); }};
+            ++owner_statistics.async_starts;
+        } catch (const std::system_error&) {
+            asynchronous = false;
+            pool.reset(); progress_lane.reset(); ++owner_statistics.start_failed;
+        } catch (...) {
+            asynchronous = false;
+            pool.reset(); progress_lane.reset(); throw;
+        }
     }
     ~Impl() {
         {
@@ -216,15 +269,28 @@ struct CpuDrawExecutor::Impl {
         if (coordinator.joinable()) coordinator.join();
     }
 
+    // CodexAstraLocal: Exact retained leases prevent code-address reuse from
+    // aliasing another program; the common last-hit layout skips a 16-slot scan.
+    static bool Matches(const Effect& effect, const ShaderRunLease& lease, u16 booleans) {
+        return effect.valid && effect.lease.OwnerIdentity() == lease.OwnerIdentity() &&
+            effect.lease.EntryPoint() == lease.EntryPoint() && effect.booleans == booleans;
+    }
+    const Effect* FindEffect(const ShaderRunLease& lease, u16 booleans) const {
+        if (Matches(effects[last_effect], lease, booleans)) return &effects[last_effect];
+        for (std::size_t i = 0; i < effects.size(); ++i) {
+            if (Matches(effects[i], lease, booleans)) {
+                last_effect = i; return &effects[i];
+            }
+        }
+        return nullptr;
+    }
     const Effect& Effects(const ShaderRunLease& lease, u16 booleans) {
         // CodexAstraLocal: Immutable lease ownership prevents address ABA. The
         // same graph first proves acyclic, valid, effect-free shader flow; only
         // its later per-vertex carry refusals are irrelevant to whole-draw work.
-        for (const auto& effect : effects) {
-            if (effect.valid && effect.lease.OwnerIdentity() == lease.OwnerIdentity() &&
-                effect.lease.EntryPoint() == lease.EntryPoint() && effect.booleans == booleans) {
-                return effect;
-            }
+        if (const auto* effect = FindEffect(lease, booleans)) {
+            ++owner_statistics.effect_hits;
+            return *effect;
         }
         ParallelVertexWork work;
         const auto proof = AnalyzeParallelVertex(lease.Program(), lease.Swizzles(), lease.EntryPoint(),
@@ -236,8 +302,14 @@ struct CpuDrawExecutor::Impl {
         case ParallelVertexStatus::OutputCarry: accepted = true; break;
         default: break;
         }
-        auto& cached = effects[next_effect++ % effects.size()];
-        cached = {lease, booleans, true, accepted && work.valid, work.minimum_arithmetic};
+        last_effect = next_effect++ % effects.size();
+        auto& cached = effects[last_effect];
+        // CodexAstraLocal: Exhaustion disables token reuse instead of wrapping
+        // a generation into an approval for an overwritten cache slot.
+        const u64 generation = effect_generation == std::numeric_limits<u64>::max()
+            ? 0 : ++effect_generation;
+        cached = {lease, booleans, true, accepted && work.valid, work.minimum_arithmetic, generation};
+        ++owner_statistics.effect_builds;
         return cached;
     }
 
@@ -251,6 +323,28 @@ struct CpuDrawExecutor::Impl {
     bool CanJoinPending(u64 work) const {
         std::lock_guard lock{mutex};
         return PendingGroupFits(work);
+    }
+
+    // CodexAstraLocal: Keep .48's shape/arithmetic/pending-work eligibility
+    // unchanged. This shared owner path only reuses its exact immutable proof.
+    bool AllowsEffect(const Effect* effect, u32 count) {
+        ScopedCost cost{sampled_costs && (++eligibility_calls % 1024 == 0),
+                        owner_statistics.eligibility_samples, owner_statistics.eligibility_ns};
+        approved_effect.reset();
+        bool accepted{}, work_refused{};
+        if (effect && count && count <= 65535 && count % 3 == 0 && effect->accepted) {
+            accepted = effect->minimum_arithmetic >= 35 &&
+                (count >= 96 || CanJoinPending(u64(count) * effect->minimum_arithmetic));
+            work_refused = !accepted;
+        }
+        if (accepted) {
+            if (effect->identity) approved_effect = Approval{
+                static_cast<std::size_t>(effect - effects.data()), effect->identity};
+        } else {
+            ++owner_statistics.captures; ++owner_statistics.refused; ++owner_statistics.early_refused;
+            owner_statistics.work_refused += work_refused;
+        }
+        return accepted;
     }
 
     void Loop() noexcept {
@@ -286,7 +380,7 @@ struct CpuDrawExecutor::Impl {
                     else grains.back().end = static_cast<u32>(wave.size());
                 }
                 const auto coordinator_id = std::this_thread::get_id();
-                const auto result = pool.Run(static_cast<u32>(grains.size()), 1,
+                const auto result = pool->Run(static_cast<u32>(grains.size()), 1,
                     [&](u32 first, u32 end) {
                         const bool on_coordinator = std::this_thread::get_id() == coordinator_id;
                         for (u32 n = first; n < end; ++n) {
@@ -308,7 +402,7 @@ struct CpuDrawExecutor::Impl {
                     statistics.grouped_waves += wave.size() > 1;
                     statistics.work_grains += grains.size();
                     statistics.peak_threads = std::max(statistics.peak_threads, result.working_threads);
-                    statistics.scheduling = pool.Scheduling();
+                    statistics.scheduling = pool->Scheduling();
                 }
                 wave.clear();
                 {
@@ -350,8 +444,8 @@ struct CpuDrawExecutor::Impl {
 };
 
 CpuDrawExecutor::CpuDrawExecutor(unsigned processors, std::size_t packets, std::size_t bytes,
-                               void (*start)())
-    : impl{std::make_unique<Impl>(processors, packets, bytes, start)} {}
+                               void (*start)(), bool sampled_costs)
+    : impl{std::make_unique<Impl>(processors, packets, bytes, start, sampled_costs)} {}
 CpuDrawExecutor::~CpuDrawExecutor() = default;
 bool CpuDrawExecutor::HasPendingSeed() const noexcept {
     return impl->pending_seed_hint.load(std::memory_order_relaxed);
@@ -359,20 +453,27 @@ bool CpuDrawExecutor::HasPendingSeed() const noexcept {
 
 bool CpuDrawExecutor::AllowsShaderWork(const ShaderRunLease& lease, u16 booleans, u32 count) {
     impl->capture_at_capacity = false;
-    bool accepted{}, work_refused{};
-    if (lease && count && count <= 65535 && count % 3 == 0) {
-        const auto& effect = impl->Effects(lease, booleans);
-        if (effect.accepted) {
-            accepted = effect.minimum_arithmetic >= 35 &&
-                (count >= 96 || impl->CanJoinPending(u64(count) * effect.minimum_arithmetic));
-            work_refused = !accepted;
-        }
+    // CodexAstraLocal: Invalid shapes retain .48's no-analysis refusal path.
+    const bool shape = count && count <= 65535 && count % 3 == 0;
+    return impl->AllowsEffect(lease && shape ? &impl->Effects(lease, booleans) : nullptr, count);
+}
+std::optional<bool> CpuDrawExecutor::CachedShaderWork(const ShaderRunLease& lease, u16 booleans,
+                                                   u32 count) {
+    // CodexAstraLocal: Unknown code preserves full setup; no proof is created or
+    // guest pointer borrowed by the early cached-only lookup.
+    if (!lease) return std::nullopt;
+    ++impl->owner_statistics.cached_checks;
+    const Impl::Effect* effect{};
+    {
+        ScopedCost lookup{impl->sampled_costs && (impl->owner_statistics.cached_checks % 1024 == 0),
+                          impl->owner_statistics.lookup_samples, impl->owner_statistics.lookup_ns};
+        effect = impl->FindEffect(lease, booleans);
     }
-    if (!accepted) {
-        std::lock_guard lock{impl->mutex};
-        ++impl->statistics.captures; ++impl->statistics.refused; ++impl->statistics.early_refused;
-        impl->statistics.work_refused += work_refused;
-    }
+    if (!effect) { ++impl->owner_statistics.cached_misses; return std::nullopt; }
+    ++impl->owner_statistics.cached_hits;
+    impl->capture_at_capacity = false;
+    const bool accepted = impl->AllowsEffect(effect, count);
+    impl->owner_statistics.cached_negative += !accepted;
     return accepted;
 }
 
@@ -380,12 +481,11 @@ std::shared_ptr<CpuDrawPacket> CpuDrawExecutor::Capture(const CpuDrawCapture& so
                                                       CpuDrawHardwareWriter writer, u32 stride) {
     const auto refuse = [&](bool capacity = false, bool work = false) -> std::shared_ptr<CpuDrawPacket> {
         impl->capture_at_capacity = capacity;
-        std::lock_guard lock{impl->mutex}; ++impl->statistics.refused;
-        impl->statistics.work_refused += work; return {};
+        // CodexAstraLocal: This refusal path has no coordinator writer.
+        ++impl->owner_statistics.refused;
+        impl->owner_statistics.work_refused += work; return {};
     };
-    {
-        std::lock_guard lock{impl->mutex}; ++impl->statistics.captures;
-    }
+    ++impl->owner_statistics.captures; // CodexAstraLocal: Same emulation-owner counter.
     impl->capture_at_capacity = false;
     // CodexAstraLocal: Complete nonempty List/Shader triples are the first seam.
     // Root's adapter additionally establishes backend/observer/memory/renderer
@@ -399,7 +499,27 @@ std::shared_ptr<CpuDrawPacket> CpuDrawExecutor::Capture(const CpuDrawCapture& so
             u64(source.count) * source.index_width > source.index_bytes.size())) ||
         (!source.indexed && u64(source.base_vertex) + source.count - 1 > std::numeric_limits<u32>::max()))
         return refuse();
-    const auto& effect = impl->Effects(source.shader_lease, ParallelVertexBooleanUniforms(source.uniforms));
+    // CodexAstraLocal: Reuse only the accepted immutable same-code/entry/boolean
+    // proof; standalone captures and changed keys still perform normal lookup.
+    const auto booleans = ParallelVertexBooleanUniforms(source.uniforms);
+    const Impl::Effect* selected_effect{};
+    {
+        ScopedCost proof{impl->sampled_costs && (++impl->proof_calls % 1024 == 0),
+                         impl->owner_statistics.proof_samples, impl->owner_statistics.proof_ns};
+        if (impl->approved_effect) {
+            const auto& token = *impl->approved_effect;
+            const auto& candidate = impl->effects[token.slot];
+            if (token.generation && candidate.identity == token.generation &&
+                Impl::Matches(candidate, source.shader_lease, booleans))
+                selected_effect = &candidate;
+            else ++impl->owner_statistics.token_mismatches;
+        } else ++impl->owner_statistics.token_missing;
+        impl->owner_statistics.effect_reuses += selected_effect != nullptr;
+        if (!selected_effect) selected_effect = &impl->Effects(source.shader_lease, booleans);
+    }
+    // CodexAstraLocal: No cache mutation follows before the packet captures its
+    // own source lease; no mutable cache reference crosses publication.
+    const auto& effect = *selected_effect;
     if (!effect.accepted)
         return refuse();
     // CodexAstraLocal: The finite complete-path control lost on tiny/light
@@ -446,7 +566,7 @@ std::shared_ptr<CpuDrawPacket> CpuDrawExecutor::Capture(const CpuDrawCapture& so
     // CodexAstraLocal: Dense snapshots still charge unused sparse holes. Bound
     // their raw copy volume by the largest tested qualifying input layout.
     if (raw_size > u64(misses) * 70) {
-        { std::lock_guard lock{impl->mutex}; ++impl->statistics.copy_refused; }
+        ++impl->owner_statistics.copy_refused; // CodexAstraLocal: Owner-only refusal.
         return refuse(false, true);
     }
     const u64 footprint = sizeof(CpuDrawPacket) + sizeof(CpuDrawPacket::Impl) + sizeof(NativeVertexPlan) +
@@ -492,7 +612,7 @@ std::shared_ptr<CpuDrawPacket> CpuDrawExecutor::Capture(const CpuDrawCapture& so
         [&](PAddr address) { return std::span<const u8>{packet->raw}.subspan(address); }, true)
         != NativeVertexInputPlan::Result::Ready) return refuse();
     if (packet->requires_group) {
-        std::lock_guard lock{impl->mutex}; ++impl->statistics.group_candidates;
+        ++impl->owner_statistics.group_candidates; // CodexAstraLocal: Owner-only capture.
     }
     return std::shared_ptr<CpuDrawPacket>{new CpuDrawPacket{std::move(packet)}};
 }
@@ -501,6 +621,9 @@ bool CpuDrawExecutor::LastCaptureAtCapacity() const noexcept { return impl->capt
 
 bool CpuDrawExecutor::Submit(const std::shared_ptr<CpuDrawPacket>& packet) {
     if (!packet || packet->impl->credit->budget != impl->budget) return false;
+    // CodexAstraLocal: Accepted owned work alone pays startup; no task is visible
+    // before optional startup or synchronous fallback is fully established.
+    impl->StartProgress();
     {
         std::lock_guard lock{impl->mutex};
         if (impl->stopping || impl->terminal || packet->impl->submitted.load(std::memory_order_relaxed)) return false;
@@ -508,7 +631,7 @@ bool CpuDrawExecutor::Submit(const std::shared_ptr<CpuDrawPacket>& packet) {
         // exchange during capture cannot leave an underqualified tiny packet
         // published alone; the caller still owns its untouched serial fallback.
         if (packet->impl->requires_group && !impl->PendingGroupFits(packet->impl->guaranteed_work)) {
-            ++impl->statistics.group_lost; ++impl->statistics.refused; ++impl->statistics.work_refused;
+            ++impl->statistics.group_lost; ++impl->owner_statistics.refused; ++impl->owner_statistics.work_refused;
             return false;
         }
         if (impl->asynchronous) {
@@ -545,6 +668,22 @@ void CpuDrawExecutor::Drain() {
 CpuDrawExecutor::Statistics CpuDrawExecutor::GetStatistics() const {
     std::scoped_lock lock{impl->mutex, impl->budget->mutex};
     auto result = impl->statistics;
+    // CodexAstraLocal: The reporting owner merges its uncontended counters;
+    // asynchronous publication and resident-credit fields retain their locks.
+    const auto& owner = impl->owner_statistics;
+    result.captures = owner.captures; result.refused = owner.refused;
+    result.work_refused = owner.work_refused; result.early_refused = owner.early_refused;
+    result.group_candidates = owner.group_candidates; result.copy_refused = owner.copy_refused;
+    result.cached_checks = owner.cached_checks; result.cached_hits = owner.cached_hits;
+    result.cached_misses = owner.cached_misses; result.cached_negative = owner.cached_negative;
+    result.effect_hits = owner.effect_hits; result.effect_builds = owner.effect_builds;
+    result.effect_reuses = owner.effect_reuses;
+    result.token_missing = owner.token_missing; result.token_mismatches = owner.token_mismatches;
+    result.start_requests = owner.start_requests; result.start_refused = owner.start_refused;
+    result.start_failed = owner.start_failed; result.async_starts = owner.async_starts;
+    result.lookup_samples = owner.lookup_samples; result.lookup_ns = owner.lookup_ns;
+    result.eligibility_samples = owner.eligibility_samples; result.eligibility_ns = owner.eligibility_ns;
+    result.proof_samples = owner.proof_samples; result.proof_ns = owner.proof_ns;
     result.resident_packets = impl->budget->packets; result.resident_bytes = impl->budget->bytes;
     return result;
 }

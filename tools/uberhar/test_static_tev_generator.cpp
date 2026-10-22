@@ -18,6 +18,58 @@ void FmtLogMessageImpl(Class, Level level, const char*, unsigned int, const char
 }
 }
 
+// CodexAstraLocal: G1 is confined to cacheable full Vulkan GLSL. The existing
+// pixel corpus checks formulas; these directed source witnesses ensure the
+// intended dead work disappears without pruning the other generation domains.
+void CheckFullPruning() {
+    using namespace Pica::Shader;
+    using namespace Pica::Shader::Generator::GLSL;
+    Pica::RegsInternal regs{};
+    regs.lighting.disable.Assign(0);
+    regs.framebuffer.output_merger.alphablend_enable.Assign(1);
+    FSConfig config{regs};
+    config.framebuffer.alpha_test_func.Assign(Pica::FramebufferRegs::CompareFunc::Always);
+    for (auto& stage : config.texture.tev_stages) stage = {0, 0, 0, 0};
+    // Dead earlier lighting and texture demands must not reach the full body.
+    config.texture.tev_stages[0] = {0x00010003, 0, 0, 0};
+    config.texture.tev_stages[5] = {0x05400540, 0, 0, 0};
+    const auto original = config;
+    Profile profile{};
+    profile.is_vulkan = true;
+    profile.has_separable_shaders = true;
+    profile.has_logic_op = true;
+    const auto full = GenerateFragmentShader(config, {}, profile);
+    if (full.find("color_output_0") != std::string::npos ||
+        full.find("color_output_5") == std::string::npos ||
+        full.find("vec4 diffuse_sum") != std::string::npos ||
+        full.find("\ncolor_results_2 = ") != std::string::npos ||
+        full.find("\nalpha_results_2 = ") != std::string::npos)
+        throw std::runtime_error("Full pruning retained dead TEV/lighting/operands");
+    if (!(config == original)) throw std::runtime_error("Full pruning mutated FSConfig identity");
+    const auto require_unpruned = [](const std::string& code, bool full_source) {
+        if (code.find("vec4 diffuse_sum") == std::string::npos ||
+            (full_source && code.find("color_output_0") == std::string::npos))
+            throw std::runtime_error("Full pruning escaped its generation domain");
+    };
+    auto opengl = profile;
+    opengl.is_vulkan = false;
+    require_unpruned(GenerateFragmentShader(config, {}, opengl), true);
+    UserConfig custom{};
+    custom.use_custom_normal.Assign(1);
+    require_unpruned(GenerateFragmentShader(config, custom, profile), true);
+    const auto family = MakeDynamicTevFamilyConfig(config, profile);
+    const auto plan = MakeStaticTevPlan(MakeDynamicTevState(config, profile));
+    require_unpruned(FragmentModule{family, {}, profile, true}.Generate(), false);
+    require_unpruned(GenerateStaticTevFragmentShader(family, {}, profile, plan), false);
+    for (u32 source : {1U, 2U}) {
+        config.texture.tev_stages[5].sources_raw = source | (source << 16);
+        if (GenerateFragmentShader(config, {}, profile).find("vec4 diffuse_sum") ==
+            std::string::npos)
+            throw std::runtime_error("Full pruning removed live lighting output");
+    }
+    std::puts("PASS full GLSL pruning boundaries, dead operands and live lighting controls");
+}
+
 void CheckPlan() {
     using namespace Pica::Shader;
     using namespace Pica::Shader::Generator;
@@ -68,6 +120,7 @@ void CheckPlan() {
 
 int main(int argc, char** argv) {
     if (argc != 2) return 1;
+    CheckFullPruning();
     CheckPlan();
     using namespace Pica::Shader;
     using namespace Pica::Shader::Generator;

@@ -81,14 +81,15 @@ bool SupportsDynamicTev(const FSConfig& config, const UserConfig& user) {
 // the ordered merger separately owns shadow writes. Reserved procedural state,
 // gas and custom-shader domains remain refusals, never approximations or fallback.
 // CodexAstraLocal: Share the exact backwards dependency graph while retaining
-// this generator's stage-zero Previous remap. Graphics source is unchanged.
+// this generator's stage-zero Previous remap. Full graphics GLSL and the
+// callable evaluator share this compile-time graph, not a runtime shader helper.
 static bool IsPassThroughTevStage(const Pica::TexturingRegs::TevStageConfig& stage);
 static Pica::TevLiveness::Plan ComputeTevPlan(const FSConfig& config) {
     std::array<TexturingRegs::TevStageConfig,6> stages;
     for (u32 i=0;i<6;++i) stages[i]=config.texture.tev_stages[i];
     // CodexAstraLocal: This generated consumer skips an entire identity stage.
     // Stage zero then preserves initial zero; it never performs Previous->source3.
-    // Software executes that stage, so keep this adjustment local to compute GLSL.
+    // Software executes that stage, so keep this adjustment local to generated GLSL.
     if(IsPassThroughTevStage(stages[0])) {
         stages[0].color_source3.Assign(TexturingRegs::TevStageConfig::Source::Previous);
         stages[0].alpha_source3.Assign(TexturingRegs::TevStageConfig::Source::Previous);
@@ -455,7 +456,11 @@ FragmentModule::FragmentModule(const FSConfig& config_, const UserConfig& user_,
            (!dynamic_tev && CheckComputeFragmentSupport(config, user, profile) ==
                                 ComputeFragmentSupport::Ready));
     config.ApplyProfile(profile_);
-    if (compute_evaluator) compute_liveness = ComputeTevPlan(config);
+    // CodexAstraLocal: G1 removes only dead full-shader work after host profile
+    // lowering. Generic/static TEV, OpenGL and custom shaders retain their exact
+    // original generation. No register normalization, admission or ABI changes.
+    prune_tev = compute_evaluator || (!dynamic_tev && profile.is_vulkan && user.IsCacheable());
+    if (prune_tev) tev_liveness = ComputeTevPlan(config);
     out.reserve(RESERVE_SIZE);
     DefineExtensions();
     DefineInterface();
@@ -535,8 +540,10 @@ vec4 secondary_fragment_color = vec4(0.0);
 
     // Write shader source to emulate all enabled PICA lights
     using TevSource = TexturingRegs::TevStageConfig::Source;
-    if (!compute_evaluator || compute_liveness.Uses(TevSource::PrimaryFragmentColor) ||
-        compute_liveness.Uses(TevSource::SecondaryFragmentColor)) WriteLighting();
+    // CodexAstraLocal: Lighting is pure fragment input work; remove it only when
+    // neither result reaches final RGB/alpha through any live TEV dependency.
+    if (!prune_tev || tev_liveness.Uses(TevSource::PrimaryFragmentColor) ||
+        tev_liveness.Uses(TevSource::SecondaryFragmentColor)) WriteLighting();
 
     out += "vec4 combiner_buffer = vec4(0.0);\n"
            "vec4 next_combiner_buffer = tev_combiner_buffer_color;\n"
@@ -560,7 +567,7 @@ vec4 secondary_fragment_color = vec4(0.0);
         WriteDynamicTevLoop();
     } else {
         for (u32 index = 0; index < config.texture.tev_stages.size(); index++) {
-            if (compute_evaluator) WriteComputeTevStage(index);
+            if (prune_tev) WritePrunedTevStage(index);
             else WriteTevStage(index);
         }
     }
@@ -937,13 +944,13 @@ void FragmentModule::WriteTevStage(u32 index) {
     }
 }
 
-// CodexAstraLocal: Compute evaluates only operands with a path to final
+// CodexAstraLocal: Full GLSL evaluates only operands with a path to final
 // output. Dead NaN UVs remain original semantic data but cannot trigger texture
 // operations. Live formulas, byteround-before-scale and delayed writes stay exact.
-void FragmentModule::WriteComputeTevStage(u32 index) {
+void FragmentModule::WritePrunedTevStage(u32 index) {
     using Operation = TexturingRegs::TevStageConfig::Operation;
     const TexturingRegs::TevStageConfig stage=config.texture.tev_stages[index];
-    const auto live=compute_liveness.stages[index];
+    const auto live=tev_liveness.stages[index];
     if(!IsPassThroughTevStage(stage)) {
         if(live.NeedsColor(stage.color_op)) {
             for(u32 operand=0;operand<Pica::TevLiveness::OperandCount(stage.color_op);++operand) {

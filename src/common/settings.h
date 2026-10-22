@@ -27,14 +27,11 @@ enum class GraphicsAPI {
 
 // AstraEH: Values match Android's mutually exclusive test switches; zero preserves custom settings.
 // CodexAstraUlt: Append the fragment-isolation preset; persisted IDs 0–3 retain their meanings.
+// CodexAstraLocal: Keep original persisted IDs; retired values migrate in the profile loader.
 enum class UberharTestMode : u32 {
     Custom = 0,
     Native = 1,
-    Compute = 2,
     Automatic = 3,
-    ComboGeneric = 4,
-    // CodexAstraLocal: Append CPU graphics without changing persisted older modes.
-    Software = 5,
 };
 
 enum class InitClock : u32 {
@@ -564,6 +561,9 @@ struct Values {
     SwitchableSetting<bool> uberhar_native_full_fragments{true, Keys::uberhar_native_full_fragments};
     SwitchableSetting<bool> uberhar_cpu_prefix_overlap{true, Keys::uberhar_cpu_prefix_overlap};
     SwitchableSetting<bool> uberhar_parallel_texture_decode{true, Keys::uberhar_parallel_texture_decode};
+    // CodexAstraLocal: Optional process-frozen execution census, off by default;
+    // the real worker admission/reservation contract remains active either way.
+    SwitchableSetting<bool> uberhar_cpu_execution_census{false, Keys::uberhar_cpu_execution_census};
 
     // AstraEH: Profiles are applied after loading custom values, never written back over them.
     SwitchableSetting<UberharTestMode> uberhar_test_mode{UberharTestMode::Custom,

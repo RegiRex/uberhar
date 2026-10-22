@@ -69,22 +69,6 @@ Scheduler::Scheduler(const Instance& instance)
 
 Scheduler::~Scheduler() = default;
 
-Scheduler::ComputeRecordingScope Scheduler::RecordComputeFailure(
-    std::shared_ptr<ComputeFailurePacket> packet) noexcept {
-    if (!packet) return {};
-    try {
-    if (!compute_failures) {
-        compute_failures=std::make_shared<ComputeFailureTracker>();
-        master_semaphore->SetComputeFailureTracker(compute_failures);
-    }
-    compute_failures->Begin(packet,CurrentTick(),master_semaphore->KnownGpuTick());
-    return {compute_failures,std::move(packet)};
-    } catch(...) {
-        packet->Unavailable("submission_context","diagnostic_tracker_allocation_failed");
-        return {};
-    }
-}
-
 void Scheduler::Flush(vk::Semaphore signal, vk::Semaphore wait) {
     // When flushing, we only send data to the worker thread; no waiting is necessary.
     SubmitExecution(signal, wait);
@@ -127,10 +111,10 @@ void Scheduler::WaitWorker() {
 }
 
 void Scheduler::Wait(u64 tick) {
-    try {
+    // CodexAstraLocal: Shared submission cancellation remains after retiring
+    // the independent compute observer; ordinary waits keep their original order.
     shader_failure.Check();
     if (master_semaphore->IsFree(tick)) {
-        if(compute_failures)compute_failures->Retire(master_semaphore->KnownGpuTick());
         return;
     }
     if (tick >= master_semaphore->CurrentTick()) {
@@ -140,20 +124,6 @@ void Scheduler::Wait(u64 tick) {
     // CodexAstraUlt-2: A canceled submission never signals its Vulkan tick.
     if (shader_failure.WaitSubmitted(tick))
         master_semaphore->Wait(tick);
-    if(compute_failures)compute_failures->Retire(master_semaphore->KnownGpuTick());
-    } catch(const vk::SystemError& error) {
-        if(compute_failures)if(auto packet=compute_failures->Submitted(tick)) {
-            packet->Unavailable("retirement_status","wait_failed_no_gpu_capture_attempted");
-            packet->Failure(ComputeFailureStage::FinalUseWait,error.what(),error.code().value());
-            throw VideoCore::ShaderRecoveryError(error.what());
-        }
-        throw;
-    } catch(const std::exception&) {
-        // A worker notice carries its actual operation; owner waiting does not
-        // replace it with the next draw or invent a successful status readback.
-        if(compute_failures)if(auto packet=compute_failures->Submitted(tick))packet->FlushNotices();
-        throw;
-    }
 }
 
 void Scheduler::DispatchWork() {
@@ -193,7 +163,6 @@ void Scheduler::WorkerThread(std::stop_token stop_token) {
 
     while (!stop_token.stop_requested()) {
         std::unique_ptr<CommandChunk> work;
-        std::shared_ptr<ComputeFailurePacket> failure;
 
         {
             std::unique_lock lk{queue_mutex};
@@ -214,15 +183,11 @@ void Scheduler::WorkerThread(std::stop_token stop_token) {
             // Perform the work, tracking whether the chunk was a submission
             // before executing.
             const bool has_submit = work->HasSubmit();
-            failure=work->failure;
-            bool executed=false;
             // CodexAstraUlt-2: Stop the entire stream; the producer reports this
             // typed failure. No draw or submission after it may execute.
             VideoCore::ExecuteShaderCommands(shader_failure,
                 [&] {
-                    try {
                     work->ExecuteAll(current_cmdbuf);
-                    executed=true;
                     // CodexAstraLocal: The next command-buffer allocation is
                     // still worker-owned work. Capture its typed failure before
                     // it can escape the thread; already submitted ticks remain
@@ -230,25 +195,8 @@ void Scheduler::WorkerThread(std::stop_token stop_token) {
                     if (has_submit) {
                         AllocateWorkerCommandBuffers();
                     }
-                    } catch(const VideoCore::ShaderRecoveryError& error) {
-                        if(failure && (executed || !failure->HasNotice()))
-                            failure->Notice(executed ? ComputeFailureStage::Allocation :
-                                ComputeFailureStage::ResourcePreparation,error.what());
-                        throw;
-                    } catch(const vk::SystemError& error) {
-                        if(!failure)throw;
-                        failure->Notice(executed ? ComputeFailureStage::Allocation :
-                            ComputeFailureStage::ResourcePreparation,error.what(),error.code().value());
-                        throw VideoCore::ShaderRecoveryError(error.what());
-                    }
                 }, [&] { work->Discard(); });
         }
-
-        // CodexAstraLocal TEST-ONLY LOG: The terminal stream is latched before
-        // persistence; filesystem work runs without execution/queue/submit locks.
-        // Remove with the temporary Calculated incident recorder.
-        if(failure)failure->FlushNotices();
-        work->failure.reset();
 
         {
             std::scoped_lock rl{reserve_mutex};
@@ -278,24 +226,14 @@ void Scheduler::SubmitExecution(vk::Semaphore signal_semaphore, vk::Semaphore wa
 
     on_submit();
 
-    // An attempted submission is associated before its callback executes. It
-    // is not counted as submitted until SubmitWork succeeds below.
-    const auto failure=compute_failures ?
-        compute_failures->Attempt(signal_value,master_semaphore->KnownGpuTick()) : nullptr;
-
-    RecordBound([signal_semaphore, wait_semaphore, signal_value, failure, this](vk::CommandBuffer cmdbuf) {
+    // CodexAstraLocal: Retain the original submit lock and success watermark
+    // without the retired independent compute packet observer.
+    Record([signal_semaphore, wait_semaphore, signal_value, this](vk::CommandBuffer cmdbuf) {
         MICROPROFILE_SCOPE(Vulkan_Submit);
-        try {
         std::scoped_lock lock{submit_mutex};
         master_semaphore->SubmitWork(cmdbuf, wait_semaphore, signal_semaphore, signal_value);
         shader_failure.Submitted(signal_value);
-        } catch(const vk::SystemError& error) {
-            if(!failure)throw;
-            failure->Notice(ComputeFailureStage::QueueSubmit,error.what(),error.code().value());
-            throw VideoCore::ShaderRecoveryError(error.what());
-        }
-        if(failure)failure->Number("submit_succeeded_tick",signal_value);
-    },failure);
+    });
 
     master_semaphore->Refresh();
 

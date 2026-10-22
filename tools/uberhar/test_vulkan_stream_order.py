@@ -4,7 +4,7 @@
 Actual ring/lease, scheduler submit/dispatch, render-pass and rasterizer setup/draw
 seams execute with recording driver/packet/selection endpoints. All original ordinary cases remain; only non-sampled
 deferred draws are added because permanent compute rejection cannot reserve a query.
-The scheduler's optional Calculated tracker stays null; adapters reject activation.
+CodexAstraLocal: Shared stream ownership remains covered after renderer retirement.
 No Vulkan execution, pixels, executor behavior, diagnostic packet behavior or full
 cached-UBO/LUT proof follows.
 """
@@ -59,9 +59,7 @@ def main():
         header=read(source_root/'src/video_core/renderer_vulkan/vk_stream_buffer.h')
         schedule=read(ROOT/'src/video_core/renderer_vulkan/vk_scheduler.cpp')
         read(source_root/'src/video_core/renderer_vulkan/vk_scheduler.h')
-        # CodexAstraLocal: Bind the interface behind the null observer adapters;
-        # Wait/SubmitExecution remain complete, unmodified production extracts.
-        read(source_root/'src/video_core/renderer_vulkan/compute_failure_packet.h')
+        # CodexAstraLocal: Shared scheduler extracts remain complete after packet observer retirement.
         render=read(ROOT/'src/video_core/renderer_vulkan/vk_render_manager.cpp')
         render_header=read(ROOT/'src/video_core/renderer_vulkan/vk_render_manager.h')
         pipeline=read(ROOT/'src/video_core/renderer_vulkan/vk_pipeline_cache.cpp')

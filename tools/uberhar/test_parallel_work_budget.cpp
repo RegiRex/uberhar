@@ -23,7 +23,7 @@ static void Need(bool value, const char* reason) {
 static void ProgressAndNesting() {
     AuxiliaryBudget single{1};
     Need(!single.ReserveProgress() && !single.TryAcquire(), "single CPU capacity");
-    AuxiliaryBudget budget{3};
+    AuxiliaryBudget budget{3, true}; // CodexAstraLocal: Explicit execution-census qualification.
     {
         auto lane = budget.ReserveProgress();
         Need(bool(lane) && budget.Active() == 0 && budget.HelperCapacity() == 1,
@@ -84,7 +84,7 @@ static void ProgressAndNesting() {
 // remain independent. Check exact output and each helper's live token; short
 // sleeps widen this correctness overlap and are not benchmark observations.
 static void ConcurrentPools() {
-    AuxiliaryBudget budget{4};
+    AuxiliaryBudget budget{4, true}; // CodexAstraLocal: Census does not replace admission.
     const auto capacity = budget.GetStatistics().capacity;
     std::barrier start{4};
     std::atomic<unsigned> active{}, peak{}, helpers{}, errors{};
@@ -192,8 +192,22 @@ static void Adaptation() {
     Need(flags==expected, "adaptive arithmetic altered FP status");
 }
 
+// CodexAstraLocal: Removing diagnostic atomics must leave real admission,
+// nesting and reserved capacity intact; absent active/peak counts are labeled.
+static void WithoutCensus() {
+    AuxiliaryBudget budget{2};
+    { auto permit = budget.TryAcquire();
+      Need(bool(permit) && !budget.TryAcquire(), "uncounted admission"); }
+    auto lane = budget.ReserveProgress();
+    Need(bool(lane) && budget.HelperCapacity() == 0 && !budget.TryAcquire(),
+         "uncounted reservation bound");
+    const auto stats = budget.GetStatistics();
+    Need(!stats.execution_census && stats.active == 0 && stats.peak == 0 && stats.reservations == 1,
+         "absent execution census mislabeled");
+}
+
 int main() try {
-    ProgressAndNesting(); ConcurrentPools(); Adaptation();
+    ProgressAndNesting(); ConcurrentPools(); Adaptation(); WithoutCensus();
     std::cout << "shared budget PASS: execution, reserved progress, nesting, output, adaptive rollback\n";
     return 0;
 } catch (const std::exception& error) {

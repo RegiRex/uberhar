@@ -253,16 +253,15 @@ void BindTransportAndModes() {
   PipelineCache::CpuFragmentToken token{};
   auto layout = SoftwareLayout();
   auto c = Config();
-  for (auto mode :
-       {Settings::UberharTestMode::Native, Settings::UberharTestMode::Compute,
-        Settings::UberharTestMode::ComboGeneric,
-        Settings::UberharTestMode::Custom}) {
+  // CodexAstraLocal: Exercise only live Native/Custom controls here. The retired
+  // Compute/ComboGeneric persisted values are covered by real profile migration.
+  for (auto mode : {Settings::UberharTestMode::Native, Settings::UberharTestMode::Custom}) {
     PipelineCache p;
     Settings::values.uberhar_test_mode.value = mode;
     p.allow_specialized_fragments = false;
     p.allow_static_cpu_tev = mode==Settings::UberharTestMode::Native;
     // CodexAstraLocal: Full CPU fragments now belong to Native independently
-    // of GPU capabilities; other control modes still make no optional demand.
+    // of GPU capabilities; the Custom control still makes no optional demand.
     p.allow_full_cpu_fragments = mode==Settings::UberharTestMode::Native;
     p.Fresh(c);
     auto i = Info();
@@ -578,11 +577,33 @@ void KeyAndDynamicState() {
   }
 }
 
+// CodexAstraLocal: A completed direct full module must feed the existing CPU
+// vertex pipeline/transport without an optional wait or GLSL frontend call.
+void DirectFullModuleRouting() {
+    PipelineCache p;
+    p.profile.vk_use_spirv_generator = true;
+    const auto config = Config();
+    const auto before = Probe::direct_spirv_calls;
+    const auto frontend = Probe::compiler_calls;
+    for (unsigned draw = 0; draw < 16; ++draw)
+        p.curr_disk_cache->UseReadyFragmentShader(config, {}, true);
+    Require(Probe::direct_spirv_calls == before, "direct full generation stays queued");
+    p.ready_vertex_worker->WaitForRequests();
+    Require(Probe::direct_spirv_calls == before + 1 && Probe::compiler_calls == frontend,
+            "direct full module bypasses GLSL frontend");
+    Require(p.curr_disk_cache->ready_fragment_spirv_builds == 1 &&
+            p.curr_disk_cache->ready_fragment_glsl_builds == 0,
+            "direct full route reports effective generator");
+    auto* owner = QualifyAndBuild(p, Info(), config);
+    Require(owner != nullptr, "direct full module admits existing CPU vertex pipeline");
+}
+
 int main() {
     try {
         RealSelectionAndTransport(); ActualBankReuse(); FailuresProfilesAndModes();
         SharedLimitsAndAllocation();
         BindTransportAndModes(); KeyAndDynamicState();
+        DirectFullModuleRouting();
         Require(Probe::optional_waits==0 && Probe::lifetime_errors==0,
                 "no optional waits or borrowed shader destruction");
         std::cout << "PASS checks=" << Probe::checks << " builds=" << Probe::pipeline_builds

@@ -278,16 +278,9 @@
     <!-- Graphics settings strings -->
     <string name="renderer">Renderer</string>
     <string name="graphics_api">Graphics API</string>
-    <!-- CodexAstraLocal: Distinguish CPU guest graphics from presentation-only GPU use. -->
-    <string name="uberhar_test_software">CPU Software</string>
-    <string name="uberhar_test_software_description">Render guest graphics on the CPU at 1×. The GPU only displays completed frames. Keeps CPU emulation, audio and GPU timing settings. Requires a game restart.</string>
-    <string name="software_renderer_workers">CPU Software workers</string>
-    <string name="software_renderer_workers_description">Total CPU rendering participants, limited to available processors. Applies only to CPU Software after a game restart.</string>
-    <string name="software_workers_auto">Automatic</string>
-    <string name="software_workers_one">1 participant</string>
-    <string name="software_workers_two">2 participants</string>
     <string name="spirv_shader_gen">Enable SPIR-V shader generation</string>
-    <string name="spirv_shader_gen_description">Emits the fragment shader used to emulate PICA using SPIR-V instead of GLSL</string>
+    <!-- CodexAstraLocal: Explain the effective comparison rather than claiming measured performance. -->
+    <string name="spirv_shader_gen_description">Use direct SPIR-V for compatible full fragment shaders. Turn off to compare GLSL with unused operations removed. Generic rendering remains available while full shaders prepare. Restart the game after changing.</string>
     <string name="disable_spirv_optimizer">Disable SPIR-V Optimizer</string>
     <string name="disable_spirv_optimizer_description">Disables the SPIR-V optimization pass, reducing stuttering considerably while barely affecting performance.</string>
     <string name="async_shaders">Enable Asynchronous Shader Compilation</string>
@@ -297,16 +290,13 @@
     <string name="uberhar_test_native">Virtual PICA: native rasterization</string>
     <!-- CodexAstraLocal: Native retains CPU vertices and can now select ready static texture-combiner shaders; pending work still renders through the complete generic path. -->
     <string name="uberhar_test_native_description">Prototype: uses CPU shader translation with generic or ready texture-combiner fragment shaders. First-use CPU and GPU compilation can still pause. Restart the game after changing.</string>
-    <!-- CodexAstraLocal: Calculated now renders guest triangles independently; disclose experimental support and terminal failures before selection. -->
-    <string name="uberhar_test_compute">Virtual PICA: Calculated (experimental)</string>
-    <string name="uberhar_test_compute_description">Experimental Vulkan compute rendering with no Native fallback. Unsupported graphics stop emulation and record an error. Performance and game compatibility are still under evaluation. Restart the game after changing.</string>
     <string name="uberhar_test_auto">Virtual PICA: automatic combination</string>
     <!-- AstraPro: Combo now opts into ready-only GPU vertices; not full compute. -->
     <!-- CodexAstraLocal: Describe the added CPU-vertex fragment tier without claiming Native remains generic-only or promising a measured speedup. -->
-    <string name="uberhar_test_auto_description">Experimental Vulkan mode: combines CPU rendering, ready GPU vertices for eligible independent triangle lists, and bounded fragment specialization. Complete generic rendering covers pending and unsupported specialization; performance may vary by game. Not a full compute renderer. Restart the game after changing.</string>
-    <!-- CodexAstraUlt: One persisted diagnostic preset isolates optional fragments while retaining Combo vertices. -->
-    <string name="uberhar_test_combo_generic">Virtual PICA: Combo (generic fragments)</string>
-    <string name="uberhar_test_combo_generic_description">Comparison mode: keeps Combo’s ready GPU vertices and rectangle rendering, but uses generic fragments where supported. Other states retain accurate recovery. Compare the same scene with Native and automatic combination. Restart the game after changing.</string>
+    <string name="uberhar_test_auto_description">Experimental Vulkan mode: combines CPU vertex preparation, ready GPU vertices and bounded fragment specialization. Complete generic rendering covers pending specialization. Restart the game after changing.</string>
+    <!-- CodexAstraLocal: Optional census costs are disclosed and remain independent of safety. -->
+    <string name="uberhar_cpu_execution_census">Collect detailed CPU worker counts</string>
+    <string name="uberhar_cpu_execution_census_description">Collect executing and peak worker counts for diagnostics. Off avoids this extra bookkeeping; worker limits remain enforced. Fully restart the app after changing.</string>
     <string name="uberhar_test_locked">Turn off the active Virtual PICA test mode to edit custom graphics settings. Your saved custom values are preserved.</string>
     <string name="uberhar_hybrid_tev">Uberhar hybrid TEV (experimental)</string>
     <string name="uberhar_separate_folder_title">Use an empty folder for Uberhar</string>

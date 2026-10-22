@@ -56,7 +56,14 @@ def main():
     # CodexAstraLocal: Focus new grouping/publication/ready-prefix behavior in
     # local checks; the default CI invocation still runs every older control.
     parser.add_argument('--groups-only', action='store_true')
+    # CodexAstraLocal: One bounded local port check; default CI remains complete.
+    parser.add_argument('--cpu-preparation-only', action='store_true')
+    # CodexAstraLocal: Focus the lazy-start seed-fixture repair without repeating
+    # unrelated controls. CI does not pass this flag and retains every check.
+    parser.add_argument('--pending-seed-only', action='store_true')
     args = parser.parse_args()
+    if args.pending_seed_only and (args.reset_only or args.groups_only or args.cpu_preparation_only):
+        parser.error('--pending-seed-only cannot be combined with another focused check')
     root = args.root.resolve()
     source_root = (args.source_root or root / 'src').resolve()
     output_root = args.output_root or root / 'build/uberhar-probe/cpu-draw-queue'
@@ -209,11 +216,14 @@ inline struct { Setting uberhar_test_mode; } values;
     header_path = source / logical[2]
     header = header_path.read_text()
     instrumented = '// CodexAstraLocal: Test-only deterministic exceptional boundaries.\n' + \
-        'namespace PacketProbe { void BeforeWave(); void BeforeInvocation(); }\n' + original
-    instrumented = change(instrumented, '                const auto result = pool.Run(',
-        '                PacketProbe::BeforeWave();\n                const auto result = pool.Run(')
+        'namespace PacketProbe { void BeforeWave(); void BeforeInvocation(); void BeforeThreadStart(); }\n' + original
+    instrumented = change(instrumented, '                const auto result = pool->Run(',
+        '                PacketProbe::BeforeWave();\n                const auto result = pool->Run(')
     instrumented = change(instrumented, '                    context.Run(unit);',
         '                    PacketProbe::BeforeInvocation();\n                    context.Run(unit);')
+    # CodexAstraLocal: Only the copied test source injects resource failure.
+    instrumented = change(instrumented, '            pool = std::make_unique<Common::Uberhar::ParallelWork>(',
+        '            PacketProbe::BeforeThreadStart();\n            pool = std::make_unique<Common::Uberhar::ParallelWork>(')
     variants = [
         ('positive', instrumented, header, 'all', None),
         ('missing_active_completion', change(instrumented,
@@ -274,16 +284,32 @@ inline struct { Setting uberhar_test_mode; } values;
             'if (false)\n        throw VideoCore::ShaderRecoveryError{"Uberhar deferred CPU draw failed"};\n    result ='),
             header, 'groups', 'ready error skipped or replayed'),
         ('missing_progress_reservation', change(instrumented,
-            'asynchronous{processors > 1 && bool(progress_lane)}',
-            'asynchronous{processors > 1}'), header,
+            'if (!*progress_lane)', 'if (false)'), header,
             'groups', 'no-lane publication failed synchronous progress'),
     ]
-    if args.reset_only:
+    # CodexAstraLocal: Mutation checks target the new exact-key precheck/reuse and
+    # lazy-start invariants; old renderer/group policy is still exercised unchanged.
+    preparation_variants = [
+        ('forgot_cached_boolean', change(instrumented, 'effect.booleans == booleans', 'true'),
+         header, 'preparation', 'cached Boolean identity aliased'),
+        ('ignored_token_identity', change(instrumented,
+            'Impl::Matches(candidate, source.shader_lease, booleans)', 'true'),
+         header, 'preparation', 'stale Boolean token reused'),
+        ('eager_policy_start', change(instrumented,
+            '    impl->capture_at_capacity = false;\n    // CodexAstraLocal: Invalid shapes',
+            '    impl->StartProgress();\n    impl->capture_at_capacity = false;\n    // CodexAstraLocal: Invalid shapes'),
+         header, 'preparation', 'negative policy reserved progress'),
+    ]
+    if args.pending_seed_only:
+        variants = [('positive', instrumented, header, 'groups', None), grouped_variants[0]]
+    elif args.cpu_preparation_only:
+        variants = [('positive', instrumented, header, 'all', None)] + preparation_variants
+    elif args.reset_only:
         variants = [('positive', instrumented, header, 'resets', None)]
     elif args.groups_only:
         variants = [('positive', instrumented, header, 'groups', None)] + grouped_variants
     else:
-        variants += grouped_variants
+        variants += grouped_variants + preparation_variants
     try:
         common = [compile_one(p,p.stem) for p in actual]
         fixture = compile_one(source / 'fixture.cpp','fixture')
@@ -302,7 +328,7 @@ inline struct { Setting uberhar_test_mode; } values;
             run(name+'-link',flags+[selected_fixture,queue,*common,*link_flags,'-o',binary])
             result = json.loads(run(name+'-run',[*prefix,binary,selected],0 if expected is None else 1).stdout)
             if expected is None:
-                minimum = 4 if args.reset_only else 9 if args.groups_only else (1024 if args.a64 else 512)
+                minimum = 4 if args.reset_only else 9 if (args.groups_only or args.pending_seed_only) else (1024 if args.a64 else 512)
                 if result.get('passed') is not True or result.get('comparisons',0) < minimum:
                     raise RuntimeError('Incomplete positive population')
                 proof['result'] = result
@@ -311,37 +337,38 @@ inline struct { Setting uberhar_test_mode; } values;
             proof['variants'].append({'name':name,'source_sha256':sha(cpp),'header_sha256':sha(header_path),
                                       'binary_sha256':sha(binary),'result':result})
             print(name+': '+str(result),flush=True)
-        # CodexAstraLocal: Two targeted controls prove the new regression detects
-        # a restored redundant drain and failure to retain the serialized tail.
-        header_path.write_text(header)
-        queue_cpp = out / 'reset-queue.cpp'; queue_cpp.write_text(instrumented)
-        queue_obj = compile_one(queue_cpp, 'reset-queue')
-        controls = [
-            ('redundant_reset_drain', change(owner, '    void Restart() {',
-                '    void Restart() {\n        ReconcileDeferredVertices();'),
-                'redundant reset drained packets'),
-            ('missing_reset_pair', change(owner,
-                '        primitive_assembler.AdoptCompletedTriangleTail(result.last_pair);', ''),
-                'reset saved pair differs'),
-        ]
-        if not args.reset_only:
-            controls.append(('skip_nonready_prefix', change(owner,
-                'else if (!packet->TryCompletedResult(result))\n            break;',
-                'else if (!packet->TryCompletedResult(result))\n            continue;'),
-                'nonready predecessor skipped'))
-        for name, mutated_owner, expected in controls:
-            owner_path.write_text(mutated_owner)
-            (out / (name + '-owner.h')).write_text(mutated_owner)
-            fixture_obj = compile_one(source / 'fixture.cpp', name + '-fixture')
-            binary = out / name
-            run(name + '-link', flags + [fixture_obj, queue_obj, *common, *link_flags, '-o', binary])
-            selected = 'groups' if name == 'skip_nonready_prefix' else 'resets'
-            result = json.loads(run(name + '-run', [*prefix, binary, selected], 1).stdout)
-            if result.get('passed') is not False or result.get('error') != expected:
-                raise RuntimeError('Wrong reset negative-control failure: ' + str(result))
-            proof['variants'].append({'name': name, 'owner_sha256': sha(owner_path),
-                                     'binary_sha256': sha(binary), 'result': result})
-            print(name + ': ' + str(result), flush=True)
+        if not args.pending_seed_only:
+            # CodexAstraLocal: Two targeted controls prove the new regression detects
+            # a restored redundant drain and failure to retain the serialized tail.
+            header_path.write_text(header)
+            queue_cpp = out / 'reset-queue.cpp'; queue_cpp.write_text(instrumented)
+            queue_obj = compile_one(queue_cpp, 'reset-queue')
+            controls = [
+                ('redundant_reset_drain', change(owner, '    void Restart() {',
+                    '    void Restart() {\n        ReconcileDeferredVertices();'),
+                    'redundant reset drained packets'),
+                ('missing_reset_pair', change(owner,
+                    '        primitive_assembler.AdoptCompletedTriangleTail(result.last_pair);', ''),
+                    'reset saved pair differs'),
+            ]
+            if not args.reset_only:
+                controls.append(('skip_nonready_prefix', change(owner,
+                    'else if (!packet->TryCompletedResult(result))\n            break;',
+                    'else if (!packet->TryCompletedResult(result))\n            continue;'),
+                    'nonready predecessor skipped'))
+            for name, mutated_owner, expected in controls:
+                owner_path.write_text(mutated_owner)
+                (out / (name + '-owner.h')).write_text(mutated_owner)
+                fixture_obj = compile_one(source / 'fixture.cpp', name + '-fixture')
+                binary = out / name
+                run(name + '-link', flags + [fixture_obj, queue_obj, *common, *link_flags, '-o', binary])
+                selected = 'groups' if name == 'skip_nonready_prefix' else 'resets'
+                result = json.loads(run(name + '-run', [*prefix, binary, selected], 1).stdout)
+                if result.get('passed') is not False or result.get('error') != expected:
+                    raise RuntimeError('Wrong reset negative-control failure: ' + str(result))
+                proof['variants'].append({'name': name, 'owner_sha256': sha(owner_path),
+                                         'binary_sha256': sha(binary), 'result': result})
+                print(name + ': ' + str(result), flush=True)
         proof['passed'] = True
     finally:
         header_path.write_text(header)

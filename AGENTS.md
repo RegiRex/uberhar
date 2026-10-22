@@ -1,3 +1,13 @@
+# CURRENT — 0.1.53 authorized from original 0.1.48
+
+<!-- CodexAstraLocal: Latest owner instruction supersedes historical pauses and old delivery tracks below. -->
+
+Implement the approved selective CPU preparation/census changes, full-shader pruning and compatible stock-style generation, retaining required correctness and retired-mode migrations. Original base is 946a1bc4bcc023b768902aaebfb5200cd34e4015. Preserve original generic/static shader behavior, admission, one-entry mapping cache and cheap small-work rejection. Do not import the broad later GPU/worker-history framework.
+
+The owner performs ALL gameplay testing on return. Do not operate, install onto or start captures on the Thor. Run only necessary integration/build/release checks, use the existing gated RegiRex/uberhar workflow, save and stop after build submission. Agents stop on completion or yield while waiting for automation. Purpose comments use CodexAstraLocal; removable diagnostics use TEST-ONLY LOG markers and removal conditions. No per-milestone approval is needed. The owner requests PC sleep after saved build handoff.
+
+---
+
 # Uberhar development instructions
 
 <!-- CodexAstraLocal: Owner requests separate .42/.43 comparisons after completion. -->

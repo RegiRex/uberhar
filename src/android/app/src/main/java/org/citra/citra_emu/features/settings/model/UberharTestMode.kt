@@ -3,17 +3,21 @@
 
 package org.citra.citra_emu.features.settings.model
 
-// CodexAstraUlt: Extend AstraEH's single persisted mode with a generic-fragment Combo control.
-// IDs 0–3 and saved custom values retain their meanings; no independent conflicting toggles.
+// CodexAstraLocal: Retire standalone Software/generic-only Combo; preserve persisted IDs.
+// CodexAstraLocal: Supported IDs stay fixed; retired ID 2 migrates to Native below.
 enum class UberharTestMode(val id: Int) {
-    // CodexAstraLocal: CPU graphics is a separate implementation, never Native fallback.
-    CUSTOM(0), NATIVE(1), COMPUTE(2), AUTOMATIC(3), COMBO_GENERIC(4), SOFTWARE(5);
+    CUSTOM(0), NATIVE(1), AUTOMATIC(3);
 
     // CodexAstraUlt: Match common/uberhar_test_profile.h for the locked effective display.
     val allowsSpecializedFragments: Boolean get() = this == AUTOMATIC
 
     companion object {
-        fun from(value: Int) = entries.firstOrNull { it.id == value } ?: CUSTOM
+        // CodexAstraLocal: Never recycle retired mode 2 or display it as a different renderer.
+        fun from(value: Int) = when (value) {
+            2, 5 -> NATIVE
+            4 -> AUTOMATIC
+            else -> entries.firstOrNull { it.id == value } ?: CUSTOM
+        }
     }
 }
 

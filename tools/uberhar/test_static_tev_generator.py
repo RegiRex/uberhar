@@ -86,6 +86,10 @@ def prepare(parent):
     assert {p.name for p in (directory / "tev-cases").iterdir()} == expected
     assert {p.name for p in (directory / "families").iterdir()} == {f"{i}.frag" for i in range(64)}
     assert "PASS 805 key/prefix/runtime/compiler-ownership controls" in (directory / "emit-key-family.log").read_text()
+    # CodexAstraLocal: Require the new full-only pruning witnesses alongside the
+    # existing partial controls; the numerical corpus below still runs unchanged.
+    assert "PASS full GLSL pruning boundaries, dead operands and live lighting controls" in (
+        directory / "emit-key-family.log").read_text()
     assert all(digest(path) == value for path, value in before.items()), "Source changed while compiling"
     hashes = {str(path.relative_to(ROOT)): digest(path) for path in sorted(source_paths)}
     # CodexAstraLocal: Retain exact source bytes and corpus identities before any
@@ -98,6 +102,7 @@ def prepare(parent):
         "author": "CodexAstraLocal", "source_sha256": hashes, "commands": commands,
         "key_controls": 805, "tev_cases": 816, "nonempty_family_modules": 64,
         "family_accurate_mul_equalities": 64,
+        "full_glsl_pruning_boundary_controls": True,
         "artifacts": {str(path.relative_to(directory)): digest(path)
                       for path in sorted(directory.rglob("*")) if path.is_file()},
     }

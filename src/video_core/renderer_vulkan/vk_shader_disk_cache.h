@@ -397,6 +397,9 @@ private:
     // parent drains shader and pipeline users. Failed entries stay failed; they
     // cannot poison the inherited mandatory-recovery shader cache.
     struct ReadyFragmentKey {
+        // CodexAstraLocal: Profile equality includes the frozen generator choice;
+        // FSConfig owns the compatibility decision. Fixed G1 code changes enter
+        // the source-derived disk-cache version; ready modules remain memory-only.
         Pica::Shader::FSConfig config;
         Pica::Shader::Profile profile;
         bool operator==(const ReadyFragmentKey& other) const {
@@ -418,6 +421,9 @@ private:
         ready_fragment_lookup_only_misses{}; // CodexAstraLocal: All missing read-only module probes.
     std::atomic<u64> ready_fragment_builds{}, ready_fragment_failures{},
         ready_fragment_compile_ns{}, ready_fragment_max_compile_ns{};
+    // CodexAstraLocal: Existing bounded progress/final reporting identifies which
+    // generator actually ran, including attempts ending in terminal failure.
+    std::atomic<u64> ready_fragment_spirv_builds{}, ready_fragment_glsl_builds{};
 
     std::unordered_map<size_t, Shader> fixed_geometry_shaders;
     // CodexAstraLocal: Fixed-title partial entries are map-stable, memory-only

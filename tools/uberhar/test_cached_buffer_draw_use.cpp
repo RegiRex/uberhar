@@ -77,8 +77,6 @@ struct RasterizerVulkan {
  bool AccelerateDrawBatchInternal(bool is_indexed);
  void MarkCachedShaderBuffersUsed();
  std::vector<HardwareVertex> vertex_batch;
- bool strict_compute{};
- struct {unsigned no_target{};}strict_compute_stats;
  bool NoTarget(bool packet){
   Framebuffer fb;const auto* framebuffer=&fb;FramebufferHelper fb_helper;
   std::shared_ptr<Packet> deferred=packet?std::make_shared<Packet>():nullptr;
@@ -111,14 +109,15 @@ int main(){
     }
     ++cases;
    }
-  for(bool packet:{false,true})for(bool strict:{false,true}){
-   RasterizerVulkan r;r.strict_compute=strict;
+  for(bool packet:{false,true}){
+   // CodexAstraLocal: Supported graphics preserve retained CPU output on a no-target draw.
+   RasterizerVulkan r;
    bool returned{},terminal{};
    try{returned=r.NoTarget(packet);}catch(const VideoCore::ShaderRecoveryError&){terminal=true;}
-   Require(strict?terminal&&!returned:returned&&!terminal,"no-target strict terminal or ordinary return");
+   Require(returned&&!terminal,"supported no-target draw returns without terminal failure");
    Require(r.scheduler.draws==0&&r.uniform_buffer.stamps==0&&r.texture_buffer.stamps==0&&r.texture_lf_buffer.stamps==0,
            "no-target queues no cached use");
-   Require(r.vertex_batch.size()==(packet?3:0),"no-target retained packet bytes are not cleared on terminal failure");
+   Require(r.vertex_batch.size()==(packet?3:0),"no-target retained packet bytes are not cleared on no-target return");
    ++cases;
   }
   std::cout<<"PASS draw-use cases="<<cases<<" checks="<<checks<<'\n';

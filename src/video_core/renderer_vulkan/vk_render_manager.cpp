@@ -40,10 +40,11 @@ void RenderManager::BeginRendering(const Framebuffer* framebuffer,
         .clear = {},
         .do_clear = false,
     };
+    // CodexAstraLocal: End the previous pass using its own attachment metadata before replacement.
+    BeginRendering(new_pass);
     images = framebuffer->Images();
     aspects = framebuffer->Aspects();
     shadow_rendering = framebuffer->shadow_rendering;
-    BeginRendering(new_pass);
 }
 
 void RenderManager::BeginRendering(const RenderPass& new_pass) {

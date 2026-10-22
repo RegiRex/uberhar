@@ -73,13 +73,12 @@ struct FramebufferHelper { mutable u32 canceled{}; void CancelInvalidation() con
 class RasterizerVulkan : public VideoCore::RasterizerAccelerated {
 public:
     using DeferredHardwareWriter = decltype(&WriteDeferredTriangles);
-    bool strict_compute{}, vertex_capture{}, ready_vertex_attempt{};
+    bool vertex_capture{}, ready_vertex_attempt{};
     struct { bool ready{}; } cpu_bridge;
     struct { bool enabled{true}; bool HasWorkerThread() const { return enabled; } } scheduler;
     struct { bool enabled{true}; bool CanDeferUpload() const { return enabled; } } stream_buffer;
     bool compute_rect{true};
     Pica::RegsInternal regs{};
-    struct { u32 no_target{}; } strict_compute_stats;
     std::vector<std::vector<u8>> draws;
     u32 shader_batches{}, packet_conversions{};
     DeferredHardwareWriter PrepareDeferredVertices(u32 count) const;
@@ -223,7 +222,7 @@ int main()try {
     Need(!raster.PrepareDeferredVertices(6),"expandable or zero raw state remains synchronous");
     raster.compute_rect=false;
     Need(raster.PrepareDeferredVertices(6),"no compute decision needs output");
-    raster.strict_compute=true; Need(!raster.PrepareDeferredVertices(6),"strict mode refusal");raster.strict_compute=false;
+    // CodexAstraLocal: Deferred admission now covers supported graphics modes only.
     raster.scheduler.enabled=false;Need(!raster.PrepareDeferredVertices(6),"no worker refusal");raster.scheduler.enabled=true;
     raster.stream_buffer.enabled=false;Need(!raster.PrepareDeferredVertices(6),"noncoherent stream refusal");raster.stream_buffer.enabled=true;
     raster.vertex_capture=true;Need(!raster.PrepareDeferredVertices(6),"capture refusal");raster.vertex_capture=false;

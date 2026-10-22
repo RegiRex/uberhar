@@ -25,6 +25,8 @@ enum class BooleanSetting(
     UBERHAR_NATIVE_FULL_FRAGMENTS(SettingKeys.uberhar_native_full_fragments(), Settings.SECTION_RENDERER, true),
     UBERHAR_CPU_PREFIX_OVERLAP(SettingKeys.uberhar_cpu_prefix_overlap(), Settings.SECTION_RENDERER, true),
     UBERHAR_PARALLEL_TEXTURE_DECODE(SettingKeys.uberhar_parallel_texture_decode(), Settings.SECTION_RENDERER, true),
+    // CodexAstraLocal: Avoid optional permit counters unless explicitly requested.
+    UBERHAR_CPU_EXECUTION_CENSUS(SettingKeys.uberhar_cpu_execution_census(), Settings.SECTION_RENDERER, false),
 
     DISABLE_SPIRV_OPTIMIZER(SettingKeys.disable_spirv_optimizer(), Settings.SECTION_RENDERER, true),
     PLUGIN_LOADER(SettingKeys.plugin_loader(), Settings.SECTION_SYSTEM, false),

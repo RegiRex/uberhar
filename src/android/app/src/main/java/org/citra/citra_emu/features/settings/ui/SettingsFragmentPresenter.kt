@@ -955,49 +955,17 @@ class SettingsFragmentPresenter(private val fragmentView: SettingsFragmentView) 
         // comparison. All choices share one persisted mode; custom settings remain untouched.
         val mode = UberharTestMode.from(IntSetting.UBERHAR_TEST_MODE.int)
         sl.add(HeaderSetting(R.string.uberhar_test_modes))
+        // CodexAstraLocal: Only supported Native/Combo modes remain selectable; IDs migrate.
         val modes = listOf(
-            // CodexAstraLocal: Explicit CPU raster mode shares existing controls/lifecycle.
-            Triple(
-                UberharTestMode.SOFTWARE,
-                R.string.uberhar_test_software,
-                R.string.uberhar_test_software_description
-            ),
-            Triple(
-                UberharTestMode.NATIVE,
-                R.string.uberhar_test_native,
-                R.string.uberhar_test_native_description
-            ),
-            Triple(
-                UberharTestMode.COMPUTE,
-                R.string.uberhar_test_compute,
-                R.string.uberhar_test_compute_description
-            ),
-            Triple(
-                UberharTestMode.AUTOMATIC,
-                R.string.uberhar_test_auto,
-                R.string.uberhar_test_auto_description
-            ),
-            Triple(
-                UberharTestMode.COMBO_GENERIC,
-                R.string.uberhar_test_combo_generic,
-                R.string.uberhar_test_combo_generic_description
-            )
+            Triple(UberharTestMode.NATIVE, R.string.uberhar_test_native,
+                R.string.uberhar_test_native_description),
+            Triple(UberharTestMode.AUTOMATIC, R.string.uberhar_test_auto,
+                R.string.uberhar_test_auto_description)
         )
         for ((choice, title, description) in modes) {
             val setting = UberharTestModeSwitch(IntSetting.UBERHAR_TEST_MODE, choice)
             sl.add(SwitchSetting(setting, title, description, setting.key))
         }
-        // CodexAstraLocal: A Software worker budget remains editable while the
-        // effective renderer/1x settings are locked; it takes effect on restart.
-        sl.add(SingleChoiceSetting(
-            IntSetting.SOFTWARE_RENDERER_WORKERS,
-            R.string.software_renderer_workers,
-            R.string.software_renderer_workers_description,
-            R.array.softwareWorkerNames,
-            R.array.softwareWorkerValues,
-            IntSetting.SOFTWARE_RENDERER_WORKERS.key,
-            IntSetting.SOFTWARE_RENDERER_WORKERS.defaultValue
-        ))
         // CodexAstraLocal: Keep placement editable beside the presets. It affects
         // only Combo guest vertices and is captured when the game starts.
         sl.add(SwitchSetting(
@@ -1029,6 +997,14 @@ class SettingsFragmentPresenter(private val fragmentView: SettingsFragmentView) 
             R.string.uberhar_parallel_texture_decode_description,
             BooleanSetting.UBERHAR_PARALLEL_TEXTURE_DECODE.key,
             BooleanSetting.UBERHAR_PARALLEL_TEXTURE_DECODE.defaultValue
+        ))
+        // CodexAstraLocal: Detailed counters are optional; admission safety remains active.
+        sl.add(SwitchSetting(
+            BooleanSetting.UBERHAR_CPU_EXECUTION_CENSUS,
+            R.string.uberhar_cpu_execution_census,
+            R.string.uberhar_cpu_execution_census_description,
+            BooleanSetting.UBERHAR_CPU_EXECUTION_CENSUS.key,
+            BooleanSetting.UBERHAR_CPU_EXECUTION_CENSUS.defaultValue
         ))
         val customStart = sl.size
         sl.apply {
@@ -1342,8 +1318,9 @@ class SettingsFragmentPresenter(private val fragmentView: SettingsFragmentView) 
         // values of the session profile without overwriting the user's custom settings.
         if (mode != UberharTestMode.CUSTOM) {
             for (item in sl.subList(customStart, sl.size)) {
-                if ((item.setting == IntSetting.RESOLUTION_FACTOR &&
-                     mode != UberharTestMode.SOFTWARE) ||
+                // CodexAstraLocal: Permit generator comparison without disabling the profile.
+                if (item.setting == IntSetting.RESOLUTION_FACTOR ||
+                    item.setting == BooleanSetting.SPIRV_SHADER_GEN ||
                     item.setting == BooleanSetting.USE_INTEGER_SCALING ||
                     item.type == SettingsItem.TYPE_HEADER
                 ) continue

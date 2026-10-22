@@ -18,8 +18,8 @@ namespace Vulkan {
 // rectangle. No textures, clipping, depth, stencil, blending or interpolation are
 // approximated.
 // CodexAstraLocal: This optional helper proves only its compute packet after
-// CPU vertices; other draws retain complete graphics rendering. Independent
-// Calculated owns original-input compute and no longer calls this rectangle path.
+// CPU vertices; other draws retain complete graphics rendering. The independent
+// renderer is retired; Combo retains this exact rectangle path.
 struct ComputeRectPacket {
     std::array<s32, 4> rect; // x, y, width, height in the current surface's pixels.
     u32 color;               // RGBA8 in the R32_UINT storage view's little-endian order.

@@ -352,18 +352,25 @@ std::optional<std::pair<u64, Shader* const>> ShaderDiskCache::UseReadyFragmentSh
             bool failed = false;
             try {
                 const auto& [fs, profile] = entry->key;
-                // AstraPro: Keep this optional experiment on the inherited GLSL
-                // specialization used by the existing full-fragment pixel oracle.
-                // This does not change the normal/custom renderer's SPIR-V choice.
-                const auto code = GLSL::GenerateFragmentShader(fs, {}, profile);
-                // CodexAstraUlt: Replace AstraPro's inherited generic-latency compiler
-                // option for this optional job. Full requested-profile equality still
-                // guards the cache; every entry has this same fixed optimization policy.
-                // CodexAstraLocal: The cache entry owns this profile snapshot for the
-                // queued job. Apply the optional-only override to compilation, preserving
-                // profile identity and complete CPU fallback while the module is absent.
-                const auto spirv = CompileGLSL(code, vk::ShaderStageFlagBits::eFragment, "",
-                    DisableShaderOptimizer(true, profile.vk_disable_spirv_optimizer != 0));
+                // CodexAstraLocal: Honor the ordinary full-shader generator choice
+                // using the entry's immutable Profile and identical compatibility
+                // guard. Both vertex routes retain the same fragment interface;
+                // the caller's existing barycentric/custom checks stay in force.
+                // The optional lane never blocks the foreground or changes its
+                // complete generic/static fallback while this module is pending.
+                std::vector<u32> spirv;
+                if (profile.vk_use_spirv_generator && !fs.UsesSpirvIncompatibleConfig()) {
+                    ++ready_fragment_spirv_builds;
+                    spirv = SPIRV::GenerateFragmentShader(fs, profile);
+                } else {
+                    ++ready_fragment_glsl_builds;
+                    const auto code = GLSL::GenerateFragmentShader(fs, {}, profile);
+                    // CodexAstraLocal: Keep the inherited optional GLSL optimizer
+                    // policy. Direct SPIR-V has no GLSL frontend/optimizer step;
+                    // G1 pruning applies only to this full cacheable GLSL branch.
+                    spirv = CompileGLSL(code, vk::ShaderStageFlagBits::eFragment, "",
+                        DisableShaderOptimizer(true, profile.vk_disable_spirv_optimizer != 0));
+                }
                 if (spirv.empty()) throw std::runtime_error("empty optional fragment module");
                 entry->shader.module = CompileSPV(spirv, device);
                 if (!entry->shader.module) throw std::runtime_error("null optional fragment module");
@@ -652,12 +659,18 @@ void ShaderDiskCache::ReportUberharStats(const char* kind) const {
                               ? Common::Log::Delivery::Diagnostic
                               : Common::Log::Delivery::Reliable;
     // AstraPro: Existing five-second/final cadence, not per draw.
+    // CodexAstraLocal TEST-ONLY LOG: Effective generator attempts distinguish
+    // direct SPIR-V from G1-pruned GLSL in .53 owner comparisons. Remove the
+    // added policy/count fields after generator selection is qualified; keep
+    // production failure handling and its bounded error diagnostics intact.
     // CodexAstraUlt Log Line: Replace AstraPro's blocking progress enqueue; totals stay reliable.
     LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
              "Uberhar ready GPU fragments {}: schema=1 scope=title requests={} ready_hits={} "
              "cold_demand={} busy={} capped={} mismatches={} failed_hits={} unsupported={} lookup_only_misses={} "
              "modules={} builds={} failures={} compile_ms={:.3f} max_compile_ms={:.3f} "
-             "demand_replacements={} max_modules={} warmup_draws={} storage=memory_only generator=glsl_specialized weighting=lookups",
+             "demand_replacements={} max_modules={} warmup_draws={} storage=memory_only "
+             "generator=setting_compatible_v1 requested_spirv={} direct_spirv_build_attempts={} "
+             "glsl_build_attempts={} glsl_pruning=full_v1 weighting=lookups",
              kind, ready_fragment_requests, ready_fragment_hits, ready_fragment_cold,
              ready_fragment_busy, ready_fragment_capped, ready_fragment_mismatches,
              ready_fragment_failed_hits, ready_fragment_unsupported, ready_fragment_lookup_only_misses,
@@ -665,7 +678,8 @@ void ShaderDiskCache::ReportUberharStats(const char* kind) const {
              ready_fragment_builds.load(), ready_fragment_failures.load(),
              ready_fragment_compile_ns.load() / 1e6, ready_fragment_max_compile_ns.load() / 1e6,
              ready_fragment_demand.Replacements(), ReadyFragmentPolicy::MaxModules,
-             ReadyFragmentPolicy::WarmupDraws);
+             ReadyFragmentPolicy::WarmupDraws, parent.profile.vk_use_spirv_generator != 0,
+             ready_fragment_spirv_builds.load(), ready_fragment_glsl_builds.load());
     // CodexAstraLocal Log Line: Bounded title counts and generated byte/time
     // totals identify real partial compilation and failure. Generated bytes are
     // neither retained source storage nor opaque driver/GPU memory consumption.
@@ -704,7 +718,8 @@ void ShaderDiskCache::ReportUberharStats(const char* kind) const {
     LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
              "Uberhar GPU shader admission {}: schema=1 vs_deferred={} vs_capped={} gs_capped={} "
              "failures={} max_vs_configs=128 max_gs_configs=128 "
-             "ready_compiler_policy=optimized_background_v1 ready_optimizer_disabled=false",
+             "ready_compiler_policy=optimized_glsl_or_direct_spirv_v2 "
+             "ready_optimizer_disabled=false ready_optimizer_scope=glsl_only",
              kind, ready_vs_deferred, ready_vs_capped, ready_gs_capped,
              ready_shader_failures.load());
     // AstraEH Log Line: Same bounded report cadence; counts objects, not completed compiles.

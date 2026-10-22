@@ -94,7 +94,7 @@ static const char* android_config_default_file_content = (BOOST_HANA_STRING(R"(
 
 [Renderer]
 # Whether to render using OpenGL
-# CodexAstraLocal: 0: CPU Software (1x, GPU presentation only), 1: OpenGL ES, 2: Vulkan.
+# CodexAstraLocal: 1: OpenGL ES, 2: Vulkan; retired Software value 0 migrates to Vulkan.
 )") DECLARE_KEY(graphics_api) BOOST_HANA_STRING(R"(
 
 # CodexAstraLocal: Total CPU raster participants including caller; clamped to allowed CPUs.
@@ -113,10 +113,8 @@ static const char* android_config_default_file_content = (BOOST_HANA_STRING(R"(
 # Requires a game restart. 0 (default): Off, 1: On
 )") DECLARE_KEY(uberhar_force_tev) BOOST_HANA_STRING(R"(
 
-# AstraEH: 0=custom, 1=virtual native, 2=compute prototype, 3=automatic prototype.
-# CodexAstraUlt: 4=Combo with generic fragments; keeps Combo vertices and compute selection.
-# CodexAstraLocal: 5=CPU Software at 1x; GPU use is presentation only.
-# Requires a game restart. Custom graphics settings are preserved.
+# CodexAstraLocal: Custom=0, Native=1, Combo=3; retired IDs 2/5 migrate to Native
+# and 4 to Combo, preserving supported saved choices without restoring old modes.
 )") DECLARE_KEY(uberhar_test_mode) BOOST_HANA_STRING(R"(
 
 # AstraEH: Ready-only CPU vertex bridge; active only with hybrid TEV and Force off.
@@ -138,6 +136,10 @@ static const char* android_config_default_file_content = (BOOST_HANA_STRING(R"(
 # CodexAstraLocal: Parallel CPU texture decoding; independent comparison, restart required.
 # 0: Off, 1 (default): On
 )") DECLARE_KEY(uberhar_parallel_texture_decode) BOOST_HANA_STRING(R"(
+
+# CodexAstraLocal: Detailed executing/peak counts only; actual worker admission is always enforced.
+# 0 (default): Off, 1: On; restart the app after changing.
+)") DECLARE_KEY(uberhar_cpu_execution_census) BOOST_HANA_STRING(R"(
 
 
 # Whether to emit PICA fragment shader using SPIRV or GLSL (Vulkan only)

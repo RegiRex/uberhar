@@ -41,6 +41,9 @@ set(HASH_FILES
     "${VIDEO_CORE}/pica/regs_texturing.h"
     "${VIDEO_CORE}/pica/regs_internal.cpp"
     "${VIDEO_CORE}/pica/regs_internal.h"
+    # CodexAstraLocal: Full-shader pruning depends on this shared liveness plan;
+    # invalidate persisted modules when its generated-code decisions change.
+    "${VIDEO_CORE}/pica/uberhar_tev_liveness.h"
 )
 set(COMBINED "")
 foreach (F IN LISTS HASH_FILES)

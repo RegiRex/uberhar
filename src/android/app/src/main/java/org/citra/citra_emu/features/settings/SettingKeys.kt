@@ -47,6 +47,8 @@ object SettingKeys {
     external fun uberhar_native_full_fragments(): String
     external fun uberhar_cpu_prefix_overlap(): String
     external fun uberhar_parallel_texture_decode(): String
+    // CodexAstraLocal: Match native generated key for restart-only census.
+    external fun uberhar_cpu_execution_census(): String
 
     // AstraEH: Persist only the selected profile, not three conflicting booleans.
     external fun uberhar_test_mode(): String

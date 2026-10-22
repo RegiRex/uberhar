@@ -28,7 +28,7 @@ void ComputeRectRenderer::Initialize(vk::PipelineCache cache) {
     if (!(family.queueFlags & vk::QueueFlagBits::eCompute)) {
         // AstraEH Log Line: One capability rejection.
         // CodexAstraLocal Log Line: Optional rectangle routing retains graphics
-        // rendering on rejection; independent Calculated does not create this owner.
+        // rendering on rejection; the independent compute renderer is retired.
         LOG_WARNING(Render_Vulkan, "Uberhar compute unavailable: graphics queue lacks compute");
         return;
     }
@@ -81,7 +81,7 @@ void ComputeRectRenderer::Initialize(vk::PipelineCache cache) {
              "Uberhar compute prepared: coverage=solid_masked_endpoint_rectangles pipeline_count=1 "
              "runtime_compilation=false timestamps={} mode={} graphics_fallback={}",
              bool(queries), static_cast<u32>(mode),
-             Settings::RequiresComputeOnly(mode) ? "disabled" : "allowed");
+             "allowed");
 }
 
 // CodexAstraLocal: Keep optional expanded proof work on immutable compute modes
@@ -94,8 +94,7 @@ bool ComputeRectRenderer::Choose(const ComputeRectPacket& packet) {
     ++eligible;
     if (!Ready())
         return false;
-    if (mode == Settings::UberharTestMode::Compute)
-        return true;
+    // CodexAstraLocal: Retired mode no longer forces rectangle selection; Combo keeps its measured chooser.
     // CodexAstraUlt: Both Combo presets use the same measured rectangle selection.
     return Settings::UsesAutomaticCompute(mode) && queries &&
            selector.Select(ComputeRectSelector::Bucket(packet.PixelCount()));
@@ -117,8 +116,8 @@ void ComputeRectRenderer::Draw(Surface& surface, const ComputeRectPacket& packet
     compute_pixels += packet.PixelCount();
 }
 
-// CodexAstraLocal: Keep production and scratch commands identical without
-// making a synthetic benchmark a guest fallback or a selector observation.
+// CodexAstraLocal: Preserve the shared production command body and its rectangle
+// pixel fixture after the independent scratch benchmark is retired.
 void RecordComputeRectCommands(vk::CommandBuffer cmdbuf, vk::Image image,
                                vk::PipelineLayout view_layout, vk::Pipeline target,
                                vk::DescriptorSet set, const ComputeRectPacket& packet) {
@@ -310,6 +309,6 @@ void ComputeRectRenderer::Report() {
         static_cast<u32>(mode), considered, unsupported, geometry_rejected, format_rejected,
         eligible, native_draws, compute_draws, compute_pixels, measured_draws[0],
         measured_ns[0] / 1e6, measured_draws[1], measured_ns[1] / 1e6,
-        Settings::RequiresComputeOnly(mode) ? "disabled" : "allowed");
+        "allowed");
 }
 } // namespace Vulkan

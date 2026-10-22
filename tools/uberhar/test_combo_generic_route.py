@@ -159,11 +159,11 @@ int main() try {
     // CodexAstraUlt: Execute both ready/missing optional cases for both Combo presets.
     // CodexAstraLocal: Native's saved ON/OFF choice must leave each Combo policy
     // and its complete generic/mandatory recovery behavior unchanged.
+    // CodexAstraLocal: Preserve both full and generic consumers through Combo's force flag after mode retirement.
+    for (bool force_generic : {false, true})
     for (const auto [mode, native_full] : {
              std::pair{UberharTestMode::Automatic, false},
-             std::pair{UberharTestMode::Automatic, true},
-             std::pair{UberharTestMode::ComboGeneric, false},
-             std::pair{UberharTestMode::ComboGeneric, true}}) {
+             std::pair{UberharTestMode::Automatic, true}}) {
         for (bool ready : {false,true}) {
             values.uberhar_test_mode = mode;
             values.uberhar_native_full_fragments = native_full;
@@ -171,10 +171,10 @@ int main() try {
             Disk disk; disk.ready = ready;
             PipelineCache cache{mode};
             cache.curr_disk_cache = &disk;
-            cache.force_tev = values.uberhar_force_tev.GetValue();
-            const bool specialized = mode == UberharTestMode::Automatic;
-            Check(cache.allow_full_cpu_fragments == specialized &&
-                  cache.allow_static_cpu_tev == specialized &&
+            cache.force_tev = values.uberhar_force_tev.GetValue() || force_generic;
+            const bool specialized = !force_generic;
+            Check(cache.allow_full_cpu_fragments &&
+                  cache.allow_static_cpu_tev &&
                   cache.allow_ready_gpu_vertices && cache.ready_vertex_worker,
                   "Native full-fragment control changed Combo capabilities");
             Pica::RegsInternal regs;
@@ -236,9 +236,9 @@ int main() try {
             Check(!cache.PreferReadySpecializedFragment(user), "uncacheable optional shader selected");
         }
     }
-    // CodexAstraUlt: The explicit mode capability must protect mode 4 even if force state changes.
-    PipelineCache guarded{UberharTestMode::ComboGeneric};
-    guarded.force_tev = false;
+    // CodexAstraLocal: Forced generic rendering still refuses optional full preparation.
+    PipelineCache guarded{UberharTestMode::Automatic};
+    guarded.force_tev = true;
     Check(!guarded.PreferReadySpecializedFragment({}), "mode capability bypassed by force flag");
     // CodexAstraLocal: Actual Native mode creates the optional CPU-fragment lane.
     // Neither module readiness, unsupported state nor a later global mode edit

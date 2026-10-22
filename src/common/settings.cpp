@@ -94,6 +94,8 @@ void LogSettings() {
     // CodexAstraLocal: Record the requested CPU budget separately from the
     // renderer's startup report of the process-allowed effective participants.
     log_setting("Renderer_SoftwareWorkers", values.software_renderer_workers.GetValue());
+    // CodexAstraLocal: Requested census state is retained with normal settings diagnostics.
+    log_setting("Renderer_CPUExecutionCensus", values.uberhar_cpu_execution_census.GetValue());
     log_setting("Renderer_AsyncShaders", values.async_shader_compilation.GetValue());
     // AstraEH: Include experimental mode in logs so device reports can be compared.
     // AstraEH Log Line: Capture the master experiment switch.

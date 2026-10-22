@@ -218,7 +218,7 @@ void CheckContract(std::span<const vk::DescriptorSetLayoutBinding> bindings, u32
 }
 void ProductionContracts() {
     // CodexAstraLocal: Exact binding declarations and hint expressions are
-    // inserted from actual Calculated, graphics, blit and presentation owners.
+    // inserted from actual graphics, rectangle, blit and presentation owners.
     // UBERHAR_OWNER_CONTRACTS
 }
 

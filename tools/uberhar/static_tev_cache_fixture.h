@@ -77,6 +77,9 @@ namespace Probe {
 bool partial_tier{};
 unsigned checks{}, compiler_calls{}, pipeline_builds{}, required_waits{},
     optional_waits{}, lifetime_errors{}, destroyed_pipelines{};
+// CodexAstraLocal: Keep direct generation distinct from the GLSL frontend in
+// extracted route fixtures; real SPIR-V code remains the ordinary generator.
+unsigned direct_spirv_calls{};
 int compiler_failure{}, build_failure{};
 bool logger_throws{};
 std::set<const void *> live_shaders;
@@ -89,6 +92,15 @@ void Require(bool c, const char *m) {
     throw std::runtime_error(m);
 }
 } // namespace Probe
+namespace Pica::Shader::Generator::SPIRV {
+std::vector<u32> GenerateFragmentShader(const FSConfig&, const Profile&) {
+  ++Probe::direct_spirv_calls;
+  if (Probe::compiler_failure == 1) throw std::runtime_error("direct generator");
+  if (Probe::compiler_failure == 2) throw 991;
+  if (Probe::compiler_failure == 3) return {};
+  return {0x7230203, 0x535056};
+}
+}
 namespace Common::Log {
 void Stop() {}
 void FmtLogMessageImpl(Class, Level level, const char *, unsigned, const char *,
