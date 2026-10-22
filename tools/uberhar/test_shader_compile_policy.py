@@ -3,7 +3,8 @@
 
 The compiler/device are recording doubles: this checks routing, immutable compiler
 inputs and success/failure publication, not driver memory or shader numerical output.
-The separate generated-shader Vulkan validation/output fixtures cover real compilers.
+The separate generated-shader Vulkan validation/output fixtures cover GLSL compilers;
+direct SPIR-V endpoint coverage here does not establish actual direct-module pixels.
 """
 import argparse
 from pathlib import Path
@@ -54,15 +55,33 @@ HEADER = r'''
 #include <string>
 #include <string_view>
 #include <vector>
+#include "common/common_types.h"
 #include "video_core/renderer_vulkan/uberhar_shader_compile_policy.h"
-using u64 = unsigned long long;
+#include "video_core/shader/generator/profile.h"
+// CodexAstraLocal: Use the production value types so queued-job interface changes
+// cannot remain hidden behind a duplicate profile or integer definition.
+using Pica::Shader::Profile;
 using Vulkan::DisableShaderOptimizer;
 #define LOG_ERROR(...) ((void)0)
 namespace vk {
 enum class ShaderStageFlagBits { eVertex, eFragment, eGeometry };
 using Device = int;
 }
-struct Profile { bool vk_disable_spirv_optimizer{}, has_clip_planes{}; };
+// CodexAstraLocal: Name the tested fields explicitly; profile layout and unrelated
+// capability additions must not change the cases through aggregate positions.
+Profile MakeProfile(bool disable_optimizer, bool clip_planes, bool use_spirv = false) {
+    Profile profile{};
+    profile.vk_disable_spirv_optimizer = disable_optimizer;
+    profile.has_clip_planes = clip_planes;
+    profile.vk_use_spirv_generator = use_spirv;
+    return profile;
+}
+// CodexAstraLocal: Model only the compatibility boundary used by this queued
+// policy job; actual register-to-compatibility behavior has separate source tests.
+struct FSConfig {
+    bool incompatible{};
+    bool UsesSpirvIncompatibleConfig() const { return incompatible; }
+};
 struct Shader {
     std::string program{"generated"}; int module{}; bool done{}, failed{};
     void MarkDone() { done = true; }
@@ -75,10 +94,14 @@ struct Worker {
 };
 struct ExtraFixedGSConfig { bool use_clip_planes{}, separable_shader{}; };
 struct GSConfigEntry { static constexpr int EXPECTED_VERSION = 0; int version{}, gs_config{}; };
-struct ReadyKey { int fs{}; Profile profile{}; };
+struct ReadyKey { FSConfig fs; Profile profile; };
 struct Entry { ReadyKey key; Shader shader; };
 struct CompilerRecord { vk::ShaderStageFlagBits stage; bool disabled; };
 std::vector<CompilerRecord> records;
+// CodexAstraLocal: Distinct endpoints expose effective selection and frozen
+// generator inputs; they cannot both silently model a GLSL frontend invocation.
+struct GeneratorRecord { bool direct, incompatible, requested; };
+std::vector<GeneratorRecord> generators;
 bool global_disable_optimizer{}, fail_compile{}, observed_clip{};
 std::vector<unsigned> CompileGLSL(std::string_view, vk::ShaderStageFlagBits stage,
                                std::string_view = "", bool disabled = global_disable_optimizer) {
@@ -86,12 +109,23 @@ std::vector<unsigned> CompileGLSL(std::string_view, vk::ShaderStageFlagBits stag
     if (fail_compile) return {};
     return {1};
 }
-int CompileSPV(const std::vector<unsigned>& code, vk::Device) { return code.empty() ? 0 : 1; }
+int CompileSPV(const std::vector<unsigned>& code, vk::Device) {
+    return code.empty() ? 0 : static_cast<int>(code.front());
+}
 namespace GLSL {
 std::string GenerateFixedGeometryShader(int, ExtraFixedGSConfig extra) {
     observed_clip = extra.use_clip_planes; return "generated";
 }
-std::string GenerateFragmentShader(int, int, Profile) { return "generated"; }
+std::string GenerateFragmentShader(FSConfig fs, int, Profile profile) {
+    generators.push_back({false, fs.incompatible, profile.vk_use_spirv_generator != 0});
+    return "generated";
+}
+}
+namespace SPIRV {
+std::vector<u32> GenerateFragmentShader(FSConfig fs, Profile profile) {
+    generators.push_back({true, fs.incompatible, profile.vk_use_spirv_generator != 0});
+    return fail_compile ? std::vector<u32>{} : std::vector<u32>{2};
+}
 }
 namespace VideoCore {
 template<class Work, class Failure>
@@ -116,6 +150,7 @@ struct Cache {
     std::atomic<unsigned> mandatory_shader_failures{}, ready_shader_failures{};
     std::atomic<u64> ready_fragment_compile_ns{}, ready_fragment_max_compile_ns{},
         ready_fragment_builds{}, ready_fragment_failures{};
+    std::atomic<u64> ready_fragment_spirv_builds{}, ready_fragment_glsl_builds{};
     void AppendVSSPIRV(int, const std::vector<unsigned>&, u64) { ++writes; }
     void AppendGSSPIRV(int, const std::vector<unsigned>&, u64) { ++writes; }
     void AppendGSConfig(int, const GSConfigEntry&, u64) { ++writes; }
@@ -138,11 +173,12 @@ int main() try {
             for (bool ready : {false, true}) {
                 for (int stage : {0, 1, 2}) {
                     Cache cache;
-                    cache.parent.profile = {requested, true};
+                    cache.parent.profile = MakeProfile(requested, true);
                     cache.fragment.key.profile = cache.parent.profile;
                     global_disable_optimizer = requested;
                     fail_compile = fail;
                     records.clear();
+                    generators.clear();
                     observed_clip = false;
                     if (stage == 0) cache.Vertex(ready);
                     if (stage == 1) cache.Geometry(ready);
@@ -156,7 +192,7 @@ int main() try {
                     // CodexAstraUlt: A later UI/global/profile change must not alter this job.
                     if (change_options) {
                         global_disable_optimizer = !requested;
-                        cache.parent.profile = {!requested, false};
+                        cache.parent.profile = MakeProfile(!requested, false);
                     }
                     cache.parent.shader_workers.Drain();
                     cache.parent.optional_worker.Drain();
@@ -176,6 +212,48 @@ int main() try {
                 }
             }
         }
+    }
+    }
+    // CodexAstraLocal: Keep all 48 legacy policy cases above, then independently
+    // cross generator request, compatibility, completion and intervening setting
+    // mutation. The real queued body must use its owned entry, not live settings.
+    for (bool requested_spirv : {false, true}) {
+    for (bool incompatible : {false, true}) {
+    for (bool change_options : {false, true}) {
+    for (bool fail : {false, true}) {
+        Cache cache;
+        cache.parent.profile = MakeProfile(true, true, requested_spirv);
+        cache.fragment.key = {{incompatible}, cache.parent.profile};
+        global_disable_optimizer = true;
+        fail_compile = fail;
+        records.clear(); generators.clear();
+        cache.Fragment();
+        Check(!cache.fragment.shader.done && generators.empty() && records.empty(),
+              "Full fragment generator ran or published before its queued job");
+        Check(cache.parent.shader_workers.jobs.empty() &&
+              cache.parent.optional_worker.jobs.size() == 1,
+              "Production compiler job used the wrong worker lane");
+        if (change_options) cache.parent.profile = MakeProfile(false, false, !requested_spirv);
+        cache.parent.optional_worker.Drain();
+        const bool direct = requested_spirv && !incompatible;
+        Check(generators.size() == 1 && generators[0].direct == direct &&
+              generators[0].incompatible == incompatible &&
+              generators[0].requested == requested_spirv,
+              "Full fragment generator choice or compatibility snapshot changed");
+        Check(direct ? records.empty() : records.size() == 1 && !records[0].disabled &&
+              records[0].stage == vk::ShaderStageFlagBits::eFragment,
+              "Full fragment frontend policy does not match effective generator");
+        const auto& shader = cache.fragment.shader;
+        Check(shader.done && shader.failed == fail &&
+              shader.module == (fail ? 0 : direct ? 2 : 1),
+              "Full fragment generator result was not published correctly");
+        Check(cache.ready_fragment_builds == 1 && cache.ready_fragment_failures == fail &&
+              cache.ready_fragment_spirv_builds == direct &&
+              cache.ready_fragment_glsl_builds == !direct,
+              "Full fragment effective generator accounting changed");
+        ++checks;
+    }
+    }
     }
     }
     std::printf("PASS: %u production queued compiler cases preserve policy, snapshots and completion\n", checks);
@@ -235,7 +313,7 @@ def main() -> None:
     vertex = job(source, "ShaderDiskCache::UseProgrammableVertexShader(", True)
     geometry = job(source, "ShaderDiskCache::UseFixedGeometryShader(", True)
     fragment = job(source, "ShaderDiskCache::UseReadyFragmentShader(", False)
-    # CodexAstraLocal: Retain the original 48-case matrix, and require actual
+    # CodexAstraLocal: Retain the original 48 cases plus 16 generator cases, and require actual
     # wrong-lane and unoptimized-optional jobs to fail its behavioral assertions.
     variants = [("", fragment, None),
                 ("-wrong-worker", replace_once(fragment,
@@ -245,6 +323,16 @@ def main() -> None:
                     "DisableShaderOptimizer(true, profile.vk_disable_spirv_optimizer != 0)",
                     "DisableShaderOptimizer(false, profile.vk_disable_spirv_optimizer != 0)"),
                  "Production compiler job did not preserve the optional/required policy snapshot")]
+    # CodexAstraLocal: A forced legacy GLSL path, missing compatibility check or
+    # late mutable-profile read must fail behavior, never merely compilation.
+    guard = 'profile.vk_use_spirv_generator && !fs.UsesSpirvIncompatibleConfig()'
+    for suffix, replacement in (
+            ('-ignored-generator', 'false'),
+            ('-ignored-compatibility', 'profile.vk_use_spirv_generator'),
+            ('-mutable-generator',
+             'parent.profile.vk_use_spirv_generator && !fs.UsesSpirvIncompatibleConfig()')):
+        variants.append((suffix, replace_once(fragment, guard, replacement),
+                         'Full fragment generator choice or compatibility snapshot changed'))
     args.output.parent.mkdir(parents=True, exist_ok=True)
     for suffix, fragment_job, expected_failure in variants:
         cpp = HEADER + vertex + r'''

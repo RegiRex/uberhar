@@ -4,6 +4,21 @@
 set -euo pipefail
 mkdir -p build/uberhar-probe
 python3 tools/uberhar/check_android_keys.py
+# CodexAstraLocal: Compile extracted shader jobs/routes before the larger corpus.
+# Changed production bodies must work with every ordinary/static fixture shell;
+# compilation failure is a gate failure, never a successful negative control.
+# CodexAstraUlt: Execute the real queued compiler jobs with frozen optional/required inputs.
+python3 tools/uberhar/test_shader_compile_policy.py
+# CodexAstraLocal: Execute actual optional-worker completion/failure controls and
+# extracted CPU-fragment selection/binding, including deliberately broken routes.
+# GPU image/transport execution remains a separate mandatory shader-workflow gate.
+python3 tools/uberhar/test_optional_fragment_worker.py
+python3 tools/uberhar/test_ready_cpu_fragments.py --mutants
+# CodexAstraLocal: Preserve both legacy populations, then qualify the additional
+# static-TEV tier's exact keys, reserved budgets, promotion and shared worker lane.
+# Actual generated pixels remain a separate shader-workflow requirement.
+python3 tools/uberhar/test_optional_fragment_worker.py --static-tev
+python3 tools/uberhar/test_ready_cpu_fragments.py --static-tev --mutants
 # CodexAstraLocal: Passive memory parser/schedule controls use a fake client and
 # clock only; this host gate never contacts ADB or invents bandwidth readings.
 python3 tools/uberhar/device_testing/test_memory_probe.py
@@ -63,18 +78,6 @@ timeout 30s build/uberhar-probe/test-vertex-capture-policy
 # independently read its artifacts; replay synthetic input through production CPU.
 python3 tools/uberhar/test_vertex_capture.py
 python3 tools/uberhar/test_vertex_capture_replay.py
-# CodexAstraUlt: Execute the real queued compiler jobs with frozen optional/required inputs.
-python3 tools/uberhar/test_shader_compile_policy.py
-# CodexAstraLocal: Execute actual optional-worker completion/failure controls and
-# extracted CPU-fragment selection/binding, including deliberately broken routes.
-# GPU image/transport execution remains a separate mandatory shader-workflow gate.
-python3 tools/uberhar/test_optional_fragment_worker.py
-python3 tools/uberhar/test_ready_cpu_fragments.py --mutants
-# CodexAstraLocal: Preserve both legacy populations, then qualify the additional
-# static-TEV tier's exact keys, reserved budgets, promotion and shared worker lane.
-# Actual generated pixels remain a separate shader-workflow requirement.
-python3 tools/uberhar/test_optional_fragment_worker.py --static-tev
-python3 tools/uberhar/test_ready_cpu_fragments.py --static-tev --mutants
 # CodexAstraLocal: Real worker release, completed GPU use and fixed ownership
 # must all permit reuse; intended broken lifetime/admission policies fail closed.
 python3 tools/uberhar/test_adaptive_cpu_cache.py --mutants

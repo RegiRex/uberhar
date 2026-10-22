@@ -1,3 +1,22 @@
+<!-- CodexAstraLocal: Follow-up after the initial .53 extraction-fixture compile failure. -->
+The initial Android build passed but the shader job stopped on a stale
+`test_shader_compile_policy.py` shell. Source-only integration checks were
+insufficient. The repair requires executable validation of all affected fixtures
+and the consolidated host probe before resubmission; see
+[the required preflight procedure](UBERHAR_RELEASE_PREFLIGHT.md). The existing
+publication gates are retained.
+
+<!-- CodexAstraLocal: Record the second issue found locally, preserving all boundary cases and stricter intended-failure evidence. -->
+The local integrated probe also found a descriptor negative-control ordering
+problem after removal of a low-hint retired consumer. The deliberately undersized
+implementation reached a zero-hint division before its capacity assertion. The
+repair retains the same six boundary hints, exercises nonzero hint 4 first, and
+requires exit code 1 with the exact capacity assertion. Production pool handling
+is unchanged. The normal 1,345-check case and all six deliberate defects pass.
+The compiler-policy fixture now includes actual production Profile/integer types;
+all 64 cases and five deliberate defects pass. Both changes received independent
+architecture review.
+
 # 0.1.53 integration review
 
 <!-- CodexAstraLocal: Keep the selected source baseline and reviewed scope explicit; this is a focused integration review, not a new whole-project audit. -->

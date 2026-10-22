@@ -158,6 +158,15 @@ def main():
             row["returncode"] = result.returncode
             if name == "baseline":
                 if result.returncode != 0: raise RuntimeError(f"baseline failed; {run}")
+            elif name == "undersized-pool":
+                # CodexAstraLocal: Retirement removed the low-hint live owner.
+                # Require the shared API's explicit capacity witness; a crash or
+                # a different later assertion cannot qualify this negative case.
+                row["expected_assertion"] = "exact effective set capacity"
+                if result.returncode != 1 or not re.fullmatch(
+                        r"FAIL after \d+ checks: exact effective set capacity\n",
+                        (run / f"{name}.stderr").read_text()):
+                    raise RuntimeError(f"{name}: capacity assertion not observed; {run}")
             elif result.returncode == 0 or "FAIL" not in (run / f"{name}.stderr").read_text():
                 raise RuntimeError(f"{name}: intended failure not observed; {run}")
         report["passed"] = True

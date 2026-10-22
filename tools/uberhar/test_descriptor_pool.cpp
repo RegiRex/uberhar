@@ -351,7 +351,10 @@ int main() {
     dispatcher.vkAllocateDescriptorSets = AllocateSets;
     try {
         ProductionContracts();
-        for (const u32 hint : {0U, 1U, 4U, 16U, 32U, 1024U})
+        // CodexAstraLocal: Surviving consumers use hints of at least 16. Exercise
+        // the shared 64-set minimum with a nonzero small hint before zero, so
+        // removing that minimum fails its capacity assertion before overflow math.
+        for (const u32 hint : {4U, 0U, 1U, 16U, 32U, 1024U})
             CheckContract(simple_bindings, hint, hint < 16 ? 64 : hint * 4);
         auto arrays = simple_bindings;
         arrays[0].descriptorCount = 65536;

@@ -1,3 +1,19 @@
+# CURRENT — repair and pre-submission validation of .53
+
+<!-- CodexAstraLocal: Owner explicitly requires affected executable validation before resubmission following the failed first .53 gate. -->
+Fix the shader test harness and any related stale extracted-code interfaces.
+Before submission, run the applicable extraction fixtures and consolidated host
+probe against this exact integrated tree; run affected shader output/module gates.
+Follow docs/UBERHAR_RELEASE_PREFLIGHT.md. Record commands, source identity, failures and passing results. Syntax or source
+review alone is insufficient. Preserve all existing release gates; never treat
+fixture compile failure as a successful negative control. Once validation passes,
+submit the corrected .53 through RegiRex/uberhar's gated prerelease workflow.
+No device tests or installation: the owner handles gameplay. Do not resume prior
+PC-sleep scheduling automatically for this new repair session. All code comments
+use CodexAstraLocal. Agents yield during automation and stop when their task ends.
+
+---
+
 # CURRENT — 0.1.53 authorized from original 0.1.48
 
 <!-- CodexAstraLocal: Latest owner instruction supersedes historical pauses and old delivery tracks below. -->
