@@ -35,11 +35,12 @@ class SettingsActivityPresenter(private val activityView: SettingsActivityView) 
     }
 
     fun onResume() {
-        SystemSaveGame.load()
+        // CodexAstraLocal: Title editing never loads/saves global emulated-console identity.
+        if (gameId.isEmpty()) SystemSaveGame.load()
     }
 
     fun onPause() {
-        SystemSaveGame.save()
+        if (gameId.isEmpty()) SystemSaveGame.save()
     }
 
     fun onStart() {
@@ -96,16 +97,23 @@ class SettingsActivityPresenter(private val activityView: SettingsActivityView) 
     }
 
     fun onStop(finishing: Boolean) {
-        if (finishing && shouldSave) {
+        val saved = finishing && shouldSave
+        if (saved) {
             Log.debug("[SettingsActivity] Settings activity stopping. Saving settings to INI...")
             settings.saveSettings(activityView)
-            // added to ensure that layout changes take effect as soon as settings window closes
-            NativeLibrary.reloadSettings()
-            NativeLibrary.updateFramebuffer(NativeLibrary.isPortraitMode())
-            updateAndroidImageVisibility()
-            TurboHelper.reloadTurbo(false) // TODO: Can this go somewhere else? -OS
+            if (!settings.isPerGame) updateAndroidImageVisibility()
         }
+        // CodexAstraLocal: Reload once, retaining the running title and its restart-only resources.
         NativeLibrary.reloadSettings()
+        if (finishing) {
+            val runningTitle = if (NativeLibrary.isRunning())
+                String.format("%016X", NativeLibrary.getRunningTitleId()) else ""
+            Settings().loadSettings(runningTitle)
+        }
+        if (saved) {
+            NativeLibrary.updateFramebuffer(NativeLibrary.isPortraitMode())
+            TurboHelper.reloadTurbo(false)
+        }
     }
 
     fun onSettingChanged() {

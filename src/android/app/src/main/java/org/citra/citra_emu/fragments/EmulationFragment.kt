@@ -44,7 +44,6 @@ import androidx.drawerlayout.widget.DrawerLayout
 import androidx.drawerlayout.widget.DrawerLayout.DrawerListener
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.activityViewModels
-import androidx.fragment.app.viewModels
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
@@ -87,6 +86,7 @@ import org.citra.citra_emu.utils.EmulationMenuSettings
 import org.citra.citra_emu.utils.GameHelper
 import org.citra.citra_emu.utils.GameIconUtils
 import org.citra.citra_emu.utils.Log
+import org.citra.citra_emu.utils.TurboHelper
 import org.citra.citra_emu.utils.UberharDeviceDiagnostics
 import org.citra.citra_emu.utils.ViewUtils
 import org.citra.citra_emu.viewmodel.EmulationViewModel
@@ -117,7 +117,9 @@ class EmulationFragment :
     private lateinit var screenAdjustmentUtil: ScreenAdjustmentUtil
 
     private val emulationViewModel: EmulationViewModel by activityViewModels()
-    private val settingsViewModel: SettingsViewModel by viewModels()
+    // CodexAstraLocal: In-game layout/control writes must share the Activity's title
+    // scope, rather than silently saving through an unloaded global Settings instance.
+    private val settingsViewModel: SettingsViewModel by activityViewModels()
     private val settings get() = settingsViewModel.settings
 
     private val onPause = Runnable { togglePause() }
@@ -199,6 +201,15 @@ class EmulationFragment :
             ).show()
             requireActivity().finish()
             return
+        }
+
+        // CodexAstraLocal: ACTION_VIEW/shortcut titles are resolved only here. Save the
+        // resolved Game for Activity recreation, then load its canonical settings before
+        // any screen/control helper can write; zero/invalid IDs still inherit globals.
+        intent.putExtra("game", game)
+        val settingsTitleId = SettingsFile.normalizeGameId("%016X".format(game.titleId))
+        if (!settings.isLoaded || settings.gameId != settingsTitleId) {
+            settings.loadSettings(settingsTitleId ?: "")
         }
 
         // AstraEH: Record the displayed title on one line for date/game-aware log exports.
@@ -457,6 +468,17 @@ class EmulationFragment :
                         ""
                     )
 
+                    true
+                }
+
+                // CodexAstraLocal: Keep global settings available beside the title editor;
+                // renderer selections in either editor remain locked until the game exits.
+                R.id.menu_game_settings -> {
+                    SettingsActivity.launch(
+                        requireContext(),
+                        SettingsFile.FILE_NAME_CONFIG,
+                        "%016X".format(game.titleId)
+                    )
                     true
                 }
 
@@ -1874,6 +1896,10 @@ class EmulationFragment :
             NativeLibrary.surfaceChanged(surface!!)
             when (state) {
                 State.STOPPED -> {
+                    // CodexAstraLocal: Match the core's per-load limiter reset in the
+                    // process-wide turbo helper. New games start at configured normal
+                    // speed; surface recreation and pause/resume retain their turbo state.
+                    TurboHelper.setTurboEnabled(false, showToast = false)
                     Thread({
                         Log.debug("[EmulationFragment] Starting emulation thread.")
                         // AstraEH: A fatal process exit leaves the active marker on disk. Normal

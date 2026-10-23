@@ -2,6 +2,12 @@
 
 # Thor USB readiness on Nobara
 
+<!-- CodexAstraLocal: Keep the new workload discoverable from the device-testing guide. -->
+The regular performance suite now includes the
+[Xenoblade Chronicles 3D 2x opening/battle comparison](../../../docs/UBERHAR_XENOBLADE_TEST_CARD.md).
+That card specifies the stock Azahar reference, phase boundaries, data collection
+and optional Turnip comparison; this readiness helper does not launch it.
+
 Run these steps on your Nobara laptop. This helper checks that the laptop can read
 the Thor's identity and the installed Uberhar version. It does not run a game,
 install an APK, change phone settings, or connect the cloud session to your laptop.

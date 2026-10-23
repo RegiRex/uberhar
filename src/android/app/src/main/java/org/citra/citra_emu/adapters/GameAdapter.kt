@@ -53,6 +53,8 @@ import org.citra.citra_emu.adapters.GameAdapter.GameViewHolder
 import org.citra.citra_emu.databinding.CardGameBinding
 import org.citra.citra_emu.databinding.DialogShortcutBinding
 import org.citra.citra_emu.features.cheats.ui.CheatsFragmentDirections
+import org.citra.citra_emu.features.settings.ui.SettingsActivity
+import org.citra.citra_emu.features.settings.utils.SettingsFile
 import org.citra.citra_emu.fragments.IndeterminateProgressDialogFragment
 import org.citra.citra_emu.model.Game
 import org.citra.citra_emu.utils.BuildUtil
@@ -534,6 +536,12 @@ class GameAdapter(
         bottomSheetView.findViewById<MaterialButton>(R.id.about_game_play).setOnClickListener {
             val action = HomeNavigationDirections.actionGlobalEmulationActivity(holder.game)
             view.findNavController().navigate(action)
+        }
+
+        // CodexAstraLocal: The title ID, not the ROM path, owns portable per-game overrides.
+        bottomSheetView.findViewById<MaterialButton>(R.id.game_settings).setOnClickListener {
+            SettingsActivity.launch(context, SettingsFile.FILE_NAME_CONFIG, "%016X".format(game.titleId))
+            bottomSheetDialog.dismiss()
         }
 
         bottomSheetView.findViewById<TextView>(R.id.about_game_playtime).text =

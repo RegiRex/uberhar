@@ -68,6 +68,12 @@
         android:icon="@drawable/ic_settings"
         android:title="@string/preferences_settings" />
 
+    <!-- CodexAstraLocal: Title-specific overrides share the game-list settings editor. -->
+    <item
+        android:id="@+id/menu_game_settings"
+        android:icon="@drawable/ic_settings"
+        android:title="@string/uberhar_game_settings" />
+
     <item
         android:id="@+id/menu_multiplayer"
         android:icon="@drawable/ic_network"

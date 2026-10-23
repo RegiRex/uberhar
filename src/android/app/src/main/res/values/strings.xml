@@ -1,5 +1,27 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- CodexAstraLocal: Testing is a temporary global overlay; saved title settings remain distinct. -->
+    <string name="uberhar_testing">Testing</string>
+    <string name="uberhar_testing_description">Temporary choices for every game. Turn off to restore saved global and per-game settings. Other graphics settings stay unchanged.</string>
+    <string name="uberhar_testing_restart_required">Close the game before changing Testing, its rendering preset, or its resolution.</string>
+    <string name="uberhar_testing_native">Native</string>
+    <string name="uberhar_testing_combo_cpu">Combo · CPU Vertices ON</string>
+    <string name="uberhar_testing_combo_gpu">Combo · CPU Vertices OFF</string>
+    <string name="uberhar_testing_resolution_2x">2×</string>
+    <string name="uberhar_testing_resolution_4x">4×</string>
+    <string name="uberhar_testing_active_summary">Testing active: %1$s · %2$d×. These temporary values override saved rendering mode, CPU Vertices and resolution.</string>
+    <string name="uberhar_testing_save_failed">Could not save Testing settings. Recheck the displayed selection before launching a game.</string>
+    <string name="uberhar_game_settings">Game Settings</string>
+    <string name="uberhar_game_settings_title">%1$s · %2$s</string>
+    <string name="uberhar_game_settings_scope">Saved settings for this game. Unchanged values inherit Global; long-press a setting to restore its global value.</string>
+    <string name="uberhar_global_settings_scope">Saved global settings. Game overrides take precedence.</string>
+    <string name="uberhar_setting_global">%1$s · Global</string>
+    <string name="uberhar_setting_override">%1$s · Game override</string>
+    <string name="uberhar_game_reset">Use Global Settings</string>
+    <string name="uberhar_game_reset_description">Remove this game’s saved overrides. Other games and global settings stay unchanged.</string>
+    <string name="uberhar_game_reset_confirm">Restore all settings for this game to their global values?</string>
+    <string name="uberhar_game_reset_setting_confirm">Restore this setting to its global value for this game?</string>
+    <string name="uberhar_game_reset_restart_required">Close the game before restoring renderer settings to Global.</string>
 
     <!-- General application strings -->
     <string name="app_name" translatable="false">Azahar</string>

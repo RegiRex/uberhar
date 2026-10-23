@@ -258,8 +258,6 @@ static Core::System::ResultStatus RunCitra(const std::string& filepath) {
     // CodexAstraLocal: Resolve persisted/per-title profiles before constructing
     // the frontend context; CPU Software needs EGL even after a prior Vulkan run.
     // Forces a config reload on game boot, if the user changed settings in the UI
-    Config{};
-    // Replace with game-specific settings
     u64 program_id{};
     FileUtil::SetCurrentRomPath(filepath);
     auto app_loader = Loader::GetLoader(filepath);
@@ -267,6 +265,13 @@ static Core::System::ResultStatus RunCitra(const std::string& filepath) {
         app_loader->ReadProgramId(program_id);
         system.RegisterAppLoaderEarly(app_loader);
     }
+    // CodexAstraLocal: Resolve global/title/testing layers before choosing a frontend API or workers.
+    Config{program_id};
+    SCOPE_EXIT({
+        // CodexAstraLocal: Cleanup runs on every return, including frontend initialization failures.
+        // Later shutdown guards run first; only then can the next title inherit clean global state.
+        if (!system.IsPoweredOn()) Config{};
+    });
     system.ApplySettings();
     Settings::LogSettings();
 
@@ -1134,14 +1139,11 @@ void Java_org_citra_citra_1emu_NativeLibrary_logUserDirectory(JNIEnv* env,
 
 void Java_org_citra_citra_1emu_NativeLibrary_reloadSettings([[maybe_unused]] JNIEnv* env,
                                                             [[maybe_unused]] jobject obj) {
-    Config{};
     Core::System& system{Core::System::GetInstance()};
-
-    // Replace with game-specific settings
-    if (system.IsPoweredOn()) {
-        u64 program_id{};
-        system.GetAppLoader().ReadProgramId(program_id);
-    }
+    // CodexAstraLocal: In-game edits retain the same title scope and preserve restart-only resources.
+    u64 program_id{};
+    if (system.IsPoweredOn()) system.GetAppLoader().ReadProgramId(program_id);
+    Config{program_id};
 
     if (multiplayer) {
         multiplayer->UpdateCredentials();

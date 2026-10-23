@@ -156,6 +156,8 @@ c++ -std=c++20 -O2 -DENABLE_VULKAN -DFMT_HEADER_ONLY -Isrc -Ibuild/uberhar-profi
   -Iexternals/fmt/include -Iexternals/boost tools/uberhar/test_graphics_profile.cpp \
   -o build/uberhar-probe/test-graphics-profile
 build/uberhar-probe/test-graphics-profile
+# CodexAstraLocal: Keep Android title/testing inheritance isolated from saved global preferences.
+python3 tools/uberhar/test_android_settings_layers.py
 # CodexAstraUlt: Execute production route control with the generated setting keys.
 python3 tools/uberhar/test_combo_generic_route.py
 # CodexAstraUlt: Reproduce triangle quaternion parity using the real CPU submission

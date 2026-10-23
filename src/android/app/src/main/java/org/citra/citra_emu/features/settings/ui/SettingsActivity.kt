@@ -21,10 +21,12 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.updatePadding
 import androidx.preference.PreferenceManager
 import com.google.android.material.color.MaterialColors
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import java.io.IOException
 import org.citra.citra_emu.CitraApplication
 import org.citra.citra_emu.NativeLibrary
 import org.citra.citra_emu.R
+import org.citra.citra_emu.activities.EmulationActivity
 import org.citra.citra_emu.databinding.ActivitySettingsBinding
 import org.citra.citra_emu.features.settings.model.BooleanSetting
 import org.citra.citra_emu.features.settings.model.FloatSetting
@@ -202,6 +204,12 @@ class SettingsActivity :
     }
 
     fun onSettingsReset() {
+        // CodexAstraLocal: Even a restored legacy reset dialog cannot delete global
+        // configuration, controllers or console data from a title-scoped activity.
+        if (settings.isPerGame) {
+            resetPerGameSettings()
+            return
+        }
         // Prevents saving to a non-existent settings file
         presenter.onSettingsReset()
 
@@ -249,7 +257,40 @@ class SettingsActivity :
     }
 
     fun setToolbarTitle(title: String) {
-        binding.toolbarSettingsLayout.title = title
+        // CodexAstraLocal: Preserve title scope on every submenu, not just the entry page.
+        binding.toolbarSettingsLayout.title = if (settings.isPerGame) {
+            getString(R.string.uberhar_game_settings_title, title, settings.gameId)
+        } else {
+            title
+        }
+    }
+
+    // CodexAstraLocal: A destructive-looking whole-title action always asks before
+    // changing the pending overrides; cancellation leaves both files and values intact.
+    fun confirmResetPerGameSettings() {
+        if (!settings.isPerGame) return
+        if (!canResetPerGameSettings()) return
+        MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.uberhar_game_reset)
+            .setMessage(R.string.uberhar_game_reset_confirm)
+            .setPositiveButton(android.R.string.ok) { _, _ -> resetPerGameSettings() }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun resetPerGameSettings() {
+        if (!settings.isPerGame || !canResetPerGameSettings()) return
+        settings.resetPerGameOverrides()
+        presenter.onSettingChanged()
+        settingsFragment?.loadSettingsList()
+    }
+
+    // CodexAstraLocal: Recheck at confirmation time as well as row binding, because
+    // a restored dialog must not reset frozen renderer options in a running game.
+    private fun canResetPerGameSettings(): Boolean {
+        if (!EmulationActivity.isRunning()) return true
+        showToastMessage(getString(R.string.uberhar_game_reset_restart_required), true)
+        return false
     }
 
     private val settingsFragment: SettingsFragment?

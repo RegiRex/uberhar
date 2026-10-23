@@ -50,7 +50,8 @@ object SettingsFile {
     fun readFile(
         ini: DocumentFile,
         isCustomGame: Boolean,
-        view: SettingsActivityView?
+        view: SettingsActivityView?,
+        accepts: (AbstractSetting) -> Boolean = { true }
     ): HashMap<String, SettingSection?> {
         val sections: HashMap<String, SettingSection?> = SettingsSectionMap()
         var reader: BufferedReader? = null
@@ -65,7 +66,7 @@ object SettingsFile {
                     current = sectionFromLine(line!!, isCustomGame)
                     sections[current.name] = current
                 } else if (current != null) {
-                    val setting = settingFromLine(line!!)
+                    val setting = settingFromLine(line!!, if (isCustomGame) current.name else null, accepts)
                     if (setting != null) {
                         current.putSetting(setting)
                     }
@@ -104,8 +105,72 @@ object SettingsFile {
      */
     fun readCustomGameSettings(
         gameId: String,
+        view: SettingsActivityView?,
+        accepts: (AbstractSetting) -> Boolean = { true }
+    ): HashMap<String, SettingSection?> {
+        // CodexAstraLocal: A missing title file means inheritance, not a broken settings screen.
+        val ini = getCustomGameSettingsFile(gameId, false) ?: return SettingsSectionMap()
+        return readFile(ini, true, view, accepts)
+    }
+
+    // CodexAstraLocal: Canonical title IDs prevent path traversal and collisions between launch/editor paths.
+    fun normalizeGameId(gameId: String): String? = gameId.trim().takeIf {
+        it.matches(Regex("[0-9a-fA-F]{1,16}")) && it.any { c -> c != '0' }
+    }?.uppercase()?.padStart(16, '0')
+
+    fun saveCustomGameSettings(
+        gameId: String,
+        settings: List<AbstractSetting>,
+        removedKeys: Set<String>,
         view: SettingsActivityView?
-    ): HashMap<String, SettingSection?> = readFile(getCustomGameSettingsFile(gameId), true, view)
+    ) {
+        try {
+            val ini = getCustomGameSettingsFile(gameId, true)
+                ?: throw IOException("Cannot create title settings")
+            val resolver = CitraApplication.appContext.contentResolver
+            val writer = resolver.openInputStream(ini.uri)!!.use { Wini(it) }
+            // CodexAstraLocal: Only requested keys are removed; unrecognized future settings survive.
+            for (section in writer.values) removedKeys.forEach(section::remove)
+            settings.forEach { writer.put(it.section, it.key, it.valueAsString) }
+            resolver.openOutputStream(ini.uri, "wt")!!.use { writer.store(it) }
+        } catch (e: Exception) {
+            Log.error("[SettingsFile] Error saving title $gameId: ${e.message}")
+            view?.showToastMessage(
+                CitraApplication.appContext.getString(R.string.error_saving, gameId, e.message), false
+            )
+        }
+    }
+
+    // CodexAstraLocal: Testing is a separate persisted overlay and never overwrites config.ini.
+    fun readTestingFile(): Wini {
+        val ini = getOptionalConfigFile("testing", false) ?: return Wini()
+        return try {
+            CitraApplication.appContext.contentResolver.openInputStream(ini.uri)!!.use { Wini(it) }
+        } catch (e: Exception) {
+            Log.error("[SettingsFile] Error reading testing settings: ${e.message}")
+            Wini()
+        }
+    }
+
+    fun saveTestingFile(writer: Wini): Boolean = try {
+        val ini = getOptionalConfigFile("testing", true)
+            ?: throw IOException("Cannot create testing settings")
+        CitraApplication.appContext.contentResolver.openOutputStream(ini.uri, "wt")!!.use {
+            writer.store(it)
+        }
+        true
+    } catch (e: Exception) {
+        Log.error("[SettingsFile] Error saving testing settings: ${e.message}")
+        false
+    }
+
+    private fun getOptionalConfigFile(name: String, create: Boolean): DocumentFile? {
+        val root = DocumentFile.fromTreeUri(CitraApplication.appContext, Uri.parse(userDirectory))
+        val directory = root?.findFile("config") ?: return null
+        return directory.findFile("$name.ini") ?: if (create) {
+            directory.createFile("application/octet-stream", "$name.ini")
+        } else null
+    }
 
     /**
      * Saves a Settings HashMap to a given .ini file on disk. If unsuccessful, outputs an error
@@ -182,10 +247,15 @@ object SettingsFile {
         return configDirectory!!.findFile("$fileName.ini")!!
     }
 
-    private fun getCustomGameSettingsFile(gameId: String): DocumentFile {
+    private fun getCustomGameSettingsFile(gameId: String, create: Boolean): DocumentFile? {
+        val canonicalId = normalizeGameId(gameId) ?: return null
         val root = DocumentFile.fromTreeUri(CitraApplication.appContext, Uri.parse(userDirectory))
-        val configDirectory = root!!.findFile("GameSettings")
-        return configDirectory!!.findFile("$gameId.ini")!!
+            ?: return null
+        val directory = root.findFile("GameSettings")
+            ?: if (create) root.createDirectory("GameSettings") else null
+        return directory?.findFile("$canonicalId.ini") ?: if (create) {
+            directory?.createFile("application/octet-stream", "$canonicalId.ini")
+        } else null
     }
 
     private fun sectionFromLine(line: String, isCustomGame: Boolean): SettingSection {
@@ -203,57 +273,49 @@ object SettingsFile {
      * @param line    The line of text being parsed.
      * @return A typed Setting containing the key/value contained in the line.
      */
-    private fun settingFromLine(line: String): AbstractSetting? {
-        val splitLine = line.split("=".toRegex()).dropLastWhile { it.isEmpty() }.toTypedArray()
-        if (splitLine.size != 2) {
-            return null
-        }
-        val key = splitLine[0].trim { it <= ' ' }
-        val value = splitLine[1].trim { it <= ' ' }
-        if (value.isEmpty()) {
-            return null
-        }
+    private fun settingFromLine(
+        line: String,
+        section: String?,
+        accepts: (AbstractSetting) -> Boolean
+    ): AbstractSetting? {
+        // CodexAstraLocal: Split once so parameter packages containing '=' remain intact.
+        val parts = line.split('=', limit = 2)
+        if (parts.size != 2 || parts[0].trim().startsWith('#') ||
+            parts[0].trim().startsWith(';')) return null
+        val key = parts[0].trim()
+        val setting = org.citra.citra_emu.features.settings.model.Settings.allSettings.firstOrNull {
+            it.key == key && (section == null || it.section == section)
+        } ?: return null
+        if (!accepts(setting)) return null
+        return if (applyValue(setting, parts[1].trim())) setting else null
+    }
 
-        val booleanSetting = BooleanSetting.from(key)
-        if (booleanSetting != null) {
-            booleanSetting.boolean = value.toBoolean()
-            return booleanSetting
-        }
-
-        val intSetting = IntSetting.from(key)
-        if (intSetting != null) {
-            try {
-                intSetting.int = value.toInt()
-            } catch (e: NumberFormatException) {
-                intSetting.int = if (value.toBoolean()) 1 else 0
+    // CodexAstraLocal: Reuse typed enum parsing for global/title loads and reset-to-global snapshots.
+    fun applyValue(setting: AbstractSetting, value: String): Boolean {
+        return try {
+            when (setting) {
+                is BooleanSetting -> setting.boolean = when (value.lowercase()) {
+                    "true", "yes", "on", "1" -> true
+                    "false", "no", "off", "0" -> false
+                    else -> throw IllegalArgumentException("Invalid boolean")
+                }
+                is IntSetting -> setting.int = value.toIntOrNull() ?: when (value.lowercase()) {
+                    "true" -> 1
+                    "false" -> 0
+                    else -> throw IllegalArgumentException("Invalid integer")
+                }
+                is ScaledFloatSetting -> setting.float = value.toFloat() * setting.scale
+                is FloatSetting -> setting.float = value.toFloat()
+                is StringSetting -> setting.string = value
+                is IntListSetting -> setting.list = if (value.isEmpty()) emptyList() else
+                    value.split(',').map { it.trim().toInt() }
+                else -> return false
             }
-            return intSetting
+            true
+        } catch (e: IllegalArgumentException) {
+            Log.error("[SettingsFile] Invalid value for ${setting.key}: ${e.message}")
+            false
         }
-
-        val scaledFloatSetting = ScaledFloatSetting.from(key)
-        if (scaledFloatSetting != null) {
-            scaledFloatSetting.float = value.toFloat() * scaledFloatSetting.scale
-            return scaledFloatSetting
-        }
-
-        val floatSetting = FloatSetting.from(key)
-        if (floatSetting != null) {
-            floatSetting.float = value.toFloat()
-            return floatSetting
-        }
-
-        val stringSetting = StringSetting.from(key)
-        if (stringSetting != null) {
-            stringSetting.string = value
-            return stringSetting
-        }
-
-        val intListSetting = IntListSetting.from(key)
-        if (intListSetting != null) {
-            intListSetting.list = value.split(", ").map { it.toInt() }
-        }
-
-        return null
     }
 
     /**

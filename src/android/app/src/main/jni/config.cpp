@@ -26,7 +26,8 @@
 #include "jni/default_ini.h"
 #include "jni/input_manager.h"
 
-Config::Config() {
+Config::Config(u64 program_id) : title_id{program_id},
+                                 runtime_reload{Core::System::GetInstance().IsPoweredOn()} {
     // TODO: Don't hardcode the path; let the frontend decide where to put the config files.
     android_config_loc = FileUtil::GetUserPath(FileUtil::UserPath::ConfigDir) + "config.ini";
     std::string ini_buffer;
@@ -35,6 +36,21 @@ Config::Config() {
         android_config = std::make_unique<INIReader>(ini_buffer.c_str(), ini_buffer.size());
     }
 
+    // CodexAstraLocal: Missing title settings inherit globals; malformed overrides fail closed.
+    if (title_id != 0) {
+        const auto path = FileUtil::GetUserPath(FileUtil::UserPath::UserDir) +
+                          fmt::format("GameSettings/{:016X}.ini", title_id);
+        std::string title_buffer;
+        if (FileUtil::ReadFileToString(true, path, title_buffer) && !title_buffer.empty()) {
+            auto parsed = std::make_unique<INIReader>(title_buffer.c_str(), title_buffer.size());
+            if (parsed->ParseError() == 0) {
+                title_config = std::move(parsed);
+                LOG_INFO(Config, "Loaded per-game settings for {:016X}", title_id);
+            } else {
+                LOG_ERROR(Config, "Ignoring malformed per-game settings for {:016X}", title_id);
+            }
+        }
+    }
     Reload();
 }
 
@@ -78,29 +94,114 @@ static const std::array<int, Settings::NativeAnalog::NumAnalogs> default_analogs
     InputManager::N3DS_STICK_C,
 }};
 
-template <>
-void Config::ReadSetting(const std::string& group, Settings::Setting<std::string>& setting) {
-    std::string setting_value =
-        android_config->Get(group, setting.GetLabel(), setting.GetDefault());
-    if (setting_value.empty()) {
-        setting_value = setting.GetDefault();
+// CodexAstraLocal: Typed overlay parsing uses inherited values as fallbacks for malformed entries.
+namespace {
+// CodexAstraLocal: Keep an active testing launch stable when an editor changes next-launch preferences.
+bool testing_overlay_active{};
+
+template <typename Type>
+Type ReadConfigValue(const INIReader& reader, const std::string& group,
+                     const std::string& key, const Type& fallback) {
+    if constexpr (std::is_same_v<Type, std::string>) {
+        return reader.GetString(group, key, fallback);
+    } else if constexpr (std::is_same_v<Type, bool>) {
+        return reader.GetBoolean(group, key, fallback);
+    } else if constexpr (std::is_floating_point_v<Type>) {
+        return static_cast<Type>(reader.GetReal(group, key, fallback));
+    } else {
+        return static_cast<Type>(reader.GetInteger(group, key, static_cast<long>(fallback)));
     }
-    setting = std::move(setting_value);
+}
+} // namespace
+
+bool Config::HasTitleValue(const std::string& group, const std::string& key) const {
+    // CodexAstraLocal: Device identity, storage, networking and debug configuration stay global.
+    const bool allowed = group == "Core" || group == "Renderer" || group == "Audio" ||
+                         group == "Layout" || group == "Utility";
+    return allowed && key != Settings::Keys::turbo_limit && title_config &&
+           title_config->HasValue(group, key);
 }
 
-template <>
-void Config::ReadSetting(const std::string& group, Settings::Setting<bool>& setting) {
-    setting = android_config->GetBoolean(group, setting.GetLabel(), setting.GetDefault());
+bool Config::KeepRunningValue(const std::string& key) const {
+    // CodexAstraLocal: Owners of these resources are created once; settings edits apply next launch.
+    static constexpr std::array keys{
+        Settings::Keys::graphics_api,
+        Settings::Keys::uberhar_test_mode,
+        Settings::Keys::uberhar_cpu_vertex_only,
+        Settings::Keys::uberhar_native_full_fragments,
+        Settings::Keys::uberhar_cpu_prefix_overlap,
+        Settings::Keys::uberhar_parallel_texture_decode,
+        Settings::Keys::uberhar_cpu_execution_census,
+        Settings::Keys::uberhar_hybrid_tev,
+        Settings::Keys::uberhar_force_tev,
+        Settings::Keys::uberhar_cpu_vertex_bridge,
+        Settings::Keys::async_shader_compilation,
+        Settings::Keys::async_presentation,
+        Settings::Keys::spirv_shader_gen,
+        Settings::Keys::disable_spirv_optimizer,
+        Settings::Keys::use_hw_shader,
+        Settings::Keys::use_shader_jit,
+        Settings::Keys::use_cpu_jit,
+        Settings::Keys::shaders_accurate_mul,
+        Settings::Keys::use_vsync,
+        Settings::Keys::software_renderer_workers,
+    };
+    return runtime_reload &&
+           (std::ranges::find(keys, key) != keys.end() ||
+            (key == Settings::Keys::resolution_factor && testing_overlay_active));
 }
 
 template <typename Type, bool ranged>
 void Config::ReadSetting(const std::string& group, Settings::Setting<Type, ranged>& setting) {
-    if constexpr (std::is_floating_point_v<Type>) {
-        setting = android_config->GetReal(group, setting.GetLabel(), setting.GetDefault());
-    } else {
-        setting = static_cast<Type>(android_config->GetInteger(
-            group, setting.GetLabel(), static_cast<long>(setting.GetDefault())));
+    if (KeepRunningValue(setting.GetLabel())) return;
+    Type value = ReadConfigValue(*android_config, group, setting.GetLabel(), setting.GetDefault());
+    if (HasTitleValue(group, setting.GetLabel())) {
+        value = ReadConfigValue(*title_config, group, setting.GetLabel(), value);
     }
+    setting = value;
+}
+
+template <typename Type, bool ranged>
+void Config::ReadSetting(const std::string& group, Settings::SwitchableSetting<Type, ranged>& setting) {
+    ReadSetting(group, setting, setting.GetDefault());
+}
+
+template <typename Type, bool ranged>
+void Config::ReadSetting(const std::string& group, Settings::SwitchableSetting<Type, ranged>& setting,
+                         const Type& android_default) {
+    if (KeepRunningValue(setting.GetLabel())) return;
+    setting.SetGlobal(true);
+    setting = ReadConfigValue(*android_config, group, setting.GetLabel(), android_default);
+    if (HasTitleValue(group, setting.GetLabel())) {
+        const auto inherited = setting.GetValue();
+        setting.SetGlobal(false);
+        setting = ReadConfigValue(*title_config, group, setting.GetLabel(), inherited);
+    }
+}
+
+void Config::ApplyTestingOverlay() {
+    if (runtime_reload) return;
+    testing_overlay_active = false;
+    if (title_id == 0) return;
+    // CodexAstraLocal: Last-layer testing values never touch persisted title or global preferences.
+    std::string buffer;
+    const auto path = FileUtil::GetUserPath(FileUtil::UserPath::ConfigDir) + "testing.ini";
+    if (!FileUtil::ReadFileToString(true, path, buffer) || buffer.empty()) return;
+    const INIReader testing{buffer.c_str(), buffer.size()};
+    if (testing.ParseError() != 0 || !testing.GetBoolean("Testing", "enabled", false)) return;
+    const auto preset = testing.GetInteger("Testing", "preset", 0);
+    const auto resolution = testing.GetInteger("Testing", "resolution", 2);
+    if (preset < 0 || preset > 2 || (resolution != 2 && resolution != 4)) {
+        LOG_ERROR(Config, "Ignoring invalid testing preset/resolution");
+        return;
+    }
+    testing_overlay_active = true;
+    Settings::values.uberhar_test_mode = preset == 0 ? Settings::UberharTestMode::Native :
+                                                      Settings::UberharTestMode::Automatic;
+    Settings::values.uberhar_cpu_vertex_only = preset == 1;
+    Settings::values.resolution_factor = static_cast<u16>(resolution);
+    LOG_INFO(Config, "Testing overlay: title={:016X} preset={} resolution={}x", title_id,
+             preset, resolution);
 }
 
 void Config::ReadValues() {
@@ -140,8 +241,7 @@ void Config::ReadValues() {
 
     // Renderer
     Settings::values.use_gles = android_config->GetBoolean("Renderer", "use_gles", true);
-    Settings::values.shaders_accurate_mul =
-        android_config->GetBoolean("Renderer", "shaders_accurate_mul", false);
+    ReadSetting("Renderer", Settings::values.shaders_accurate_mul, false);
     ReadSetting("Renderer", Settings::values.graphics_api);
     // CodexAstraLocal: Retired Android Software selection migrates without changing saves or resolution.
     if (Settings::values.graphics_api.GetValue() == Settings::GraphicsAPI::Software) {
@@ -188,9 +288,14 @@ void Config::ReadValues() {
     ReadSetting("Renderer", Settings::values.texture_sampling);
     ReadSetting("Renderer", Settings::values.turbo_limit);
     // Workaround to map Android setting for enabling the frame limiter to the format Citra expects
-    if (android_config->GetBoolean("Renderer", "use_frame_limit", true)) {
-        ReadSetting("Renderer", Settings::values.frame_limit);
-    } else {
+    // CodexAstraLocal: The legacy limiter switch follows the same title inheritance as its cap.
+    const bool global_limiter = android_config->GetBoolean("Renderer", "use_frame_limit", true);
+    const bool use_limiter =
+        HasTitleValue("Renderer", "use_frame_limit")
+            ? title_config->GetBoolean("Renderer", "use_frame_limit", global_limiter)
+            : global_limiter;
+    ReadSetting("Renderer", Settings::values.frame_limit);
+    if (!use_limiter) {
         Settings::values.frame_limit = 0;
     }
 
@@ -218,19 +323,15 @@ void Config::ReadValues() {
     // Layout
     // Somewhat inelegant solution to ensure layout value is between 0 and 5 on read
     // since older config files may have other values
-    int layoutInt = (int)android_config->GetInteger(
-        "Layout", "layout_option", static_cast<int>(Settings::LayoutOption::LargeScreen));
-    if (layoutInt < 0 || layoutInt > 5) {
-        layoutInt = static_cast<int>(Settings::LayoutOption::LargeScreen);
+    // CodexAstraLocal: Use the same typed overlay path for layout enum and scalar preferences.
+    ReadSetting("Layout", Settings::values.layout_option, Settings::LayoutOption::LargeScreen);
+    if (static_cast<int>(Settings::values.layout_option.GetValue()) < 0 ||
+        static_cast<int>(Settings::values.layout_option.GetValue()) > 5) {
+        Settings::values.layout_option = Settings::LayoutOption::LargeScreen;
     }
-    Settings::values.layout_option = static_cast<Settings::LayoutOption>(layoutInt);
-    Settings::values.screen_gap =
-        static_cast<int>(android_config->GetReal("Layout", "screen_gap", 0));
-    Settings::values.large_screen_proportion =
-        static_cast<float>(android_config->GetReal("Layout", "large_screen_proportion", 2.25));
-    Settings::values.small_screen_position = static_cast<Settings::SmallScreenPosition>(
-        android_config->GetInteger("Layout", "small_screen_position",
-                                   static_cast<int>(Settings::SmallScreenPosition::TopRight)));
+    ReadSetting("Layout", Settings::values.large_screen_proportion, 2.25f);
+    ReadSetting("Layout", Settings::values.small_screen_position,
+                Settings::SmallScreenPosition::TopRight);
     ReadSetting("Layout", Settings::values.screen_gap);
     ReadSetting("Layout", Settings::values.custom_top_x);
     ReadSetting("Layout", Settings::values.custom_top_y);
@@ -246,13 +347,9 @@ void Config::ReadValues() {
     ReadSetting("Layout", Settings::values.cardboard_y_shift);
     ReadSetting("Layout", Settings::values.upright_screen);
 
-    Settings::values.portrait_layout_option =
-        static_cast<Settings::PortraitLayoutOption>(android_config->GetInteger(
-            "Layout", "portrait_layout_option",
-            static_cast<int>(Settings::PortraitLayoutOption::PortraitTopFullWidth)));
-    Settings::values.secondary_display_layout = static_cast<Settings::SecondaryDisplayLayout>(
-        android_config->GetInteger("Layout", Settings::HKeys::secondary_display_layout.c_str(),
-                                   static_cast<int>(Settings::SecondaryDisplayLayout::None)));
+    ReadSetting("Layout", Settings::values.portrait_layout_option);
+    ReadSetting("Layout", Settings::values.secondary_display_layout,
+                Settings::SecondaryDisplayLayout::None);
     ReadSetting("Layout", Settings::values.custom_portrait_top_x);
     ReadSetting("Layout", Settings::values.custom_portrait_top_y);
     ReadSetting("Layout", Settings::values.custom_portrait_top_width);
@@ -367,6 +464,7 @@ void Config::ReadValues() {
     ReadSetting("WebService", Settings::values.network_token);
 
     // AstraEH: Apply last, after reloading every saved setting; never write these overrides to INI.
+    ApplyTestingOverlay();
     Settings::ApplyUberharTestProfile();
 }
 

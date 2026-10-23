@@ -17,6 +17,7 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import org.citra.citra_emu.BuildConfig
 import org.citra.citra_emu.CitraApplication
 import org.citra.citra_emu.R
+import org.citra.citra_emu.activities.EmulationActivity
 import org.citra.citra_emu.display.ScreenLayout
 import org.citra.citra_emu.display.StereoMode
 import org.citra.citra_emu.display.StereoWhichDisplay
@@ -32,6 +33,7 @@ import org.citra.citra_emu.features.settings.model.IntSetting
 import org.citra.citra_emu.features.settings.model.ScaledFloatSetting
 import org.citra.citra_emu.features.settings.model.Settings
 import org.citra.citra_emu.features.settings.model.StringSetting
+import org.citra.citra_emu.features.settings.model.TestingSettings
 import org.citra.citra_emu.features.settings.model.UberharGraphicsProfile
 import org.citra.citra_emu.features.settings.model.UberharTestMode
 import org.citra.citra_emu.features.settings.model.UberharTestModeSwitch
@@ -57,6 +59,12 @@ import org.citra.citra_emu.utils.SystemSaveGame
 import org.citra.citra_emu.utils.ThemeUtil
 
 class SettingsFragmentPresenter(private val fragmentView: SettingsFragmentView) {
+    // CodexAstraLocal: Only title-safe child pages can be reached from the per-game editor.
+    private val perGameSubmenus = setOf(
+        Settings.SECTION_CUSTOM_LANDSCAPE,
+        Settings.SECTION_CUSTOM_PORTRAIT,
+        Settings.SECTION_PERFORMANCE_OVERLAY
+    )
     private var menuTag: String? = null
     private lateinit var gameId: String
     private var settingsList: ArrayList<SettingsItem>? = null
@@ -92,9 +100,6 @@ class SettingsFragmentPresenter(private val fragmentView: SettingsFragmentView) 
     }
 
     fun loadSettingsList() {
-        if (!TextUtils.isEmpty(gameId)) {
-            settingsActivity.setToolbarTitle("Application Settings: $gameId")
-        }
         val sl = ArrayList<SettingsItem>()
         if (menuTag == null) {
             return
@@ -133,6 +138,20 @@ class SettingsFragmentPresenter(private val fragmentView: SettingsFragmentView) 
                 return
             }
         }
+        // CodexAstraLocal: The title editor only exposes keys the native overlay accepts;
+        // unkeyed SystemSaveGame/device actions must never mutate global state here.
+        if (settings.isPerGame && menuTag != SettingsFile.FILE_NAME_CONFIG) {
+            sl.removeAll { item ->
+                val setting = item.setting
+                when {
+                    setting is UberharTestModeSwitch -> !settings.isPerGameSetting(setting.backing)
+                    setting != null -> !settings.isPerGameSetting(setting)
+                    item is HeaderSetting -> false
+                    item is SubmenuSetting -> item.menuKey !in perGameSubmenus
+                    else -> true
+                }
+            }
+        }
         settingsList = sl
         fragmentView.showSettingsList(settingsList!!)
     }
@@ -156,6 +175,40 @@ class SettingsFragmentPresenter(private val fragmentView: SettingsFragmentView) 
 
     private fun addConfigSettings(sl: ArrayList<SettingsItem>) {
         settingsActivity.setToolbarTitle(settingsActivity.getString(R.string.preferences_settings))
+        // CodexAstraLocal: A game editor has a deliberately bounded surface and a
+        // confirmed title-only reset; global console/account/controller actions stay global.
+        if (settings.isPerGame) {
+            sl.add(
+                SubmenuSetting(
+                    R.string.preferences_general, 0, R.drawable.ic_general_settings, Settings.SECTION_CORE
+                )
+            )
+            sl.add(
+                SubmenuSetting(
+                    R.string.preferences_graphics, 0, R.drawable.ic_graphics, Settings.SECTION_RENDERER
+                )
+            )
+            sl.add(
+                SubmenuSetting(
+                    R.string.preferences_layout, 0, R.drawable.ic_fit_screen, Settings.SECTION_LAYOUT
+                )
+            )
+            sl.add(
+                SubmenuSetting(
+                    R.string.preferences_audio, 0, R.drawable.ic_audio, Settings.SECTION_AUDIO
+                )
+            )
+            sl.add(
+                RunnableSetting(
+                    R.string.uberhar_game_reset,
+                    R.string.uberhar_game_reset_description,
+                    false,
+                    R.drawable.ic_restore,
+                    { settingsActivity.confirmResetPerGameSettings() }
+                )
+            )
+            return
+        }
         sl.apply {
             add(
                 SubmenuSetting(
@@ -1087,7 +1140,11 @@ class SettingsFragmentPresenter(private val fragmentView: SettingsFragmentView) 
                     R.array.resolutionFactorNames,
                     R.array.resolutionFactorValues,
                     IntSetting.RESOLUTION_FACTOR.key,
-                    IntSetting.RESOLUTION_FACTOR.defaultValue
+                    IntSetting.RESOLUTION_FACTOR.defaultValue,
+                    // CodexAstraLocal: Testing freezes the launch resolution; ordinary
+                    // resolution changes remain live when that overlay is not active.
+                    isEnabled = !(TestingSettings.enabled && EmulationActivity.isRunning()),
+                    disabledMessage = R.string.uberhar_testing_restart_required
                 )
             )
             add(

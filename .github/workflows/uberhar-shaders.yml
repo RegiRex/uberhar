@@ -45,7 +45,8 @@ jobs:
         # parser/preamble, rather than relying only on separately adapted CLI shaders.
         # CodexAstraLocal: CPU Software's small helper gate shares the pinned
         # Catch fixture with native tests without building the full guest core.
-        run: git submodule update --init --depth 1 externals/fmt externals/xxHash externals/boost externals/nihstro externals/vulkan-headers externals/microprofile externals/xbyak externals/libretro-common/libretro-common externals/glslang externals/catch2
+        # CodexAstraLocal: The settings-layer fixture uses the same INI parser as Android.
+        run: git submodule update --init --depth 1 externals/fmt externals/xxHash externals/boost externals/nihstro externals/vulkan-headers externals/microprofile externals/xbyak externals/libretro-common/libretro-common externals/glslang externals/catch2 externals/inih/inih
       - name: Install validation tools
         # CodexAstraLocal: The cached-buffer lifetime gate submits real Vulkan
         # draws through an explicitly selected software ICD and real fences.

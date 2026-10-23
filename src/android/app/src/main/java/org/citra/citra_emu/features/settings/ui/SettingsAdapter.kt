@@ -16,6 +16,7 @@ import android.text.TextWatcher
 import android.text.format.DateFormat
 import android.view.LayoutInflater
 import android.view.ViewGroup
+import android.widget.TextView
 import androidx.annotation.StringRes
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -34,6 +35,7 @@ import java.lang.NumberFormatException
 import java.text.SimpleDateFormat
 import kotlin.math.roundToInt
 import org.citra.citra_emu.R
+import org.citra.citra_emu.activities.EmulationActivity
 import org.citra.citra_emu.databinding.DialogSliderBinding
 import org.citra.citra_emu.databinding.DialogSoftwareKeyboardBinding
 import org.citra.citra_emu.databinding.ListItemSettingBinding
@@ -46,7 +48,9 @@ import org.citra.citra_emu.features.settings.model.AbstractSetting
 import org.citra.citra_emu.features.settings.model.AbstractShortSetting
 import org.citra.citra_emu.features.settings.model.AbstractStringSetting
 import org.citra.citra_emu.features.settings.model.FloatSetting
+import org.citra.citra_emu.features.settings.model.IntSetting
 import org.citra.citra_emu.features.settings.model.ScaledFloatSetting
+import org.citra.citra_emu.features.settings.model.TestingSettings
 import org.citra.citra_emu.features.settings.model.UberharTestModeSwitch
 import org.citra.citra_emu.features.settings.model.view.DateTimeSetting
 import org.citra.citra_emu.features.settings.model.view.InputBindingSetting
@@ -145,7 +149,25 @@ class SettingsAdapter(private val fragmentView: SettingsFragmentView, public val
     }
 
     override fun onBindViewHolder(holder: SettingViewHolder, position: Int) {
-        getItem(position)?.let { holder.bind(it) }
+        getItem(position)?.let { item ->
+            holder.bind(item)
+            // CodexAstraLocal: Make inheritance visible beside the real setting label;
+            // profile-only wrappers retain their saved key and synthetic switches unwrap.
+            val model = fragmentView.activityView!!.settings
+            val original = item.setting
+            val setting = if (original is UberharTestModeSwitch) original.backing else original
+            if (model.isPerGame && setting != null && model.isPerGameSetting(setting)) {
+                holder.itemView.findViewById<TextView>(R.id.text_setting_name)?.text =
+                    context.getString(
+                        if (model.isPerGameOverride(setting)) {
+                            R.string.uberhar_setting_override
+                        } else {
+                            R.string.uberhar_setting_global
+                        },
+                        context.getString(item.nameId)
+                    )
+            }
+        }
     }
 
     private fun getItem(position: Int): SettingsItem? = settings?.get(position)
@@ -155,6 +177,13 @@ class SettingsAdapter(private val fragmentView: SettingsFragmentView, public val
     override fun getItemViewType(position: Int): Int = getItem(position)?.type ?: -1
 
     fun setSettingsList(newSettings: ArrayList<SettingsItem>?) {
+        // CodexAstraLocal: Mutable enum-backed rows cannot retain an old inheritance
+        // snapshot for DiffUtil; rebind this small editor after edits and confirmed resets.
+        if (fragmentView.activityView!!.settings.isPerGame) {
+            settings = newSettings ?: arrayListOf()
+            notifyDataSetChanged()
+            return
+        }
         if (settings == null) {
             settings = newSettings ?: arrayListOf()
             notifyDataSetChanged()
@@ -602,6 +631,32 @@ class SettingsAdapter(private val fragmentView: SettingsFragmentView, public val
     }
 
     fun onLongClick(setting: AbstractSetting, position: Int): Boolean {
+        // CodexAstraLocal: Per-title reset inherits the current global value only after
+        // confirmation; it does not substitute a factory default or clear other titles.
+        val model = fragmentView.activityView!!.settings
+        if (model.isPerGame) {
+            val backing = if (setting is UberharTestModeSwitch) setting.backing else setting
+            if (isRuntimeResetBlocked(backing)) {
+                onClickDisabledSetting(true, R.string.uberhar_game_reset_restart_required)
+                return true
+            }
+            MaterialAlertDialogBuilder(context)
+                .setTitle(R.string.uberhar_game_reset)
+                .setMessage(R.string.uberhar_game_reset_setting_confirm)
+                .setPositiveButton(android.R.string.ok) { _, _ ->
+                    if (isRuntimeResetBlocked(backing)) {
+                        onClickDisabledSetting(true, R.string.uberhar_game_reset_restart_required)
+                    } else {
+                        model.resetPerGameSetting(backing)
+                        fragmentView.onSettingChanged()
+                        fragmentView.loadSettingsList()
+                        notifyDataSetChanged()
+                    }
+                }
+                .setNegativeButton(android.R.string.cancel, null)
+                .show()
+            return true
+        }
         MaterialAlertDialogBuilder(context)
             .setMessage(R.string.reset_setting_confirmation)
             .setPositiveButton(android.R.string.ok) { _: DialogInterface, _: Int ->
@@ -634,6 +689,12 @@ class SettingsAdapter(private val fragmentView: SettingsFragmentView, public val
 
         return true
     }
+
+    // CodexAstraLocal: A pending reset must also respect Testing's frozen resolution,
+    // even though the normal resolution preference is otherwise editable during play.
+    private fun isRuntimeResetBlocked(setting: AbstractSetting): Boolean =
+        EmulationActivity.isRunning() && (!setting.isRuntimeEditable ||
+            (TestingSettings.enabled && setting.key == IntSetting.RESOLUTION_FACTOR.key))
 
     fun onInputBindingLongClick(setting: InputBindingSetting, position: Int): Boolean {
         MaterialAlertDialogBuilder(context)

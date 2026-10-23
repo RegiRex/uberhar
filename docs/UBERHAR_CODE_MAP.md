@@ -1,3 +1,17 @@
+# Pending Android per-game settings and Testing controls
+
+<!-- CodexAstraLocal: Map the next-candidate feature separately from the published .53 rendering changes. -->
+- `features/settings/model/Settings.kt` owns global snapshots and sparse title
+  overrides; `utils/SettingsFile.kt` preserves unrelated INI keys and normalizes IDs.
+- `model/TestingSettings.kt` stores the independent temporary overlay; settings
+  UI classes expose its presets, scope labels and confirmed inheritance resets.
+- `jni/config.cpp/.h` applies global → title → Testing → renderer profile;
+  `jni/native.cpp` resolves launch/reload title identity and restores global scope.
+- `EmulationActivity.kt` and `EmulationFragment.kt` share the title-scoped model;
+  new emulation starts reset the turbo helper while pause/resume retains it.
+- `test_android_settings_scope.py` and `test_android_settings_layers.py` exercise
+  persistence and native layering. See [usage and limits](UBERHAR_PER_GAME_SETTINGS.md).
+
 # Current 0.1.53 source map correction
 
 <!-- CodexAstraLocal: The historical map below documents experiments; this candidate intentionally restores .48 implementation boundaries. -->

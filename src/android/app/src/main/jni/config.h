@@ -13,13 +13,20 @@ class INIReader;
 class Config {
 private:
     std::unique_ptr<INIReader> android_config;
+    // CodexAstraLocal: Sparse title values are read-only and never merged into the global file.
+    std::unique_ptr<INIReader> title_config;
+    u64 title_id{};
+    bool runtime_reload{};
+    bool HasTitleValue(const std::string& group, const std::string& key) const;
+    bool KeepRunningValue(const std::string& key) const;
+    void ApplyTestingOverlay();
     std::string android_config_loc;
 
     bool LoadINI(const std::string& default_contents = "", bool retry = true);
     void ReadValues();
 
 public:
-    Config();
+    explicit Config(u64 program_id = 0);
     ~Config();
 
     void Reload();
@@ -33,4 +40,10 @@ private:
      */
     template <typename Type, bool ranged>
     void ReadSetting(const std::string& group, Settings::Setting<Type, ranged>& setting);
+
+    template <typename Type, bool ranged>
+    void ReadSetting(const std::string& group, Settings::SwitchableSetting<Type, ranged>& setting);
+    template <typename Type, bool ranged>
+    void ReadSetting(const std::string& group, Settings::SwitchableSetting<Type, ranged>& setting,
+                     const Type& android_default);
 };

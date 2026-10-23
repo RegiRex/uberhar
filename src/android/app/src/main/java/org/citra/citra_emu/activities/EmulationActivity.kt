@@ -119,7 +119,17 @@ class EmulationActivity : AppCompatActivity() {
             return
         }
 
-        settingsViewModel.settings.loadSettings()
+        // CodexAstraLocal: Load this title's effective settings before constructing
+        // its layout. Missing/zero IDs inherit globals instead of sharing a homebrew file.
+        val game = try {
+            intent.extras?.let { extras ->
+                BundleCompat.getParcelable(extras, "game", Game::class.java)
+            }
+        } catch (e: Exception) {
+            Log.error("[EmulationActivity] Failed to retrieve game data: ${e.message}")
+            null
+        }
+        settingsViewModel.settings.loadSettings(game?.let { String.format("%016X", it.titleId) } ?: "")
 
         screenAdjustmentUtil = ScreenAdjustmentUtil(this, windowManager, settingsViewModel.settings)
 
@@ -160,15 +170,8 @@ class EmulationActivity : AppCompatActivity() {
         isEmulationRunning = true
         instance = this
 
-        val game = try {
-            intent.extras?.let { extras ->
-                BundleCompat.getParcelable(extras, "game", Game::class.java)
-            } ?: run {
-                Log.error("[EmulationActivity] Missing game data in intent extras")
-                return
-            }
-        } catch (e: Exception) {
-            Log.error("[EmulationActivity] Failed to retrieve game data: ${e.message}")
+        if (game == null) {
+            Log.error("[EmulationActivity] Missing game data in intent extras")
             return
         }
 
@@ -190,6 +193,9 @@ class EmulationActivity : AppCompatActivity() {
         val game = intent.extras?.let { extras ->
             BundleCompat.getParcelable(extras, "game", Game::class.java)
         }
+        // CodexAstraLocal: Shortcut/title changes reuse this Activity, so replace
+        // the previous game's Java-side scope before rebuilding the emulation UI.
+        settingsViewModel.settings.loadSettings(game?.let { String.format("%016X", it.titleId) } ?: "")
         if (game != null) {
             NativeLibrary.playTimeManagerStart(game.titleId)
         }

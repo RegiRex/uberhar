@@ -165,6 +165,19 @@ enum class BooleanSetting(
 
     companion object {
         private val NOT_RUNTIME_EDITABLE = listOf(
+            // CodexAstraLocal: Match native renderer/worker lifetimes; edits need a new game launch.
+            UBERHAR_HYBRID_TEV,
+            UBERHAR_FORCE_TEV,
+            UBERHAR_CPU_VERTEX_BRIDGE,
+            UBERHAR_CPU_VERTEX_ONLY,
+            UBERHAR_NATIVE_FULL_FRAGMENTS,
+            UBERHAR_CPU_PREFIX_OVERLAP,
+            UBERHAR_PARALLEL_TEXTURE_DECODE,
+            UBERHAR_CPU_EXECUTION_CENSUS,
+            SPIRV_SHADER_GEN,
+            DISABLE_SPIRV_OPTIMIZER,
+            HW_SHADER,
+            SHADER_JIT,
             PLUGIN_LOADER,
             ALLOW_PLUGIN_LOADER,
             ASYNC_SHADERS,

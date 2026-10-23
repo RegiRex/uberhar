@@ -12,7 +12,53 @@ import org.citra.citra_emu.features.settings.ui.SettingsActivityView
 import org.citra.citra_emu.features.settings.utils.SettingsFile
 
 class Settings {
-    private var gameId: String? = null
+    // CodexAstraLocal: Title editors own sparse overrides; enum values are only their working copy.
+    var gameId: String? = null
+        private set
+    val isPerGame: Boolean get() = gameId != null
+    private var globalValues = emptyMap<String, String>()
+    private var loadedValues = emptyMap<String, String>()
+    private val titleOverrides = mutableSetOf<String>()
+    private val removedOverrides = mutableSetOf<String>()
+
+    private fun canonical(setting: AbstractSetting): AbstractSetting? = allSettings.firstOrNull {
+        it.key == setting.key && it.section == setting.section
+    }
+
+    fun isPerGameSetting(setting: AbstractSetting): Boolean = canonical(setting)?.let {
+        it.section in perGameSections && it != IntSetting.TURBO_LIMIT
+    } ?: false
+
+    fun isPerGameOverride(setting: AbstractSetting): Boolean {
+        val saved = canonical(setting) ?: return false
+        return isPerGame && (saved.key in titleOverrides ||
+            saved.valueAsString != loadedValues[saved.key] ||
+            (saved.key in removedOverrides && saved.valueAsString != globalValues[saved.key])) &&
+            (saved.key !in removedOverrides || saved.valueAsString != globalValues[saved.key])
+    }
+
+    fun resetPerGameSetting(setting: AbstractSetting) {
+        val saved = canonical(setting) ?: return
+        if (!isPerGame || !isPerGameSetting(saved)) return
+        globalValues[saved.key]?.let { SettingsFile.applyValue(saved, it) }
+        titleOverrides.remove(saved.key)
+        removedOverrides.add(saved.key!!)
+    }
+
+    fun resetPerGameOverrides() {
+        allSettings.filter(::isPerGameSetting).forEach(::resetPerGameSetting)
+    }
+
+    private fun snapshot() = allSettings.associate { it.key!! to it.valueAsString }
+
+    private fun resetWorkingValues() {
+        BooleanSetting.clear()
+        IntSetting.clear()
+        FloatSetting.clear()
+        ScaledFloatSetting.clear()
+        StringSetting.clear()
+        IntListSetting.clear()
+    }
 
     var isLoaded = false
 
@@ -39,11 +85,17 @@ class Settings {
         get() = sections.isEmpty()
 
     fun loadSettings(view: SettingsActivityView? = null) {
+        // CodexAstraLocal: A previous title must never become the next editor's defaults.
+        resetWorkingValues()
         sections = SettingsSectionMap()
+        titleOverrides.clear()
+        removedOverrides.clear()
         loadCitraSettings(view)
+        globalValues = snapshot()
         if (!TextUtils.isEmpty(gameId)) {
             loadCustomGameSettings(gameId!!, view)
         }
+        loadedValues = snapshot()
         isLoaded = true
     }
 
@@ -54,8 +106,10 @@ class Settings {
     }
 
     private fun loadCustomGameSettings(gameId: String, view: SettingsActivityView?) {
-        // Custom game settings
-        mergeSections(SettingsFile.readCustomGameSettings(gameId, view))
+        // CodexAstraLocal: Reject unsupported title keys before mutating shared enum objects.
+        val custom = SettingsFile.readCustomGameSettings(gameId, view, ::isPerGameSetting)
+        custom.values.filterNotNull().forEach { titleOverrides.addAll(it.settings.keys) }
+        mergeSections(custom)
     }
 
     private fun mergeSections(updatedSections: HashMap<String, SettingSection?>) {
@@ -69,8 +123,8 @@ class Settings {
         }
     }
 
-    fun loadSettings(gameId: String, view: SettingsActivityView) {
-        this.gameId = gameId
+    fun loadSettings(gameId: String, view: SettingsActivityView? = null) {
+        this.gameId = SettingsFile.normalizeGameId(gameId)
         loadSettings(view)
     }
 
@@ -88,15 +142,38 @@ class Settings {
                 SettingsFile.saveFile(fileName, iniSections, view)
             }
         } else {
-            // TODO: Implement per game settings
+            // CodexAstraLocal: Keep explicit overrides, save only edits, and preserve unknown INI keys.
+            val overrides = allSettings.filter(::isPerGameSetting).filter {
+                (it.key !in removedOverrides || it.valueAsString != globalValues[it.key]) &&
+                    (it.key in titleOverrides || it.valueAsString != loadedValues[it.key] ||
+                        (it.key in removedOverrides && it.valueAsString != globalValues[it.key]))
+            }
+            SettingsFile.saveCustomGameSettings(gameId!!, overrides, removedOverrides, view)
         }
     }
 
     fun saveSetting(setting: AbstractSetting, filename: String) {
-        SettingsFile.saveFile(filename, setting)
+        // CodexAstraLocal: Synthetic layout controls also respect the active title editor.
+        if (isPerGame) {
+            if (isPerGameSetting(setting)) {
+                removedOverrides.remove(setting.key)
+                titleOverrides.add(setting.key!!)
+                SettingsFile.saveCustomGameSettings(gameId!!, listOf(setting), emptySet(), null)
+            }
+        } else {
+            SettingsFile.saveFile(filename, setting)
+        }
     }
 
     companion object {
+        // CodexAstraLocal: Device identity, storage, networking, controls and Android preferences stay global.
+        private val perGameSections = setOf("Core", "Renderer", "Audio", "Layout", "Utility")
+        val allSettings: List<AbstractSetting> by lazy {
+            (BooleanSetting.entries + IntSetting.entries + FloatSetting.entries +
+                ScaledFloatSetting.entries + StringSetting.entries + IntListSetting.entries)
+                .distinctBy { it.section to it.key }
+        }
+
         const val SECTION_CORE = "Core"
         const val SECTION_SYSTEM = "System"
         const val SECTION_CAMERA = "Camera"

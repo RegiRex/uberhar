@@ -11,12 +11,18 @@ import android.view.View
 import android.view.ViewGroup
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.isVisible
 import androidx.core.view.updatePadding
 import androidx.fragment.app.Fragment
 import androidx.recyclerview.widget.LinearLayoutManager
+import com.google.android.material.chip.Chip
+import org.citra.citra_emu.R
+import org.citra.citra_emu.activities.EmulationActivity
 import org.citra.citra_emu.databinding.FragmentSettingsBinding
 import org.citra.citra_emu.features.settings.model.AbstractSetting
+import org.citra.citra_emu.features.settings.model.TestingSettings
 import org.citra.citra_emu.features.settings.model.view.SettingsItem
+import org.citra.citra_emu.features.settings.utils.SettingsFile
 
 class SettingsFragment :
     Fragment(),
@@ -28,6 +34,10 @@ class SettingsFragment :
 
     private var _binding: FragmentSettingsBinding? = null
     private val binding get() = _binding!!
+
+    // CodexAstraLocal: Keep temporary test selections separate from the edited title/global enums.
+    private var renderingTestingPanel = false
+    private val testingPresetChips = mutableMapOf<Int, Chip>()
 
     override fun onAttach(context: Context) {
         super.onAttach(context)
@@ -56,6 +66,7 @@ class SettingsFragment :
             adapter = settingsAdapter
             layoutManager = LinearLayoutManager(activity)
         }
+        setupTestingPanel()
         fragmentPresenter.onViewCreated(settingsAdapter!!)
 
         setInsets()
@@ -71,6 +82,99 @@ class SettingsFragment :
 
     override fun showSettingsList(settingsList: ArrayList<SettingsItem>) {
         settingsAdapter!!.setSettingsList(settingsList)
+        renderTestingPanel()
+    }
+
+    // CodexAstraLocal: The UI catalog drives direct buttons. New approved combinations
+    // must add the same stable ID to this list, TestingSettings and the native mapping.
+    private fun setupTestingPanel() {
+        TestingSettings.load()
+        val isRoot = requireArguments().getString(ARGUMENT_MENU_TAG) == SettingsFile.FILE_NAME_CONFIG
+        binding.testingPanel.isVisible = isRoot
+        if (!isRoot) return
+
+        TESTING_PRESETS.forEach { (preset, label) ->
+            val chip = Chip(requireContext()).apply {
+                id = View.generateViewId()
+                setText(label)
+                isCheckable = true
+                setOnClickListener {
+                    changeTestingSelection { TestingSettings.preset = preset }
+                }
+            }
+            testingPresetChips[preset] = chip
+            binding.testingPresets.addView(chip)
+        }
+        binding.testingEnabled.setOnCheckedChangeListener { _, enabled ->
+            if (!renderingTestingPanel) {
+                changeTestingSelection { TestingSettings.enabled = enabled }
+            }
+        }
+        binding.testingResolution.addOnButtonCheckedListener { _, checkedId, checked ->
+            if (checked && !renderingTestingPanel) {
+                changeTestingSelection {
+                    TestingSettings.resolution = if (checkedId == R.id.testing_resolution_4x) 4 else 2
+                }
+            }
+        }
+    }
+
+    // CodexAstraLocal: Save the separate overlay through its backend and
+    // redraw from durable values if writing fails; never mark ordinary settings dirty.
+    private fun changeTestingSelection(change: () -> Unit) {
+        if (renderingTestingPanel) return
+        if (EmulationActivity.isRunning()) {
+            showToastMessage(getString(R.string.uberhar_testing_restart_required), true)
+            renderTestingPanel()
+            return
+        }
+        change()
+        if (!TestingSettings.save()) {
+            TestingSettings.load()
+            showToastMessage(getString(R.string.uberhar_testing_save_failed), true)
+        }
+        renderTestingPanel()
+    }
+
+    // CodexAstraLocal: Distinguish edited normal values from the temporary effective
+    // preset, and forbid mid-game renderer changes even if the game is paused.
+    private fun renderTestingPanel() {
+        renderingTestingPanel = true
+        val running = EmulationActivity.isRunning()
+        binding.testingEnabled.isChecked = TestingSettings.enabled
+        binding.testingEnabled.isEnabled = !running
+        binding.testingControls.isVisible = TestingSettings.enabled
+        binding.testingDescription.setText(
+            if (running) R.string.uberhar_testing_restart_required else R.string.uberhar_testing_description
+        )
+        testingPresetChips.forEach { (preset, chip) ->
+            chip.isChecked = TestingSettings.preset == preset
+            chip.isEnabled = !running
+        }
+        binding.testingResolution.check(
+            if (TestingSettings.resolution == 4) R.id.testing_resolution_4x else R.id.testing_resolution_2x
+        )
+        binding.testingResolution2x.isEnabled = !running
+        binding.testingResolution4x.isEnabled = !running
+        val scope = getString(
+            if (activityView!!.settings.isPerGame) {
+                R.string.uberhar_game_settings_scope
+            } else {
+                R.string.uberhar_global_settings_scope
+            }
+        )
+        binding.settingsScope.text = if (TestingSettings.enabled) {
+            val presetName = getString(TESTING_PRESETS.first { it.first == TestingSettings.preset }.second)
+            scope + "\n" + getString(
+                R.string.uberhar_testing_active_summary,
+                presetName,
+                TestingSettings.resolution
+            )
+        } else {
+            scope
+        }
+        binding.settingsScope.isVisible = true
+        renderingTestingPanel = false
     }
 
     override fun loadSettingsList() {
@@ -116,6 +220,13 @@ class SettingsFragment :
     companion object {
         private const val ARGUMENT_MENU_TAG = "menu_tag"
         private const val ARGUMENT_GAME_ID = "game_id"
+
+        // CodexAstraLocal: These IDs match TestingSettings/native overlay serialization.
+        private val TESTING_PRESETS = listOf(
+            0 to R.string.uberhar_testing_native,
+            1 to R.string.uberhar_testing_combo_cpu,
+            2 to R.string.uberhar_testing_combo_gpu
+        )
 
         fun newInstance(menuTag: String?, gameId: String?): Fragment {
             val fragment = SettingsFragment()

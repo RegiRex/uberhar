@@ -24,6 +24,8 @@ Current shader-cache consumers include:
 | Ready fragment selection and binding | `python3 tools/uberhar/test_ready_cpu_fragments.py --mutants` and `--static-tev --mutants` |
 | Failure/teardown and cache ownership | Existing shader-worker recovery, adaptive-cache, descriptor and lifetime commands in `build_probe.sh` |
 | Full GLSL generation | Existing module validation, TEV, full fragment color/depth and CPU-fragment ABI pixel gates in `uberhar-shaders.yml` |
+| Android title/Testing configuration layers | `python3 tools/uberhar/test_android_settings_layers.py` plus actual pinned Android NDK checks for changed JNI translation units |
+| Android settings persistence and inheritance | `python3 tools/uberhar/test_android_settings_scope.py --kotlinc <compiler> --ini4j <jar>` with compatible `JAVA_HOME`; full Android build remains separate |
 
 This table identifies current consumers, not an exhaustive future allowlist. A
 changed renderer, queue or constructor requires its own dependency search. Real
