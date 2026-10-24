@@ -49,6 +49,10 @@ object SettingKeys {
     external fun uberhar_parallel_texture_decode(): String
     // CodexAstraLocal: Match native generated key for restart-only census.
     external fun uberhar_cpu_execution_census(): String
+    // CodexAstraLocal: Shared generated key for the Turnip submission comparison.
+    external fun turnip_pass_end_flush(): String
+    // CodexAstraLocal: Generic-only optimizer; full shader frontend selection remains independent.
+    external fun uberhar_optimize_generic_shaders(): String
 
     // AstraEH: Persist only the selected profile, not three conflicting booleans.
     external fun uberhar_test_mode(): String

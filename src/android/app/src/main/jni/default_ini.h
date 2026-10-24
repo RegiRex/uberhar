@@ -142,6 +142,14 @@ static const char* android_config_default_file_content = (BOOST_HANA_STRING(R"(
 )") DECLARE_KEY(uberhar_cpu_execution_census) BOOST_HANA_STRING(R"(
 
 
+# CodexAstraLocal: Isolated Turnip pass-end asynchronous submission comparison.
+# 0 (default): driver policy, 1: enable; game restart required.
+)") DECLARE_KEY(turnip_pass_end_flush) BOOST_HANA_STRING(R"(
+
+# CodexAstraLocal: Generic-only optimizer comparison; requires a new game launch.
+# 0 (default): lower compilation latency, 1: optimize generic GPU programs.
+)") DECLARE_KEY(uberhar_optimize_generic_shaders) BOOST_HANA_STRING(R"(
+
 # Whether to emit PICA fragment shader using SPIRV or GLSL (Vulkan only)
 # 0: GLSL, 1: SPIR-V (default)
 )") DECLARE_KEY(spirv_shader_gen) BOOST_HANA_STRING(R"(

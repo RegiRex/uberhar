@@ -23,6 +23,7 @@
 #include <type_traits>
 #include <utility>
 #include <vector>
+#include "common/uberhar_sampled_duration.h" // CodexAstraLocal: Real sparse timer, no changed ordering.
 
 using u8 = std::uint8_t;
 using u32 = std::uint32_t;
@@ -283,9 +284,16 @@ struct Chunk {
     bool Empty() const { return commands.empty(); }
     void Discard() { commands.clear(); }
     void MarkSubmit() { submit = true; }
+    // CodexAstraLocal: Queue timestamp does not enqueue GPU commands.
+    void MarkQueued(bool) {}
 };
 class Scheduler {
 public:
+    // CodexAstraLocal: Preserve complete extracted submission/wait bodies while
+    // modeling only their diagnostic counters, never suppressing an actual wait.
+    bool diagnostics_enabled{};
+    Common::Uberhar::SampledDuration submission_wait, gpu_wait;
+    u64 diagnostic_dispatches{}, diagnostic_submits{}, diagnostic_queue_peak{};
     Driver& driver;
     std::unique_ptr<Master> master_semaphore = std::make_unique<Master>();
     Failure shader_failure;
@@ -344,6 +352,16 @@ struct Framebuffer {
 constexpr u32 MinDrawsToFlush = 20;
 class RenderManager {
 public:
+    // CodexAstraLocal: Diagnostic fields must not change fixture construction.
+    RenderManager(const Instance& instance_, Scheduler& scheduler_)
+        : instance{instance_}, scheduler{scheduler_} {}
+    // CodexAstraLocal: Optional timing adds no synthetic barrier/pass/flush in
+    // this ordering fixture; real Vulkan query validity has separate checks.
+    bool diagnostics_enabled{};
+    u64 diagnostic_reuses{}, diagnostic_flushes{};
+    void BeginDiagnosticPass(const RenderPass&, bool) {}
+    void EndDiagnosticPass() {}
+    bool ShouldFlushPass() const { return instance.ShouldFlush(); }
     const Instance& instance;
     Scheduler& scheduler;
     std::array<vk::Image, 2> images{};
@@ -352,7 +370,7 @@ public:
     RenderPass pass{};
     u32 num_draws{};
     void BeginRendering(const Framebuffer*, Common::Rectangle<u32>);
-    void BeginRendering(const RenderPass&);
+    void BeginRendering(const RenderPass&, bool framebuffer_pass = false);
     void EndRendering();
 };
 enum class BufferType : u32 { Upload, Download, Stream };

@@ -28,6 +28,10 @@ enum class BooleanSetting(
     // CodexAstraLocal: Avoid optional permit counters unless explicitly requested.
     UBERHAR_CPU_EXECUTION_CENSUS(SettingKeys.uberhar_cpu_execution_census(), Settings.SECTION_RENDERER, false),
 
+    // CodexAstraLocal: Driver submission policy is frozen at renderer creation.
+    TURNIP_PASS_END_FLUSH(SettingKeys.turnip_pass_end_flush(), Settings.SECTION_RENDERER, false),
+    // CodexAstraLocal: Freeze generic program/cache identity for the game launch.
+    UBERHAR_OPTIMIZE_GENERIC_SHADERS(SettingKeys.uberhar_optimize_generic_shaders(), Settings.SECTION_RENDERER, false),
     DISABLE_SPIRV_OPTIMIZER(SettingKeys.disable_spirv_optimizer(), Settings.SECTION_RENDERER, true),
     PLUGIN_LOADER(SettingKeys.plugin_loader(), Settings.SECTION_SYSTEM, false),
     ALLOW_PLUGIN_LOADER(SettingKeys.allow_plugin_loader(), Settings.SECTION_SYSTEM, true),
@@ -174,6 +178,8 @@ enum class BooleanSetting(
             UBERHAR_CPU_PREFIX_OVERLAP,
             UBERHAR_PARALLEL_TEXTURE_DECODE,
             UBERHAR_CPU_EXECUTION_CENSUS,
+            TURNIP_PASS_END_FLUSH,
+            UBERHAR_OPTIMIZE_GENERIC_SHADERS,
             SPIRV_SHADER_GEN,
             DISABLE_SPIRV_OPTIMIZER,
             HW_SHADER,

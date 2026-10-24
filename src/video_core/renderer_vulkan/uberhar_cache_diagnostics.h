@@ -46,7 +46,7 @@ inline Inventory InspectFile(const std::filesystem::path& path) {
 // AstraEH: Scan metadata once before any cache loading/writing, with a hard entry
 // cap. An inaccessible/truncated scan must never claim that a cache was empty.
 inline Inventory InspectGeneric(const std::filesystem::path& directory, std::string_view title,
-                                std::size_t limit = 8192) {
+                                std::size_t limit = 8192, bool optional = false) {
     Inventory result;
     std::error_code error;
     std::filesystem::directory_iterator it{directory, error}, end;
@@ -67,7 +67,10 @@ inline Inventory InspectGeneric(const std::filesystem::path& directory, std::str
         }
         ++result.examined;
         const auto name = it->path().filename().string();
-        if (name.starts_with(prefix) && name.ends_with(".spv"))
+        // CodexAstraLocal: Optional records/recipes are visible separately from
+        // generic modules, so a warm optional cache cannot be labeled empty.
+        if (name.starts_with(prefix) && name.starts_with(prefix + "opt-") == optional &&
+            (name.ends_with(".spv") || (optional && name.ends_with("recipes.bin"))))
             result.Add(InspectFile(it->path()));
     }
     if (error)
@@ -76,7 +79,7 @@ inline Inventory InspectGeneric(const std::filesystem::path& directory, std::str
 }
 
 struct Snapshot {
-    Inventory generic, driver, specialized;
+    Inventory generic, driver, specialized, optional;
     bool recorded{}, enabled{}, specialized_active{};
 
     const char* State() const {
@@ -86,6 +89,7 @@ struct Snapshot {
             return "disabled";
         Inventory active = generic;
         active.Add(driver);
+        active.Add(optional);
         if (specialized_active)
             active.Add(specialized);
         // AstraEH: Preserve uncertainty even when some files were successfully counted.
@@ -111,6 +115,7 @@ inline Snapshot Inspect(const std::filesystem::path& pipeline_directory,
         return result;
     }
     result.generic = InspectGeneric(pipeline_directory, title);
+    result.optional = InspectGeneric(pipeline_directory, title, 8192, true);
     result.driver = InspectFile(driver_file);
     for (const auto stage : {"vs", "fs", "gs", "pl"}) {
         result.specialized.Add(

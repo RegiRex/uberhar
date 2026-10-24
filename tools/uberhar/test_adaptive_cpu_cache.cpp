@@ -385,6 +385,8 @@ void BudgetsFailuresAndReset() {
         Check(h.bank.stats.retirements==0,"free physical slots do not cause retirement");
         h.other_owned=255;
         h.combined=256;
+        // CodexAstraLocal: Lifetime totals no longer spend credits implicitly.
+        while (h.bank.SpendExternalWork()) {}
         for (unsigned n=0;n<20;++n) { h.Observe(2,MakeKey(2),16); h.Frame(); }
         Check(h.bank.stats.retirements==0,"exhausted combined work prevents new retirement");
         Check(h.bank.Find(1)==ready,"existing ready hit survives work exhaustion");
@@ -423,6 +425,19 @@ void BudgetsFailuresAndReset() {
         for(unsigned n=0;n<20;++n) { h.Observe(999,MakeKey(999),16);h.Frame(); }
         Check(h.bank.stats.retirements==retired,"CPU token exhaustion forbids new retirement");
         Check(!h.bank.CanCreate(0,h.combined,false),"no sixty-fifth attempt");
+        // CodexAstraLocal: Time, not destruction, permits useful later demand.
+        // Exercise a wrapped bounded history after the legacy lifetime boundary.
+        h.bank.RefillWork(Vulkan::CompileBudget::NowMs() + 10000);
+        for (unsigned n=0;n<8;++n) { h.Observe(999,MakeKey(999),16);h.Frame(); h.queue.Run(); }
+        Check(h.bank.Owned()==0,"renewed demand reclaims old failed owner");
+        auto* resumed=h.Create(999);
+        Check(resumed && h.bank.Attempts()==65,"renewed credit admits sixty-fifth attempt");
+        unsigned ring_rows{};
+        h.bank.VisitAttempts([&](std::size_t ordinal,const Key&,u64,bool) {
+            ++ring_rows;
+            Check(ordinal>=2 && ordinal<=65,"bounded ring retains lifetime ordinals");
+        });
+        Check(ring_rows==64,"wrapped attempt history remains bounded");
         const auto generation=h.bank.AllSlots()[0].generation;
         h.queue.Run();h.Drain();
         Owner::teardown=true;h.bank.ResetAfterDrain();Owner::teardown=false;

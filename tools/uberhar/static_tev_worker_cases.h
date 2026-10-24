@@ -44,8 +44,13 @@ void PartialLimits() {
         for(unsigned n=0;n<16;++n){Probe::fail_allocation_after=0;
             denied.cache.UseStaticTevFragmentShader(config,empty,{});Probe::fail_allocation_after=-1;}
         PartialDemand(denied,config,empty,32);
-        Require(denied.cache.static_tev_attempts==16 && denied.cache.static_tev_fragments.empty() &&
-                denied.parent.shader_workers.accepted==0,"allocation attempts remain finite without owners");
+        // CodexAstraLocal: One allocation failure now installs exact-key backoff;
+        // repeated demand cannot consume every renewable credit in one draw burst.
+        Require(denied.cache.static_tev_attempts==1 && denied.cache.static_tev_fragments.empty() &&
+                denied.parent.shader_workers.accepted==0 &&
+                denied.cache.static_failure_history.Find(StaticTevPolicy::Key::Hash(config,empty),
+                    StaticTevPolicy::Key{config,denied.parent.profile,empty}),
+                "allocation failure backoff prevents repeated ownerless attempts");
     }
 }
 void PartialFailures() {
@@ -57,7 +62,7 @@ void PartialFailures() {
         const auto attempts=f.parent.shader_workers.attempts;
         PartialDemand(f,family,plan,32);
         Require(f.parent.shader_workers.attempts==attempts && f.cache.static_tev_attempts==1,
-                "partial failure never retries");
+                "partial failure cannot retry during backoff");
     }
 }
 void SharedLane() {

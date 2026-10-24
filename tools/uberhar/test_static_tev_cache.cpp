@@ -130,31 +130,35 @@ void PartitionPressure() {
         Require(p.ready_cpu_bank->stats.max_owned==16, "both bounded partitions include retirement");
     }
 }
-void TerminalBudgetsKeepHits() {
+void RenewableBudgetsKeepHits() {
     PipelineCache p;
     auto* full=Warm(p,false);
     auto* partial=Warm(p,true);
-    for(unsigned i=0;i<63;++i) Require(Spend(p,false,1000+i), "full lifetime allowance preserved");
+    for(unsigned i=0;i<63;++i) Require(Spend(p,false,1000+i), "full startup allowance preserved");
     Require(p.ready_cpu_bank->Attempts(0)==64 && p.ready_cpu_bank->Attempts(1)==1,
             "partial cannot consume full attempts");
     p.allow_full_cpu_fragments=true;
     auto token=DrawCpu(p,Info(),Config());
     Require(bool(token) && p.ready_cpu_bank->AllSlots()[token.slot].owner.get()==full,
             "full ready hit survives 64 full attempts");
-    for(unsigned i=0;i<15;++i) Require(Spend(p,true,2000+i), "partial lifetime allowance independent");
+    for(unsigned i=0;i<15;++i) Require(Spend(p,true,2000+i), "partial startup allowance independent");
     Require(p.ready_cpu_bank->Attempts()==80 && p.ready_cpu_bank->Attempts(1)==16,
-            "separate terminal work budgets close");
+            "separate startup work credits close");
     p.allow_full_cpu_fragments=false;
     token=DrawCpu(p,Info(),Config());
     Require(bool(token) && p.ready_cpu_bank->AllSlots()[token.slot].owner.get()==partial,
             "partial ready hit survives 16 partial attempts");
-    Require(!p.ready_cpu_bank->AcceptingDemand(p.ready_optional_attempts,0) &&
-            !p.ready_cpu_bank->AcceptingDemand(p.ready_optional_attempts,1),
-            "both budgets deny only new demand");
+    Require(p.ready_cpu_bank->TierCredits(0)==0 && p.ready_cpu_bank->TierCredits(1)==0,
+            "both tiers spend actual credit rather than only telemetry");
     p.allow_full_cpu_fragments=true;
     token=DrawCpu(p,Info(),Config());
     Require(bool(token) && p.ready_cpu_bank->AllSlots()[token.slot].owner.get()==full,
             "partial exhaustion cannot hide full ready hit");
+    // CodexAstraLocal: A later session interval renews bounded admission; ready
+    // residents remain usable before and after renewal. No lifetime ceiling.
+    p.ready_cpu_bank->RefillWork(CompileBudget::NowMs()+2000);
+    Require(p.ready_cpu_bank->TierCredits(0)>0 && p.ready_cpu_bank->TierCredits(1)>0,
+            "both exhausted tiers renew for later gameplay");
 }
 
 void PartialTransportAndIdentity() {
@@ -384,7 +388,7 @@ void LazyTransportAndExactReuse() {
 int main() {
     try {
         Probe::partial_tier=true;
-        PromotionAndPriority(); ColdBridge(); PartitionPressure(); TerminalBudgetsKeepHits();
+        PromotionAndPriority(); ColdBridge(); PartitionPressure(); RenewableBudgetsKeepHits();
         PartialTransportAndIdentity(); FourRouteBindings(); NativeAndFailureFallback();
         LazyTransportAndExactReuse();
         Require(Probe::optional_waits==0 && Probe::lifetime_errors==0,

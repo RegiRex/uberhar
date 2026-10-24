@@ -8,6 +8,7 @@
 #include "common/scm_rev.h"
 #include "common/settings.h"
 #include "common/static_lru_cache.h"
+#include "video_core/renderer_vulkan/uberhar_optional_disk_cache.h"
 #include "common/zstd_compression.h"
 #include "video_core/renderer_vulkan/uberhar_shader_compile_policy.h" // CodexAstraLocal: Freeze explicit worker compile options.
 #include "video_core/renderer_vulkan/vk_instance.h"
@@ -41,6 +42,45 @@ namespace Vulkan {
 using namespace Pica::Shader::Generator;
 using namespace Pica::Shader;
 
+namespace {
+// CodexAstraLocal: Serialize semantic profile fields explicitly so C++ padding
+// cannot cause false warm misses. FSConfig has a unique, disk-versioned layout.
+std::vector<u32> OptionalProfileWords(const Profile& p) {
+    std::vector<u32> result{p.enable_accurate_mul, p.has_separable_shaders, p.has_clip_planes,
+        p.has_geometry_shader, p.has_custom_border_color, p.has_fragment_shader_interlock,
+        p.has_fragment_shader_barycentric, p.has_blend_minmax_factor, p.has_minus_one_to_one_range,
+        p.has_logic_op, p.has_gl_ext_framebuffer_fetch, p.has_gl_arm_framebuffer_fetch,
+        p.has_gl_nv_fragment_shader_interlock, p.has_gl_intel_fragment_shader_ordering,
+        p.has_gl_nv_fragment_shader_barycentric, p.vk_disable_spirv_optimizer,
+        p.vk_use_spirv_generator, p.is_vulkan};
+    for (const auto& t : p.vk_format_traits) {
+        const std::array<u32, 9> words{t.transfer_support, t.blit_support, t.attachment_support,
+            t.storage_support, t.needs_conversion, t.needs_emulation, t.usage_flags,
+            t.aspect_flags, t.native_format};
+        result.insert(result.end(), words.begin(), words.end());
+    }
+    return result;
+}
+std::vector<u32> OptionalIdentity(const FSConfig& fs, const Profile& profile,
+                                  const GLSL::StaticTevPlan* plan) {
+    std::vector<u32> result{plan ? 2U : 1U, static_cast<u32>(sizeof(fs)),
+        static_cast<u32>(sizeof(GLSL::StaticTevPlan)), StaticTevPolicy::CpuInterface,
+        StaticTevPolicy::GeneratorPolicy};
+    const auto append = [&result](const auto& object) {
+        static_assert(std::is_trivially_copyable_v<std::remove_cvref_t<decltype(object)>>);
+        static_assert(sizeof(object) % sizeof(u32) == 0);
+        const auto start = result.size();
+        result.resize(start + sizeof(object) / sizeof(u32));
+        std::memcpy(result.data() + start, &object, sizeof(object));
+    };
+    append(fs);
+    const auto fields = OptionalProfileWords(profile);
+    result.insert(result.end(), fields.begin(), fields.end());
+    if (plan) append(*plan);
+    return result;
+}
+} // namespace
+
 static VideoCore::DiskResourceLoadCallback MakeThrottledCallback(
     VideoCore::DiskResourceLoadCallback original) {
 
@@ -61,6 +101,12 @@ static VideoCore::DiskResourceLoadCallback MakeThrottledCallback(
 
 void ShaderDiskCache::Init(const std::atomic_bool& stop_loading,
                            const VideoCore::DiskResourceLoadCallback& callback) {
+
+    // CodexAstraLocal: The independent optional cache is demand-loaded. It never
+    // preloads Custom's complete guest cache or restores spent admission counters.
+    optional_persistent = Settings::values.use_disk_shader_cache.GetValue();
+    optional_directory = parent.GetPipelineCacheDir();
+    if (optional_persistent) LoadUsefulRecipes();
 
     // AstraEH: A test profile must not warm or write the user's specialized shader cache.
     // Driver compilation data is managed separately by PipelineCache and is retained.
@@ -85,6 +131,214 @@ void ShaderDiskCache::Init(const std::atomic_bool& stop_loading,
     // AstraEH: Snapshot objects reconstructed at load; their builds may still be queued.
     startup_host_pipelines = graphics_pipelines.size();
     startup_guest_records = known_graphic_pipelines.size();
+}
+
+u64 ShaderDiskCache::OptionalCompilerIdentity() const {
+    // CodexAstraLocal: Include generator ABI/source and pinned compiler revision;
+    // exact config/profile/program kind are separately stored in each record.
+    const std::string_view source{Common::g_shader_cache_version}, revision{Common::g_scm_rev};
+    return Common::HashCombine(OptionalDiskCache::Schema, FSConfig::StructHash(),
+        Common::ComputeHash64(source.data(), source.size()),
+        Common::ComputeHash64(revision.data(), revision.size()));
+}
+
+bool ShaderDiskCache::OptionalWriteAllowed(const std::string& directory,
+                                          const std::string& path, u64 bytes) {
+    // CodexAstraLocal: Fixed collision slots bound each title to 128 full/32
+    // static records. A worker-only global scan additionally caps optional data
+    // at 512 MiB; reaching it refuses new writes rather than deleting other titles.
+    constexpr u64 limit = 512ULL * 1024 * 1024;
+    if (!optional_quota_scanned) {
+        optional_disk_bytes = 0;
+        u64 visited{};
+        const bool complete = FileUtil::ForeachDirectoryEntry(nullptr, directory,
+            [&](u64*, const std::string& parent_path, const std::string& name) {
+                if (++visited > 65536) return false;
+                if (name.find("-uber-opt-") != std::string::npos)
+                    optional_disk_bytes += std::min(FileUtil::GetSize(parent_path + name), limit);
+                return optional_disk_bytes <= limit;
+            });
+        if (!complete) optional_disk_bytes = limit;
+        optional_quota_scanned = true;
+    }
+    const u64 old_size = FileUtil::Exists(path) ? std::min(FileUtil::GetSize(path), optional_disk_bytes) : 0;
+    if (bytes > limit || optional_disk_bytes - old_size > limit - bytes) {
+        ++optional_disk_quota_refusals;
+        return false;
+    }
+    optional_disk_bytes = optional_disk_bytes - old_size + bytes;
+    return true;
+}
+
+std::vector<u32> ShaderDiskCache::LoadOrCompileOptional(std::span<const u32> identity,
+    bool partial, const std::function<std::vector<u32>()>& compile) {
+    const auto compiler = OptionalCompilerIdentity();
+    const auto identity_hash = Common::ComputeHash64(identity.data(), identity.size_bytes());
+    const auto path = fmt::format("{}{:016X}-uber-opt-{}-{:03X}.spv", optional_directory,
+        title_id, partial ? "static" : "full", identity_hash % (partial ? 32 : 128));
+    if (optional_persistent) try {
+        FileUtil::IOFile file(path, "rb");
+        if (file) {
+            const auto bytes = file.GetSize();
+            if (bytes && bytes <= OptionalDiskCache::MaxBytes && bytes % sizeof(u32) == 0) {
+                std::vector<u32> words(bytes / sizeof(u32));
+                if (file.ReadBytes(words.data(), bytes) == bytes) {
+                    auto spirv = OptionalDiskCache::Decode(identity, compiler, words);
+                    if (!spirv.empty()) { ++optional_disk_hits; return spirv; }
+                }
+            }
+            ++optional_disk_rejected;
+        }
+    } catch (...) { ++optional_disk_rejected; }
+    ++optional_disk_misses;
+    auto spirv = compile();
+    if (optional_persistent && !spirv.empty()) try {
+        const auto words = OptionalDiskCache::Encode(identity, compiler, spirv);
+        if (!words.empty() && OptionalWriteAllowed(optional_directory, path, words.size() * sizeof(u32))) {
+            const auto temporary = path + ".tmp";
+            FileUtil::IOFile file(temporary, "wb");
+            const bool written = file && file.WriteBytes(words.data(), words.size() * sizeof(u32)) ==
+                words.size() * sizeof(u32) && file.Flush();
+            file.Close();
+            if (written && FileUtil::Rename(temporary, path)) ++optional_disk_writes;
+            else { FileUtil::Delete(temporary); ++optional_disk_write_failures; }
+        }
+    } catch (...) { ++optional_disk_write_failures; }
+    return spirv;
+}
+
+void ShaderDiskCache::ReportOptionalFailure(const char* phase, const char* reason, unsigned kind) noexcept {
+    // CodexAstraLocal: Production error detail is independently bounded; throwing
+    // log delivery must never prevent failure/completion publication.
+    if (optional_error_details.fetch_add(1, std::memory_order_relaxed) >= 8) return;
+    try {
+        LOG_ERROR(Render_Vulkan, "Uberhar optional compile failure: phase={} kind={} error={} limit=8",
+                  phase, kind, reason);
+    } catch (...) {}
+}
+
+bool ShaderDiskCache::WarmDemand(u64 hash, bool partial) const {
+    // CodexAstraLocal: Fixed direct lookup keeps cold misses cheap; collisions
+    // can lose advisory replay priority, never alias executable programs.
+    const auto& recipe = warm_recipes[hash % warm_recipes.size()];
+    return recipe.hash == hash && recipe.partial == partial && recipe.selections >= 16;
+}
+
+void ShaderDiskCache::LoadUsefulRecipes() {
+    // CodexAstraLocal: Positive demand records merely prioritize an encountered
+    // exact current key. They never enqueue startup work or restore old counters.
+    try {
+        const auto path = fmt::format("{}{:016X}-uber-opt-recipes.bin", optional_directory, title_id);
+        FileUtil::IOFile file(path, "rb");
+        constexpr std::size_t header = 8, row = 5, count = 64;
+        std::array<u32, header + row * count> words{};
+        if (!file || file.GetSize() != sizeof(words) || file.ReadBytes(words.data(), sizeof(words)) != sizeof(words)) return;
+        const auto profile_words = OptionalProfileWords(parent.profile);
+        const u64 profile_hash = Common::ComputeHash64(profile_words.data(), profile_words.size() * sizeof(u32));
+        if (words[0] != 0x55524543 || words[1] != 1 ||
+            UberharSpirvCache::Join(words[2], words[3]) != OptionalCompilerIdentity() ||
+            UberharSpirvCache::Join(words[4], words[5]) != profile_hash ||
+            UberharSpirvCache::Join(words[6], words[7]) != Common::ComputeHash64(words.data() + header, row * count * sizeof(u32))) return;
+        for (std::size_t i = 0; i < count; ++i) {
+            const auto* item = words.data() + header + row * i;
+            if (item[4] > 1) { warm_recipes = {}; return; }
+            const UsefulRecipe recipe{UberharSpirvCache::Join(item[0], item[1]),
+                UberharSpirvCache::Join(item[2], item[3]), item[4] != 0};
+            auto& bucket = warm_recipes[recipe.hash % warm_recipes.size()];
+            if (recipe.selections > bucket.selections) bucket = recipe;
+        }
+    } catch (...) { warm_recipes = {}; }
+}
+
+void ShaderDiskCache::RecordOptionalSelection(const Shader* shader) {
+    // CodexAstraLocal: Actual selected owners carry their own cheap counter.
+    if (shader) shader->RecordOptionalSelection();
+}
+
+void ShaderDiskCache::SaveUsefulRecipesAfterDrain() {
+    if (!optional_persistent) return;
+    try {
+        std::vector<UsefulRecipe> useful;
+        for (const auto& recipe : warm_recipes) if (recipe.selections) useful.push_back(recipe);
+        for (const auto& [hash, entry] : ready_fragments)
+            if (entry->shader.OptionalSelections() && !entry->shader.HasFailed() && entry->key.profile == parent.profile)
+                useful.push_back({hash, entry->shader.OptionalSelections(), false});
+        for (const auto& [hash, entry] : static_tev_fragments)
+            if (entry->shader.OptionalSelections() && !entry->shader.HasFailed() && entry->key.profile == parent.profile)
+                useful.push_back({hash, entry->shader.OptionalSelections(), true});
+        std::sort(useful.begin(), useful.end(), [](const auto& a, const auto& b) { return a.selections > b.selections; });
+        constexpr std::size_t header = 8, row = 5, count = 64;
+        std::array<u32, header + row * count> words{};
+        const auto profile_words = OptionalProfileWords(parent.profile);
+        const u64 profile_hash = Common::ComputeHash64(profile_words.data(), profile_words.size() * sizeof(u32));
+        const auto compiler = OptionalCompilerIdentity();
+        words[0] = 0x55524543; words[1] = 1;
+        words[2] = static_cast<u32>(compiler); words[3] = compiler >> 32;
+        words[4] = static_cast<u32>(profile_hash); words[5] = profile_hash >> 32;
+        for (std::size_t i = 0; i < std::min(useful.size(), count); ++i) {
+            const auto& item = useful[i]; auto* out = words.data() + header + row * i;
+            out[0] = static_cast<u32>(item.hash); out[1] = item.hash >> 32;
+            out[2] = static_cast<u32>(item.selections); out[3] = item.selections >> 32; out[4] = item.partial;
+        }
+        const u64 checksum = Common::ComputeHash64(words.data() + header, row * count * sizeof(u32));
+        words[6] = static_cast<u32>(checksum); words[7] = checksum >> 32;
+        const auto path = fmt::format("{}{:016X}-uber-opt-recipes.bin", optional_directory, title_id);
+        if (!OptionalWriteAllowed(optional_directory, path, sizeof(words))) return;
+        const auto temporary = path + ".tmp";
+        FileUtil::IOFile file(temporary, "wb");
+        const bool written = file && file.WriteBytes(words.data(), sizeof(words)) == sizeof(words) && file.Flush();
+        file.Close();
+        if (!written || !FileUtil::Rename(temporary, path)) { FileUtil::Delete(temporary); ++optional_disk_write_failures; }
+    } catch (...) { ++optional_disk_write_failures; }
+}
+
+void ShaderDiskCache::ReclaimOptionalAfterDrain(u64 frame) {
+    optional_frame = frame;
+    const auto now = CompileBudget::NowMs();
+    full_module_credit.Refill(now);
+    static_module_credit.Refill(now);
+    if (OptionalFragmentPending()) return;
+    // CodexAstraLocal: CPU/GPU pipeline maps retain raw stage pointers. Eviction
+    // requires no remaining pipeline, current-state or compiler reference; stale
+    // execution keys therefore cannot survive allocator-address reuse.
+    const auto reclaim = [&](auto& entries, auto& failures, bool& pressure, u64& counter) {
+        if (!pressure) return;
+        auto victim = entries.end();
+        for (auto it = entries.begin(); it != entries.end(); ++it) {
+            const auto& entry = *it->second;
+            if (!entry.compiler_released.load(std::memory_order_acquire) ||
+                frame - entry.last_requested < 8 || parent.OptionalShaderReferenced(&entry.shader)) continue;
+            bool required = false;
+            for (const auto& [key, pipeline] : graphics_pipelines)
+                required |= pipeline && pipeline->ReferencesShader(&entry.shader);
+            if (required) continue;
+            if (victim == entries.end() || entry.last_requested < victim->second->last_requested) victim = it;
+        }
+        if (victim != entries.end()) {
+            if (warming_ready_fragment == &victim->second->shader) warming_ready_fragment = nullptr;
+            if (victim->second->shader.HasFailed()) {
+                const auto& entry = *victim->second;
+                failures.Remember(victim->first, entry.key, entry.retries, entry.retryable, entry.retry_after_ms);
+            }
+            const auto selections = victim->second->shader.OptionalSelections();
+            auto& remembered = warm_recipes[victim->first % warm_recipes.size()];
+            if (selections > remembered.selections)
+                remembered = {victim->first, selections, &pressure == &static_module_pressure};
+            // CodexAstraLocal: Negative GPU keys contain process-local stage
+            // addresses. Drop those advisory records before allocator reuse can
+            // make an unrelated module inherit a previous failed owner identity.
+            parent.ready_gpu_failures = {};
+            entries.erase(victim);
+            ++counter;
+            pressure = false;
+        } else {
+            // CodexAstraLocal: Modules pinned by old GPU PSOs request safe PSO
+            // retirement first; no module is detached from a live dependency.
+            parent.ready_gpu_pressure = true;
+        }
+    };
+    reclaim(ready_fragments, full_failure_history, full_module_pressure, optional_full_evictions);
+    reclaim(static_tev_fragments, static_failure_history, static_module_pressure, optional_static_evictions);
 }
 
 u64 ShaderDiskCache::CaptureVertexSourceHash(const Shader* shader) const noexcept {
@@ -183,7 +437,7 @@ std::optional<std::pair<u64, Shader* const>> ShaderDiskCache::UseProgrammableVer
                 DisableShaderOptimizer(ready_only, parent.profile.vk_disable_spirv_optimizer != 0);
             if (ready_only)
                 warming_ready_vs = &shader;
-            parent.shader_workers.QueueWork([device, &shader, this, spirv_id, ready_only,
+            try { parent.shader_workers.QueueWork([device, &shader, this, spirv_id, ready_only,
                                              disable_optimizer] {
                 const auto compile = [&] {
                     auto spirv = CompileGLSL(shader.program, vk::ShaderStageFlagBits::eVertex,
@@ -207,20 +461,17 @@ std::optional<std::pair<u64, Shader* const>> ShaderDiskCache::UseProgrammableVer
                     });
                     return;
                 }
-                // AstraPro: Every optional completion publishes success OR failure.
-                // Never strand a ready-only candidate behind an unfinished handle.
-                try {
-                    compile();
-                    shader.MarkDone();
-                } catch (const std::exception& err) {
-                    shader.program.clear();
-                    shader.MarkFailed();
-                    if (ready_shader_failures.fetch_add(1) < 8) {
-                        // AstraPro Log Line: First eight shader failures per title.
-                        LOG_ERROR(Render_Vulkan, "Uberhar optional GPU VS failed: {}", err.what());
-                    }
-                }
-            });
+                // CodexAstraLocal: Unknown compiler and logger failures obey
+                // the same terminal publication rule as mandatory dependencies.
+                VideoCore::CompleteShaderBuild(shader, compile, [this](const char* reason) {
+                    if (ready_shader_failures.fetch_add(1) < 8)
+                        LOG_ERROR(Render_Vulkan, "Uberhar optional GPU VS failed: {}", reason);
+                });
+            }); } catch (...) {
+                // CodexAstraLocal: Enqueue failure cannot leave dependent PSOs waiting forever.
+                shader.MarkFailed();
+                ready_shader_failures.fetch_add(1);
+            }
         }
 
         AppendVSConfigProgram(vs_cache, config, setup, config_hash, spirv_id);
@@ -248,7 +499,7 @@ std::optional<std::pair<u64, Shader* const>> ShaderDiskCache::UseFragmentShader(
         LOG_NEW_OBJECT(Render_Vulkan, "New FS config {:016X}", fs_config_hash);
 
         // CodexAstraUlt-2: Freeze inputs before the compiler worker resumes.
-        parent.shader_workers.QueueWork([fs_config, user, this, &shader, fs_config_hash,
+        try { parent.shader_workers.QueueWork([fs_config, user, this, &shader, fs_config_hash,
                                          profile = parent.profile]() {
             // CodexAstraUlt-2: Publish only after generation, module creation and
             // cache scheduling finish; never expose a null module as success.
@@ -276,7 +527,11 @@ std::optional<std::pair<u64, Shader* const>> ShaderDiskCache::UseFragmentShader(
                     LOG_ERROR(Render_Vulkan, "Uberhar mandatory FS failed: error={} limit=8", reason);
                 }
             });
-        });
+        }); } catch (...) {
+                // CodexAstraLocal: Enqueue failure cannot leave dependent PSOs waiting forever.
+                shader.MarkFailed();
+                ready_shader_failures.fetch_add(1);
+            }
     }
 
     return std::make_pair(fs_config_hash, &shader);
@@ -284,7 +539,7 @@ std::optional<std::pair<u64, Shader* const>> ShaderDiskCache::UseFragmentShader(
 
 // AstraPro: Compile the inherited specialized fragment implementation, not a
 // relaxed approximation. CPU fallback continues until both this module and its
-// GPU pipeline are ready. The bounded in-memory cache never writes stock vkch.
+// GPU pipeline are ready. Independent optional records never alter stock vkch.
 std::optional<std::pair<u64, Shader* const>> ShaderDiskCache::UseReadyFragmentShader(
     const FSConfig& config, const Pica::Shader::UserConfig& user, bool allow_build) {
     ++ready_fragment_requests;
@@ -293,6 +548,7 @@ std::optional<std::pair<u64, Shader* const>> ShaderDiskCache::UseReadyFragmentSh
         return {};
     }
     const u64 hash = config.Hash();
+    u32 retry_count{};
     if (const auto it = ready_fragments.find(hash); it != ready_fragments.end()) {
         auto& entry = *it->second;
         // AstraPro: Compare immutable snapshots without copying a full profile
@@ -301,6 +557,7 @@ std::optional<std::pair<u64, Shader* const>> ShaderDiskCache::UseReadyFragmentSh
             ++ready_fragment_mismatches;
             return {}; // AstraPro: Full equality, not a hash, admits reuse.
         }
+        if (!entry.shader.HasFailed()) entry.last_requested = optional_frame;
         auto& shader = entry.shader;
         if (!shader.IsDone()) {
             ++ready_fragment_busy;
@@ -308,10 +565,28 @@ std::optional<std::pair<u64, Shader* const>> ShaderDiskCache::UseReadyFragmentSh
         }
         if (shader.HasFailed() || !shader.Handle()) {
             ++ready_fragment_failed_hits;
-            return {};
+            // CodexAstraLocal: Read-only probes never retry. The caller must
+            // re-establish downstream capacity and current exact-key demand.
+            if (!allow_build || !entry.retryable || entry.retries >= 2 ||
+                CompileBudget::NowMs() < optional_circuit_until_ms.load(std::memory_order_relaxed) ||
+                CompileBudget::NowMs() < entry.retry_after_ms || !full_module_credit.Available() ||
+                (parent.warming_ready_vertex && !parent.warming_ready_vertex->IsDone()) || OptionalFragmentPending() ||
+                !entry.compiler_released.load(std::memory_order_acquire) ||
+                parent.OptionalShaderReferenced(&shader)) return {};
+            retry_count = entry.retries + 1;
+            if (warming_ready_fragment == &shader) warming_ready_fragment = nullptr;
+            ready_fragments.erase(it);
+            ++optional_retry_jobs;
+        } else {
+            // CodexAstraLocal: Clear a recovered resource failure once, after
+            // the final worker access; ordinary ready reuse adds no table scan.
+            if (entry.retries && entry.compiler_released.load(std::memory_order_acquire)) {
+                full_failure_history.Forget(hash, entry.key);
+                entry.retries = 0;
+            }
+            ++ready_fragment_hits;
+            return std::make_pair(hash, &shader);
         }
-        ++ready_fragment_hits;
-        return std::make_pair(hash, &shader);
     }
     // CodexAstraLocal: A read-only probe can reuse a ready module above without
     // creating demand or compilation on a miss. CPU admission starts with this
@@ -320,8 +595,15 @@ std::optional<std::pair<u64, Shader* const>> ShaderDiskCache::UseReadyFragmentSh
         ++ready_fragment_lookup_only_misses;
         return {};
     }
+    if (const auto until = optional_circuit_until_ms.load(std::memory_order_relaxed);
+        until && CompileBudget::NowMs() < until) return {};
     const ReadyFragmentKey key{config, parent.profile};
-    if (!ready_fragment_demand.Observe(hash, key)) {
+    if (const auto* failure = full_failure_history.Find(hash, key)) {
+        if (!failure->retryable || failure->retries >= 2 ||
+            CompileBudget::NowMs() < failure->retry_after_ms) return {};
+        retry_count = std::max(retry_count, failure->retries + 1);
+    }
+    if (!retry_count && !WarmDemand(hash, false) && !ready_fragment_demand.Observe(hash, key)) {
         ++ready_fragment_cold;
         return {};
     }
@@ -330,14 +612,26 @@ std::optional<std::pair<u64, Shader* const>> ShaderDiskCache::UseReadyFragmentSh
     // optional PSO; required generic preparation uses its existing separate lane.
     const bool pending = (warming_ready_fragment && !warming_ready_fragment->IsDone()) ||
         (parent.warming_ready_vertex && !parent.warming_ready_vertex->IsDone());
-    if (!parent.ready_vertex_worker || !ReadyFragmentPolicy::CanAdmit(ready_fragments.size(), pending)) {
+    if (!parent.ready_vertex_worker || !full_module_credit.Available() ||
+        !ReadyFragmentPolicy::CanAdmit(ready_fragments.size(), pending)) {
+        full_module_pressure |= ready_fragments.size() >= ReadyFragmentPolicy::MaxModules;
         if (pending) ++ready_fragment_busy;
         else ++ready_fragment_capped;
         return {};
     }
-    auto object = std::make_unique<ReadyFragmentEntry>(parent.instance, key);
-    auto* entry = object.get();
-    ready_fragments.emplace(hash, std::move(object));
+    full_module_credit.Spend();
+    ReadyFragmentEntry* entry{};
+    try {
+        auto object = std::make_unique<ReadyFragmentEntry>(parent.instance, key);
+        entry = object.get();
+        ready_fragments.emplace(hash, std::move(object));
+        entry->last_requested = optional_frame;
+        entry->retries = retry_count;
+    } catch (...) {
+        ++optional_resource_failures;
+        full_failure_history.Remember(hash, key, retry_count, true, CompileBudget::NowMs() + 2000);
+        return {};
+    }
     warming_ready_fragment = &entry->shader;
     // AstraPro: All compiler inputs are immutable owned snapshots. A mutable
     // renderer profile must not be read by this worker while emulation resumes.
@@ -358,24 +652,45 @@ std::optional<std::pair<u64, Shader* const>> ShaderDiskCache::UseReadyFragmentSh
                 // the caller's existing barycentric/custom checks stay in force.
                 // The optional lane never blocks the foreground or changes its
                 // complete generic/static fallback while this module is pending.
-                std::vector<u32> spirv;
+                const auto identity = OptionalIdentity(fs, profile, nullptr);
+                auto spirv = LoadOrCompileOptional(identity, false, [&] {
+                std::vector<u32> generated;
                 if (profile.vk_use_spirv_generator && !fs.UsesSpirvIncompatibleConfig()) {
                     ++ready_fragment_spirv_builds;
-                    spirv = SPIRV::GenerateFragmentShader(fs, profile);
+                    generated = SPIRV::GenerateFragmentShader(fs, profile);
                 } else {
                     ++ready_fragment_glsl_builds;
                     const auto code = GLSL::GenerateFragmentShader(fs, {}, profile);
                     // CodexAstraLocal: Keep the inherited optional GLSL optimizer
                     // policy. Direct SPIR-V has no GLSL frontend/optimizer step;
                     // G1 pruning applies only to this full cacheable GLSL branch.
-                    spirv = CompileGLSL(code, vk::ShaderStageFlagBits::eFragment, "",
+                    generated = CompileGLSL(code, vk::ShaderStageFlagBits::eFragment, "",
                         DisableShaderOptimizer(true, profile.vk_disable_spirv_optimizer != 0));
                 }
-                if (spirv.empty()) throw std::runtime_error("empty optional fragment module");
-                entry->shader.module = CompileSPV(spirv, device);
+                return generated;
+                });
+                if (spirv.empty()) throw OptionalCompileError(OptionalCompileFailure::Source, "empty optional fragment module");
+                entry->shader.module = CompileOptionalSPV(spirv, device);
                 if (!entry->shader.module) throw std::runtime_error("null optional fragment module");
+            } catch (const OptionalCompileError& error) {
+                failed = true;
+                ReportOptionalFailure("module", error.what(), static_cast<unsigned>(error.kind));
+                ++ready_fragment_failures;
+                entry->retryable = error.kind == OptionalCompileFailure::Resource;
+                if (entry->retryable) ++optional_resource_failures;
+                else if (error.kind == OptionalCompileFailure::Source) ++optional_source_failures;
+                else if (error.kind == OptionalCompileFailure::DeviceLost) ++optional_device_failures;
+                else ++optional_unknown_failures;
+                entry->retry_after_ms = CompileBudget::NowMs() + (2000ULL << entry->retries);
+            } catch (const std::bad_alloc&) {
+                failed = entry->retryable = true;
+                ReportOptionalFailure("allocation", "temporary compiler allocation failure", 1);
+                ++ready_fragment_failures;
+                ++optional_resource_failures;
+                entry->retry_after_ms = CompileBudget::NowMs() + (2000ULL << entry->retries);
             } catch (const std::exception& error) {
                 failed = true;
+                ++optional_unknown_failures;
                 if (ready_fragment_failures.fetch_add(1) < 8) {
                     // AstraPro Log Line: Bound failure details; the CPU still renders.
                     // CodexAstraLocal: Diagnostic allocation failure cannot escape a
@@ -403,12 +718,22 @@ std::optional<std::pair<u64, Shader* const>> ShaderDiskCache::UseReadyFragmentSh
             auto maximum = ready_fragment_max_compile_ns.load();
             while (maximum < ns && !ready_fragment_max_compile_ns.compare_exchange_weak(maximum, ns)) {}
             ready_fragment_builds.fetch_add(1);
-            if (failed) entry->shader.MarkFailed();
-            else entry->shader.MarkDone(); // Publish the module only after all writes.
+            if (failed) {
+                if (optional_failure_streak.fetch_add(1) >= 7)
+                    optional_circuit_until_ms.store(CompileBudget::NowMs() + 30000);
+                entry->shader.MarkFailed();
+            } else {
+                optional_failure_streak.store(0);
+                entry->shader.MarkDone();
+            } // Publish the module only after all writes.
+            entry->compiler_released.store(true, std::memory_order_release);
         });
     } catch (...) {
+        entry->retryable = true;
+        entry->retry_after_ms = CompileBudget::NowMs() + (2000ULL << entry->retries);
         entry->shader.MarkFailed();
         ready_fragment_failures.fetch_add(1);
+        entry->compiler_released.store(true, std::memory_order_release);
         return {};
     }
     ++ready_fragment_busy;
@@ -416,8 +741,8 @@ std::optional<std::pair<u64, Shader* const>> ShaderDiskCache::UseReadyFragmentSh
 }
 
 // CodexAstraLocal: Optional partial modules retain exact immutable inputs and
-// terminal completion. A miss never waits, changes the generic shader, or writes
-// transferable/disk cache data; GPU vertex work is unrelated to this CPU-FS API.
+// terminal completion. A miss never waits or changes the generic shader.
+// Successful programs use independent disk records; the CPU-FS ABI stays exact.
 std::optional<std::pair<u64, Shader* const>> ShaderDiskCache::UseStaticTevFragmentShader(
     const FSConfig& family, const GLSL::StaticTevPlan& plan,
     const UserConfig& user, bool allow_build) {
@@ -429,6 +754,7 @@ std::optional<std::pair<u64, Shader* const>> ShaderDiskCache::UseStaticTevFragme
         return {};
     }
     const u64 hash = StaticTevPolicy::Key::Hash(family, plan);
+    u32 retry_count{};
     if (const auto found = static_tev_fragments.find(hash); found != static_tev_fragments.end()) {
         auto& entry = *found->second;
         // CodexAstraLocal: Avoid copying the large profile on ready hits, while
@@ -439,44 +765,72 @@ std::optional<std::pair<u64, Shader* const>> ShaderDiskCache::UseStaticTevFragme
             ++static_tev_mismatches;
             return {};
         }
+        if (!entry.shader.HasFailed()) entry.last_requested = optional_frame;
         if (!entry.shader.IsDone()) { ++static_tev_busy; return {}; }
         if (entry.shader.HasFailed() || !entry.shader.Handle()) {
             ++static_tev_failed_hits;
-            return {};
+            if (!allow_build || !entry.retryable || entry.retries >= 2 ||
+                CompileBudget::NowMs() < optional_circuit_until_ms.load(std::memory_order_relaxed) ||
+                CompileBudget::NowMs() < entry.retry_after_ms || !static_module_credit.Available() ||
+                (parent.warming_ready_vertex && !parent.warming_ready_vertex->IsDone()) || OptionalFragmentPending() ||
+                !entry.compiler_released.load(std::memory_order_acquire) ||
+                parent.OptionalShaderReferenced(&entry.shader)) return {};
+            retry_count = entry.retries + 1;
+            if (warming_ready_fragment == &entry.shader) warming_ready_fragment = nullptr;
+            static_tev_fragments.erase(found);
+            ++optional_retry_jobs;
+        } else {
+            // CodexAstraLocal: A successful bounded retry supersedes its negative record.
+            if (entry.retries && entry.compiler_released.load(std::memory_order_acquire)) {
+                static_failure_history.Forget(hash, entry.key);
+                entry.retries = 0;
+            }
+            ++static_tev_hits;
+            return std::make_pair(hash, &entry.shader);
         }
-        ++static_tev_hits;
-        return std::make_pair(hash, &entry.shader);
     }
     if (!allow_build) { ++static_tev_lookup_misses; return {}; }
+    if (const auto until = optional_circuit_until_ms.load(std::memory_order_relaxed);
+        until && CompileBudget::NowMs() < until) return {};
     if (static_tev_fragments.size() >= StaticTevPolicy::MaxModules ||
-        static_tev_attempts >= StaticTevPolicy::MaxModuleAttempts) {
+        !static_module_credit.Available()) {
+        static_module_pressure |= static_tev_fragments.size() >= StaticTevPolicy::MaxModules;
         ++static_tev_capped;
         return {};
     }
     const StaticTevPolicy::Key key{family, parent.profile, plan};
-    if (!static_tev_demand.Observe(hash, key)) { ++static_tev_cold; return {}; }
+    if (const auto* failure = static_failure_history.Find(hash, key)) {
+        if (!failure->retryable || failure->retries >= 2 ||
+            CompileBudget::NowMs() < failure->retry_after_ms) return {};
+        retry_count = std::max(retry_count, failure->retries + 1);
+    }
+    if (!retry_count && !WarmDemand(hash, true) && !static_tev_demand.Observe(hash, key)) { ++static_tev_cold; return {}; }
     if ((warming_ready_fragment && !warming_ready_fragment->IsDone()) ||
         (parent.warming_ready_vertex && !parent.warming_ready_vertex->IsDone())) {
         ++static_tev_busy;
         return {};
     }
     // CodexAstraLocal: Charge before every throwing owner allocation/insertion.
-    // A failed entry remains terminal; an allocation failure consumes the finite
-    // title attempt budget even when no entry could be retained.
+    // Failures spend work credit even without a retained owner. Only classified
+    // temporary failures receive bounded demand-triggered retries.
+    static_module_credit.Spend();
     ++static_tev_attempts;
     StaticTevEntry* entry{};
     try {
         auto owner = std::make_unique<StaticTevEntry>(parent.instance, key);
         entry = owner.get();
         static_tev_fragments.emplace(hash, std::move(owner));
+        entry->last_requested = optional_frame;
+        entry->retries = retry_count;
     } catch (...) {
         ++static_tev_allocation_failures;
+        static_failure_history.Remember(hash, key, retry_count, true, CompileBudget::NowMs() + 2000);
         return {};
     }
     warming_ready_fragment = &entry->shader;
     const auto device = parent.instance.GetDevice();
     try {
-        parent.ready_vertex_worker->QueueWork([entry, device] {
+        parent.ready_vertex_worker->QueueWork([this, entry, device] {
             bool failed = false;
             try {
                 const auto elapsed = [](auto begin) {
@@ -488,6 +842,9 @@ std::optional<std::pair<u64, Shader* const>> ShaderDiskCache::UseStaticTevFragme
                 // through the unchanged per-draw 128-byte push transport.
                 const auto& key = entry->key;
                 auto begin = std::chrono::steady_clock::now();
+                const auto identity = OptionalIdentity(key.family, key.profile, &key.plan);
+                const auto spirv = LoadOrCompileOptional(identity, true, [&] {
+                begin = std::chrono::steady_clock::now();
                 const auto source = GLSL::GenerateStaticTevFragmentShader(
                     key.family, {}, key.profile, key.plan);
                 entry->generation_ns = elapsed(begin);
@@ -496,26 +853,54 @@ std::optional<std::pair<u64, Shader* const>> ShaderDiskCache::UseStaticTevFragme
                 // CodexAstraLocal: Partial specialization is optional work and
                 // explicitly uses the optimized frontend, even though non-TEV
                 // generation remains dynamic. Required generic policy is intact.
-                const auto spirv = CompileGLSL(source, vk::ShaderStageFlagBits::eFragment, "",
+                const auto generated = CompileGLSL(source, vk::ShaderStageFlagBits::eFragment, "",
                     DisableShaderOptimizer(true, key.profile.vk_disable_spirv_optimizer != 0));
                 entry->frontend_ns = elapsed(begin);
+                return generated;
+                });
                 entry->spirv_bytes = spirv.size() * sizeof(u32);
-                if (spirv.empty()) throw std::runtime_error("empty static TEV module");
+                if (spirv.empty()) throw OptionalCompileError(OptionalCompileFailure::Source, "empty static TEV module");
                 begin = std::chrono::steady_clock::now();
-                entry->shader.module = CompileSPV(spirv, device);
+                entry->shader.module = CompileOptionalSPV(spirv, device);
                 entry->module_ns = elapsed(begin);
                 if (!entry->shader.module) throw std::runtime_error("null static TEV module");
+            } catch (const OptionalCompileError& error) {
+                failed = true;
+                ReportOptionalFailure("module", error.what(), static_cast<unsigned>(error.kind));
+                entry->retryable = error.kind == OptionalCompileFailure::Resource;
+                if (entry->retryable) ++optional_resource_failures;
+                else if (error.kind == OptionalCompileFailure::Source) ++optional_source_failures;
+                else if (error.kind == OptionalCompileFailure::DeviceLost) ++optional_device_failures;
+                else ++optional_unknown_failures;
+                entry->retry_after_ms = CompileBudget::NowMs() + (2000ULL << entry->retries);
+            } catch (const std::bad_alloc&) {
+                failed = entry->retryable = true;
+                ReportOptionalFailure("allocation", "temporary compiler allocation failure", 1);
+                ++optional_resource_failures;
+                entry->retry_after_ms = CompileBudget::NowMs() + (2000ULL << entry->retries);
             } catch (...) {
                 failed = true;
+                ReportOptionalFailure("module", "unknown compiler failure", 3);
+                ++optional_unknown_failures;
             }
             // CodexAstraLocal: Completion is the last owner write; progress reads
             // metrics only after acquiring it, and the parent drains this lane
             // before any shader, layout, pipeline or driver-cache destruction.
-            if (failed) entry->shader.MarkFailed();
-            else entry->shader.MarkDone();
+            if (failed) {
+                if (optional_failure_streak.fetch_add(1) >= 7)
+                    optional_circuit_until_ms.store(CompileBudget::NowMs() + 30000);
+                entry->shader.MarkFailed();
+            } else {
+                optional_failure_streak.store(0);
+                entry->shader.MarkDone();
+            }
+            entry->compiler_released.store(true, std::memory_order_release);
         });
     } catch (...) {
+        entry->retryable = true;
+        entry->retry_after_ms = CompileBudget::NowMs() + (2000ULL << entry->retries);
         entry->shader.MarkFailed();
+        entry->compiler_released.store(true, std::memory_order_release);
         return {};
     }
     ++static_tev_busy;
@@ -564,7 +949,7 @@ std::optional<std::pair<u64, Shader* const>> ShaderDiskCache::UseFixedGeometrySh
             const bool disable_optimizer =
                 DisableShaderOptimizer(ready_only, parent.profile.vk_disable_spirv_optimizer != 0);
             const bool use_clip_planes = parent.profile.has_clip_planes;
-            parent.shader_workers.QueueWork([gs_config, this, &shader, gs_config_hash, ready_only,
+            try { parent.shader_workers.QueueWork([gs_config, this, &shader, gs_config_hash, ready_only,
                                              disable_optimizer, use_clip_planes]() {
                 const auto compile = [&] {
                     ExtraFixedGSConfig extra;
@@ -594,19 +979,17 @@ std::optional<std::pair<u64, Shader* const>> ShaderDiskCache::UseFixedGeometrySh
                     });
                     return;
                 }
-                // AstraPro: Same bounded failed-completion policy as optional VS.
-                try {
-                    compile();
-                    // AstraPro: Publish optional success only after all throwing work.
-                    shader.MarkDone();
-                } catch (const std::exception& err) {
-                    shader.MarkFailed();
-                    if (ready_shader_failures.fetch_add(1) < 8) {
-                        // AstraPro Log Line: Shared eight-failure per-title cap.
-                        LOG_ERROR(Render_Vulkan, "Uberhar optional GPU GS failed: {}", err.what());
-                    }
-                }
-            });
+                // CodexAstraLocal: Unknown compiler and logger failures obey
+                // the same terminal publication rule as mandatory dependencies.
+                VideoCore::CompleteShaderBuild(shader, compile, [this](const char* reason) {
+                    if (ready_shader_failures.fetch_add(1) < 8)
+                        LOG_ERROR(Render_Vulkan, "Uberhar optional GPU GS failed: {}", reason);
+                });
+            }); } catch (...) {
+                // CodexAstraLocal: Enqueue failure cannot leave dependent PSOs waiting forever.
+                shader.MarkFailed();
+                ready_shader_failures.fetch_add(1);
+            }
         }
 
         return std::make_pair(gs_config_hash, &shader);
@@ -658,6 +1041,25 @@ void ShaderDiskCache::ReportUberharStats(const char* kind) const {
     const auto delivery = std::strcmp(kind, "progress") == 0
                               ? Common::Log::Delivery::Diagnostic
                               : Common::Log::Delivery::Reliable;
+    // CodexAstraLocal TEST-ONLY LOG: Remove after cold/scene-revisit/warm reuse
+    // qualification. Counters distinguish useful selections from mere disk files.
+    LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
+        "Uberhar optional cache {}: schema=1 full_evictions={} static_evictions={} "
+        "disk_hits={} disk_misses={} disk_rejected={} disk_writes={} write_failures={} "
+        "quota_refusals={} full_credit={} static_credit={} full_refilled={} static_refilled={} "
+        "replay=demand_confirmed_positive bounds=128full_32static_512MiB_global",
+        kind, optional_full_evictions, optional_static_evictions, optional_disk_hits.load(),
+        optional_disk_misses.load(), optional_disk_rejected.load(), optional_disk_writes.load(),
+        optional_disk_write_failures.load(), optional_disk_quota_refusals.load(),
+        full_module_credit.Credits(), static_module_credit.Credits(),
+        full_module_credit.Replenished(), static_module_credit.Replenished());
+    // CodexAstraLocal TEST-ONLY LOG: Retain failure classes/retries/circuit until
+    // recovery is qualified; remove this summary with the cache experiment logs.
+    LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
+        "Uberhar optional recovery {}: retries={} resource_failures={} source_failures={} "
+        "unknown_failures={} device_failures={} circuit_until_ms={} max_key_retries=2",
+        kind, optional_retry_jobs.load(), optional_resource_failures.load(), optional_source_failures.load(),
+        optional_unknown_failures.load(), optional_device_failures.load(), optional_circuit_until_ms.load());
     // AstraPro: Existing five-second/final cadence, not per draw.
     // CodexAstraLocal TEST-ONLY LOG: Effective generator attempts distinguish
     // direct SPIR-V from G1-pruned GLSL in .53 owner comparisons. Remove the
@@ -668,7 +1070,7 @@ void ShaderDiskCache::ReportUberharStats(const char* kind) const {
              "Uberhar ready GPU fragments {}: schema=1 scope=title requests={} ready_hits={} "
              "cold_demand={} busy={} capped={} mismatches={} failed_hits={} unsupported={} lookup_only_misses={} "
              "modules={} builds={} failures={} compile_ms={:.3f} max_compile_ms={:.3f} "
-             "demand_replacements={} max_modules={} warmup_draws={} storage=memory_only "
+             "demand_replacements={} max_modules={} warmup_draws={} storage=optional_disk_v1 "
              "generator=setting_compatible_v1 requested_spirv={} direct_spirv_build_attempts={} "
              "glsl_build_attempts={} glsl_pruning=full_v1 weighting=lookups",
              kind, ready_fragment_requests, ready_fragment_hits, ready_fragment_cold,
@@ -700,8 +1102,8 @@ void ShaderDiskCache::ReportUberharStats(const char* kind) const {
             "cold={} busy={} capped={} mismatches={} failed_hits={} unsupported={} lookup_misses={} "
             "modules={} attempts={} allocation_failures={} done={} failed={} "
             "generated_glsl_bytes={} generated_spirv_bytes={} generation_ms={:.3f} "
-            "frontend_ms={:.3f} module_ms={:.3f} max_modules=8 max_attempts=16 "
-            "storage=memory_only generator=static_tev_runtime_lighting optimizer=enabled "
+            "frontend_ms={:.3f} module_ms={:.3f} max_modules=8 initial_attempt_credit=16 renewable=true "
+            "storage=optional_disk_v1 generator=static_tev_runtime_lighting optimizer=enabled "
             "cpu_vertex_abi=88 push_bytes=128 weighting=lookups demand_replacements={}",
             kind, static_tev_requests, static_tev_hits, static_tev_cold, static_tev_busy,
             static_tev_capped, static_tev_mismatches, static_tev_failed_hits,

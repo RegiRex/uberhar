@@ -5,6 +5,7 @@
 #pragma once
 
 #include <span>
+#include <stdexcept>
 
 #include "video_core/renderer_vulkan/vk_common.h"
 
@@ -30,6 +31,16 @@ std::vector<u32> CompileGLSL(std::string_view code, vk::ShaderStageFlagBits stag
  * @param device The vulkan device handle
  */
 vk::ShaderModule CompileSPV(std::span<const u32> code, vk::Device device);
+// CodexAstraLocal: Preserve Vulkan resource/device errors for optional retry
+// policy; required callers retain the inherited null-return interface above.
+enum class OptionalCompileFailure { Source, Resource, DeviceLost, Unknown };
+class OptionalCompileError : public std::runtime_error {
+public:
+    OptionalCompileError(OptionalCompileFailure kind, const char* message)
+        : std::runtime_error(message), kind(kind) {}
+    OptionalCompileFailure kind;
+};
+vk::ShaderModule CompileOptionalSPV(std::span<const u32> code, vk::Device device);
 
 vk::ShaderModule Compile(std::string_view code, vk::ShaderStageFlagBits stage, vk::Device device,
                          std::string_view premable = "");

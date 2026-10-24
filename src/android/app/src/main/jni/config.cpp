@@ -98,6 +98,7 @@ static const std::array<int, Settings::NativeAnalog::NumAnalogs> default_analogs
 namespace {
 // CodexAstraLocal: Keep an active testing launch stable when an editor changes next-launch preferences.
 bool testing_overlay_active{};
+long testing_overlay_preset{};
 
 template <typename Type>
 Type ReadConfigValue(const INIReader& reader, const std::string& group,
@@ -132,6 +133,8 @@ bool Config::KeepRunningValue(const std::string& key) const {
         Settings::Keys::uberhar_cpu_prefix_overlap,
         Settings::Keys::uberhar_parallel_texture_decode,
         Settings::Keys::uberhar_cpu_execution_census,
+        Settings::Keys::turnip_pass_end_flush,
+        Settings::Keys::uberhar_optimize_generic_shaders,
         Settings::Keys::uberhar_hybrid_tev,
         Settings::Keys::uberhar_force_tev,
         Settings::Keys::uberhar_cpu_vertex_bridge,
@@ -146,9 +149,9 @@ bool Config::KeepRunningValue(const std::string& key) const {
         Settings::Keys::use_vsync,
         Settings::Keys::software_renderer_workers,
     };
-    return runtime_reload &&
-           (std::ranges::find(keys, key) != keys.end() ||
-            (key == Settings::Keys::resolution_factor && testing_overlay_active));
+    // CodexAstraLocal: Preserve the live resolution until a valid Testing overlay replaces it.
+    return runtime_reload && (std::ranges::find(keys, key) != keys.end() ||
+                             (key == Settings::Keys::resolution_factor && testing_overlay_active));
 }
 
 template <typename Type, bool ranged>
@@ -180,28 +183,41 @@ void Config::ReadSetting(const std::string& group, Settings::SwitchableSetting<T
 }
 
 void Config::ApplyTestingOverlay() {
-    if (runtime_reload) return;
-    testing_overlay_active = false;
-    if (title_id == 0) return;
-    // CodexAstraLocal: Last-layer testing values never touch persisted title or global preferences.
+    // CodexAstraLocal: Renderer/master choices are fixed for a launch. Resolution
+    // can reload from the same title's Testing overlay through normal ApplySettings.
+    if (!runtime_reload) testing_overlay_active = false;
+    if (title_id == 0 || (runtime_reload && !testing_overlay_active)) return;
     std::string buffer;
     const auto path = FileUtil::GetUserPath(FileUtil::UserPath::ConfigDir) + "testing.ini";
     if (!FileUtil::ReadFileToString(true, path, buffer) || buffer.empty()) return;
     const INIReader testing{buffer.c_str(), buffer.size()};
-    if (testing.ParseError() != 0 || !testing.GetBoolean("Testing", "enabled", false)) return;
-    const auto preset = testing.GetInteger("Testing", "preset", 0);
-    const auto resolution = testing.GetInteger("Testing", "resolution", 2);
-    if (preset < 0 || preset > 2 || (resolution != 2 && resolution != 4)) {
-        LOG_ERROR(Config, "Ignoring invalid testing preset/resolution");
-        return;
+    if (testing.ParseError() != 0 ||
+        (!runtime_reload && !testing.GetBoolean("Testing", "enabled", false))) return;
+    std::ostringstream section_name;
+    section_name << "Testing." << std::uppercase << std::hex << std::setw(16)
+                 << std::setfill('0') << title_id;
+    const auto section = section_name.str();
+    // CodexAstraLocal: Match Kotlin's validated fallback chain for malformed title/default entries.
+    const auto valid_preset = [](long value) { return value >= 0 && value <= 2; };
+    const auto valid_resolution = [](long value) { return value == 2 || value == 4; };
+    auto global_preset = testing.GetInteger("Testing", "preset", 0);
+    auto global_resolution = testing.GetInteger("Testing", "resolution", 2);
+    if (!valid_preset(global_preset)) global_preset = 0;
+    if (!valid_resolution(global_resolution)) global_resolution = 2;
+    auto preset = testing.GetInteger(section, "preset", global_preset);
+    auto resolution = testing.GetInteger(section, "resolution", global_resolution);
+    if (!valid_preset(preset)) preset = global_preset;
+    if (!valid_resolution(resolution)) resolution = global_resolution;
+    if (!runtime_reload) {
+        testing_overlay_active = true;
+        testing_overlay_preset = preset;
+        Settings::values.uberhar_test_mode = preset == 0 ? Settings::UberharTestMode::Native :
+                                                          Settings::UberharTestMode::Automatic;
+        Settings::values.uberhar_cpu_vertex_only = preset == 1;
     }
-    testing_overlay_active = true;
-    Settings::values.uberhar_test_mode = preset == 0 ? Settings::UberharTestMode::Native :
-                                                      Settings::UberharTestMode::Automatic;
-    Settings::values.uberhar_cpu_vertex_only = preset == 1;
     Settings::values.resolution_factor = static_cast<u16>(resolution);
-    LOG_INFO(Config, "Testing overlay: title={:016X} preset={} resolution={}x", title_id,
-             preset, resolution);
+    LOG_INFO(Config, "Testing overlay: title={:016X} preset={} resolution={}x live={}", title_id,
+             testing_overlay_preset, resolution, runtime_reload);
 }
 
 void Config::ReadValues() {
@@ -261,6 +277,9 @@ void Config::ReadValues() {
     ReadSetting("Renderer", Settings::values.uberhar_cpu_vertex_only);
     // CodexAstraLocal: Load comparison controls before constructing renderer owners.
     ReadSetting("Renderer", Settings::values.uberhar_native_full_fragments);
+    // CodexAstraLocal: Resolve title/global driver policy before renderer construction.
+    ReadSetting("Renderer", Settings::values.turnip_pass_end_flush);
+    ReadSetting("Renderer", Settings::values.uberhar_optimize_generic_shaders);
     ReadSetting("Renderer", Settings::values.uberhar_cpu_prefix_overlap);
     ReadSetting("Renderer", Settings::values.uberhar_parallel_texture_decode);
     // CodexAstraLocal: Freeze optional census before any worker owner is constructed.

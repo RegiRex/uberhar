@@ -57,6 +57,18 @@ int main() {
     Require(capped.capped && !capped.complete && capped.examined == 1, "scan bound not enforced");
     state.generic = capped;
     Require(std::string_view{state.State()} == "unknown", "partial scan claimed empty or warm");
+    // CodexAstraLocal: Optional warm modules/recipes have a separate namespace;
+    // their presence is not a validated warm hit and temporary writes do not count.
+    const auto optional = pipeline / "0000000000000001-uber-opt-full-3.spv";
+    const auto recipes = pipeline / "0000000000000001-uber-opt-recipes.bin";
+    std::ofstream(optional) << "optional";
+    std::ofstream(recipes) << "recipe";
+    std::ofstream(pipeline / "0000000000000001-uber-opt-full-3.spv.tmp") << "partial";
+    state = inspect();
+    Require(state.generic.files == 1 && state.optional.files == 2 && state.optional.bytes == 14,
+            "optional module and recipe inventory mixed with generic or temporary files");
+    fs::remove(optional);
+    fs::remove(recipes);
     fs::remove(module);
     std::ofstream(transfer / "0000000000000001_fs.vkch") << "specialized";
     Require(std::string_view{inspect().State()} == "empty_files", "bypassed records affect Native");

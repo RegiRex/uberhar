@@ -24,6 +24,9 @@
             android:layout_gravity="center_horizontal"
             android:src="@drawable/ic_citra_full" />
 
+        <!-- CodexAstraLocal: Quick Testing sits directly below the flower, above all option cards. -->
+        <include android:id="@+id/testing_panel" layout="@layout/panel_testing" />
+
         <androidx.recyclerview.widget.RecyclerView
             android:id="@+id/home_settings_list"
             android:layout_width="match_parent"

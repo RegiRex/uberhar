@@ -52,6 +52,10 @@ foreach(KEY IN ITEMS
     "uberhar_parallel_texture_decode"
     # CodexAstraLocal: Optional detailed worker census, independent of admission safety.
     "uberhar_cpu_execution_census"
+    # CodexAstraLocal: Isolated driver submission comparison; no shader-policy changes.
+    "turnip_pass_end_flush"
+    # CodexAstraLocal: Launch-only generic shader optimization tradeoff.
+    "uberhar_optimize_generic_shaders"
     # AstraEH: One mutually exclusive experimental renderer profile.
     "uberhar_test_mode"
     "async_presentation"

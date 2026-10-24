@@ -5,6 +5,9 @@
 #pragma once
 
 #include <mutex>
+#include <functional>
+#include "video_core/renderer_vulkan/uberhar_compile_budget.h"
+#include "video_core/renderer_vulkan/uberhar_optional_failure_cache.h"
 #include <optional>
 #include <unordered_set>
 #include <tsl/robin_map.h>
@@ -60,6 +63,11 @@ public:
         const Pica::Shader::Generator::GLSL::StaticTevPlan& plan,
         const Pica::Shader::UserConfig& user, bool allow_build = true);
 
+    // CodexAstraLocal: Only the existing command-drain boundary may reclaim
+    // unreferenced optional modules. Selection records useful warm demand.
+    void ReclaimOptionalAfterDrain(u64 frame);
+    void RecordOptionalSelection(const Shader* shader);
+    void SaveUsefulRecipesAfterDrain();
     GraphicsPipeline* GetPipeline(const PipelineInfo& info);
     // AstraEH: Read renderer-owned cache sizes and foreground VS translation costs.
     void ReportUberharStats(const char* kind) const;
@@ -73,6 +81,29 @@ public:
     u64 CaptureVertexSourceHash(const Shader* shader) const noexcept;
 
 private:
+    // CodexAstraLocal: Optional disk I/O stays on the serial compiler lane.
+    std::vector<u32> LoadOrCompileOptional(std::span<const u32> identity, bool partial,
+                                         const std::function<std::vector<u32>()>& compile);
+    void LoadUsefulRecipes();
+    bool WarmDemand(u64 key, bool partial) const;
+    void ReportOptionalFailure(const char* phase, const char* reason, unsigned kind) noexcept;
+    u64 OptionalCompilerIdentity() const;
+    bool OptionalWriteAllowed(const std::string& directory, const std::string& path, u64 bytes);
+    std::string optional_directory;
+    bool optional_persistent{}, optional_quota_scanned{};
+    u64 optional_disk_bytes{}, optional_frame{}, optional_full_evictions{}, optional_static_evictions{};
+    bool full_module_pressure{}, static_module_pressure{};
+    // CodexAstraLocal: Preserve inherited cold/warm startup allowances; renewal
+    // extends later-session work without an unmeasured early-admission reduction.
+    CompileBudget full_module_credit{ReadyFragmentPolicy::MaxModules, 500},
+                  static_module_credit{StaticTevPolicy::MaxModuleAttempts, 1000};
+    struct UsefulRecipe { u64 hash{}, selections{}; bool partial{}; };
+    std::array<UsefulRecipe, 64> warm_recipes{};
+    std::atomic<u64> optional_error_details{};
+    std::atomic<u64> optional_retry_jobs{}, optional_resource_failures{}, optional_source_failures{}, optional_unknown_failures{}, optional_device_failures{};
+    std::atomic<u64> optional_failure_streak{}, optional_circuit_until_ms{};
+    std::atomic<u64> optional_disk_hits{}, optional_disk_misses{}, optional_disk_rejected{},
+        optional_disk_writes{}, optional_disk_write_failures{}, optional_disk_quota_refusals{};
     // AstraEH: Distinguish startup reuse from live misses for already known guest records.
     u64 startup_host_pipelines{}, startup_guest_records{}, live_host_pipelines{},
         live_host_known_record{};
@@ -399,7 +430,7 @@ private:
     struct ReadyFragmentKey {
         // CodexAstraLocal: Profile equality includes the frozen generator choice;
         // FSConfig owns the compatibility decision. Fixed G1 code changes enter
-        // the source-derived disk-cache version; ready modules remain memory-only.
+        // the source-derived disk-cache version; disk records also include exact inputs.
         Pica::Shader::FSConfig config;
         Pica::Shader::Profile profile;
         bool operator==(const ReadyFragmentKey& other) const {
@@ -411,9 +442,18 @@ private:
             : key(key_), shader(instance) {}
         ReadyFragmentKey key;
         Shader shader;
+        // CodexAstraLocal: Release follows every worker access, separately from readiness.
+        std::atomic_bool compiler_released{};
+        u64 last_requested{};
+        // CodexAstraLocal: Only classified temporary failures receive at most
+        // two delayed demand-triggered retries; other failures remain negative.
+        u32 retries{};
+        bool retryable{};
+        u64 retry_after_ms{};
     };
     std::unordered_map<u64, std::unique_ptr<ReadyFragmentEntry>> ready_fragments;
     ReadyFragmentPolicy::DemandGate<ReadyFragmentKey> ready_fragment_demand;
+    OptionalFailureCache<ReadyFragmentKey, 128> full_failure_history;
     Shader* warming_ready_fragment{};
     u64 ready_fragment_requests{}, ready_fragment_hits{}, ready_fragment_cold{},
         ready_fragment_busy{}, ready_fragment_capped{}, ready_fragment_mismatches{},
@@ -426,8 +466,8 @@ private:
     std::atomic<u64> ready_fragment_spirv_builds{}, ready_fragment_glsl_builds{};
 
     std::unordered_map<size_t, Shader> fixed_geometry_shaders;
-    // CodexAstraLocal: Fixed-title partial entries are map-stable, memory-only
-    // and never evicted before all parent compiler/command/pipeline users drain.
+    // CodexAstraLocal: Partial entries stay map-stable while referenced. Eviction
+    // requires compiler release and no remaining parent pipeline/state users.
     // Per-entry metrics are readable only after IsDone acquires publication.
     struct StaticTevEntry {
         StaticTevEntry(const Instance& instance, const StaticTevPolicy::Key& value)
@@ -435,9 +475,17 @@ private:
         StaticTevPolicy::Key key;
         Shader shader;
         u64 source_bytes{}, spirv_bytes{}, generation_ns{}, frontend_ns{}, module_ns{};
+        std::atomic_bool compiler_released{};
+        u64 last_requested{};
+        // CodexAstraLocal: Only classified temporary failures receive at most
+        // two delayed demand-triggered retries; other failures remain negative.
+        u32 retries{};
+        bool retryable{};
+        u64 retry_after_ms{};
     };
     std::unordered_map<u64, std::unique_ptr<StaticTevEntry>> static_tev_fragments;
     ReadyFragmentPolicy::DemandGate<StaticTevPolicy::Key> static_tev_demand;
+    OptionalFailureCache<StaticTevPolicy::Key, 32> static_failure_history;
     std::size_t static_tev_attempts{};
     u64 static_tev_requests{}, static_tev_hits{}, static_tev_cold{}, static_tev_busy{},
         static_tev_capped{}, static_tev_mismatches{}, static_tev_failed_hits{},

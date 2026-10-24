@@ -28,7 +28,7 @@ struct CpuFragmentObservation {
     }
 };
 // CodexAstraLocal: Preserve the inherited full-specialization allowance while
-// the additional partial tier has its own smaller attempt budget. Retirement,
+// the additional partial tier has its own smaller renewable work budget. Retirement,
 // probation and admission use this same partition, including failed owners.
 struct CpuFragmentPartitions {
     static constexpr std::size_t Slots = 8 + StaticTevPolicy::MaxPsoOwners,

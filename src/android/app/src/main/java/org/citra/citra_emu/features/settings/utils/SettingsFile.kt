@@ -141,26 +141,32 @@ object SettingsFile {
         }
     }
 
-    // CodexAstraLocal: Testing is a separate persisted overlay and never overwrites config.ini.
-    fun readTestingFile(): Wini {
-        val ini = getOptionalConfigFile("testing", false) ?: return Wini()
+    // CodexAstraLocal: Independent overlay/driver stores preserve ordinary config and title inheritance.
+    fun readTestingFile(): Wini = readAuxiliaryFile("testing")
+    fun saveTestingFile(writer: Wini): Boolean = saveAuxiliaryFile("testing", writer)
+    fun readDriverFile(): Wini = readAuxiliaryFile("drivers")
+    fun saveDriverFile(writer: Wini): Boolean = saveAuxiliaryFile("drivers", writer)
+
+    private fun readAuxiliaryFile(name: String): Wini {
+        // CodexAstraLocal: Home Options may be reopened after storage permission loss; show defaults safely.
         return try {
+            val ini = getOptionalConfigFile(name, false) ?: return Wini()
             CitraApplication.appContext.contentResolver.openInputStream(ini.uri)!!.use { Wini(it) }
         } catch (e: Exception) {
-            Log.error("[SettingsFile] Error reading testing settings: ${e.message}")
+            Log.error("[SettingsFile] Error reading $name settings: ${e.message}")
             Wini()
         }
     }
 
-    fun saveTestingFile(writer: Wini): Boolean = try {
-        val ini = getOptionalConfigFile("testing", true)
-            ?: throw IOException("Cannot create testing settings")
+    private fun saveAuxiliaryFile(name: String, writer: Wini): Boolean = try {
+        val ini = getOptionalConfigFile(name, true)
+            ?: throw IOException("Cannot create $name settings")
         CitraApplication.appContext.contentResolver.openOutputStream(ini.uri, "wt")!!.use {
             writer.store(it)
         }
         true
     } catch (e: Exception) {
-        Log.error("[SettingsFile] Error saving testing settings: ${e.message}")
+        Log.error("[SettingsFile] Error saving $name settings: ${e.message}")
         false
     }
 

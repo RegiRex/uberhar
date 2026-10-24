@@ -109,6 +109,10 @@ void LogSettings() {
     log_setting("Uberhar_CPUVertexOnly", values.uberhar_cpu_vertex_only.GetValue());
     // CodexAstraLocal: Identify selected controls once; actual route counters qualify execution.
     log_setting("UBERHAR_NATIVE_FULL_FRAGMENTS", values.uberhar_native_full_fragments.GetValue());
+    // CodexAstraLocal: Record the chosen driver experiment once per effective settings snapshot.
+    log_setting("Renderer_TurnipPassEndFlush", values.turnip_pass_end_flush.GetValue());
+    // CodexAstraLocal: Identify the real generic optimizer comparison in performance logs.
+    log_setting("UBERHAR_OPTIMIZE_GENERIC_SHADERS", values.uberhar_optimize_generic_shaders.GetValue());
     log_setting("UBERHAR_CPU_PREFIX_OVERLAP", values.uberhar_cpu_prefix_overlap.GetValue());
     log_setting("UBERHAR_PARALLEL_TEXTURE_DECODE", values.uberhar_parallel_texture_decode.GetValue());
 
@@ -244,6 +248,9 @@ void RestoreGlobalState(bool is_powered_on) {
     values.uberhar_cpu_vertex_only.SetGlobal(true);
     // CodexAstraLocal: Restore global values when leaving per-game settings.
     values.uberhar_native_full_fragments.SetGlobal(true);
+    // CodexAstraLocal: Return title-specific driver experiments to global inheritance.
+    values.turnip_pass_end_flush.SetGlobal(true);
+    values.uberhar_optimize_generic_shaders.SetGlobal(true);
     values.uberhar_cpu_prefix_overlap.SetGlobal(true);
     values.uberhar_parallel_texture_decode.SetGlobal(true);
 

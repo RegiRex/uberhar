@@ -130,8 +130,20 @@ static void Adaptation() {
     };
     AdaptiveParticipation cadence{3};
     for (unsigned i=0;i<1024;++i) Need(!cadence.SelectSample(1,64), "tiny job sampled");
-    for (unsigned i=1;i<=128;++i)
-        Need(cadence.SelectSample(1024,16) == (i%64==0), "sample cadence");
+    // CodexAstraLocal: Alternating task shapes must avoid adaptive clocks while
+    // retaining the full worker allowance; stable work still reaches trials.
+    for (unsigned i=0;i<128;++i) {
+        cadence.Prepare(i%2 ? 1024 : 2048,16);
+        Need(!cadence.SelectSample(i%2 ? 1024 : 2048,16), "unstable shape sampled");
+        Need(cadence.Desired()==3, "sampling gate changed worker budget");
+    }
+    cadence.Prepare(4096,16);
+    for (unsigned i=0;i<7;++i) cadence.Prepare(4096,16);
+    for (unsigned i=1;i<=128;++i) {
+        cadence.Prepare(4096,16);
+        Need(cadence.SelectSample(4096,16) == (i%64==0), "sample cadence");
+    }
+    Need(cadence.GetStatistics().unstable_skipped==128, "avoided-sample accounting");
     AdaptiveParticipation policy{3};
     for (unsigned i=0;i<7;++i) policy.Observe(base);
     Need(policy.Desired()==3, "unstable early trial");

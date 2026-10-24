@@ -1,3 +1,23 @@
+# CURRENT — 0.1.55 approved; stop after prerelease submission
+
+<!-- CodexAstraLocal: Owner approved the complete post-.54 driver/architecture package on October 23, 2026; this supersedes historical pause and removed-renderer instructions below. -->
+Implement the approved next-build plan from the private driver report:
+/home/regirex/uberhar-device-testing/build/device-testing/20261007-recovery/owner054-turnip-comparison-20261023-01/analysis/NEXT_BUILD_RECOMMENDATIONS.md
+Keep .54 base and original .48 reference. Work in this isolated .55 checkout; preserve other worktrees and private artifacts.
+Deliver bounded renewable specialization, reliable completion/typed failure handling, useful optional shader persistence,
+GPU submission/wait diagnostics and narrow Turnip control, measured CPU-path simplification, and queued Testing/per-game driver conveniences.
+Owner reports disabling right-eye rendering harmed Sonic in base Azahar; enabling the eye restored excellent performance.
+Audit forced base graphics settings; schedule owner third-track Sonic Azahar/Uberhar comparison after this build.
+No device gameplay or capture is authorized during this build task. Root exclusively operates device if later authorized.
+Keep architect separate from developers. Agents yield with process/log handles while automation runs and stop when done.
+Run the required affected executable preflight once on the integrated tree; repair actual failures without dropping gates.
+All changes have CodexAstraLocal purpose comments. Temporary logs use CodexAstraLocal TEST-ONLY LOG and removal conditions.
+Submit only through RegiRex/uberhar's existing gated prerelease workflow. Stop all agents and root after submission,
+without polling the hosted build to completion. Save a resumable handoff and give the owner the build link and honest status.
+No automatic installation, driver change, gameplay or sleep. No per-milestone approval required.
+
+---
+
 # CURRENT — repair and pre-submission validation of .53
 
 <!-- CodexAstraLocal: Owner explicitly requires affected executable validation before resubmission following the failed first .53 gate. -->

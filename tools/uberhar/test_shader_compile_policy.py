@@ -31,17 +31,32 @@ def job(source: str, signature: str, options: bool) -> str:
     if len(queues) != 1:
         raise ValueError("Expected exactly one recognized shader-worker queue call")
     queue = queues[0]
-    # CodexAstraLocal: Optional queue admission now has an outer failure boundary.
-    # Derive its indentation so both old and contained job bodies stay testable;
-    # refuse an unexpected inline call rather than extracting a later method.
-    indent = source[source.rfind("\n", 0, queue) + 1:queue]
-    if not indent or indent.strip():
-        raise ValueError("Expected a standalone indented shader-worker queue call")
-    end = source.index("\n" + indent + "});", queue, method_end) + len(indent) + 5
-    # CodexAstraUlt: Include the actual frozen-option preparation when present.
-    # Accept the previous source too, so --source reproduces its behavioral failure.
+    # CodexAstraLocal: Scan the actual call parentheses so outer try/catch
+    # containment and nested completion lambdas cannot alter the extraction.
+    opening = source.index("(", queue)
+    depth, state, cursor = 0, "code", opening
+    while cursor < method_end:
+        char, pair = source[cursor], source[cursor:cursor + 2]
+        if state == "line":
+            if char == "\n": state = "code"
+        elif state == "block":
+            if pair == "*/": state = "code"; cursor += 1
+        elif state in ('"', "'"):
+            if char == "\\": cursor += 1
+            elif char == state: state = "code"
+        elif pair == "//": state = "line"; cursor += 1
+        elif pair == "/*": state = "block"; cursor += 1
+        elif char in ('"', "'"): state = char
+        elif char == "(": depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth == 0: break
+        cursor += 1
+    if depth or source[cursor + 1] != ";":
+        raise ValueError("Unterminated queued shader job")
     option = source.find("const bool disable_optimizer =", start, queue)
-    return source[option if options and option >= 0 else queue:end]
+    preparation = source[option:source.rfind("\n", 0, queue)] if options and option >= 0 else ""
+    return preparation + "\n" + source[queue:cursor + 2]
 
 
 # CodexAstraLocal: Recording compiler/device doubles defer execution explicitly
@@ -56,12 +71,14 @@ HEADER = r'''
 #include <string_view>
 #include <vector>
 #include "common/common_types.h"
+#include "video_core/renderer_vulkan/uberhar_compile_budget.h"
 #include "video_core/renderer_vulkan/uberhar_shader_compile_policy.h"
 #include "video_core/shader/generator/profile.h"
 // CodexAstraLocal: Use the production value types so queued-job interface changes
 // cannot remain hidden behind a duplicate profile or integer definition.
 using Pica::Shader::Profile;
 using Vulkan::DisableShaderOptimizer;
+using Vulkan::CompileBudget;
 #define LOG_ERROR(...) ((void)0)
 namespace vk {
 enum class ShaderStageFlagBits { eVertex, eFragment, eGeometry };
@@ -95,7 +112,19 @@ struct Worker {
 struct ExtraFixedGSConfig { bool use_clip_planes{}, separable_shader{}; };
 struct GSConfigEntry { static constexpr int EXPECTED_VERSION = 0; int version{}, gs_config{}; };
 struct ReadyKey { FSConfig fs; Profile profile; };
-struct Entry { ReadyKey key; Shader shader; };
+// CodexAstraLocal: Queue policy tests model disk/device endpoints only; real
+// credit, codec and retry ownership have their focused lifecycle fixtures.
+enum class OptionalCompileFailure { Source, Resource, DeviceLost, Unknown };
+struct OptionalCompileError : std::runtime_error {
+    OptionalCompileFailure kind;
+    OptionalCompileError(OptionalCompileFailure k, const char* why) : std::runtime_error(why), kind(k) {}
+};
+struct Entry {
+    ReadyKey key; Shader shader;
+    unsigned retries{}; bool retryable{}; u64 retry_after_ms{};
+    std::atomic<bool> compiler_released{};
+};
+std::vector<u32> OptionalIdentity(const FSConfig&, const Profile&, const void*) { return {1}; }
 struct CompilerRecord { vk::ShaderStageFlagBits stage; bool disabled; };
 std::vector<CompilerRecord> records;
 // CodexAstraLocal: Distinct endpoints expose effective selection and frozen
@@ -111,6 +140,10 @@ std::vector<unsigned> CompileGLSL(std::string_view, vk::ShaderStageFlagBits stag
 }
 int CompileSPV(const std::vector<unsigned>& code, vk::Device) {
     return code.empty() ? 0 : static_cast<int>(code.front());
+}
+int CompileOptionalSPV(const std::vector<unsigned>& code, vk::Device device) {
+    if (code.empty()) throw OptionalCompileError(OptionalCompileFailure::Source, "empty");
+    return CompileSPV(code, device);
 }
 namespace GLSL {
 std::string GenerateFixedGeometryShader(int, ExtraFixedGSConfig extra) {
@@ -151,6 +184,13 @@ struct Cache {
     std::atomic<u64> ready_fragment_compile_ns{}, ready_fragment_max_compile_ns{},
         ready_fragment_builds{}, ready_fragment_failures{};
     std::atomic<u64> ready_fragment_spirv_builds{}, ready_fragment_glsl_builds{};
+    std::atomic<u64> optional_resource_failures{}, optional_source_failures{},
+        optional_device_failures{}, optional_unknown_failures{}, optional_failure_streak{},
+        optional_circuit_until_ms{};
+    void ReportOptionalFailure(const char*, const char*, unsigned) noexcept {}
+    template<class Work> auto LoadOrCompileOptional(const std::vector<u32>&, bool, Work work) {
+        return work();
+    }
     void AppendVSSPIRV(int, const std::vector<unsigned>&, u64) { ++writes; }
     void AppendGSSPIRV(int, const std::vector<unsigned>&, u64) { ++writes; }
     void AppendGSConfig(int, const GSConfigEntry&, u64) { ++writes; }

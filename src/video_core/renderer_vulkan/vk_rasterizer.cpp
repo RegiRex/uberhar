@@ -206,6 +206,9 @@ RasterizerVulkan::~RasterizerVulkan() {
 
 void RasterizerVulkan::TickFrame() {
     scheduler.WaitWorker();
+    // CodexAstraLocal TEST-ONLY LOG: Reuse the ordinary owner frame boundary;
+    // timestamp resolution never flushes or waits for unfinished GPU work.
+    renderpass_cache.PollDiagnostics();
     // CodexAstraLocal: Reuse only this existing drained command boundary; the
     // cache separately checks compiler release and actual GPU completion.
     pipeline_cache.RetireReadyCpuAfterWorkerDrain();
@@ -814,12 +817,17 @@ bool RasterizerVulkan::AccelerateDrawBatchInternal(bool is_indexed) {
                 });
                 // CodexAstraLocal: Capture publication is still a real draw;
                 // stamp only after its final bind/index preparation and enqueue.
+                // CodexAstraLocal: Retiring GPU-specialized owners need the
+                // same final-use tick as CPU owners, including captured draws.
+                pipeline_cache.CompleteReadyGpuDraw(ready_vertex_pipeline);
                 MarkCachedShaderBuffersUsed();
                 return true;
             }
         }
     }
     scheduler.Record(draw);
+    // CodexAstraLocal: No failed/pending attempt reaches this successful draw stamp.
+    if (ready_vertex_pipeline) pipeline_cache.CompleteReadyGpuDraw(ready_vertex_pipeline);
 
     // CodexAstraLocal: A rejected/pending pipeline returned above without a
     // draw. Only this actual enqueue extends cached shader-buffer lifetime.

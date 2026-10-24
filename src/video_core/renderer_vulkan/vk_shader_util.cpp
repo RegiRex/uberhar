@@ -142,22 +142,19 @@ EShLanguage ToEshShaderStage(vk::ShaderStageFlagBits stage) {
 }
 
 bool InitializeCompiler() {
-    static bool glslang_initialized = false;
-
-    if (glslang_initialized) {
+    // CodexAstraLocal: Several shader workers can enter concurrently. C++ static
+    // initialization serializes glslang startup and registers finalization once.
+    static const bool initialized = [] {
+        if (!glslang::InitializeProcess()) {
+            LOG_CRITICAL(Render_Vulkan, "Failed to initialize glslang shader compiler");
+            return false;
+        }
+        std::atexit([]() { glslang::FinalizeProcess(); });
         return true;
-    }
-
-    if (!glslang::InitializeProcess()) {
-        LOG_CRITICAL(Render_Vulkan, "Failed to initialize glslang shader compiler");
-        return false;
-    }
-
-    std::atexit([]() { glslang::FinalizeProcess(); });
-
-    glslang_initialized = true;
-    return true;
+    }();
+    return initialized;
 }
+
 } // Anonymous namespace
 
 std::vector<u32> CompileGLSL(std::string_view code, vk::ShaderStageFlagBits stage,
@@ -242,6 +239,20 @@ vk::ShaderModule CompileSPV(std::span<const u32> code, vk::Device device) {
     }
 
     return {};
+}
+
+vk::ShaderModule CompileOptionalSPV(std::span<const u32> code, vk::Device device) {
+    if (code.empty()) throw OptionalCompileError(OptionalCompileFailure::Source, "empty optional module");
+    try {
+        const vk::ShaderModuleCreateInfo info{.codeSize = code.size_bytes(), .pCode = code.data()};
+        return device.createShaderModule(info);
+    } catch (const vk::SystemError& error) {
+        const auto result = static_cast<vk::Result>(error.code().value());
+        const auto kind = result == vk::Result::eErrorDeviceLost ? OptionalCompileFailure::DeviceLost :
+            (result == vk::Result::eErrorOutOfHostMemory || result == vk::Result::eErrorOutOfDeviceMemory)
+                ? OptionalCompileFailure::Resource : OptionalCompileFailure::Unknown;
+        throw OptionalCompileError(kind, error.what());
+    }
 }
 
 vk::ShaderModule Compile(std::string_view code, vk::ShaderStageFlagBits stage, vk::Device device,

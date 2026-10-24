@@ -72,6 +72,10 @@ def main():
     parser.add_argument('--repo-root',type=Path,default=ROOT)
     parser.add_argument('--source-root',type=Path)
     parser.add_argument('--static-tev',action='store_true')
+    # CodexAstraLocal: A changed assertion can run its focused production-body
+    # witness without recompiling unchanged deliberate-defect variants. Full
+    # release invocation retains the complete corpus and every negative control.
+    parser.add_argument('--case', choices=('all', 'typed'), default='all')
     args = parser.parse_args()
     ROOT=args.repo_root.resolve()
     source_root=(args.source_root or ROOT).resolve()
@@ -89,6 +93,17 @@ def main():
     text = header.read_text()
     members = text[text.index('    struct ReadyFragmentKey {'):
                    text.index('    std::unordered_map<size_t, Shader> fixed_geometry_shaders;')]
+    # CodexAstraLocal: Include exact renewable-credit/circuit declarations and
+    # identity serialization; the persistence endpoint itself is modeled below.
+    members += text[text.index('    std::string optional_directory;'):
+                    text.index('    // AstraEH: Distinguish startup reuse')]
+    members += extract(text, 'bool OptionalFragmentPending() const') + '\n'
+    identity = '\n'.join(extract(cpp.read_text(), marker) for marker in (
+        'std::vector<u32> OptionalProfileWords(', 'std::vector<u32> OptionalIdentity('))
+    write(out / 'identity.inc', identity + '\n')
+    helpers = '\n'.join(extract(cpp.read_text(), marker) for marker in (
+        'void ShaderDiskCache::ReportOptionalFailure(', 'bool ShaderDiskCache::WarmDemand('))
+    write(out / 'helpers.inc', helpers + '\n')
     # CodexAstraLocal: The extended mode shares the real worker/completion and
     # all legacy controls; add exact partial-owned fields and actual support guards.
     static_function=''
@@ -119,7 +134,13 @@ def main():
     unsafe_log, replacements = logger_pattern.subn(r'\1', function)
     if replacements != 1:
         raise ValueError('Expected exactly one guarded standard-failure logger')
-    queue_token = '} catch (...) {\n        entry->shader.MarkFailed();\n        ready_fragment_failures.fetch_add(1);'
+    # CodexAstraLocal: Queue retry metadata must remain intact in the mutant;
+    # remove only its terminal publication after locating the final catch.
+    queue_start = function.rindex('    } catch (...) {')
+    queue_token = function[queue_start:]
+    if queue_token.count('entry->shader.MarkFailed();') != 1:
+        raise ValueError('Expected one terminal publication in queue handler')
+    queue_pending = queue_token.replace('entry->shader.MarkFailed();', '(void)entry;')
     if function.count(queue_token) != 1:
         raise ValueError('Expected exactly one terminal queue-failure boundary')
     lookup = extract(function, 'if (!allow_build)')
@@ -130,7 +151,7 @@ def main():
         'normal': (function, 'all', 'pass'),
         'opaque-escape': (function.replace(unknown, ''), 'opaque', 'abort'),
         'logger-escape': (unsafe_log, 'logger', 'abort'),
-        'queue-pending': (function.replace(queue_token, '} catch (...) {\n        ready_fragment_failures.fetch_add(1);'), 'queue', 'queue failure terminal'),
+        'queue-pending': (function.replace(queue_token, queue_pending), 'queue', 'queue failure terminal'),
         'lookup-warms': (function.replace(lookup, ''), 'lookup', 'lookup-only'),
         'profile-alias': (function.replace(profile_token, ''), 'profile', 'profile mismatch'),
     }
@@ -150,17 +171,22 @@ def main():
         for name,old,new,expected in [
             ('partial-optimizer','DisableShaderOptimizer(true, key.profile.vk_disable_spirv_optimizer != 0)',
              'DisableShaderOptimizer(false, key.profile.vk_disable_spirv_optimizer != 0)','partial explicitly optimized'),
-            ('partial-markdone','else entry->shader.MarkDone();\n        });',
-             'else (void)entry;\n        });','partial completion published'),
+            ('partial-markdone','entry->shader.MarkDone();',
+             '(void)entry;','partial completion published'),
             ('partial-ignores-lane','(warming_ready_fragment && !warming_ready_fragment->IsDone()) ||\n        (parent.warming_ready_vertex && !parent.warming_ready_vertex->IsDone())) {',
              'false) {','partial cannot queue behind held full compilation')]:
             if static_function.count(old)!=1:raise ValueError('partial boundary changed: '+name)
             variants[name]=(function+'\n'+static_function.replace(old,new),'all',expected)
+    if args.case == 'typed':
+        variants = {'normal': (function + '\n' + static_function, 'typed', 'pass')}
     inputs = [D / 'test_optional_fragment_worker.cpp', Path(__file__), cpp, header, shader,
               ROOT / 'src/common/thread_worker.h', ROOT / 'src/common/async_handle.h',
               ROOT / 'src/common/unique_function.h',
               ROOT / 'src/video_core/renderer_vulkan/uberhar_fragment_policy.h',
               ROOT / 'src/video_core/renderer_vulkan/uberhar_shader_compile_policy.h',
+              ROOT / 'src/video_core/renderer_vulkan/uberhar_compile_budget.h',
+              ROOT / 'src/video_core/renderer_vulkan/uberhar_optional_failure_cache.h',
+              ROOT / 'src/video_core/renderer_vulkan/vk_shader_util.h',
               ROOT / 'src/video_core/shader/generator/pica_fs_config.cpp',
               ROOT / 'src/video_core/shader/generator/pica_fs_config.h',
               ROOT / 'src/video_core/shader/generator/profile.h']
@@ -199,7 +225,9 @@ def main():
                     stdout=result.stdout, stderr=result.stderr)
         if expected == 'pass':
             passed = result.returncode == 0 and re.fullmatch(
-                (r'PASS checks=625 actual_thread_worker=true gpu_execution=false\n' if args.static_tev else r'PASS checks=563 actual_thread_worker=true gpu_execution=false\n'), result.stdout) is not None
+                (r'PASS checks=33 actual_thread_worker=true gpu_execution=false\n' if args.case == 'typed' else
+                 r'PASS checks=673 actual_thread_worker=true gpu_execution=false\n' if args.static_tev else
+                 r'PASS checks=611 actual_thread_worker=true gpu_execution=false\n'), result.stdout) is not None
         elif expected == 'abort':
             passed = result.returncode == -signal.SIGABRT
         else:

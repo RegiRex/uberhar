@@ -99,10 +99,14 @@ enum ProgramType { VS, FS, GS };
 struct Shader {};
 struct Disk {
     Shader shader;
-    unsigned optional_calls{}, mandatory_calls{};
+    unsigned optional_calls{}, optional_build_calls{}, mandatory_calls{};
     bool ready{};
-    std::optional<std::pair<u64,Shader*>> UseReadyFragmentShader(const FSConfig&, const Pica::Shader::UserConfig&) {
+    std::optional<std::pair<u64,Shader*>> UseReadyFragmentShader(const FSConfig&, const Pica::Shader::UserConfig&,
+                                                             bool allow_build) {
+        // CodexAstraLocal: Distinguish existing-module probes from new demand;
+        // downstream credit must prevent only builds, never ready reuse.
         ++optional_calls;
+        optional_build_calls += allow_build;
         return ready ? std::make_optional(std::pair<u64,Shader*>{7,&shader}) : std::nullopt;
     }
     std::optional<std::pair<u64,Shader*>> UseFragmentShader(const FSConfig&, const Pica::Shader::UserConfig&) {
@@ -117,6 +121,10 @@ struct PipelineCache {
     const bool allow_specialized_fragments, allow_static_cpu_tev,
                allow_full_cpu_fragments, allow_ready_gpu_vertices;
     bool ready_vertex_worker;
+    // CodexAstraLocal: Model the downstream lane endpoint; separate worker and
+    // retirement fixtures exercise its production accounting and lifetime.
+    bool optional_capacity{true};
+    bool OptionalGpuAdmissionAvailable() const { return optional_capacity; }
     explicit PipelineCache(Settings::UberharTestMode mode)
         : allow_specialized_fragments{Settings::AllowsSpecializedFragments(mode)},
           allow_static_cpu_tev{hybrid_tev && Settings::AllowsStaticCpuTev(mode)},
@@ -181,7 +189,9 @@ int main() try {
             Pica::Shader::UserConfig user;
             const bool admitted = cache.ReadyGpuFragmentPreflight(regs,user);
             Check(admitted == (!specialized || ready), "optional preflight selection changed");
-            Check(disk.optional_calls == unsigned(specialized), "generic mode warmed optional FS");
+            Check(disk.optional_calls == unsigned(specialized) * (ready ? 1U : 2U) &&
+                  disk.optional_build_calls == unsigned(specialized && !ready),
+                  "generic mode warmed optional FS or ready lookup created new demand");
             const FSConfig previous{regs};
             cache.prepared_cpu_family = &previous;
             cache.pending_tev_transport = previous;
@@ -235,6 +245,19 @@ int main() try {
             user.cacheable = false;
             Check(!cache.PreferReadySpecializedFragment(user), "uncacheable optional shader selected");
         }
+    }
+    // CodexAstraLocal: The same real preflight must keep ready reuse available
+    // at exhausted downstream capacity while avoiding futile missing-module jobs.
+    {
+        Disk disk;
+        PipelineCache limited{UberharTestMode::Automatic};
+        limited.curr_disk_cache = &disk;
+        limited.optional_capacity = false;
+        Check(!limited.ReadyGpuFragmentPreflight({}, {}) && disk.optional_calls == 1 &&
+              disk.optional_build_calls == 0, "exhausted downstream capacity warmed optional module");
+        disk.ready = true;
+        Check(limited.ReadyGpuFragmentPreflight({}, {}) && disk.optional_calls == 2 &&
+              disk.optional_build_calls == 0, "exhausted capacity blocked already-ready module");
     }
     // CodexAstraLocal: Forced generic rendering still refuses optional full preparation.
     PipelineCache guarded{UberharTestMode::Automatic};

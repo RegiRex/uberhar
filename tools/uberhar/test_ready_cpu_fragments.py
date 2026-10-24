@@ -154,12 +154,22 @@ def main() -> None:
     cpp=read('src/video_core/renderer_vulkan/vk_pipeline_cache.cpp')
     check_final_image_capture(function(cpp, 'bool PipelineCache::BindPipeline('))
     graphics=read('src/video_core/renderer_vulkan/vk_graphics_pipeline.cpp')
+    disk_source=read('src/video_core/renderer_vulkan/vk_shader_disk_cache.cpp')
     parts=[function(graphics,'u64 GraphicsPipeline::Key()').replace('GraphicsPipeline::Key()','GraphicsPipeline::ActualKey()'),
            function(graphics,'bool GraphicsPipeline::MatchesExecution(')]
+    # CodexAstraLocal: Cache identities remain production code; only disk I/O
+    # and driver endpoints are modeled in this route/ownership fixture.
+    parts += [function(disk_source,'std::vector<u32> OptionalProfileWords('),
+              function(disk_source,'std::vector<u32> OptionalIdentity('),
+              function(disk_source,'void ShaderDiskCache::ReportOptionalFailure(')]
     for signature in ('bool PipelineCache::PreferReadySpecializedFragment(',
                       'bool PipelineCache::ReadyVertexShaders()',
                       'GraphicsPipeline* PipelineCache::PrepareReadyCpuFragment(',
                       'void PipelineCache::CompleteReadyCpuDraw(',
+                      'void PipelineCache::CompleteReadyGpuDraw(',
+                      'bool PipelineCache::OptionalGpuAdmissionAvailable(',
+                      'bool PipelineCache::OptionalShaderReferenced(',
+                      'void PipelineCache::RetireReadyGpuAfterWorkerDrain(',
                       'void PipelineCache::RetireReadyCpuAfterWorkerDrain()',
                       'GraphicsPipeline* PipelineCache::PrepareReadyGpuVertex(',
                       'void PipelineCache::UseFragmentShader(',
@@ -180,6 +190,10 @@ def main() -> None:
     new_members=disk_header[disk_header.index('    struct StaticTevEntry {'):
         disk_header.index('    std::unordered_set<u64> known_geometry_shaders;')]
     (out/'fragment_members.inc').write_text(old_members+new_members)
+    pipeline_header=read('src/video_core/renderer_vulkan/vk_pipeline_cache.h')
+    (out/'gpu_failure_state.inc').write_text(pipeline_header[pipeline_header.index('    struct GpuFailureKey {'):pipeline_header.index('    OptionalFailureCache<GpuFailureKey, 64> ready_gpu_failures;')+len('    OptionalFailureCache<GpuFailureKey, 64> ready_gpu_failures;')])
+    (out/'optional_state.inc').write_text(disk_header[disk_header.index('    std::string optional_directory;'):
+        disk_header.index('    // AstraEH: Distinguish startup reuse')])
     body=replace_once('\n\n'.join(parts),'vk::CommandBuffer cmdbuf','RecordingCommands cmdbuf')
     key=read('src/video_core/renderer_vulkan/uberhar_cpu_fragment_cache.h')
     if key.count('namespace Vulkan {')!=1:raise ValueError('observation-key namespace changed')
@@ -229,13 +243,21 @@ def main() -> None:
              '(void)token;','actual after-Map draw tick retained'),
             ('stale-warming-pointer','if (warming_ready_vertex == owner) warming_ready_vertex = nullptr;',
              '(void)owner;','retirement clears shared warming raw pointer'),
-            ('missing-cpu-cap','!ReadyVertexPolicy::CanQueue(ready_vertex_pipelines.size() + ReadyCpuOwned(), pending)',
-             '!ReadyVertexPolicy::CanQueue(ready_vertex_pipelines.size(), pending)','combined physical cap includes CPU owner'),
+            ('missing-cpu-cap','!ReadyVertexPolicy::CanQueue(ready_vertex_pipelines.size() + ReadyCpuOwned() +\n                                    retiring_ready_gpu_active, pending || retiring_ready_gpu_active)',
+             '!ReadyVertexPolicy::CanQueue(ready_vertex_pipelines.size() + retiring_ready_gpu_active, pending || retiring_ready_gpu_active)','combined physical cap includes CPU owner'),
             ('uncharged-gpu-work','++ready_optional_attempts;','(void)ready_optional_attempts;',
              'GPU attempt charged before worker admission'),
             ('stale-generic-constants','tev_push_constants.Invalidate();','(void)constants_dirty;',
              'specialized dirty state invalidates same-A generic constants'),
-        ]:cases.append((name,replace_once(body,old,new),expected))
+        ]:
+            # CodexAstraLocal: CPU and GPU retirement now share the same safe
+            # pointer-clear spelling. Mutate only the CPU boundary this case tests.
+            if name == 'stale-warming-pointer':
+                boundary=function(body,'void PipelineCache::RetireReadyCpuAfterWorkerDrain(')
+                mutated=replace_once(body,boundary,replace_once(boundary,old,new))
+            else:
+                mutated=replace_once(body,old,new)
+            cases.append((name,mutated,expected))
     header_mutations={}
     if args.mutants and args.static_tev:
         for name,old,new,expected in [

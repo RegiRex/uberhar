@@ -83,6 +83,7 @@ import org.citra.citra_emu.utils.DirectoryInitialization
 import org.citra.citra_emu.utils.DirectoryInitialization.DirectoryInitializationState
 import org.citra.citra_emu.utils.EmulationLifecycleUtil
 import org.citra.citra_emu.utils.EmulationMenuSettings
+import org.citra.citra_emu.utils.GpuDriverHelper
 import org.citra.citra_emu.utils.GameHelper
 import org.citra.citra_emu.utils.GameIconUtils
 import org.citra.citra_emu.utils.Log
@@ -219,7 +220,9 @@ class EmulationFragment :
 
         // So this fragment doesn't restart on configuration changes; i.e. rotation.
         retainInstance = true
-        emulationState = EmulationState(game.path)
+        emulationState = EmulationState(game.path, "%016X".format(game.titleId)) {
+            activity?.finish()
+        }
         screenAdjustmentUtil =
             ScreenAdjustmentUtil(requireContext(), requireActivity().windowManager, settings)
         EmulationLifecycleUtil.addPauseResumeHook(onPause)
@@ -1782,7 +1785,12 @@ class EmulationFragment :
         ViewCompat.setOnApplyWindowInsetsListener(binding.inGameMenu, applyCutoutInsets)
     }
 
-    private class EmulationState(private val gamePath: String) {
+    // CodexAstraLocal: Driver identity is captured with the title, not read from mutable UI settings.
+    private class EmulationState(
+        private val gamePath: String,
+        private val titleId: String,
+        private val onLaunchFailure: () -> Unit
+    ) {
         private var state: State
         private var surface: Surface? = null
 
@@ -1908,6 +1916,13 @@ class EmulationFragment :
                         // on the owning thread; finally records teardown when the call unwinds.
                         org.citra.citra_emu.utils.CrashSessionLogs.beginRun()
                         try {
+                            // CodexAstraLocal: Resolve the immutable title driver before renderer construction,
+                            // on this background thread rather than blocking UI or replacing a live library.
+                            if (!GpuDriverHelper.prepareDriverForGame(titleId)) {
+                                Log.error("GPU driver preparation refused; aborting launch without using a stale driver")
+                                Handler(Looper.getMainLooper()).post { onLaunchFailure() }
+                                return@Thread
+                            }
                             NativeLibrary.run(gamePath)
                         } finally {
                             org.citra.citra_emu.utils.CrashSessionLogs.endRun()

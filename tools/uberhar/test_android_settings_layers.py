@@ -17,6 +17,7 @@ end = source.index('void Config::ReadValues()', start)
 prefix = r'''
 #include <cassert>
 #include <iostream>
+#include <iomanip>
 #include <memory>
 #include <ranges>
 #include <sstream>
@@ -73,12 +74,20 @@ int main() {
     assert(v.uberhar_test_mode.GetValue() == Settings::UberharTestMode::Automatic);
     assert(v.uberhar_cpu_vertex_only.GetValue() && v.resolution_factor.GetValue() == 4);
     cfg.runtime_reload = true;
+    FileUtil::test_file = "[Testing]\nenabled=false\npreset=0\nresolution=2\n";
     cfg.ReadSetting("Renderer", v.resolution_factor);
-    assert(v.resolution_factor.GetValue() == 4); // CodexAstraLocal: testing launch remains frozen
+    cfg.ApplyTestingOverlay();
+    assert(v.resolution_factor.GetValue() == 2); // CodexAstraLocal: live Testing resolution
+    assert(v.uberhar_test_mode.GetValue() == Settings::UberharTestMode::Automatic);
+    assert(v.uberhar_cpu_vertex_only.GetValue() && testing_overlay_active); // model/master stay frozen
     cfg.runtime_reload = false;
     FileUtil::test_file = "[Testing]\nenabled=true\npreset=2\nresolution=2\n";
     cfg.ApplyTestingOverlay();
     assert(!v.uberhar_cpu_vertex_only.GetValue() && v.resolution_factor.GetValue() == 2);
+    FileUtil::test_file = "[Testing]\nenabled=true\npreset=0\nresolution=2\n"
+                          "[Testing.000400000F700100]\npreset=1\nresolution=4\n";
+    cfg.ApplyTestingOverlay();
+    assert(v.uberhar_cpu_vertex_only.GetValue() && v.resolution_factor.GetValue() == 4);
     FileUtil::test_file = "[Testing]\nenabled=false\n";
     cfg.ReadSetting("Renderer", v.resolution_factor);
     cfg.ApplyTestingOverlay();
@@ -88,7 +97,8 @@ int main() {
     assert(v.resolution_factor.GetValue() == 2 && v.resolution_factor.UsingGlobal());
     FileUtil::test_file = "[Testing]\nenabled=true\npreset=9\nresolution=4\n";
     cfg.ApplyTestingOverlay();
-    assert(v.resolution_factor.GetValue() == 2 && !testing_overlay_active);
+    assert(v.resolution_factor.GetValue() == 4 && testing_overlay_active);
+    assert(v.uberhar_test_mode.GetValue() == Settings::UberharTestMode::Native);
     std::cout << "Android title/testing typed layers: PASS\n";
 }
 '''

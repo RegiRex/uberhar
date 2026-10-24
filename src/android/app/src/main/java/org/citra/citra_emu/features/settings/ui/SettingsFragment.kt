@@ -15,7 +15,6 @@ import androidx.core.view.isVisible
 import androidx.core.view.updatePadding
 import androidx.fragment.app.Fragment
 import androidx.recyclerview.widget.LinearLayoutManager
-import com.google.android.material.chip.Chip
 import org.citra.citra_emu.R
 import org.citra.citra_emu.activities.EmulationActivity
 import org.citra.citra_emu.databinding.FragmentSettingsBinding
@@ -36,8 +35,7 @@ class SettingsFragment :
     private val binding get() = _binding!!
 
     // CodexAstraLocal: Keep temporary test selections separate from the edited title/global enums.
-    private var renderingTestingPanel = false
-    private val testingPresetChips = mutableMapOf<Int, Chip>()
+    private var testingPanelController: TestingPanelController? = null
 
     override fun onAttach(context: Context) {
         super.onAttach(context)
@@ -85,96 +83,32 @@ class SettingsFragment :
         renderTestingPanel()
     }
 
-    // CodexAstraLocal: The UI catalog drives direct buttons. New approved combinations
-    // must add the same stable ID to this list, TestingSettings and the native mapping.
+    // CodexAstraLocal: Use the same title-aware panel on home Options and in-game Settings.
     private fun setupTestingPanel() {
-        TestingSettings.load()
         val isRoot = requireArguments().getString(ARGUMENT_MENU_TAG) == SettingsFile.FILE_NAME_CONFIG
-        binding.testingPanel.isVisible = isRoot
+        binding.testingPanel.root.isVisible = isRoot
+        TestingSettings.load(requireArguments().getString(ARGUMENT_GAME_ID) ?: "")
         if (!isRoot) return
-
-        TESTING_PRESETS.forEach { (preset, label) ->
-            val chip = Chip(requireContext()).apply {
-                id = View.generateViewId()
-                setText(label)
-                isCheckable = true
-                setOnClickListener {
-                    changeTestingSelection { TestingSettings.preset = preset }
-                }
-            }
-            testingPresetChips[preset] = chip
-            binding.testingPresets.addView(chip)
-        }
-        binding.testingEnabled.setOnCheckedChangeListener { _, enabled ->
-            if (!renderingTestingPanel) {
-                changeTestingSelection { TestingSettings.enabled = enabled }
-            }
-        }
-        binding.testingResolution.addOnButtonCheckedListener { _, checkedId, checked ->
-            if (checked && !renderingTestingPanel) {
-                changeTestingSelection {
-                    TestingSettings.resolution = if (checkedId == R.id.testing_resolution_4x) 4 else 2
-                }
-            }
-        }
-    }
-
-    // CodexAstraLocal: Save the separate overlay through its backend and
-    // redraw from durable values if writing fails; never mark ordinary settings dirty.
-    private fun changeTestingSelection(change: () -> Unit) {
-        if (renderingTestingPanel) return
-        if (EmulationActivity.isRunning()) {
-            showToastMessage(getString(R.string.uberhar_testing_restart_required), true)
+        testingPanelController = TestingPanelController(
+            binding.testingPanel, viewLifecycleOwner,
+            requireArguments().getString(ARGUMENT_GAME_ID) ?: ""
+        ) {
             renderTestingPanel()
-            return
+            fragmentPresenter.loadSettingsList()
         }
-        change()
-        if (!TestingSettings.save()) {
-            TestingSettings.load()
-            showToastMessage(getString(R.string.uberhar_testing_save_failed), true)
-        }
-        renderTestingPanel()
     }
 
-    // CodexAstraLocal: Distinguish edited normal values from the temporary effective
-    // preset, and forbid mid-game renderer changes even if the game is paused.
     private fun renderTestingPanel() {
-        renderingTestingPanel = true
-        val running = EmulationActivity.isRunning()
-        binding.testingEnabled.isChecked = TestingSettings.enabled
-        binding.testingEnabled.isEnabled = !running
-        binding.testingControls.isVisible = TestingSettings.enabled
-        binding.testingDescription.setText(
-            if (running) R.string.uberhar_testing_restart_required else R.string.uberhar_testing_description
-        )
-        testingPresetChips.forEach { (preset, chip) ->
-            chip.isChecked = TestingSettings.preset == preset
-            chip.isEnabled = !running
-        }
-        binding.testingResolution.check(
-            if (TestingSettings.resolution == 4) R.id.testing_resolution_4x else R.id.testing_resolution_2x
-        )
-        binding.testingResolution2x.isEnabled = !running
-        binding.testingResolution4x.isEnabled = !running
+        testingPanelController?.render()
         val scope = getString(
-            if (activityView!!.settings.isPerGame) {
-                R.string.uberhar_game_settings_scope
-            } else {
-                R.string.uberhar_global_settings_scope
-            }
+            if (activityView!!.settings.isPerGame) R.string.uberhar_game_settings_scope
+            else R.string.uberhar_global_settings_scope
         )
         binding.settingsScope.text = if (TestingSettings.enabled) {
             val presetName = getString(TESTING_PRESETS.first { it.first == TestingSettings.preset }.second)
-            scope + "\n" + getString(
-                R.string.uberhar_testing_active_summary,
-                presetName,
-                TestingSettings.resolution
-            )
-        } else {
-            scope
-        }
+            scope + "\n" + getString(R.string.uberhar_testing_active_summary, presetName, TestingSettings.resolution)
+        } else scope
         binding.settingsScope.isVisible = true
-        renderingTestingPanel = false
     }
 
     override fun loadSettingsList() {

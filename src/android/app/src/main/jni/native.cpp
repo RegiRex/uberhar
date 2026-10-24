@@ -485,9 +485,17 @@ static Core::System::ResultStatus RunCitra(const std::string& filepath) {
     return Core::System::ResultStatus::Success;
 }
 
-void InitializeGpuDriver(const std::string& hook_lib_dir, const std::string& custom_driver_dir,
+// CodexAstraLocal: Return 0 for refused/failed, 1 for system, 2 for custom so UI reports real fallback.
+int InitializeGpuDriver(const std::string& hook_lib_dir, const std::string& custom_driver_dir,
                          const std::string& custom_driver_name,
                          const std::string& file_redirect_dir) {
+    // CodexAstraLocal: RunCitra owns this lock through renderer/window destruction,
+    // including the interval after IsPoweredOn becomes false. Never replace its driver early.
+    std::unique_lock lifecycle_lock{running_mutex, std::try_to_lock};
+    if (!lifecycle_lock.owns_lock()) {
+        LOG_WARNING(Frontend, "GPU driver change refused while emulation is starting/running/tearing down");
+        return false;
+    }
 #if defined(ENABLE_VULKAN) && CITRA_ARCH(arm64)
     void* handle{};
     const char* file_redirect_dir_{};
@@ -506,13 +514,25 @@ void InitializeGpuDriver(const std::string& hook_lib_dir, const std::string& cus
             custom_driver_dir.c_str(), custom_driver_name.c_str(), file_redirect_dir_, nullptr);
     }
 
+    // CodexAstraLocal: Record actual library fallback, distinct from a prepared archive selection.
+    const bool custom_loaded = handle != nullptr;
     // Try to load the system driver.
     if (!handle) {
         handle = adrenotools_open_libvulkan(RTLD_NOW, featureFlags, nullptr, hook_lib_dir.c_str(),
                                             nullptr, nullptr, file_redirect_dir_, nullptr);
     }
 
+    if (!handle) {
+        LOG_ERROR(Frontend, "GPU driver load failed for custom and system libraries");
+        return false;
+    }
     vulkan_library = std::make_shared<Common::DynamicLibrary>(handle);
+    LOG_INFO(Frontend, "GPU driver library: requested={} effective={} directory={}",
+             custom_driver_name.empty() ? "System" : custom_driver_name,
+             custom_loaded ? "Custom" : "System", custom_loaded ? custom_driver_dir : "system");
+    return custom_loaded ? 2 : 1;
+#else
+    return 1;
 #endif
 }
 
@@ -634,11 +654,11 @@ void Java_org_citra_citra_1emu_NativeLibrary_doFrame([[maybe_unused]] JNIEnv* en
     }
 }
 
-void JNICALL Java_org_citra_citra_1emu_NativeLibrary_initializeGpuDriver(
+jint JNICALL Java_org_citra_citra_1emu_NativeLibrary_initializeGpuDriver(
     JNIEnv* env, jobject obj, jstring hook_lib_dir, jstring custom_driver_dir,
     jstring custom_driver_name, jstring file_redirect_dir) {
-    InitializeGpuDriver(GetJString(env, hook_lib_dir), GetJString(env, custom_driver_dir),
-                        GetJString(env, custom_driver_name), GetJString(env, file_redirect_dir));
+    return InitializeGpuDriver(GetJString(env, hook_lib_dir), GetJString(env, custom_driver_dir),
+                               GetJString(env, custom_driver_name), GetJString(env, file_redirect_dir));
 }
 
 void Java_org_citra_citra_1emu_NativeLibrary_notifyOrientationChange([[maybe_unused]] JNIEnv* env,

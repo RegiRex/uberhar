@@ -7,8 +7,8 @@
 
 namespace Vulkan::StaticTevPolicy {
 // CodexAstraLocal: Bound partial specialization globally within one title, not
-// per generic family. Failed/allocation attempts are never refunded; modules
-// retain stable ownership until the existing shader/pipeline drain boundary.
+// per generic family. Failed/allocation work is never refunded; time renews
+// credit. Modules remain stable until compiler/dependent-pipeline use is released.
 inline constexpr std::size_t MaxModules = 8;
 inline constexpr std::size_t MaxModuleAttempts = 16;
 inline constexpr std::size_t MaxPsoOwners = 8;

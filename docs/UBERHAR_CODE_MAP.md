@@ -1,3 +1,32 @@
+<!-- CodexAstraLocal: .55 implementation map for maintainers; private hardware reports remain outside Git. -->
+## 0.1.55 adaptive specialization and driver/testing controls
+
+- `renderer_vulkan/uberhar_compile_budget.h`, `uberhar_optional_failure_cache.h`:
+  renewable bounded work credits and exact negative history. Lifetime attempts
+  are diagnostic counts, not permanent admission ceilings.
+- `vk_pipeline_cache`, `vk_graphics_pipeline`, `uberhar_adaptive_cpu_policy`:
+  demand admission, optional CPU/GPU ownership, final-use ticks, worker release
+  and safe pressure-driven replacement.
+- `vk_shader_disk_cache`, `uberhar_optional_disk_cache`, `vk_shader_util`:
+  compatible optional full/static artifacts, useful-demand records, typed
+  compiler errors, bounded retries and driver-specific persistent blobs.
+- `vk_render_manager`, `vk_scheduler`, `common/uberhar_sampled_duration.h`:
+  bounded nonblocking GPU-pass/queue/wait diagnostics and isolated Turnip
+  natural-pass submission control. Instrumentation has TEST-ONLY LOG removal
+  conditions; ordinary errors and safe lifetimes are production behavior.
+- `common/uberhar_cpu_work_budget.h`, `pica_core`: stable-shape adaptive-only
+  sampling; worker allocations and explicit timing remain independent.
+- Android `TestingPanelController`, `TestingSettings`, `DriverSettings`,
+  `GameDriverSettings`, `GpuDriverHelper`, JNI `config`/`native`: temporary
+  per-title Testing overlay, home shortcuts/live resolution, launch-time driver
+  overrides and renderer-safe library ownership.
+- `test_optional_cache_lifecycle.py`, `test_android_driver_lifecycle.py` plus
+  updated ordinary/static worker, route, retirement and queued-draw fixtures:
+  executable admission, compatibility, failure and ownership controls.
+
+See [release scope](releases/0.1.55.md), [profile audit](UBERHAR_GRAPHICS_PROFILE_AUDIT.md)
+and [settings behavior](UBERHAR_PER_GAME_SETTINGS.md).
+
 # Pending Android per-game settings and Testing controls
 
 <!-- CodexAstraLocal: Map the next-candidate feature separately from the published .53 rendering changes. -->

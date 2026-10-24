@@ -696,7 +696,7 @@ void PicaCore::ReportVirtualVertices(const char* kind, std::chrono::steady_clock
             "early_refused={} group_candidates={} seed_submitted={} group_submitted={} "
             "group_lost={} copy_refused={} grouped_waves={} work_grains={} "
             "adaptive_helpers={} adaptive_samples={} adaptive_rejected={} adaptive_trials={} "
-            "adaptive_accepted={} adaptive_reverted={} "
+            "adaptive_accepted={} adaptive_reverted={} adaptive_unstable_skipped={} "
             "preparation_reuses={} refused_path_samples={} refused_path_ms={:.3f} "
             "ready_prefix_packets={} fallback_boundaries={} "
             "scope=complete_list_or_shader_no_gs seed_min_misses=96 max_vertices=255 min_arithmetic=35 "
@@ -715,6 +715,7 @@ void PicaCore::ReportVirtualVertices(const char* kind, std::chrono::steady_clock
             statistics.work_grains, statistics.scheduling.desired, statistics.scheduling.samples,
             statistics.scheduling.rejected, statistics.scheduling.trials,
             statistics.scheduling.accepted, statistics.scheduling.reverted,
+            statistics.scheduling.unstable_skipped,
             deferred.preparation_reuses, deferred.refused_path_samples,
             deferred.refused_path_ns / 1e6, deferred.ready_prefix_packets,
             deferred.fallback_boundaries);
@@ -821,10 +822,10 @@ void PicaCore::ReportVirtualVertices(const char* kind, std::chrono::steady_clock
         // remove after tuning, without changing the scheduling mechanism.
         const auto scheduling = parallel.batch.Scheduling();
         LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
-            "Uberhar vertex scheduling {}: schema=1 helpers={} samples={} rejected={} "
-            "trials={} accepted={} reverted={} scope=sampled_pool_work_not_frames",
+            "Uberhar vertex scheduling {}: schema=2 helpers={} samples={} rejected={} "
+            "trials={} accepted={} reverted={} unstable_skipped={} scope=sampled_pool_work_not_frames",
             kind, scheduling.desired, scheduling.samples, scheduling.rejected,
-            scheduling.trials, scheduling.accepted, scheduling.reverted);
+            scheduling.trials, scheduling.accepted, scheduling.reverted, scheduling.unstable_skipped);
         LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
             "Uberhar CPU parallel {}: schema=3 available={} created_workers={} peak_threads={} "
             "checks={} batches={} chunks={} owner_invocations={} worker_invocations={} "

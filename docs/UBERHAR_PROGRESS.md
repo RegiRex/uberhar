@@ -1,3 +1,27 @@
+<!-- CodexAstraLocal: .55 implementation checkpoint; hosted and hardware qualification are separate. -->
+## 0.1.55 — adaptive specialization, warm reuse and testing controls
+
+Implemented the approved .54 follow-up while retaining its rendering base.
+Renewable work credits replace session-long specialization exhaustion; bounded
+negative history and safe post-command/GPU retirement prevent repeated failed
+work and allow later-scene demand. Compatible optional programs and useful-demand
+records persist. New GPU pass/queue/wait diagnostics, isolated default-OFF Turnip
+submission/generic-optimizer controls, and stable-shape CPU sampling expose costs
+without claiming measured hardware gains.
+
+Home Options Testing, per-title Testing choices/live resolution and per-title
+driver exceptions are integrated. Independent review caught retry-history reset,
+failed-owner capacity retention, escaping optional allocations, and unseen-demand
+pressure not reaching retirement; those paths were corrected before submission.
+Android Kotlin/resources and pinned ARM64 source checks are separate from the
+integrated host gates and eventual Android/signing/publication workflow.
+
+The owner handles subsequent hardware testing, including Sonic third-track
+Azahar/Uberhar pacing. Right-eye suppression was already OFF in Native/Combo.
+See [release notes](releases/0.1.55.md). Stop all agents/root at submission; check
+actual hosted results on the owner's next request rather than consuming credits
+watching the build.
+
 # Current: 0.1.53 release candidate from original 0.1.48
 
 <!-- CodexAstraLocal: Latest source state supersedes historical current-build claims below. -->

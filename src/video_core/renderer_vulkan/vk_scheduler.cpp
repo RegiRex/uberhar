@@ -6,6 +6,8 @@
 #include <utility>
 #include "common/microprofile.h"
 #include "common/thread.h"
+#include "common/logging/log.h"
+#include "common/uberhar_test_profile.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #ifdef HAVE_LIBRETRO
@@ -60,6 +62,8 @@ void Scheduler::CommandChunk::Discard() noexcept {
 Scheduler::Scheduler(const Instance& instance)
     : master_semaphore{MakeMasterSemaphore(instance)},
       command_pool{instance, master_semaphore.get()}, use_worker_thread{true} {
+    // CodexAstraLocal: Leave Custom-mode scheduler costs unchanged.
+    diagnostics_enabled = Settings::IsUberharTestProfile(Settings::values.uberhar_test_mode.GetValue());
     AllocateWorkerCommandBuffers();
     if (use_worker_thread) {
         AcquireNewChunk();
@@ -89,6 +93,7 @@ void Scheduler::WaitWorker() {
     if (!use_worker_thread) {
         return;
     }
+    const auto measured_wait = worker_wait.Measure(diagnostics_enabled);
 
     MICROPROFILE_SCOPE(Vulkan_WaitForWorker);
     // CodexAstraUlt-2: Drain captures even after failure; report only after the
@@ -121,9 +126,18 @@ void Scheduler::Wait(u64 tick) {
         // Make sure we are not waiting for the current tick without signalling
         Flush();
     }
+    // CodexAstraLocal: Split command submission readiness from actual GPU
+    // fence completion; sampled nested durations are not additive frame costs.
+    bool submitted{};
+    {
+        const auto measured_wait = submission_wait.Measure(diagnostics_enabled);
+        submitted = shader_failure.WaitSubmitted(tick);
+    }
     // CodexAstraUlt-2: A canceled submission never signals its Vulkan tick.
-    if (shader_failure.WaitSubmitted(tick))
+    if (submitted) {
+        const auto measured_wait = gpu_wait.Measure(diagnostics_enabled);
         master_semaphore->Wait(tick);
+    }
 }
 
 void Scheduler::DispatchWork() {
@@ -140,7 +154,12 @@ void Scheduler::DispatchWork() {
 
     {
         std::scoped_lock ql{queue_mutex};
+        // CodexAstraLocal: Use the existing lock; only sampled chunks read a
+        // clock, and the worker observes its own immutable queue timestamp.
+        chunk->MarkQueued(diagnostics_enabled && (++diagnostic_dispatches & 63U) == 1);
         work_queue.push(std::move(chunk));
+        if (diagnostics_enabled)
+            diagnostic_queue_peak = std::max<u64>(diagnostic_queue_peak, work_queue.size());
     }
 
     event_cv.notify_all();
@@ -182,6 +201,14 @@ void Scheduler::WorkerThread(std::stop_token stop_token) {
 
             // Perform the work, tracking whether the chunk was a submission
             // before executing.
+            // CodexAstraLocal: Sparse worker-side queue latency is independent
+            // of command execution/GPU time; no clock on unsampled chunks.
+            if (work->QueuedAt() != std::chrono::steady_clock::time_point{}) {
+                const auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    std::chrono::steady_clock::now() - work->QueuedAt()).count();
+                diagnostic_queue_ns.fetch_add(ns, std::memory_order_relaxed);
+                diagnostic_queue_samples.fetch_add(1, std::memory_order_relaxed);
+            }
             const bool has_submit = work->HasSubmit();
             // CodexAstraUlt-2: Stop the entire stream; the producer reports this
             // typed failure. No draw or submission after it may execute.
@@ -223,6 +250,7 @@ void Scheduler::SubmitExecution(vk::Semaphore signal_semaphore, vk::Semaphore wa
     }
     state = StateFlags::AllDirty;
     const u64 signal_value = master_semaphore->NextTick();
+    if (diagnostics_enabled) ++diagnostic_submits;
 
     on_submit();
 
@@ -254,6 +282,24 @@ void Scheduler::AcquireNewChunk() {
 
     chunk = std::move(chunk_reserve.back());
     chunk_reserve.pop_back();
+}
+
+void Scheduler::ReportDiagnostics(bool final) {
+    if (!diagnostics_enabled) return;
+    // CodexAstraLocal TEST-ONLY LOG: Separate sampled owner waits and worker
+    // queue latency; known tick lag is a backlog count, not elapsed GPU time.
+    // Remove after driver/pass and KI ground wait attribution is qualified.
+    LOG_INFO(Render_Vulkan,
+        "Uberhar Vulkan queue {}: schema=1 dispatches={} submissions={} queue_peak={} "
+        "queue_samples={} queue_ms={:.3f} worker_wait_calls={} worker_wait_samples={} worker_wait_ms={:.3f} "
+        "submit_wait_calls={} submit_wait_samples={} submit_wait_ms={:.3f} "
+        "gpu_wait_calls={} gpu_wait_samples={} gpu_wait_ms={:.3f} sample_stride=64",
+        final ? "final" : "progress", diagnostic_dispatches, diagnostic_submits,
+        diagnostic_queue_peak, diagnostic_queue_samples.load(std::memory_order_relaxed),
+        diagnostic_queue_ns.load(std::memory_order_relaxed) / 1e6,
+        worker_wait.calls, worker_wait.samples, worker_wait.ns / 1e6,
+        submission_wait.calls, submission_wait.samples, submission_wait.ns / 1e6,
+        gpu_wait.calls, gpu_wait.samples, gpu_wait.ns / 1e6);
 }
 
 } // namespace Vulkan

@@ -71,3 +71,30 @@ Before shipping, build the Android app and verify entrypoints, confirmed and
 cancelled individual/all resets, title switching, external launches, temporary
 Testing restore and normal-speed new-game startup on the Thor. Do not change
 existing owner settings or start gameplay merely to read this document.
+
+## 0.1.55 additions
+
+<!-- CodexAstraLocal: One shared UI edits separate Testing/title-driver stores and preserves normal preferences. -->
+Home **Options** now presents Testing directly below the flower. Choose global
+Testing defaults or a library game, then select Native / Combo CPU Vertices ON /
+OFF and 2× / 4×. The same controls remain on the main Settings page. The Testing
+master is global; preset/resolution exceptions are stored per title in
+`testing.ini`, independently of ordinary title configuration. **Use global Testing
+choices** requires confirmation and removes only that title's Testing overrides.
+Testing OFF restores normal saved settings at the next launch.
+
+While a game is running, Testing resolution can change live. Rendering preset,
+Testing master and driver require exit because they own launch-time resources.
+The ordinary resolution setting stays separate; use the Testing buttons to change
+an active override without overwriting normal preferences.
+
+Each title's panel also offers **GPU driver for this game**: inherit the installed
+global driver, use System, or choose an imported driver archive. These exceptions
+live in `drivers.ini`. Launch preparation verifies the archive and creates an
+immutable content-addressed installation without changing the global driver.
+Missing/incompatible archives fall back visibly to global. Native title-driver
+load failures retry the saved global choice before System; logs record the actual
+effective library and fallback is shown to the user. Archive snapshots, extracted
+entries/bytes and retained immutable installations have explicit bounds. Driver
+changes are refused while the native run/teardown owns its lifecycle lock. Old
+extracted directories are bounded and only pruned after prior native users drain.

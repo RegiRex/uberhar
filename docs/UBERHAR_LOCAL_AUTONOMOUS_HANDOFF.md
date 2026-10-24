@@ -1,3 +1,50 @@
+# Current handoff — 0.1.55; stop at prerelease submission
+
+<!-- CodexAstraLocal: October 23 owner-approved .55 scope supersedes historical open-ended loops and retired rendering tracks below. -->
+The owner approved the post-.54 driver/architecture package: renewable bounded
+specialization, failure/lifetime repairs, useful warm persistence, GPU submission
+and wait evidence, targeted CPU overhead reduction, and requested Testing/driver
+controls. Keep the .53/.54 rendering base and the original .48 comparison history.
+See [0.1.55 scope](releases/0.1.55.md) and
+[forced graphics settings audit](UBERHAR_GRAPHICS_PROFILE_AUDIT.md).
+
+**Stopping boundary:** after passing the affected local executable preflight,
+submit through the existing RegiRex/uberhar gated prerelease workflow and stop root
+and all agents. Do not monitor hosted completion, install, run device tests or
+sleep either machine automatically. On the next owner request, inspect the actual
+submitted run before declaring publication or readiness. No per-milestone approval
+is needed within the already approved scope.
+
+**Next hardware observation:** the owner found that disabling right-eye suppression
+restored Sonic performance in Azahar. Native/Combo already force suppression OFF.
+The owner will compare Sonic's third track in Azahar/Uberhar after this build,
+matching effective settings and separating lap/section pacing. Other queued tests
+include later-scene cache admission and separately labeled warm relaunches. Keep
+cold no-cache output as the performance goal; warm reuse supplements it.
+
+**Communication and workflow:** be an expert colleague, identify blind spots and
+existing solutions, correct mistaken assumptions and prioritize meaningful fixes.
+Reports should be substantive but concentrate on changed findings, decisions,
+exact setting names, useful comparison tables and especially five-second lows.
+Do not manufacture CPU utilization or equate CPU-generated shader source with CPU
+pixel execution. Track cost per complete frame and correctness. Finite relevant
+checks; repeat only after changes/failures. Architects review independently from
+developers. Completed agents stop; agents waiting on automation report their
+handle/evidence and yield. All new sections have CodexAstraLocal purpose comments;
+temporary instrumentation has TEST-ONLY LOG markers and removal conditions.
+
+Root alone operates the device when authorized. Capture has no unapproved time,
+sample or inactivity cutoff; actively verify coverage and preserve breaks until
+explicit completion. Separate FEA map/battle, Xenoblade cinematic/gameplay, KI
+air/land, and Sonic first two/final laps (lap two separately only when marked).
+Record actual loaded driver/settings/cache treatment, temperature/power, five-second
+lows/means/best windows, app core-equivalents and per-core system readings. Hardware
+DDR bandwidth and per-GPU-core counters remain unavailable unless actually exposed.
+Normal Dark Moon test ends at the title after second lab. Preserve game saves
+except authorized File 1 reset; never uninstall to bypass signing compatibility.
+
+---
+
 # Local Codex takeover: Dark Moon correctness and performance
 
 <!-- CodexAstraLocal: Direct October 7 owner guidance replaces the earlier 100% acceptance wording and every-run post-exit memory sweep. -->

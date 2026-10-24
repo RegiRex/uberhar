@@ -27,7 +27,7 @@ def main():
     files += [source / "features/settings/model" / name for name in (
         "Settings.kt", "SettingSection.kt", "BooleanSetting.kt", "IntSetting.kt",
         "FloatSetting.kt", "ScaledFloatSetting.kt", "StringSetting.kt", "IntListSetting.kt",
-        "TestingSettings.kt",
+        "TestingSettings.kt", "DriverSettings.kt",
     )]
     files += [source / "features/settings/utils/SettingsFile.kt", source / "utils/BiMap.kt"]
     combined = "\n".join(path.read_text() for path in files)
@@ -186,8 +186,33 @@ fun main(args: Array<String>) {
     check(TestingSettings.enabled && TestingSettings.preset == 2 && TestingSettings.resolution == 2)
     check(title.readBytes().contentEquals(beforeTesting) && config.readBytes().contentEquals(originalGlobal))
     check(IntSetting.UBERHAR_TEST_MODE.int == 3 && IntSetting.RESOLUTION_FACTOR.int == 4)
+    // CodexAstraLocal: Per-title Testing choices do not contaminate other titles or global defaults.
+    TestingSettings.load("000400000f700100")
+    check(TestingSettings.preset == 2 && TestingSettings.resolution == 2)
+    TestingSettings.preset = 1
+    TestingSettings.resolution = 4
+    check(TestingSettings.save())
+    TestingSettings.load("0004000000123400")
+    check(TestingSettings.preset == 2 && TestingSettings.resolution == 2)
+    TestingSettings.load("")
+    TestingSettings.preset = 0
+    check(TestingSettings.save())
+    TestingSettings.load("000400000f700100")
+    check(TestingSettings.preset == 1 && TestingSettings.resolution == 4)
+    check(TestingSettings.useGlobalChoices())
+    check(TestingSettings.preset == 0 && TestingSettings.resolution == 2)
     TestingSettings.enabled = false
     check(TestingSettings.save())
+    // CodexAstraLocal: Driver exceptions are a third independent store; null resumes global inheritance.
+    check(DriverSettings.save("000400000f700100", DriverSettings.Selection("content://driver=v27", "v27")))
+    check(DriverSettings.load("000400000f700100")?.driver == "content://driver=v27")
+    check(DriverSettings.load("0004000000123400") == null)
+    check(DriverSettings.save("000400000f700100", DriverSettings.Selection(DriverSettings.SYSTEM, "System")))
+    check(DriverSettings.load("000400000f700100")?.driver == DriverSettings.SYSTEM)
+    check(DriverSettings.save("000400000f700100", null))
+    check(DriverSettings.load("000400000f700100") == null)
+    check(!DriverSettings.save("../config", DriverSettings.Selection("bad", "bad")))
+    check(title.readBytes().contentEquals(beforeTesting) && config.readBytes().contentEquals(originalGlobal))
     a.loadSettings("000400000f700100")
     check(IntSetting.UBERHAR_TEST_MODE.int == 3 && IntSetting.RESOLUTION_FACTOR.int == 4)
 

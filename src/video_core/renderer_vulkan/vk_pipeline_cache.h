@@ -109,6 +109,9 @@ public:
     // through actual enqueue; the post-draw stamp covers recorded GPU use.
     using CpuFragmentToken = ReadyCpuBank::Token;
     void CompleteReadyCpuDraw(CpuFragmentToken token);
+    // CodexAstraLocal: Stamp actual optional GPU draw enqueue, including a flush
+    // between selection and draw, before allowing completed-tick retirement.
+    void CompleteReadyGpuDraw(GraphicsPipeline* pipeline);
     void RetireReadyCpuAfterWorkerDrain();
 
     /// Binds a pipeline using the provided information
@@ -213,6 +216,11 @@ private:
 
     /// Stores the generated pipeline cache
     void SaveDriverPipelineDiskCache();
+    // CodexAstraLocal: A driver switch retains independent UUID-compatible blobs.
+    std::string DriverCachePath(u64 title) const;
+    bool OptionalShaderReferenced(const Shader* shader) const;
+    bool OptionalGpuAdmissionAvailable();
+    void RetireReadyGpuAfterWorkerDrain();
 
     /// Loads the shader disk cache
     void LoadDiskCache(const std::atomic_bool& stop_loading = std::atomic_bool{false},
@@ -277,9 +285,28 @@ private:
     // Active, retired and destruction-queued owners remain charged to their
     // original tier: eight full plus eight partial, at most sixteen combined.
     std::unique_ptr<ReadyCpuBank> ready_cpu_bank;
-    // CodexAstraLocal: Eviction never refunds creation attempts. Charge GPU and
-    // CPU before allocation so repeated failures cannot grow unbounded work.
+    // CodexAstraLocal: Lifetime attempts remain diagnostics. CPU/GPU share
+    // renewable bounded work credit, spent before allocation and never refunded.
     std::size_t ready_optional_attempts{};
+    // CodexAstraLocal: One retired GPU owner stays charged until worker deletion
+    // is published; metadata is never read through its concurrently reset pointer.
+    std::unique_ptr<GraphicsPipeline> retiring_ready_gpu;
+    std::atomic_bool retiring_ready_gpu_done{true};
+    bool retiring_ready_gpu_active{};
+    bool ready_gpu_pressure{};
+    // CodexAstraLocal: Negative keys survive failed GPU-owner retirement without
+    // retaining every failed Vulkan pipeline. Equality includes current owners.
+    struct GpuFailureKey {
+        StaticPipelineInfo state;
+        std::array<u64, MAX_SHADER_STAGES> shaders;
+        bool dynamic{};
+        bool operator==(const GpuFailureKey& other) const {
+            return dynamic == other.dynamic && shaders == other.shaders &&
+                   state.ExecutionEquals(other.state, dynamic);
+        }
+    };
+    OptionalFailureCache<GpuFailureKey, 64> ready_gpu_failures;
+    u64 optional_frame{}, ready_gpu_retirements{};
     std::size_t ReadyCpuOwned() const { return ready_cpu_bank ? ready_cpu_bank->Owned() : 0; }
     GraphicsPipeline* warming_ready_vertex{};
     PipelineBuildStats ready_cpu_build_stats;
@@ -293,7 +320,7 @@ private:
     // population fills the fixed bank; these counters are not fragment GPU time.
     std::array<u64, 2> ready_cpu_selected_lighting{};
     // CodexAstraLocal: Reporting snapshots all fixed ownership states together;
-    // replacing the append-only bank requires a fresh census at the report cadence.
+    // replacement changes the current population, so refresh it at report cadence.
     std::array<u64, 2> ready_cpu_bank_lighting{};
     PipelineBuildStats ready_vertex_build_stats;
     // AstraPro: Optimized covered fragments are distinct from correctness recovery.

@@ -1203,4 +1203,23 @@
     <!-- CodexAstraLocal: Shader recovery also carries Software framebuffer and Calculated resource errors; describe the shared failure without misidentifying its cause. -->
     <string name="uberhar_renderer_stopped_description">Uberhar encountered a rendering error and stopped this game. Export the current text log to help investigate the failure. Additional evidence may be saved in log/crashes after restarting Uberhar.</string>
     <!-- AstraEH: Keep incident evidence off the ordinary current/previous/older log list. -->
+    <!-- CodexAstraLocal: One controlled driver comparison; no guaranteed performance claim. -->
+    <string name="turnip_pass_end_flush">Turnip pass-end submission</string>
+    <string name="turnip_pass_end_flush_description">Use the stock-driver asynchronous submission policy on Turnip. Compare per game; restart the game after changing.</string>
+    <!-- CodexAstraLocal: Testing title scope and driver inheritance remain distinct from normal settings. -->
+    <string name="uberhar_testing_global_choices">Testing defaults for all games</string>
+    <string name="uberhar_testing_target">Testing game: %1$s</string>
+    <string name="uberhar_testing_select_game">Choose Testing game</string>
+    <string name="uberhar_testing_use_global">Use global Testing choices</string>
+    <string name="uberhar_testing_reset_confirmation">Remove this game’s Testing preset and resolution choices? It will inherit the global Testing choices. Normal saved settings are unchanged.</string>
+    <string name="uberhar_testing_live_description">Resolution changes apply now. Exit the game before changing its rendering preset or the Testing switch.</string>
+    <string name="uberhar_testing_resolution_override">Change the active resolution using the Testing controls on the main Settings page.</string>
+    <string name="uberhar_game_driver">GPU driver for this game</string>
+    <string name="uberhar_game_driver_selected">GPU driver: %1$s</string>
+    <string name="uberhar_game_driver_inherit">Use global GPU driver</string>
+    <string name="uberhar_game_driver_unavailable">Saved driver unavailable — using global GPU driver</string>
+    <string name="uberhar_game_driver_failed">Could not prepare the selected GPU driver. Using the global or system driver.</string>
+    <!-- CodexAstraLocal: Generic optimizer is an explicit hardware experiment, not a silent default change. -->
+    <string name="uberhar_optimize_generic_shaders">Optimize generic shaders</string>
+    <string name="uberhar_optimize_generic_shaders_description">Optimize generic GPU programs to compare execution cost. May increase first-use compilation time. Full shader generation stays independent. Restart the game after changing.</string>
 </resources>

@@ -350,6 +350,10 @@ struct Shader : public Common::AsyncHandle {
         return module;
     }
 
+    // CodexAstraLocal: Producer-only selection count avoids scanning optional
+    // shader maps on every draw; final/reclamation reporting occurs after drain.
+    void RecordOptionalSelection() const { ++optional_selections; }
+    u64 OptionalSelections() const { return optional_selections; }
     vk::ShaderModule module;
     vk::Device device;
     std::string program;
@@ -372,12 +376,13 @@ struct Shader : public Common::AsyncHandle {
     }
 
 private:
+    mutable u64 optional_selections{};
     std::atomic_bool failed{};
 };
 
-// AstraEH: Identical Shader objects already share a compiled module, even when
-// several guest configurations refer to it. These process-local IDs never enter
-// disk records; maps and their owning shader objects have the same lifetime.
+// CodexAstraLocal: Shared Shader objects have identical process-local stage IDs.
+// No address enters disk records. Optional reclamation first retires dependent
+// PSOs and clears pointer-bearing negative records before allocator reuse.
 inline std::array<u64, MAX_SHADER_STAGES> HostShaderIds(
     const std::array<Shader*, MAX_SHADER_STAGES>& shaders) {
     std::array<u64, MAX_SHADER_STAGES> ids{};
@@ -451,6 +456,20 @@ public:
         return failed.load(std::memory_order_acquire);
     }
 
+    // CodexAstraLocal: Optional retirement reads immutable dependency identities
+    // only after command drain, and waits for compiler epilogue plus GPU use.
+    const StaticPipelineInfo& ExecutionState() const { return info.state; }
+    auto ExecutionShaders() const { return HostShaderIds(stages); }
+    bool ReferencesShader(const Shader* shader) const noexcept {
+        return std::find(stages.begin(), stages.end(), shader) != stages.end();
+    }
+    void OptionalRequested(u64 frame) { optional_last_requested = frame; }
+    void OptionalDrawQueued(u64 tick) { optional_last_tick = std::max(optional_last_tick, tick); }
+    void OptionalCompilerReleased() { optional_released.store(true, std::memory_order_release); }
+    bool OptionalReleased() const { return optional_released.load(std::memory_order_acquire); }
+    u64 OptionalLastRequest() const { return optional_last_requested; }
+    u64 OptionalLastTick() const { return optional_last_tick; }
+
     // AstraEH: Track whether speculative compilation ever served a draw. Atomics
     // permit progress snapshots while the command/compiler workers are active.
     void RecordFallbackUse() noexcept {
@@ -468,6 +487,9 @@ public:
     }
 
 private:
+    // CodexAstraLocal: Producer-owned use stamps; worker release is atomic.
+    u64 optional_last_requested{}, optional_last_tick{};
+    std::atomic_bool optional_released{};
     // CodexAstraUlt-2: Keep throwing Vulkan work behind completion publication.
     bool BuildImpl(bool fail_on_compile_required);
     const Instance& instance;

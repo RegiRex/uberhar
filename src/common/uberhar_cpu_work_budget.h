@@ -178,9 +178,13 @@ public:
     struct Statistics {
         unsigned desired{};
         std::uint64_t samples{}, rejected{}, trials{}, accepted{}, reverted{};
+        // CodexAstraLocal TEST-ONLY LOG: Count unstable eligible task calls
+        // excluded from sampling, not the number of clock readings avoided;
+        // remove after stable-shape admission is qualified on gameplay.
+        std::uint64_t unstable_skipped{};
     };
     Statistics GetStatistics() const {
-        return {desired, samples, rejected, trials, accepted, reverted};
+        return {desired, samples, rejected, trials, accepted, reverted, unstable_skipped};
     }
     // CodexAstraLocal: Registration can change the shared helper capacity after
     // this pool was constructed. Compare trials only under one capacity bound.
@@ -188,20 +192,33 @@ public:
         if (maximum == limit) return;
         Reset(); maximum = limit; desired = limit;
         shape_count = shape_grain = 0;
+        stable_shapes = 0;
     }
     // CodexAstraLocal: Check shape at every task boundary, without a clock. A
     // trial for one workload must not cap intervening unrelated jobs or survive
     // a different shape merely because that job missed the sampling cadence.
     void Prepare(std::uint32_t count, std::uint32_t grain, bool hook = false) {
         grain = std::max(1U, grain);
-        if (shape_count == count && shape_grain == grain && shape_hook == hook) return;
+        // CodexAstraLocal: A window is discarded on every shape change. Avoid
+        // clocks and worker sample bookkeeping until repeated comparable work
+        // exists; this gates measurement only, never workers or explicit timing.
+        if (shape_count == count && shape_grain == grain && shape_hook == hook) {
+            stable_shapes = std::min(StableShapeThreshold, stable_shapes + 1);
+            return;
+        }
         Reset(); shape_count = count; shape_grain = grain; shape_hook = hook;
+        stable_shapes = 1;
         desired = std::min(maximum, count / grain > 0 ? count / grain - 1 : 0);
     }
     bool SelectSample(std::uint32_t count, std::uint32_t grain) {
         // CodexAstraLocal: Tiny/serial-by-shape calls read no clocks and do not
         // advance the sampling cadence. At most one eligible call in 64 samples.
-        return maximum && count / std::max(1U, grain) >= 2 && (++cadence % 64 == 0);
+        if (!maximum || count / std::max(1U, grain) < 2) return false;
+        if (stable_shapes < StableShapeThreshold) {
+            ++unstable_skipped;
+            return false;
+        }
+        return ++cadence % 64 == 0;
     }
     void Observe(const Sample& sample) {
         ++samples;
@@ -283,12 +300,16 @@ private:
         baseline = {}; cooldown = 0; direction = -1;
     }
     unsigned maximum;
+    // CodexAstraLocal: Eight consecutive same-shape tasks are a cheap evidence
+    // prerequisite; an accepted trial and the existing 1/64 cadence are unchanged.
+    static constexpr unsigned StableShapeThreshold = 8;
+    unsigned stable_shapes{};
     unsigned desired{}, prior{}, cadence{}, cooldown{};
     std::uint32_t shape_count{}, shape_grain{};
     bool shape_hook{};
     int direction{-1};
     bool trial{};
-    std::uint64_t samples{}, rejected{}, trials{}, accepted{}, reverted{};
+    std::uint64_t samples{}, rejected{}, trials{}, accepted{}, reverted{}, unstable_skipped{};
     Window window{}, baseline{};
 };
 } // namespace Common::Uberhar

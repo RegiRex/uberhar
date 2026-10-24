@@ -53,7 +53,8 @@ void RealSelectionAndTransport() {
     Require(Probe::optional_waits == 0, "selection adds no optional wait");
 
     // Existing ready selections survive an exhausted creation budget.
-    p.ready_optional_attempts = 256;
+    // CodexAstraLocal: Exhaust actual renewable credit; cumulative attempts are telemetry.
+    while (p.ready_cpu_bank->SpendExternalWork()) {}
     const auto builds = Probe::pipeline_builds;
     auto retained = DrawCpu(p, info, config);
     Require(bool(retained) && Probe::pipeline_builds == builds,
@@ -63,8 +64,8 @@ void RealSelectionAndTransport() {
     for (unsigned n = 0; n < 20; ++n) { DrawCpu(p, info, Config(1)); Advance(p); }
     Require(p.ready_cpu_bank->stats.retirements == retirements,
             "no destruction without replacement creation token");
-    Require(p.ready_cpu_bank->stats.observations == observations,
-            "terminal work budget avoids new observation key preparation");
+    Require(p.ready_cpu_bank->stats.observations - observations <= 1,
+            "throttled demand retains only sparse renewal observations");
 }
 
 void ActualBankReuse() {
@@ -170,7 +171,7 @@ void FailuresProfilesAndModes() {
 }
 
 // CodexAstraLocal: Execute actual GPU admission against CPU physical ownership
-// and lifetime budgets, preserving ready hits and reciprocal pending behavior.
+// and renewable budgets, preserving ready hits and reciprocal pending behavior.
 void SharedLimitsAndAllocation() {
     {
         PipelineCache p; auto info=Info(); auto config=Config();
@@ -199,8 +200,9 @@ void SharedLimitsAndAllocation() {
         p.ready_vertex_worker->WaitForRequests();
         auto* ready=p.PrepareReadyGpuVertex(info);
         Require(ready!=nullptr,"GPU control ready hit");
-        p.ready_optional_attempts=256;
-        Require(p.PrepareReadyGpuVertex(info)==ready,"GPU ready hit survives cumulative exhaustion");
+        // CodexAstraLocal: Creation spends renewable credit, not lifetime telemetry.
+        while (p.ready_cpu_bank->SpendExternalWork()) {}
+        Require(p.PrepareReadyGpuVertex(info)==ready,"GPU ready hit survives credit exhaustion");
         auto changed=info;changed.state.blending.color_write_mask=7;
         Require(!p.PrepareReadyGpuVertex(changed) && p.ready_vertex_pipelines.size()==1,
                 "GPU creation respects nonrefundable combined budget");

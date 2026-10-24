@@ -130,7 +130,9 @@ def main():
             ['    class DeferredMapping final {','    class DeferredUpload final {'])
         (output/'stream-deferred-types.inc').write_text(nested+'\n')
         (output/'fixture.cpp').write_text(fixture)
-        argv=['c++','-std=c++20','-O2','-g0','-DNDEBUG','-pthread',str(output/'fixture.cpp'),'-o',str(output/'test')]
+        # CodexAstraLocal: Compile the real sparse timing helper used by the
+        # extracted scheduler, without substituting its synchronization bodies.
+        argv=['c++','-std=c++20','-O2','-g0','-DNDEBUG','-pthread','-I',str(source_root/'src'),str(output/'fixture.cpp'),'-o',str(output/'test')]
         built=subprocess.run(argv,cwd=ROOT,capture_output=True,timeout=90)
         (output/'compile.stdout').write_bytes(built.stdout);(output/'compile.stderr').write_bytes(built.stderr)
         proof['compile_argv']=argv;proof['compile_exit']=built.returncode

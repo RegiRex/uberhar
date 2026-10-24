@@ -236,7 +236,7 @@ object NativeLibrary {
         customDriverDir: String?,
         customDriverName: String?,
         fileRedirectDir: String?
-    )
+    ): Int
 
     external fun areKeysAvailable(): Boolean
 

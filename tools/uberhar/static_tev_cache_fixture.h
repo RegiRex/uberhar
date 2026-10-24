@@ -3,6 +3,7 @@
 // with controlled driver/queue endpoints.
 #include "video_core/renderer_vulkan/uberhar_adaptive_cpu_policy.h"
 #include "video_core/renderer_vulkan/uberhar_static_tev_policy.h"
+#include "video_core/renderer_vulkan/uberhar_optional_failure_cache.h" // CodexAstraLocal: Real bounded failure ledger.
 // CodexAstraLocal: Test the actual pure transport cache alongside extracted routing.
 #include "video_core/renderer_vulkan/uberhar_dynamic_tev_preparation.h"
 #include "common/logging/log.h"
@@ -33,6 +34,7 @@
 #include "video_core/renderer_vulkan/uberhar_push_constants.h"
 #include "video_core/renderer_vulkan/uberhar_shader_compile_policy.h"
 #include "video_core/renderer_vulkan/uberhar_wait_diagnostics.h"
+#include "video_core/renderer_vulkan/vk_shader_util.h" // CodexAstraLocal: Actual typed compile failures.
 #include "video_core/shader/generator/glsl_fs_shader_gen.h"
 #define MICROPROFILE_SCOPE(...) ((void)0)
 using namespace Pica::Shader::Generator;
@@ -72,7 +74,7 @@ void operator delete(void *p, std::size_t) noexcept { std::free(p); }
 void operator delete[](void *p, std::size_t) noexcept { std::free(p); }
 namespace Probe {
 // CodexAstraLocal: The legacy suite isolates the inherited full route with
-// a terminal partial-module budget. The new suite enables actual partial work;
+// exhausted partial-module credit. The new suite enables actual partial work;
 // both execute the same production cache and binding bodies.
 bool partial_tier{};
 unsigned checks{}, compiler_calls{}, pipeline_builds{}, required_waits{},
@@ -189,6 +191,21 @@ public:
     return !!stages[0] | (!!stages[1] << 1) | (!!stages[2] << 2);
   }
   void RecordFallbackUse() {}
+  // CodexAstraLocal: Driver endpoint retains the production optional-owner
+  // request/use identities; the real bank controls compiler-release ownership.
+  u64 optional_request{}, optional_tick{};
+  bool optional_released{};
+  void OptionalRequested(u64 frame) { optional_request = frame; }
+  void OptionalDrawQueued(u64 tick) { optional_tick = tick; }
+  const auto& ExecutionState() const { return info.state; }
+  auto ExecutionShaders() const { return HostShaderIds(stages); }
+  u64 OptionalLastRequest() const { return optional_request; }
+  u64 OptionalLastTick() const { return optional_tick; }
+  bool OptionalReleased() const { return optional_released; }
+  void OptionalCompilerReleased() { optional_released = true; }
+  bool ReferencesShader(const Shader* shader) const {
+    return std::find(stages.begin(), stages.end(), shader) != stages.end();
+  }
 };
 std::vector<u32> CompileGLSL(const std::string &s, vk::ShaderStageFlagBits,
                              const char *, bool disabled) {
@@ -203,7 +220,7 @@ std::vector<u32> CompileGLSL(const std::string &s, vk::ShaderStageFlagBits,
     return {};
   return {0x7230203};
 }
-vk::ShaderModule CompileSPV(const std::vector<u32> &, vk::Device) {
+vk::ShaderModule CompileOptionalSPV(const std::vector<u32> &, vk::Device) {
   if (Probe::compiler_failure == 4)
     return {};
   return vk::ShaderModule{
@@ -330,11 +347,21 @@ public:
   std::unique_ptr<Common::ThreadWorker> ready_vertex_worker =
       std::make_unique<Common::ThreadWorker>();
   std::unordered_map<u64, std::unique_ptr<GraphicsPipeline>> ready_vertex_pipelines;
+  // CodexAstraLocal: Account for detached GPU retirement owners in exact route bodies.
+  std::unique_ptr<GraphicsPipeline> retiring_ready_gpu;
+  std::atomic_bool retiring_ready_gpu_done{true};
+  bool retiring_ready_gpu_active{}, ready_gpu_pressure{};
+  u64 optional_frame{}, ready_gpu_retirements{};
+#include "gpu_failure_state.inc"
   std::unique_ptr<ReadyCpuBank> ready_cpu_bank=std::make_unique<ReadyCpuBank>();
   using CpuFragmentToken=ReadyCpuBank::Token;
   std::size_t ready_optional_attempts{};
   std::size_t ReadyCpuOwned()const{return ready_cpu_bank?ready_cpu_bank->Owned():0;}
   void CompleteReadyCpuDraw(CpuFragmentToken);
+  void CompleteReadyGpuDraw(GraphicsPipeline*);
+  bool OptionalGpuAdmissionAvailable();
+  bool OptionalShaderReferenced(const Shader*) const;
+  void RetireReadyGpuAfterWorkerDrain();
   void RetireReadyCpuAfterWorkerDrain();
   GraphicsPipeline *warming_ready_vertex{};
   PipelineBuildStats ready_vertex_build_stats, ready_cpu_build_stats;
@@ -458,6 +485,17 @@ class ShaderDiskCache {
 public:
   PipelineCache &parent;
 #include "fragment_members.inc"
+#include "optional_state.inc"
+  // CodexAstraLocal: Disk and module-reclamation endpoints are isolated from
+  // this PSO ownership fixture; actual codec/lifecycle checks cover those paths.
+  bool WarmDemand(u64, bool) const { return false; }
+  template<class F> auto LoadOrCompileOptional(std::span<const u32>, bool, F&& compile) {
+    return compile();
+  }
+  void ReclaimOptionalAfterDrain(u64 frame) { optional_frame = frame; }
+  void RecordOptionalSelection(const Shader*) {}
+  void ReportOptionalFailure(const char*, const char*, unsigned) noexcept;
+  void SaveUsefulRecipesAfterDrain() {}
   explicit ShaderDiskCache(PipelineCache &p) : parent(p) {}
   std::optional<std::pair<u64, Shader *const>>
   UseReadyFragmentShader(const FSConfig &, const UserConfig &, bool = true);
@@ -498,7 +536,9 @@ PipelineCache::PipelineCache() {
   profile.vk_disable_spirv_optimizer = true;
   curr_disk_cache = std::make_unique<ShaderDiskCache>(*this);
   if (!Probe::partial_tier)
-    curr_disk_cache->static_tev_attempts=StaticTevPolicy::MaxModuleAttempts;
+    // CodexAstraLocal: Exhaust actual partial module credit; this gate does not
+    // disable the full CPU-fragment route or rewrite production selection.
+    while (curr_disk_cache->static_module_credit.Spend()) {}
 }
 PipelineCache::~PipelineCache() {
   ClearTevFallbacks();

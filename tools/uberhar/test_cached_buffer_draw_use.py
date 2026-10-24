@@ -27,6 +27,14 @@ def main():
         # CodexAstraLocal: Defects remove actual enqueue stamps or move them
         # before setup/refusal. Each must fail a specific observed branch outcome.
         variants=[('candidate',accelerate,None),
+          # CodexAstraLocal: Optional owner retirement needs actual successful
+          # enqueue evidence in both capture and ordinary branches as well.
+          ('missing-capture-pipeline-stamp',replace_once(accelerate,
+           '                pipeline_cache.CompleteReadyGpuDraw(ready_vertex_pipeline);',''),
+           b'FAIL actual accelerated draw stamps optional pipeline once at final tick\n'),
+          ('missing-ordinary-pipeline-stamp',replace_once(accelerate,
+           '    if (ready_vertex_pipeline) pipeline_cache.CompleteReadyGpuDraw(ready_vertex_pipeline);',''),
+           b'FAIL actual accelerated draw stamps optional pipeline once at final tick\n'),
           ('missing-capture-stamp',replace_once(accelerate,'                MarkCachedShaderBuffersUsed();',''),
            b'FAIL actual accelerated draw stamps each ring once\n'),
           ('missing-ordinary-stamp',replace_once(accelerate,'    MarkCachedShaderBuffersUsed();\n\n    return true;','    return true;'),

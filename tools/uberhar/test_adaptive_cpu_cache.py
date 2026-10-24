@@ -57,7 +57,7 @@ def main():
        'slot.state = State::Retired;\n                disabled = false;'),
       'destruction queue failure disables adaptation'),
      ('retire-after-work-exhaustion','header',
-      ('pressure && attempts < CpuAttempts && combined_attempts < CombinedLimit &&', 'pressure &&'),
+      ('pressure && shared_credit.Available() &&', 'pressure &&'),
       'exhausted combined work prevents new retirement'),
      ('extra-attempt','header',('CpuAttempts = 64;', 'CpuAttempts = 65;'),
       'CPU token exhaustion forbids new retirement'),

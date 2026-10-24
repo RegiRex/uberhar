@@ -2,6 +2,8 @@
 // cache function on the actual ThreadWorker/AsyncHandle; compiler/GPU/log endpoints
 // are controlled. It performs no Vulkan calls, device work, or performance timings.
 #include <atomic>
+#include <functional>
+#include <span>
 #include <chrono>
 #include <condition_variable>
 #include <cstdlib>
@@ -20,9 +22,10 @@
 #include "common/thread_worker.h"
 #include "video_core/shader/generator/pica_fs_config.h"
 #include "video_core/renderer_vulkan/uberhar_fragment_policy.h"
-#ifdef UBERHAR_STATIC_TEV_WORKER
 #include "video_core/renderer_vulkan/uberhar_static_tev_policy.h"
-#endif
+#include "video_core/renderer_vulkan/uberhar_compile_budget.h"
+#include "video_core/renderer_vulkan/uberhar_optional_failure_cache.h"
+#include "video_core/renderer_vulkan/vk_shader_util.h"
 #include "video_core/renderer_vulkan/uberhar_shader_compile_policy.h"
 
 using Pica::Shader::FSConfig;
@@ -192,6 +195,10 @@ struct Parent {
     Queue* ready_vertex_worker=&shader_workers;
     Shader* warming_ready_vertex{};
     bool allow_static_cpu_tev=true;
+    // CodexAstraLocal: No pipeline is modeled here; explicit references can
+    // still hold a retry owner until the production reuse guard releases it.
+    const Shader* referenced_shader{};
+    bool OptionalShaderReferenced(const Shader* shader) const { return shader == referenced_shader; }
 };
 class ShaderDiskCache {
 public:
@@ -200,6 +207,14 @@ public:
     // are extracted exactly from the candidate header, not reimplemented.
 #include "members.inc"
     explicit ShaderDiskCache(Parent& owner) : parent(owner) {}
+    // CodexAstraLocal: This worker fixture has no disk backend. Real serialization
+    // is extracted; separate codec tests cover persistence and warm records.
+    bool WarmDemand(u64, bool) const;
+    void ReportOptionalFailure(const char*, const char*, unsigned) noexcept;
+    std::vector<u32> LoadOrCompileOptional(std::span<const u32>, bool,
+                                         const std::function<std::vector<u32>()>& compile) {
+        return compile();
+    }
     std::optional<std::pair<u64, Shader* const>> UseReadyFragmentShader(
         const FSConfig&, const UserConfig&, bool allow_build = true);
 #ifdef UBERHAR_STATIC_TEV_WORKER
@@ -210,7 +225,7 @@ public:
 
 // CodexAstraLocal: Fail at each external optional compilation stage, including
 // empty/null outputs. No shader compiler or Vulkan driver is invoked here.
-std::vector<u32> CompileGLSL(const std::string&, vk::ShaderStageFlagBits, const char*,
+std::vector<u32> CompileGLSL(std::string_view, vk::ShaderStageFlagBits, std::string_view,
                             bool disabled) {
     ++Probe::compile_calls; Probe::optimizer_disabled = disabled;
     if (Probe::failure == 1) throw std::runtime_error("GLSL standard");
@@ -218,13 +233,22 @@ std::vector<u32> CompileGLSL(const std::string&, vk::ShaderStageFlagBits, const 
     if (Probe::failure == 3) return {};
     return {0x07230203};
 }
-vk::ShaderModule CompileSPV(const std::vector<u32>&, vk::Device) {
+vk::ShaderModule CompileOptionalSPV(std::span<const u32>, vk::Device) {
     ++Probe::module_calls;
     if (Probe::failure == 7) throw std::runtime_error("SPV standard");
     if (Probe::failure == 8) throw 812;
     if (Probe::failure == 4) return {};
+    // CodexAstraLocal: Typed endpoints exercise policy classification without
+    // fabricating real Vulkan resource exhaustion or driver device loss.
+    if (Probe::failure == 10) throw OptionalCompileError(OptionalCompileFailure::Resource, "resource");
+    if (Probe::failure == 11) throw OptionalCompileError(OptionalCompileFailure::DeviceLost, "device");
+    if (Probe::failure == 12) throw OptionalCompileError(OptionalCompileFailure::Source, "source");
+    if (Probe::failure == 13) throw std::bad_alloc();
     return vk::ShaderModule{reinterpret_cast<VkShaderModule>(std::uintptr_t{0x1234})};
 }
+// CodexAstraLocal: Identity preparation stays production code even with disk I/O modeled.
+#include "identity.inc"
+#include "helpers.inc"
 #ifndef EXTRACTED_FUNCTION
 #define EXTRACTED_FUNCTION "normal.inc"
 #endif
@@ -343,6 +367,10 @@ void DirectFailure(unsigned failure) {
 // CodexAstraLocal: Lookup-only must not silently warm demand. Module capacity is
 // shared and exact:128 retained objects, terminal failures included, no eviction.
 void LookupAndCapacity() {
+    // CodexAstraLocal: Renewal must not lower the inherited initial cold/warm
+    // full-module envelope. Read the actual extracted production initializer.
+    { Fixture f; Require(f.cache.full_module_credit.Credits() == ReadyFragmentPolicy::MaxModules,
+                         "full initial credits preserve inherited capacity"); }
     Probe::Reset(); Fixture f; auto config = Config(12);
     for (unsigned n = 0; n < 32; ++n)
         Require(!f.cache.UseReadyFragmentShader(config, {}, false), "lookup-only absent must fall back");
@@ -394,8 +422,58 @@ void Failure(unsigned kind, bool logging_failure) {
     Require(f.parent.shader_workers.attempts == attempts &&
             f.cache.ready_fragments.at(config.Hash()).get() == entry,
             "failed owner retained without retry");
-    Require(Probe::log_calls == 1, "first failure must retain one bounded diagnostic attempt");
+    // CodexAstraLocal: Empty output has typed source evidence and the same
+    // bounded error delivery guarantee as unclassified compiler failures.
+    Require(Probe::log_calls == 1 && (kind != 3 || f.cache.optional_source_failures == 1),
+            "first failure must retain typed or bounded diagnostic evidence");
 }
+// CodexAstraLocal: Retry policy must follow typed failure, exact ownership and
+// time boundaries. Advance a deadline directly rather than sleeping in this
+// deterministic fixture; compile/queue/publication bodies remain unmodified.
+void TypedFailures() {
+    for (unsigned failure : {10U, 11U, 12U, 13U}) {
+        Probe::Reset(); Fixture f; const auto config = Config(3000 + failure);
+        const bool resource = failure == 10 || failure == 13;
+        Probe::failure = failure; Probe::logger_throws = true;
+        Demand(f, config); f.parent.shader_workers.WaitForRequests();
+        auto* entry = f.cache.ready_fragments.at(config.Hash()).get();
+        Require(entry->shader.IsDone() && entry->shader.HasFailed() &&
+                entry->compiler_released.load(), "typed failure publishes released terminal owner");
+        Require(entry->retryable == resource && Probe::log_calls == 1,
+                "typed resource-only retry and throwing diagnostics are contained");
+        Require(f.cache.optional_resource_failures == resource &&
+                f.cache.optional_device_failures == (failure == 11) &&
+                f.cache.optional_source_failures == (failure == 12),
+                "typed failure diagnostics preserve exact classification");
+        Demand(f, config, 32);
+        Require(f.parent.shader_workers.accepted == 1, "typed failure backoff blocks immediate retry");
+        entry->retry_after_ms = 0;
+        Demand(f, config, 1, false);
+        Require(f.parent.shader_workers.accepted == 1, "read-only lookup never retries expired failure");
+        if (resource) {
+            // CodexAstraLocal: An open circuit must refuse before erasing the
+            // failed owner or resetting its bounded retry history.
+            f.cache.optional_circuit_until_ms.store(CompileBudget::NowMs() + 30000);
+            Demand(f, config, 1);
+            const auto retained = f.cache.ready_fragments.find(config.Hash());
+            Require(retained != f.cache.ready_fragments.end() && retained->second.get() == entry &&
+                    entry->retries == 0 && f.parent.shader_workers.accepted == 1,
+                    "open circuit preserves failed owner and retry history");
+            f.cache.optional_circuit_until_ms.store(0);
+            f.parent.referenced_shader = &entry->shader;
+            Demand(f, config, 1);
+            Require(f.parent.shader_workers.accepted == 1, "referenced failed owner cannot be retried");
+            f.parent.referenced_shader = nullptr;
+        }
+        Probe::failure = 0; Demand(f, config, 1); f.parent.shader_workers.WaitForRequests();
+        Require(f.parent.shader_workers.accepted == (resource ? 2U : 1U),
+                "only expired unreferenced resource failure retries");
+        Require(resource ? f.cache.UseReadyFragmentShader(config, {}, false).has_value()
+                         : !f.cache.UseReadyFragmentShader(config, {}, false),
+                "resource retry recovers while permanent failure stays negative");
+    }
+}
+
 // CodexAstraLocal: A rejected queue owns a failed entry but must have no accepted task.
 void QueueFailure() {
     Probe::Reset(); Fixture f; auto config = Config(30); f.parent.shader_workers.throw_queue = true;
@@ -409,11 +487,11 @@ void QueueFailure() {
     Require(f.parent.shader_workers.attempts == 1, "queue failure must not retry");
 }
 
-// CodexAstraLocal: Allocation failures before owner insertion may propagate to
-// the CPU caller's existing catch; after insertion, queue allocation must publish
-// a terminal owner. No dangling warming pointer or leaked Shader is permitted.
+// CodexAstraLocal: Owner allocation failure is contained with bounded negative
+// history; queue allocation publishes terminal failure. No dangling warming
+// pointer or leaked Shader is permitted, and repeated demand must honor backoff.
 void Allocations() {
-    unsigned escaped_before_owner{}, contained_after_owner{}, success{};
+    unsigned contained_before_owner{}, contained_after_owner{}, success{};
     for (long countdown = 0; countdown < 8; ++countdown) {
         Probe::Reset(); Fixture f; auto config = Config(40);
         Demand(f, config, 15); Probe::intercepted_allocations = 0;
@@ -428,11 +506,15 @@ void Allocations() {
                 Probe::intercepted_allocations <= static_cast<unsigned>(countdown + 1),
                 "allocator countdown observed bounded actual allocations");
         f.parent.shader_workers.WaitForRequests();
-        if (escaped) {
-            ++escaped_before_owner;
-            Require(f.cache.ready_fragments.empty() && !f.cache.warming_ready_fragment &&
-                    f.parent.shader_workers.accepted == 0,
-                    "pre-owner allocation failure leaves no pending pointer/task");
+        Require(!escaped, "optional owner allocation never escapes render caller");
+        if (f.cache.ready_fragments.empty()) {
+            ++contained_before_owner;
+            Require(!f.cache.warming_ready_fragment && f.parent.shader_workers.accepted == 0 &&
+                    f.cache.full_failure_history.Find(config.Hash(), {config, f.parent.profile}),
+                    "pre-owner allocation failure leaves bounded history and no pending task");
+            Demand(f, config, 32);
+            Require(f.cache.ready_fragments.empty() && f.parent.shader_workers.accepted == 0,
+                    "pre-owner resource history blocks immediate repeated demand");
         } else {
             Require(f.cache.ready_fragments.size() == 1, "contained/successful admission owns one entry");
             auto* entry = f.cache.ready_fragments.begin()->second.get();
@@ -440,7 +522,7 @@ void Allocations() {
             if (entry->shader.HasFailed()) ++contained_after_owner; else ++success;
         }
     }
-    Require(escaped_before_owner > 0 && contained_after_owner > 0 && success > 0,
+    Require(contained_before_owner > 0 && contained_after_owner > 0 && success > 0,
             "allocator sweep must exercise preowner, queued-allocation and success cases");
 }
 
@@ -449,7 +531,16 @@ void Allocations() {
 void BoundedLogging() {
     Probe::Reset(); Fixture f; Probe::failure = 2; Probe::logger_throws = true;
     for (unsigned n = 0; n < 12; ++n) {
-        auto config = Config(2000 + n); Demand(f, config);
+        auto config = Config(2000 + n);
+        if (n >= 8) {
+            Demand(f, config);
+            Require(f.parent.shader_workers.accepted == n,
+                    "failure circuit blocks immediate new optional work");
+            // CodexAstraLocal: Advance only the circuit deadline to exercise
+            // all twelve failures without sleeping thirty seconds per case.
+            f.cache.optional_circuit_until_ms.store(0);
+        }
+        Demand(f, config);
         f.parent.shader_workers.WaitForRequests();
         Require(f.cache.ready_fragments.at(config.Hash())->shader.HasFailed(), "bounded failure recorded");
     }
@@ -465,7 +556,8 @@ void BoundedLogging() {
 int main(int argc, char** argv) {
     try {
         const std::string which = argc > 1 ? argv[1] : "all";
-        if (which == "opaque") Failure(2, false);
+        if (which == "typed") TypedFailures();
+        else if (which == "opaque") Failure(2, false);
         else if (which == "logger") Failure(1, true);
         else if (which == "queue") QueueFailure();
         else if (which == "lookup") LookupAndCapacity();
@@ -473,7 +565,7 @@ int main(int argc, char** argv) {
         else if (which == "generator") GeneratorChoice(true, false);
         else if (which == "incompatible") GeneratorChoice(true, true);
         else {
-            SnapshotAndPending(); LookupAndCapacity(); QueueFailure(); Allocations(); BoundedLogging();
+            SnapshotAndPending(); LookupAndCapacity(); QueueFailure(); Allocations(); BoundedLogging(); TypedFailures();
             SnapshotAndPending(true);
             for (bool requested : {false, true})
                 for (bool incompatible : {false, true}) GeneratorChoice(requested, incompatible);

@@ -4,6 +4,11 @@
 set -euo pipefail
 mkdir -p build/uberhar-probe
 python3 tools/uberhar/check_android_keys.py
+# CodexAstraLocal: Driver ownership and optional-cache framing/renewal gate this build.
+python3 tools/uberhar/test_android_driver_lifecycle.py
+python3 tools/uberhar/test_optional_cache_lifecycle.py
+# CodexAstraLocal: Real temporary-file close/reopen, quota and atomic persistence.
+python3 tools/uberhar/test_optional_cache_io.py
 # CodexAstraLocal: Compile extracted shader jobs/routes before the larger corpus.
 # Changed production bodies must work with every ordinary/static fixture shell;
 # compilation failure is a gate failure, never a successful negative control.

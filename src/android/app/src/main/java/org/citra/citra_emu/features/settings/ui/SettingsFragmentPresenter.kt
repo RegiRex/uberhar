@@ -1051,6 +1051,22 @@ class SettingsFragmentPresenter(private val fragmentView: SettingsFragmentView) 
             BooleanSetting.UBERHAR_PARALLEL_TEXTURE_DECODE.key,
             BooleanSetting.UBERHAR_PARALLEL_TEXTURE_DECODE.defaultValue
         ))
+        // CodexAstraLocal: Measure the generic compiler/runtime tradeoff independently of full shaders.
+        sl.add(SwitchSetting(
+            BooleanSetting.UBERHAR_OPTIMIZE_GENERIC_SHADERS,
+            R.string.uberhar_optimize_generic_shaders,
+            R.string.uberhar_optimize_generic_shaders_description,
+            BooleanSetting.UBERHAR_OPTIMIZE_GENERIC_SHADERS.key,
+            BooleanSetting.UBERHAR_OPTIMIZE_GENERIC_SHADERS.defaultValue
+        ))
+        // CodexAstraLocal: Compare submission only; do not spoof a driver or enable unrelated features.
+        sl.add(SwitchSetting(
+            BooleanSetting.TURNIP_PASS_END_FLUSH,
+            R.string.turnip_pass_end_flush,
+            R.string.turnip_pass_end_flush_description,
+            BooleanSetting.TURNIP_PASS_END_FLUSH.key,
+            BooleanSetting.TURNIP_PASS_END_FLUSH.defaultValue
+        ))
         // CodexAstraLocal: Detailed counters are optional; admission safety remains active.
         sl.add(SwitchSetting(
             BooleanSetting.UBERHAR_CPU_EXECUTION_CENSUS,
@@ -1141,10 +1157,10 @@ class SettingsFragmentPresenter(private val fragmentView: SettingsFragmentView) 
                     R.array.resolutionFactorValues,
                     IntSetting.RESOLUTION_FACTOR.key,
                     IntSetting.RESOLUTION_FACTOR.defaultValue,
-                    // CodexAstraLocal: Testing freezes the launch resolution; ordinary
-                    // resolution changes remain live when that overlay is not active.
+                    // CodexAstraLocal: Edit an active Testing resolution through its own
+                    // live controls, leaving the ordinary saved resolution unchanged.
                     isEnabled = !(TestingSettings.enabled && EmulationActivity.isRunning()),
-                    disabledMessage = R.string.uberhar_testing_restart_required
+                    disabledMessage = R.string.uberhar_testing_resolution_override
                 )
             )
             add(

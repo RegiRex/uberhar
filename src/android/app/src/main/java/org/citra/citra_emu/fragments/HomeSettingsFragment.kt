@@ -15,6 +15,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.isVisible
 import androidx.core.view.updatePadding
 import androidx.core.widget.doOnTextChanged
 import androidx.fragment.app.Fragment
@@ -33,6 +34,7 @@ import org.citra.citra_emu.databinding.DialogSoftwareKeyboardBinding
 import org.citra.citra_emu.databinding.FragmentHomeSettingsBinding
 import org.citra.citra_emu.features.settings.SettingKeys
 import org.citra.citra_emu.features.settings.model.Settings
+import org.citra.citra_emu.features.settings.ui.TestingPanelController
 import org.citra.citra_emu.features.settings.ui.SettingsActivity
 import org.citra.citra_emu.features.settings.utils.SettingsFile
 import org.citra.citra_emu.model.Game
@@ -41,6 +43,7 @@ import org.citra.citra_emu.ui.main.MainActivity
 import org.citra.citra_emu.utils.GameHelper
 import org.citra.citra_emu.utils.GpuDriverHelper
 import org.citra.citra_emu.utils.PermissionsHandler
+import org.citra.citra_emu.viewmodel.GamesViewModel
 import org.citra.citra_emu.viewmodel.DriverViewModel
 import org.citra.citra_emu.viewmodel.HomeViewModel
 
@@ -52,6 +55,9 @@ class HomeSettingsFragment : Fragment() {
 
     private val homeViewModel: HomeViewModel by activityViewModels()
     private val driverViewModel: DriverViewModel by activityViewModels()
+    // CodexAstraLocal: Reuse library titles; the selected editor scope does not alter ordinary game preferences.
+    private val gamesViewModel: GamesViewModel by activityViewModels()
+    private var testingController: TestingPanelController? = null
 
     private val preferences
         get() =
@@ -73,6 +79,8 @@ class HomeSettingsFragment : Fragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         mainActivity = requireActivity() as MainActivity
+
+        setupTestingPanel()
 
         val optionsList = listOf(
             HomeSetting(
@@ -213,8 +221,35 @@ class HomeSettingsFragment : Fragment() {
         setInsets()
     }
 
+    // CodexAstraLocal: A remembered target makes per-title presets one tap away below the home logo.
+    private fun setupTestingPanel() {
+        var target = preferences.getString("uberhar_testing_title", "") ?: ""
+        testingController = TestingPanelController(binding.testingPanel, viewLifecycleOwner, target)
+        fun renderTarget() {
+            val game = gamesViewModel.games.value.firstOrNull { "%016X".format(it.titleId) == target }
+            binding.testingPanel.testingTarget.text = if (target.isEmpty()) {
+                getString(R.string.uberhar_testing_global_choices)
+            } else getString(R.string.uberhar_testing_target, game?.title ?: target)
+        }
+        binding.testingPanel.testingTarget.isVisible = true
+        binding.testingPanel.testingTarget.setOnClickListener {
+            val games = gamesViewModel.games.value.filter { it.titleId != 0L }.distinctBy { it.titleId }
+            val labels = listOf(getString(R.string.uberhar_testing_global_choices)) + games.map { it.title }
+            MaterialAlertDialogBuilder(requireContext())
+                .setTitle(R.string.uberhar_testing_select_game)
+                .setItems(labels.toTypedArray()) { _, position ->
+                    target = if (position == 0) "" else "%016X".format(games[position - 1].titleId)
+                    preferences.edit().putString("uberhar_testing_title", target).apply()
+                    testingController?.setGame(target)
+                    renderTarget()
+                }.show()
+        }
+        renderTarget()
+    }
+
     override fun onStart() {
         super.onStart()
+        testingController?.render()
         exitTransition = null
         homeViewModel.setNavigationVisibility(visible = true, animated = true)
         homeViewModel.setStatusBarShadeVisibility(visible = true)
@@ -222,6 +257,7 @@ class HomeSettingsFragment : Fragment() {
 
     override fun onDestroyView() {
         super.onDestroyView()
+        testingController = null
         _binding = null
     }
 

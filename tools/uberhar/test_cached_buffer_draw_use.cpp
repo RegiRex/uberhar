@@ -37,7 +37,9 @@ struct VertexCapture {
  bool HasAttempt()const{return attempt;}
  template<class... T>Evidence Commit(T&&...){return{evidence};}
 };
-struct ReadyPipeline {u64 Key()const{return 7;}};
+// CodexAstraLocal: The optional pipeline endpoint records the real caller's
+// final-use publication; its deferred destruction is covered by lifetime tests.
+struct ReadyPipeline {u64 last{};unsigned stamps{};u64 Key()const{return 7;}};
 struct HardwareVertex {std::array<u8,88> data;};
 struct Packet {
  std::vector<HardwareVertex> vertices=std::vector<HardwareVertex>(3);
@@ -70,6 +72,10 @@ struct RasterizerVulkan {
  VertexCapture* vertex_capture{};
  struct Cache {
   RasterizerVulkan& r;
+  void CompleteReadyGpuDraw(ReadyPipeline* pipeline){
+   Require(r.scheduler.draws==1,"optional pipeline publication follows actual draw");
+   if(pipeline){pipeline->last=r.scheduler.CurrentTick();++pipeline->stamps;}
+  }
   template<class... T>bool BindPipeline(T&&...){if(r.bind_flush)++r.scheduler.tick;return r.bind_ready;}
   template<class... T>std::optional<int> CaptureVertexBinding(T&&...){return r.vertex_capture->binding?std::optional<int>{1}:std::nullopt;}
  }pipeline_cache{*this};
@@ -98,10 +104,13 @@ int main(){
     if(pending){
      Require(accepted==!ready_route,"pending return contract unchanged");
      Require(r.scheduler.draws==0&&r.scheduler.records==0,"pending pipeline queues no draw");
+     Require(r.ready_pipeline.stamps==0,"pending pipeline publishes no optional draw use");
      Require(r.uniform_buffer.stamps==0&&r.texture_buffer.stamps==0&&r.texture_lf_buffer.stamps==0,
              "no queued draw must not stamp");
     }else{
      Require(accepted&&r.scheduler.draws==1&&r.scheduler.records==1,"one actual accelerated draw");
+     Require(r.ready_pipeline.stamps==1 && r.ready_pipeline.last==r.scheduler.CurrentTick(),
+             "actual accelerated draw stamps optional pipeline once at final tick");
      for(const auto* ring:{&r.uniform_buffer,&r.texture_buffer,&r.texture_lf_buffer}){
       Require(ring->stamps==1,"actual accelerated draw stamps each ring once");
       Require(ring->last==r.scheduler.CurrentTick(),"actual accelerated final tick");

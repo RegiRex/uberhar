@@ -722,6 +722,9 @@ void QtConfig::ReadRendererValues() {
     ReadGlobalSetting(Settings::values.uberhar_cpu_vertex_only);
     // CodexAstraLocal: Read the same independent per-game controls as Android.
     ReadGlobalSetting(Settings::values.uberhar_native_full_fragments);
+    // CodexAstraLocal: Preserve the portable driver comparison in desktop configuration.
+    ReadGlobalSetting(Settings::values.turnip_pass_end_flush);
+    ReadGlobalSetting(Settings::values.uberhar_optimize_generic_shaders);
     ReadGlobalSetting(Settings::values.uberhar_cpu_prefix_overlap);
     ReadGlobalSetting(Settings::values.uberhar_parallel_texture_decode);
 
@@ -1286,6 +1289,9 @@ void QtConfig::SaveRendererValues() {
     WriteGlobalSetting(Settings::values.uberhar_cpu_vertex_only);
     // CodexAstraLocal: Write the same independent per-game controls as Android.
     WriteGlobalSetting(Settings::values.uberhar_native_full_fragments);
+    // CodexAstraLocal: Save the isolated submission policy without changing other driver flags.
+    WriteGlobalSetting(Settings::values.turnip_pass_end_flush);
+    WriteGlobalSetting(Settings::values.uberhar_optimize_generic_shaders);
     WriteGlobalSetting(Settings::values.uberhar_cpu_prefix_overlap);
     WriteGlobalSetting(Settings::values.uberhar_parallel_texture_decode);
 

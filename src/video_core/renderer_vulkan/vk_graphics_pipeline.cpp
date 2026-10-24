@@ -105,8 +105,15 @@ bool GraphicsPipeline::TryBuild(bool wait_built, bool background_only) {
     // AstraEH: Publish queue time before the worker can read it.
     queued_at = std::chrono::steady_clock::now();
     build_phase.store(0, std::memory_order::relaxed);
-    worker->QueueWork([this] { Build(); });
-    is_pending = true;
+    // CodexAstraLocal: Queue allocation is a terminal completion boundary too;
+    // a published pipeline must never retain an unfinishable pending state.
+    try {
+        worker->QueueWork([this] { Build(); });
+        is_pending = true;
+    } catch (...) {
+        MarkFailed();
+        return true;
+    }
     return wait_built;
 }
 

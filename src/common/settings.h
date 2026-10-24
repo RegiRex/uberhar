@@ -559,6 +559,10 @@ struct Values {
     // CodexAstraLocal: Independent, session-frozen controls isolate fragment,
     // assembly and texture scheduling without changing mode or dropping draws.
     SwitchableSetting<bool> uberhar_native_full_fragments{true, Keys::uberhar_native_full_fragments};
+    // CodexAstraLocal: Test the existing asynchronous pass-end submission policy on Turnip.
+    SwitchableSetting<bool> turnip_pass_end_flush{false, Keys::turnip_pass_end_flush};
+    // CodexAstraLocal: Optional generic shader optimization trades first-use compile cost for GPU cost.
+    SwitchableSetting<bool> uberhar_optimize_generic_shaders{false, Keys::uberhar_optimize_generic_shaders};
     SwitchableSetting<bool> uberhar_cpu_prefix_overlap{true, Keys::uberhar_cpu_prefix_overlap};
     SwitchableSetting<bool> uberhar_parallel_texture_decode{true, Keys::uberhar_parallel_texture_decode};
     // CodexAstraLocal: Optional process-frozen execution census, off by default;

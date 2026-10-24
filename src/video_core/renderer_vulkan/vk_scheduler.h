@@ -10,6 +10,7 @@
 #include "common/alignment.h"
 #include "common/common_funcs.h"
 #include "common/polyfill_thread.h"
+#include "common/uberhar_sampled_duration.h"
 #include "video_core/renderer_vulkan/vk_master_semaphore.h"
 #include "video_core/renderer_vulkan/vk_resource_pool.h"
 #include "video_core/shader_build_failure.h" // CodexAstraUlt-2: Terminal worker handoff.
@@ -52,6 +53,10 @@ public:
 
     /// Sends currently recorded work to the worker thread.
     void DispatchWork();
+
+    // CodexAstraLocal TEST-ONLY LOG: Called at the render diagnostic cadence;
+    // remove after wait/queue costs are qualified. Adds no submission or wait.
+    void ReportDiagnostics(bool final);
 
     // CodexAstraLocal: Deferred CPU uploads require an independent ordered
     // recorder. A future synchronous scheduler must retain ordinary draws.
@@ -197,6 +202,14 @@ private:
             return submit;
         }
 
+        // CodexAstraLocal: A sparse enqueue timestamp measures command-worker
+        // queue age, not GPU execution. It remains owned by this queued chunk.
+        void MarkQueued(bool sample) {
+            queued_at = sample ? std::chrono::steady_clock::now()
+                               : std::chrono::steady_clock::time_point{};
+        }
+        auto QueuedAt() const { return queued_at; }
+
     private:
         Command* first = nullptr;
         Command* last = nullptr;
@@ -204,6 +217,7 @@ private:
         std::size_t recorded_counts = 0;
         std::size_t command_offset = 0;
         bool submit = false;
+        std::chrono::steady_clock::time_point queued_at{};
         alignas(std::max_align_t) std::array<u8, 0x8000> data{};
     };
 
@@ -231,6 +245,12 @@ private:
     std::mutex queue_mutex;
     std::condition_variable_any event_cv;
     VideoCore::ShaderFailureState shader_failure;
+    // CodexAstraLocal TEST-ONLY LOG: Only queue-age accumulation crosses threads;
+    // other counters belong to the command producer. Remove after qualification.
+    bool diagnostics_enabled{};
+    Common::Uberhar::SampledDuration worker_wait, gpu_wait, submission_wait;
+    u64 diagnostic_dispatches{}, diagnostic_submits{}, diagnostic_queue_peak{};
+    std::atomic<u64> diagnostic_queue_ns{}, diagnostic_queue_samples{};
     std::jthread worker_thread;
     bool use_worker_thread;
 };
