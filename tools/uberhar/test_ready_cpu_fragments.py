@@ -177,6 +177,12 @@ def main() -> None:
                       'bool PipelineCache::BindPipeline(',
                       'void PipelineCache::ClearTevFallbacks()'):
         parts.append(function(cpp,signature))
+    # CodexAstraLocal: Hardware input must exercise the real fallback VS/GS selection;
+    # the old driver adapter unconditionally substituted CPU stages and hid this contract.
+    fallback = function(cpp, 'GraphicsPipeline* PipelineCache::GetTevFallback(')
+    selection = fallback[fallback.index('    auto shaders = current_shaders;'):
+                         fallback.index('    if (shader_it != tev_shaders.end())')]
+    (out/'generic_vertex_selection.inc').write_text(selection)
     parts.append(function(read('src/video_core/renderer_vulkan/vk_shader_disk_cache.cpp'),
         'std::optional<std::pair<u64, Shader* const>> ShaderDiskCache::UseReadyFragmentShader('))
     parts.append(function(read('src/video_core/renderer_vulkan/vk_shader_disk_cache.cpp'),

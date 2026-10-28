@@ -124,6 +124,15 @@ public:
     /// Get the color and depth surfaces based on the framebuffer configuration
     FramebufferHelper<T> GetFramebufferSurfaces(bool using_color_fb, bool using_depth_fb);
 
+    // CodexAstraLocal TEST-ONLY LOG: Record actual helper exits, excluding canceled
+    // preparation. Remove these counters with the .56 depth comparison logs.
+    void RecordFramebufferDepthInvalidation(bool writes) noexcept {
+        framebuffer_depth_stats.Record(writes);
+    }
+    const FramebufferDepthInvalidationStats& GetFramebufferDepthInvalidationStats() const noexcept {
+        return framebuffer_depth_stats;
+    }
+
     /// Get a surface that matches a "texture copy" display transfer config
     SurfaceRect_Tuple GetTexCopySurface(const SurfaceParams& params);
 
@@ -235,6 +244,8 @@ private:
     // CodexAstraLocal: One lazy joined decoder belongs to this cache and cannot
     // outlive the owner of its mapped upload resources.
     ParallelTextureDecoder texture_decoder;
+    // CodexAstraLocal TEST-ONLY LOG: Constant-space exit totals; removal policy above.
+    FramebufferDepthInvalidationStats framebuffer_depth_stats;
 };
 
 } // namespace VideoCore

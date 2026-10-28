@@ -1027,6 +1027,41 @@ jlong Java_org_citra_citra_1emu_NativeLibrary_getRunningTitleId([[maybe_unused]]
     return static_cast<jlong>(title_id);
 }
 
+// CodexAstraLocal: The Testing UI must display the launch request during live resolution edits,
+// without confusing this setting with the title compatibility gate or actual skipped work.
+jboolean Java_org_citra_citra_1emu_NativeLibrary_getRequestedRightEyeRenderDisabled(
+    [[maybe_unused]] JNIEnv* env, [[maybe_unused]] jobject obj) {
+    return static_cast<jboolean>(Settings::values.disable_right_eye_render.GetValue());
+}
+
+// CodexAstraLocal: Both UI and config use the same version gate, independent of build flavor.
+jboolean Java_org_citra_citra_1emu_NativeLibrary_isAlphaTestingAvailable(
+    [[maybe_unused]] JNIEnv* env, [[maybe_unused]] jobject obj) {
+    return static_cast<jboolean>(Common::g_uberhar_alpha_testing);
+}
+
+// CodexAstraLocal: Running controls show effective launch permissions after the Combo CPU veto.
+jboolean Java_org_citra_citra_1emu_NativeLibrary_getEffectiveHardwareShaders(
+    [[maybe_unused]] JNIEnv* env, [[maybe_unused]] jobject obj) {
+    return static_cast<jboolean>(Settings::values.use_hw_shader.GetValue());
+}
+
+jint Java_org_citra_citra_1emu_NativeLibrary_getEffectiveRenderThreadDelayUs(
+    [[maybe_unused]] JNIEnv* env, [[maybe_unused]] jobject obj) {
+    return static_cast<jint>(Settings::values.delay_game_render_thread_us.GetValue());
+}
+
+// CodexAstraLocal: Report immutable launch experiments during ordinary live resolution edits.
+jboolean Java_org_citra_citra_1emu_NativeLibrary_getEffectiveLinearFiltering(
+    [[maybe_unused]] JNIEnv* env, [[maybe_unused]] jobject obj) {
+    return static_cast<jboolean>(Settings::values.filter_mode.GetValue());
+}
+
+jint Java_org_citra_citra_1emu_NativeLibrary_getEffectiveStereoDepth(
+    [[maybe_unused]] JNIEnv* env, [[maybe_unused]] jobject obj) {
+    return static_cast<jint>(Settings::values.factor_3d.GetValue());
+}
+
 jboolean Java_org_citra_citra_1emu_NativeLibrary_onGamePadEvent([[maybe_unused]] JNIEnv* env,
                                                                 [[maybe_unused]] jobject obj,
                                                                 [[maybe_unused]] jstring j_device,

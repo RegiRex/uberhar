@@ -83,6 +83,90 @@
                         android:text="@string/uberhar_testing_resolution_4x" />
                 </com.google.android.material.button.MaterialButtonToggleGroup>
             </LinearLayout>
+            <!-- CodexAstraLocal: Keep the explicit per-title experiment beside preset/resolution. -->
+            <com.google.android.material.materialswitch.MaterialSwitch
+                android:id="@+id/testing_disable_right_eye_render"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:minHeight="48dp"
+                android:text="@string/disable_right_eye_render" />
+
+            <TextView
+                android:id="@+id/testing_right_eye_description"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/uberhar_testing_right_eye_description"
+                android:textAppearance="?attr/textAppearanceBodySmall" />
+
+            <!-- CodexAstraLocal: Separate title controls preserve the preset baseline until selected. -->
+            <com.google.android.material.materialswitch.MaterialSwitch
+                android:id="@+id/testing_hardware_shaders"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:minHeight="48dp"
+                android:text="@string/hw_shaders" />
+
+            <TextView
+                android:id="@+id/testing_hardware_description"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/uberhar_testing_hardware_description"
+                android:textAppearance="?attr/textAppearanceBodySmall" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/testing_render_thread_delay"
+                style="?attr/materialButtonOutlinedStyle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/delay_render_thread" />
+
+            <com.google.android.material.materialswitch.MaterialSwitch
+                android:id="@+id/testing_linear_filtering"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:minHeight="48dp"
+                android:text="@string/linear_filtering" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/uberhar_testing_linear_description"
+                android:textAppearance="?attr/textAppearanceBodySmall" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:text="@string/uberhar_testing_stereo_depth"
+                android:textAppearance="?attr/textAppearanceBodyMedium" />
+
+            <com.google.android.material.button.MaterialButtonToggleGroup
+                android:id="@+id/testing_stereo_depth"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                app:selectionRequired="true"
+                app:singleSelection="true">
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/testing_stereo_depth_0"
+                    style="?attr/materialButtonOutlinedStyle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/uberhar_testing_stereo_depth_0" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/testing_stereo_depth_1"
+                    style="?attr/materialButtonOutlinedStyle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/uberhar_testing_stereo_depth_1" />
+            </com.google.android.material.button.MaterialButtonToggleGroup>
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/uberhar_testing_stereo_description"
+                android:textAppearance="?attr/textAppearanceBodySmall" />
         </LinearLayout>
         <!-- CodexAstraLocal: Title inheritance and driver choices stay available with Testing off. -->
         <com.google.android.material.button.MaterialButton

@@ -5,6 +5,7 @@
 #pragma once
 
 #include <mutex>
+#include <atomic> // CodexAstraLocal: Publish sampled worker metadata without a new wait.
 #include <chrono> // CodexAstraLocal: Owner-frame diagnostic cadence, never a per-draw clock.
 
 #include "common/math_util.h"
@@ -19,6 +20,11 @@ namespace Vulkan {
 class Instance;
 class Scheduler;
 class Framebuffer;
+class PipelineCache;
+
+// CodexAstraLocal TEST-ONLY LOG: Count existing boundaries without changing them;
+// remove after attachment/pass-cost qualification. Feedback counts requests too.
+enum class PassEndReason : u32 { Explicit, PassChange, Submission, Feedback, Count };
 
 struct RenderPass {
     vk::Framebuffer framebuffer;
@@ -50,7 +56,12 @@ public:
     void BeginRendering(const RenderPass& new_pass, bool framebuffer_pass = false);
 
     /// Exits from any currently active renderpass instance
-    void EndRendering();
+    void EndRendering(PassEndReason reason = PassEndReason::Explicit);
+
+    // CodexAstraLocal TEST-ONLY LOG: Call only after an actual graphics draw enqueue.
+    // The sampled observer reads the worker's fulfilled binding, never a requested
+    // shader that may lose fallback arbitration. Remove with pass-cost diagnostics.
+    void RecordDiagnosticDraw(const PipelineCache& pipelines, u32 color_addr, u32 depth_addr);
 
     // CodexAstraLocal TEST-ONLY LOG: Resolve sparse GPU samples at the existing
     // frame/teardown boundary; remove after pass/submission costs are qualified.
@@ -87,9 +98,22 @@ private:
     struct PassSample {
         u64 tick{}, pixels{};
         bool pending{}, ended{}, clear{}, framebuffer_pass{};
+        // CodexAstraLocal: Owner metadata is fixed before queueing; attribution
+        // is worker-only until the end command publishes and the GPU tick retires.
+        u64 pass_id{}, frame_begin{}, frame_end{};
+        PassEndReason end_reason{};
+        struct Attribution {
+            u64 draws{}, unattributed{}, pipeline_changes{}, shader_changes{}, target_changes{};
+            u64 first_frame{}, last_frame{}, first_pipeline{}, last_pipeline{};
+            std::array<u64, 3> first_shaders{}, last_shaders{};
+            std::array<u32, 2> first_target{}, last_target{};
+        } attribution;
     };
     vk::UniqueQueryPool diagnostic_queries;
     std::array<PassSample, 16> diagnostic_samples{};
+    // CodexAstraLocal: Acquire/release covers host metadata explicitly; query
+    // availability alone is not C++ synchronization. Slots retain GPU gating too.
+    std::array<std::atomic_bool, 16> diagnostic_published{};
     int diagnostic_active{-1};
     bool diagnostics_enabled{};
     u64 diagnostic_mask{};
@@ -98,6 +122,14 @@ private:
     u64 diagnostic_passes{}, diagnostic_clears{}, diagnostic_reuses{}, diagnostic_flushes{};
     u64 diagnostic_sampled{}, diagnostic_full{}, diagnostic_unavailable{}, diagnostic_errors{};
     u64 diagnostic_pixels{}, diagnostic_max_ns{}, diagnostic_clear_samples{};
+    // CodexAstraLocal TEST-ONLY LOG: Fixed counters and one representative for
+    // each report interval, with no shader map or per-sample logging.
+    u64 diagnostic_frame{1}, diagnostic_draws{}, diagnostic_unattributed{};
+    u64 diagnostic_mixed_shader_samples{}, diagnostic_mixed_pipeline_samples{};
+    u64 diagnostic_feedback_requests{};
+    std::array<u64, static_cast<std::size_t>(PassEndReason::Count)> diagnostic_end_reasons{};
+    PassSample diagnostic_slowest{};
+    double diagnostic_slowest_ns{};
     double diagnostic_ns{};
     // CodexAstraLocal TEST-ONLY LOG: Separate sampled framebuffer graphics from
     // explicit clear/utility passes; neither includes unmeasured presentation.

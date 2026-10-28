@@ -8,19 +8,8 @@
     android:background="?attr/colorSurface"
     android:orientation="vertical">
 
-    <!-- CodexAstraLocal: Explain normal-title scope even while temporary Testing overrides it. -->
-    <TextView
-        android:id="@+id/settings_scope"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:paddingHorizontal="16dp"
-        android:paddingVertical="8dp"
-        android:textAppearance="?attr/textAppearanceBodySmall"
-        android:visibility="gone" />
-
-    <!-- CodexAstraLocal: Share the same controls and live resolution handling with home Options. -->
-    <include android:id="@+id/testing_panel" layout="@layout/panel_testing" />
-
+    <!-- CodexAstraLocal: Scope and Testing are now list content, so short/landscape windows
+         scroll every control together instead of reserving an inaccessible fixed header. -->
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/list_settings"
         android:layout_width="match_parent"

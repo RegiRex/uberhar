@@ -1,6 +1,6 @@
 // Copyright 2014-2026 Citra Emulator Project / Azahar Emulator Project
-// Licensed under GPLv2 or any later version
-// Refer to the license.txt file included.
+// Licensed under GPLv3 or any later version
+// Refer to the misc/licenses/gplv3.txt file included.
 
 #pragma once
 
@@ -355,7 +355,8 @@ public:
         return file->GetType().HasCompressedType();
     }
 
-    NCCH_Header ncch_header;
+    // CodexAstraLocal: Preserve PR2648 initialization on failed/partial input.
+    NCCH_Header ncch_header{};
     ExeFs_Header exefs_header;
     ExHeader_Header exheader_header;
 
@@ -370,6 +371,15 @@ private:
     bool is_tainted = false; // Are there parts of this container being overridden?
     bool is_loaded = false;
     bool is_compressed = false;
+
+    // CodexAstraLocal: Plus separates primary metadata and secondary executable/RomFS keys.
+    bool is_encrypted = false;
+    // for decrypting exheader, exefs header and icon/banner section
+    std::array<u8, 16> primary_key{};
+    std::array<u8, 16> secondary_key{}; // for decrypting romfs and .code section
+    std::array<u8, 16> exheader_ctr{};
+    std::array<u8, 16> exefs_ctr{};
+    std::array<u8, 16> romfs_ctr{};
 
     u32 partition = 0;
 

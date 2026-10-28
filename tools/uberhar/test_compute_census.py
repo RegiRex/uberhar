@@ -56,6 +56,9 @@ def main():
     cpp = read('vk_compute_rect.cpp')
     rasterizer_header = read('vk_rasterizer.h')
     rasterizer = read('vk_rasterizer.cpp')
+    # CodexAstraLocal: The extracted Draw uses the real resolved-format write predicate.
+    pipeline = read('vk_graphics_pipeline.h')
+    depth_predicate = block(pipeline, '[[nodiscard]] bool IsDepthWriteEnabled()')
     helper = read('uberhar_compute_census.h')
     rectangle = read('uberhar_compute_rect.h')
     observe = block(header, 'void ObserveState(')
@@ -146,6 +149,14 @@ def main():
         ]
         preflight_defects['deferred-unsafe-preflight'] = preflight.replace('if (!(raw & ~expandable))', 'if (false)')
         assert preflight_defects['deferred-unsafe-preflight'] != preflight
+        # CodexAstraLocal: A stale attachment format can silently suppress real
+        # stencil writes; require behavioral rejection of this exact integration defect.
+        resolved_call = 'fb_helper.SetDepthWriteEnabled(pipeline_info.IsDepthWriteEnabled());'
+        assert prefix.count(resolved_call) == 1
+        stale_depth = prefix.replace(resolved_call,
+                                     'fb_helper.SetDepthWriteEnabled(write_depth_fb);')
+        variants.append(('stale-depth-format', helper, stale_depth, observe, report,
+                         'depth permission uses current resolved format'))
     # CodexAstraLocal: Surviving defects exercise actual rectangle/deferred contracts.
     cases = []
     for name, census_source, route, observation_source, report_source, expected in variants:
@@ -156,6 +167,8 @@ def main():
         # CodexAstraLocal: A shadow-source run must compile its prepared-state
         # helper, not silently fall back to the checkout's older classifier API.
         (include / 'uberhar_compute_rect.h').write_text(rectangle)
+        # CodexAstraLocal: Keep the predicate provenance with every compiled variant.
+        (target / 'depth_predicate.inc').write_text(depth_predicate + '\n')
         for filename, body in [('observe.inc', observation_source), ('members.inc', members), ('report.inc', report_source), ('admission.inc', route), ('deferred_preflight.inc', preflight_defects.get(name, preflight)), ('policy.inc', policy), ('empty.inc', empty)]:
             (target / filename).write_text(body + '\n')
         command = [os.environ.get('CXX', 'c++'), '-std=c++20', '-O2', '-DFMT_HEADER_ONLY',

@@ -494,9 +494,15 @@ struct Z3DSWriteIOFile::Z3DSWriteIOFileImpl {
     Z3DSWriteIOFileImpl(size_t frame_size) {
         zstd_frame_size = frame_size;
         cstream = ZSTD_seekable_createCStream();
+        // CodexAstraLocal: Allocation/init failure must remain visible to writes and finalization.
+        if (!cstream) {
+            failed = true;
+            return;
+        }
         size_t init_result = ZSTD_seekable_initCStream(cstream, ZSTD_CLEVEL_DEFAULT, 0,
                                                        static_cast<unsigned int>(frame_size));
         if (ZSTD_isError(init_result)) {
+            failed = true;
             LOG_ERROR(Common_Filesystem, "ZSTD_seekable_initCStream() error : {}",
                       ZSTD_getErrorName(init_result));
         }
@@ -507,9 +513,16 @@ struct Z3DSWriteIOFile::Z3DSWriteIOFileImpl {
         next_input_size_hint = ZSTD_CStreamInSize();
     }
 
+    // CodexAstraLocal: Own the stream on every success/error path, including incomplete writers.
+    ~Z3DSWriteIOFileImpl() {
+        if (cstream) {
+            ZSTD_seekable_freeCStream(cstream);
+        }
+    }
+
     bool WriteHeader(IOFileBase* file) {
-        file->Seek(0, SEEK_SET);
-        return file->WriteBytes(&write_header, sizeof(write_header)) == sizeof(write_header);
+        return file->Seek(0, SEEK_SET) &&
+               file->WriteBytes(&write_header, sizeof(write_header)) == sizeof(write_header);
     }
 
     bool WriteMetadata(IOFileBase* file, const std::span<u8>& data) {
@@ -522,6 +535,11 @@ struct Z3DSWriteIOFile::Z3DSWriteIOFileImpl {
     }
 
     size_t Write(IOFileBase* file, const void* data, std::size_t length) {
+        // CodexAstraLocal: Never enter a freed/failed compressor after explicit Close or I/O
+        // failure.
+        if (failed || !cstream) {
+            return 0;
+        }
         size_t ret = length;
 
         const size_t out_size = ZSTD_CStreamOutSize();
@@ -538,6 +556,7 @@ struct Z3DSWriteIOFile::Z3DSWriteIOFileImpl {
             if (ZSTD_isError(next_input_size_hint)) {
                 LOG_ERROR(Common_Filesystem, "ZSTD_seekable_compressStream() error : {}",
                           ZSTD_getErrorName(next_input_size_hint));
+                failed = true;
                 ret = 0;
                 next_input_size_hint = ZSTD_CStreamInSize();
                 break;
@@ -546,6 +565,7 @@ struct Z3DSWriteIOFile::Z3DSWriteIOFileImpl {
                 next_input_size_hint = in_size;
             }
             if (file->WriteBytes(static_cast<u8*>(output.dst), output.pos) != output.pos) {
+                failed = true;
                 ret = 0;
                 break;
             }
@@ -555,6 +575,13 @@ struct Z3DSWriteIOFile::Z3DSWriteIOFileImpl {
     }
 
     bool Close(IOFileBase* file, size_t written_uncompressed) {
+        // CodexAstraLocal: Consume ownership once; RAII frees the stream even on footer/header
+        // failure.
+        std::unique_ptr<ZSTD_seekable_CStream, decltype(&ZSTD_seekable_freeCStream)> stream(
+            std::exchange(cstream, nullptr), &ZSTD_seekable_freeCStream);
+        if (failed || !stream) {
+            return false;
+        }
         const size_t out_size = ZSTD_CStreamOutSize();
 
         if (write_buffer.size() < out_size) {
@@ -564,7 +591,7 @@ struct Z3DSWriteIOFile::Z3DSWriteIOFileImpl {
         size_t remaining;
         do {
             ZSTD_outBuffer output = {write_buffer.data(), write_buffer.size(), 0};
-            remaining = ZSTD_seekable_endStream(cstream, &output); /* close stream */
+            remaining = ZSTD_seekable_endStream(stream.get(), &output); /* close stream */
             if (ZSTD_isError(remaining)) {
                 LOG_ERROR(Common_Filesystem, "ZSTD_seekable_endStream() error : {}",
                           ZSTD_getErrorName(remaining));
@@ -580,8 +607,6 @@ struct Z3DSWriteIOFile::Z3DSWriteIOFileImpl {
         write_header.compressed_size = written_compressed;
         write_header.uncompressed_size = written_uncompressed;
 
-        ZSTD_seekable_freeCStream(cstream);
-
         return WriteHeader(file);
     }
 
@@ -590,6 +615,7 @@ struct Z3DSWriteIOFile::Z3DSWriteIOFileImpl {
     size_t zstd_frame_size = 0;
     u64 written_compressed = 0;
 
+    bool failed = false;
     ZSTD_seekable_CStream* cstream{};
     Z3DSFileHeader write_header{};
 };
@@ -604,7 +630,8 @@ Z3DSWriteIOFile::Z3DSWriteIOFile(std::unique_ptr<IOFileBase>&& underlying_file,
     Child() = std::move(underlying_file);
     ASSERT_MSG(!Child()->GetType().HasCompressedType(), "Underlying file is already compressed!");
     impl->write_header.underlying_magic = underlying_magic;
-    impl->WriteHeader(Child().get());
+    // CodexAstraLocal: Initial-header errors must poison the staged output too.
+    impl->failed |= !impl->WriteHeader(Child().get());
 
     Metadata().Add("compressor", std::string("Azahar ") + Common::g_build_fullname);
 
@@ -629,8 +656,16 @@ Z3DSWriteIOFile::~Z3DSWriteIOFile() {
 }
 
 bool Z3DSWriteIOFile::Close() {
-    impl->Close(Child().get(), written_uncompressed);
-    return Child()->Close();
+    // CodexAstraLocal: Preserve footer and child-close failures, and make destructor reentry
+    // harmless.
+    if (closed) {
+        return close_result;
+    }
+    closed = true;
+    const bool stream_result = impl->Close(Child().get(), written_uncompressed);
+    const bool child_result = Child()->Close();
+    close_result = stream_result && child_result;
+    return close_result;
 }
 
 u64 Z3DSWriteIOFile::GetSize() const {
@@ -666,11 +701,18 @@ std::size_t Z3DSWriteIOFile::ReadAtImpl(void* data, std::size_t byte_count, std:
 
 std::size_t Z3DSWriteIOFile::WriteImpl(const void* data, std::size_t length,
                                        std::size_t data_size) {
+    // CodexAstraLocal: A finalized or failed metadata stream cannot accept more content.
+    if (closed || impl->failed) {
+        return 0;
+    }
     if (!metadata_written) {
         metadata_written = true;
         auto metadata_binary = metadata.AsBinary();
         if (!metadata_binary.empty()) {
-            impl->WriteMetadata(Child().get(), metadata_binary);
+            if (!impl->WriteMetadata(Child().get(), metadata_binary)) {
+                impl->failed = true;
+                return 0;
+            }
         }
     }
 
@@ -717,6 +759,9 @@ void Z3DSWriteIOFile::serialize(Archive& ar, const unsigned int) {
         ar & hd;
         ar & frame_size;
         ar & written_compressed;
+        // CodexAstraLocal: Deserialization constructs a new writer lifecycle.
+        closed = false;
+        close_result = false;
         impl = std::make_unique<Z3DSWriteIOFileImpl>(frame_size);
         impl->write_header = hd;
         impl->written_compressed = written_compressed;

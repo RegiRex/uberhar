@@ -4,6 +4,8 @@
 package org.citra.citra_emu.features.settings.ui
 
 import android.view.View
+import android.text.InputType
+import android.widget.EditText
 import android.widget.Toast
 import androidx.core.view.isVisible
 import androidx.lifecycle.LifecycleOwner
@@ -54,6 +56,57 @@ class TestingPanelController(
                 TestingSettings.resolution = if (checkedId == R.id.testing_resolution_4x) 4 else 2
             }
         }
+        // CodexAstraLocal: Explicit title-only opt-in shares the preset's restart boundary.
+        binding.testingDisableRightEyeRender.setOnCheckedChangeListener { _, checked ->
+            if (!rendering && gameId.isNotEmpty()) change {
+                TestingSettings.disableRightEyeRender = checked
+            }
+        }
+        // CodexAstraLocal: New controls are launch-only and preserve the separate title overlay.
+        binding.testingHardwareShaders.setOnCheckedChangeListener { _, checked ->
+            if (!rendering && gameId.isNotEmpty() && TestingSettings.preset != 1) change {
+                TestingSettings.hardwareShaders = checked
+            }
+        }
+        binding.testingRenderThreadDelay.setOnClickListener {
+            if (TestingSettings.available && !EmulationActivity.isRunning() && gameId.isNotEmpty()) {
+                val input = EditText(context).apply {
+                    inputType = InputType.TYPE_CLASS_NUMBER
+                    setText(TestingSettings.renderThreadDelayUs.toString())
+                    selectAll()
+                    hint = context.getString(R.string.uberhar_testing_delay_range)
+                }
+                val dialog = MaterialAlertDialogBuilder(context)
+                    .setTitle(R.string.delay_render_thread)
+                    .setMessage(R.string.uberhar_testing_delay_description)
+                    .setView(input)
+                    .setPositiveButton(android.R.string.ok, null)
+                    .setNegativeButton(android.R.string.cancel, null).create()
+                dialog.setOnShowListener {
+                    dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                        val value = input.text.toString().toIntOrNull()
+                        if (value == null || value !in 0..16000) {
+                            input.error = context.getString(R.string.uberhar_testing_delay_range)
+                        } else {
+                            change { TestingSettings.renderThreadDelayUs = value }
+                            dialog.dismiss()
+                        }
+                    }
+                }
+                dialog.show()
+            }
+        }
+        // CodexAstraLocal: Presentation filtering and guest slider input are independent launch controls.
+        binding.testingLinearFiltering.setOnCheckedChangeListener { _, checked ->
+            if (!rendering && gameId.isNotEmpty()) change {
+                TestingSettings.linearFiltering = checked
+            }
+        }
+        binding.testingStereoDepth.addOnButtonCheckedListener { _, checkedId, checked ->
+            if (checked && !rendering && gameId.isNotEmpty()) change {
+                TestingSettings.stereoDepth = if (checkedId == R.id.testing_stereo_depth_1) 1 else 0
+            }
+        }
         binding.testingUseGlobal.setOnClickListener {
             MaterialAlertDialogBuilder(context)
                 .setMessage(R.string.uberhar_testing_reset_confirmation)
@@ -82,7 +135,7 @@ class TestingPanelController(
     }
 
     private fun change(liveResolution: Boolean = false, update: () -> Unit) {
-        if (rendering) return
+        if (rendering || !TestingSettings.available) return
         val running = EmulationActivity.isRunning()
         if (running && !liveResolution) return
         resolveRunningTitle()
@@ -116,9 +169,13 @@ class TestingPanelController(
         resolveRunningTitle()
         TestingSettings.load(gameId)
         val running = EmulationActivity.isRunning()
+        // CodexAstraLocal: Hide alpha controls, not the ordinary per-title driver selector.
+        val available = TestingSettings.available
+        binding.testingEnabled.isVisible = available
+        binding.testingDescription.isVisible = available
         binding.testingEnabled.isChecked = TestingSettings.enabled
         binding.testingEnabled.isEnabled = !running
-        binding.testingControls.isVisible = TestingSettings.enabled
+        binding.testingControls.isVisible = available && TestingSettings.enabled
         binding.testingDescription.setText(
             if (running) R.string.uberhar_testing_live_description else R.string.uberhar_testing_description
         )
@@ -131,7 +188,36 @@ class TestingPanelController(
         )
         binding.testingResolution2x.isEnabled = true
         binding.testingResolution4x.isEnabled = true
-        binding.testingUseGlobal.isVisible = gameId.isNotEmpty()
+        // CodexAstraLocal: Global defaults cannot opt other games in; running state is native-latched.
+        binding.testingDisableRightEyeRender.isChecked = TestingSettings.requestedRightEyeRenderDisabled()
+        binding.testingDisableRightEyeRender.isEnabled = gameId.isNotEmpty() && !running
+        binding.testingRightEyeDescription.setText(
+            if (gameId.isEmpty()) R.string.uberhar_testing_right_eye_select_game
+            else R.string.uberhar_testing_right_eye_description
+        )
+        binding.testingHardwareShaders.isChecked = TestingSettings.effectiveHardwareShaders()
+        binding.testingHardwareShaders.isEnabled = gameId.isNotEmpty() && !running && TestingSettings.preset != 1
+        binding.testingHardwareDescription.setText(
+            when {
+                gameId.isEmpty() -> R.string.uberhar_testing_select_game_controls
+                TestingSettings.preset == 1 -> R.string.uberhar_testing_hardware_cpu_only
+                else -> R.string.uberhar_testing_hardware_description
+            }
+        )
+        binding.testingRenderThreadDelay.text = context.getString(
+            R.string.uberhar_testing_delay_value, TestingSettings.effectiveRenderThreadDelayUs()
+        )
+        binding.testingRenderThreadDelay.isEnabled = gameId.isNotEmpty() && !running
+        // CodexAstraLocal: Resolution alone can change live; display the native launch values here.
+        binding.testingLinearFiltering.isChecked = TestingSettings.effectiveLinearFiltering()
+        binding.testingLinearFiltering.isEnabled = gameId.isNotEmpty() && !running
+        binding.testingStereoDepth.check(
+            if (TestingSettings.effectiveStereoDepth() == 1) R.id.testing_stereo_depth_1
+            else R.id.testing_stereo_depth_0
+        )
+        binding.testingStereoDepth0.isEnabled = gameId.isNotEmpty() && !running
+        binding.testingStereoDepth1.isEnabled = gameId.isNotEmpty() && !running
+        binding.testingUseGlobal.isVisible = available && gameId.isNotEmpty()
         binding.testingUseGlobal.isEnabled = !running
         binding.gameDriver.isVisible = gameId.isNotEmpty()
         binding.gameDriver.isEnabled = !running

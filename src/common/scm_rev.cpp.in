@@ -25,6 +25,8 @@ const char g_build_fullname[] = BUILD_FULLNAME;
 const char g_build_version[]  = BUILD_VERSION;
 const char g_build_variant[]  = BUILD_VARIANT;
 const char g_shader_cache_version[] = SHADER_CACHE_VERSION;
+// CodexAstraLocal: Compiled from UBERHAR_VERSION's alpha component, never flavor/build type.
+const bool g_uberhar_alpha_testing = @UBERHAR_ALPHA_TESTING@;
 
 } // namespace
 

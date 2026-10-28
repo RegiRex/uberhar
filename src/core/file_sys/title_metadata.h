@@ -97,6 +97,9 @@ public:
     u32 GetManualContentID() const;
     u32 GetDLPContentID() const;
     u32 GetContentIDByIndex(std::size_t index) const;
+    // CodexAstraLocal: External CIA presence masks and integrity checks use the encoded TMD fields.
+    u16 GetContentIndexByIndex(std::size_t index) const;
+    const std::array<u8, 0x20>& GetContentHashByIndex(std::size_t index) const;
     u16 GetContentTypeByIndex(std::size_t index) const;
     u64 GetContentSizeByIndex(std::size_t index) const;
     u64 GetCombinedContentSize(const CIAHeader* header) const;

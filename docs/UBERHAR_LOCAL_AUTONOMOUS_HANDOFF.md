@@ -1,4 +1,27 @@
-# Current handoff — 0.1.55; stop at prerelease submission
+# Current handoff — 0.1.56; stop at prerelease submission
+
+<!-- CodexAstraLocal: October 28 owner approved the completed report, .56 build and host sleep afterward. -->
+The .56 candidate retains .55 behavior by default, adds current-format read-only
+depth ownership, bounded GPU sample attribution and per-title alpha comparison
+controls, and includes the pinned Azahar safety/Plus compatibility ports. See
+[release scope](releases/0.1.56.md), [settings](UBERHAR_PER_GAME_SETTINGS.md) and
+[compatibility provenance](UBERHAR_FILE_COMPATIBILITY.md). Broad pass-area reuse,
+feedback deduplication and CPU draw grouping remain follow-up candidates.
+
+After affected executable preflight and independent review, submit through the
+existing RegiRex/uberhar hybrid-shaders workflow. Save the actual source/run state,
+stop agents and root, and honor this session's explicit computer sleep request.
+Hosted compilation can finish independently. Do not declare publication before
+all hosted gates pass. Owner handles gameplay; no automatic install/capture/test.
+The sleep request is one-time, not a standing authorization for later sessions.
+
+Retain the communication, capture, data/signing preservation and cost discipline
+below. Completed agents stop; report automation handles and yield while waiting.
+No additional milestone approval is needed for the authorized release work.
+
+---
+
+# Historical handoff — 0.1.55; stop at prerelease submission
 
 <!-- CodexAstraLocal: October 23 owner-approved .55 scope supersedes historical open-ended loops and retired rendering tracks below. -->
 The owner approved the post-.54 driver/architecture package: renewable bounded

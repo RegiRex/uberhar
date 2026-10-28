@@ -326,6 +326,9 @@ private:
     }
 
     std::unique_ptr<Z3DSWriteIOFileImpl> impl;
+    // CodexAstraLocal: Explicit finalization and the destructor share one retained close result.
+    bool closed = false;
+    bool close_result = false;
     u64 written_uncompressed = 0;
     bool metadata_written = false;
     Z3DSMetadata metadata;

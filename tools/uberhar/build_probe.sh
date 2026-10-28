@@ -4,6 +4,14 @@
 set -euo pipefail
 mkdir -p build/uberhar-probe
 python3 tools/uberhar/check_android_keys.py
+# CodexAstraLocal: Alpha UI/native eligibility and sampled worker identity are
+# executable release gates; neither performs device work or changes rendering.
+cmake -DTEST_OUTPUT="$PWD/build/uberhar-probe/alpha-version" -P tools/uberhar/test_alpha_testing_version.cmake
+python3 tools/uberhar/test_gpu_pass_attribution.py --output build/uberhar-probe/gpu-pass-attribution
+# CodexAstraLocal: Preserve the new installer bounds/transaction failures in CI.
+# Crypto-backed reader/finalization controls use the separate pinned-dependency step.
+python3 tools/uberhar/test_installer_security.py
+python3 tools/uberhar/test_cia_install_transaction.py
 # CodexAstraLocal: Driver ownership and optional-cache framing/renewal gate this build.
 python3 tools/uberhar/test_android_driver_lifecycle.py
 python3 tools/uberhar/test_optional_cache_lifecycle.py
@@ -88,7 +96,9 @@ python3 tools/uberhar/test_vertex_capture_replay.py
 python3 tools/uberhar/test_adaptive_cpu_cache.py --mutants
 # CodexAstraLocal: Actual compute admission/report hooks must preserve exact
 # interval counts, final flushes and bounded diagnostics without changing draws.
-python3 tools/uberhar/test_compute_census.py
+# CodexAstraLocal: Retain the current-format depth-write regression as a
+# compiled semantic negative control, alongside the existing census controls.
+python3 tools/uberhar/test_compute_census.py --mutants
 # CodexAstraLocal: Supported renderer selection and unavailable backends must
 # preserve terminal frontend error handling without restoring retired modes.
 python3 tools/uberhar/test_renderer_backend.py

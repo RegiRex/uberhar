@@ -1268,7 +1268,15 @@ class SettingsFragmentPresenter(private val fragmentView: SettingsFragmentView) 
                     R.string.disable_right_eye_render_description,
                     BooleanSetting.DISABLE_RIGHT_EYE_RENDER.key,
                     BooleanSetting.DISABLE_RIGHT_EYE_RENDER.defaultValue
-                )
+                ).apply {
+                    // CodexAstraLocal: Testing can override a saved Custom profile too; show its
+                    // requested flag read-only here and edit only the separate Testing preference.
+                    if (TestingSettings.enabled) {
+                        UberharGraphicsProfile.applyTo(this, UberharTestMode.NATIVE)
+                        isEnabled = false
+                        disabledMessage = R.string.uberhar_testing_right_eye_override
+                    }
+                }
             )
 
             add(
@@ -1389,7 +1397,11 @@ class SettingsFragmentPresenter(private val fragmentView: SettingsFragmentView) 
         }
         // AstraEH: Keep both resolution controls editable; lock and display the effective
         // values of the session profile without overwriting the user's custom settings.
-        if (mode != UberharTestMode.CUSTOM) {
+        // CodexAstraLocal: Testing also overrides a saved Custom mode; display its actual profile.
+        val effectiveMode = if (TestingSettings.enabled) {
+            if (TestingSettings.preset == 0) UberharTestMode.NATIVE else UberharTestMode.AUTOMATIC
+        } else mode
+        if (effectiveMode != UberharTestMode.CUSTOM) {
             for (item in sl.subList(customStart, sl.size)) {
                 // CodexAstraLocal: Permit generator comparison without disabling the profile.
                 if (item.setting == IntSetting.RESOLUTION_FACTOR ||
@@ -1398,7 +1410,7 @@ class SettingsFragmentPresenter(private val fragmentView: SettingsFragmentView) 
                     item.type == SettingsItem.TYPE_HEADER
                 ) continue
                 // CodexAstraUlt: Display the effective fragment choice for this exact preset.
-                UberharGraphicsProfile.applyTo(item, mode)
+                UberharGraphicsProfile.applyTo(item, effectiveMode)
                 item.isEnabled = false
                 item.disabledMessage = R.string.uberhar_test_locked
             }
@@ -2102,7 +2114,19 @@ class SettingsFragmentPresenter(private val fragmentView: SettingsFragmentView) 
                     R.string.hw_shaders_description,
                     BooleanSetting.HW_SHADER.key,
                     BooleanSetting.HW_SHADER.defaultValue
-                )
+                ).apply {
+                    // CodexAstraLocal: Debug must show the effective profile value, not a saved true
+                    // that the profile replaces; edit the separate alpha request in Testing.
+                    if (TestingSettings.enabled ||
+                        UberharTestMode.from(IntSetting.UBERHAR_TEST_MODE.int) != UberharTestMode.CUSTOM
+                    ) {
+                        UberharGraphicsProfile.applyTo(this, UberharTestMode.NATIVE)
+                        isEnabled = false
+                        disabledMessage = if (TestingSettings.enabled) {
+                            R.string.uberhar_testing_launch_override
+                        } else R.string.uberhar_test_locked
+                    }
+                }
             )
             add(
                 SwitchSetting(
@@ -2111,7 +2135,16 @@ class SettingsFragmentPresenter(private val fragmentView: SettingsFragmentView) 
                     R.string.shader_jit_description,
                     BooleanSetting.SHADER_JIT.key,
                     BooleanSetting.SHADER_JIT.defaultValue
-                )
+                ).apply {
+                    // CodexAstraLocal: The same profile requires CPU shader JIT regardless of saved Custom state.
+                    if (TestingSettings.enabled ||
+                        UberharTestMode.from(IntSetting.UBERHAR_TEST_MODE.int) != UberharTestMode.CUSTOM
+                    ) {
+                        UberharGraphicsProfile.applyTo(this, UberharTestMode.NATIVE)
+                        isEnabled = false
+                        disabledMessage = R.string.uberhar_test_locked
+                    }
+                }
             )
             add(
                 SwitchSetting(

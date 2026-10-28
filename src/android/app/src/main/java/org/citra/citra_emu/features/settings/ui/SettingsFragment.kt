@@ -15,9 +15,12 @@ import androidx.core.view.isVisible
 import androidx.core.view.updatePadding
 import androidx.fragment.app.Fragment
 import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.ConcatAdapter
+import androidx.recyclerview.widget.RecyclerView
 import org.citra.citra_emu.R
 import org.citra.citra_emu.activities.EmulationActivity
 import org.citra.citra_emu.databinding.FragmentSettingsBinding
+import org.citra.citra_emu.databinding.ListItemSettingsTestingBinding
 import org.citra.citra_emu.features.settings.model.AbstractSetting
 import org.citra.citra_emu.features.settings.model.TestingSettings
 import org.citra.citra_emu.features.settings.model.view.SettingsItem
@@ -36,6 +39,8 @@ class SettingsFragment :
 
     // CodexAstraLocal: Keep temporary test selections separate from the edited title/global enums.
     private var testingPanelController: TestingPanelController? = null
+    // CodexAstraLocal: Keep scope and shared Testing controls in the list's single scroll surface.
+    private var testingHeader: ListItemSettingsTestingBinding? = null
 
     override fun onAttach(context: Context) {
         super.onAttach(context)
@@ -60,14 +65,36 @@ class SettingsFragment :
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         settingsAdapter = SettingsAdapter(this, requireActivity())
+        // CodexAstraLocal: A separate header adapter preserves each settings row's existing
+        // bindingAdapterPosition, click/reset behavior and recycling without index offsets.
+        testingHeader = ListItemSettingsTestingBinding.inflate(layoutInflater, binding.listSettings, false)
         binding.listSettings.apply {
-            adapter = settingsAdapter
+            adapter = ConcatAdapter(TestingHeaderAdapter(testingHeader!!.root), settingsAdapter!!)
             layoutManager = LinearLayoutManager(activity)
         }
         setupTestingPanel()
         fragmentPresenter.onViewCreated(settingsAdapter!!)
 
         setInsets()
+    }
+
+    // CodexAstraLocal: Release the header/controller with this view; recreated windows get
+    // fresh bindings and listeners, including phone rotation and landscape configuration changes.
+    override fun onDestroyView() {
+        binding.listSettings.adapter = null
+        testingPanelController = null
+        testingHeader = null
+        _binding = null
+        super.onDestroyView()
+    }
+
+    // CodexAstraLocal: Exactly one header scrolls before the ordinary virtualized settings rows.
+    private class TestingHeaderAdapter(private val header: View) :
+        RecyclerView.Adapter<RecyclerView.ViewHolder>() {
+        override fun getItemCount() = 1
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int) =
+            object : RecyclerView.ViewHolder(header) {}
+        override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) = Unit
     }
 
     override fun onDetach() {
@@ -86,11 +113,12 @@ class SettingsFragment :
     // CodexAstraLocal: Use the same title-aware panel on home Options and in-game Settings.
     private fun setupTestingPanel() {
         val isRoot = requireArguments().getString(ARGUMENT_MENU_TAG) == SettingsFile.FILE_NAME_CONFIG
-        binding.testingPanel.root.isVisible = isRoot
+        val header = testingHeader ?: return
+        header.testingPanel.root.isVisible = isRoot
         TestingSettings.load(requireArguments().getString(ARGUMENT_GAME_ID) ?: "")
         if (!isRoot) return
         testingPanelController = TestingPanelController(
-            binding.testingPanel, viewLifecycleOwner,
+            header.testingPanel, viewLifecycleOwner,
             requireArguments().getString(ARGUMENT_GAME_ID) ?: ""
         ) {
             renderTestingPanel()
@@ -99,16 +127,18 @@ class SettingsFragment :
     }
 
     private fun renderTestingPanel() {
+        // CodexAstraLocal: The scrolling header owns the scope text as well as Testing controls.
+        val header = testingHeader ?: return
         testingPanelController?.render()
         val scope = getString(
             if (activityView!!.settings.isPerGame) R.string.uberhar_game_settings_scope
             else R.string.uberhar_global_settings_scope
         )
-        binding.settingsScope.text = if (TestingSettings.enabled) {
+        header.settingsScope.text = if (TestingSettings.enabled) {
             val presetName = getString(TESTING_PRESETS.first { it.first == TestingSettings.preset }.second)
             scope + "\n" + getString(R.string.uberhar_testing_active_summary, presetName, TestingSettings.resolution)
         } else scope
-        binding.settingsScope.isVisible = true
+        header.settingsScope.isVisible = true
     }
 
     override fun loadSettingsList() {

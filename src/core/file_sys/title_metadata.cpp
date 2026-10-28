@@ -1,6 +1,6 @@
-// Copyright 2017-2025 Citra Emulator Project / Azahar Emulator Project
-// Licensed under GPLv2 or any later version
-// Refer to the license.txt file included.
+// Copyright 2017-2026 Citra Emulator Project / Azahar Emulator Project
+// Licensed under GPLv3 or any later version
+// Refer to the misc/licenses/gplv3.txt file included.
 
 #include <cryptopp/sha.h>
 #include "common/alignment.h"
@@ -30,7 +30,12 @@ Loader::ResultStatus TitleMetadata::Load(const std::string& file_path) {
     return result;
 }
 
+// CodexAstraLocal: Azahar PR2648: check input offset and replace old chunk state when loading
+// metadata.
 Loader::ResultStatus TitleMetadata::Load(std::span<const u8> file_data, std::size_t offset) {
+    if (offset > file_data.size()) {
+        return Loader::ResultStatus::Error;
+    }
     std::size_t total_size = static_cast<std::size_t>(file_data.size() - offset);
     if (total_size < sizeof(u32_be)) {
         return Loader::ResultStatus::Error;
@@ -65,6 +70,7 @@ Loader::ResultStatus TitleMetadata::Load(std::span<const u8> file_data, std::siz
         return Loader::ResultStatus::ErrorInvalidFormat;
     }
 
+    tmd_chunks.clear();
     for (u16 i = 0; i < tmd_body.content_count; i++) {
         ContentChunk chunk;
 
@@ -81,7 +87,8 @@ Loader::ResultStatus TitleMetadata::Save(const std::string& file_path) {
     if (!file.IsOpen())
         return Loader::ResultStatus::Error;
 
-    if (!file.WriteBytes(&signature_type, sizeof(u32_be)))
+    // CodexAstraLocal: Exact header/signature writes are required before metadata can be published.
+    if (file.WriteBytes(&signature_type, sizeof(u32_be)) != sizeof(u32_be))
         return Loader::ResultStatus::Error;
 
     // Signature lengths are variable, and the body follows the signature
@@ -90,12 +97,15 @@ Loader::ResultStatus TitleMetadata::Save(const std::string& file_path) {
         return Loader::ResultStatus::Error;
     }
 
-    if (!file.WriteBytes(tmd_signature.data(), signature_size))
+    if (tmd_signature.size() < signature_size ||
+        file.WriteBytes(tmd_signature.data(), signature_size) != signature_size)
         return Loader::ResultStatus::Error;
 
     // The TMD body start position is rounded to the nearest 0x40 after the signature
     std::size_t body_start = Common::AlignUp(signature_size + sizeof(u32), 0x40);
-    file.Seek(body_start, SEEK_SET);
+    if (!file.Seek(body_start, SEEK_SET)) {
+        return Loader::ResultStatus::Error;
+    }
 
     // Update our TMD body values and hashes
     tmd_body.content_count = static_cast<u16>(tmd_chunks.size());
@@ -129,7 +139,9 @@ Loader::ResultStatus TitleMetadata::Save(const std::string& file_path) {
             return Loader::ResultStatus::Error;
     }
 
-    return Loader::ResultStatus::Success;
+    // CodexAstraLocal: A buffered close failure must keep the old staged-install destination
+    // intact.
+    return file.Close() ? Loader::ResultStatus::Success : Loader::ResultStatus::Error;
 }
 
 u64 TitleMetadata::GetTitleID() const {
@@ -166,6 +178,16 @@ u32 TitleMetadata::GetDLPContentID() const {
 
 u32 TitleMetadata::GetContentIDByIndex(std::size_t index) const {
     return tmd_chunks[index].id;
+}
+
+// CodexAstraLocal: Distinguish encoded content indices from vector positions in sparse CIA bundles.
+u16 TitleMetadata::GetContentIndexByIndex(std::size_t index) const {
+    return tmd_chunks[index].index;
+}
+
+// CodexAstraLocal: Verify decrypted outer CIA contents before publishing staged replacements.
+const std::array<u8, 0x20>& TitleMetadata::GetContentHashByIndex(std::size_t index) const {
+    return tmd_chunks[index].hash;
 }
 
 u16 TitleMetadata::GetContentTypeByIndex(std::size_t index) const {
@@ -228,6 +250,7 @@ void TitleMetadata::AddContentChunk(const ContentChunk& chunk) {
     tmd_chunks.push_back(chunk);
 }
 
+// CodexAstraLocal: Azahar PR2648: diagnostics must stop at the actual parsed chunk count.
 void TitleMetadata::Print() const {
     LOG_DEBUG(Service_FS, "{} chunks", static_cast<u32>(tmd_body.content_count));
 
@@ -253,7 +276,7 @@ void TitleMetadata::Print() const {
         LOG_DEBUG(Service_FS, "Content chunks for content info index {}:", i);
         for (u16 j = index; j < index + count; j++) {
             // Don't attempt to print content we don't have
-            if (j > tmd_body.content_count)
+            if (j >= tmd_chunks.size())
                 break;
 
             const ContentChunk& chunk = tmd_chunks[j];

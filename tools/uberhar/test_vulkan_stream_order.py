@@ -57,12 +57,14 @@ def main():
         fixture=read(HERE/'test_vulkan_stream_order.cpp')
         stream=read(source_root/'src/video_core/renderer_vulkan/vk_stream_buffer.cpp')
         header=read(source_root/'src/video_core/renderer_vulkan/vk_stream_buffer.h')
-        schedule=read(ROOT/'src/video_core/renderer_vulkan/vk_scheduler.cpp')
+        # CodexAstraLocal: --repo supplies tooling/dependencies only; every
+        # extracted production body must come from the candidate source root.
+        schedule=read(source_root/'src/video_core/renderer_vulkan/vk_scheduler.cpp')
         read(source_root/'src/video_core/renderer_vulkan/vk_scheduler.h')
         # CodexAstraLocal: Shared scheduler extracts remain complete after packet observer retirement.
-        render=read(ROOT/'src/video_core/renderer_vulkan/vk_render_manager.cpp')
-        render_header=read(ROOT/'src/video_core/renderer_vulkan/vk_render_manager.h')
-        pipeline=read(ROOT/'src/video_core/renderer_vulkan/vk_pipeline_cache.cpp')
+        render=read(source_root/'src/video_core/renderer_vulkan/vk_render_manager.cpp')
+        render_header=read(source_root/'src/video_core/renderer_vulkan/vk_render_manager.h')
+        pipeline=read(source_root/'src/video_core/renderer_vulkan/vk_pipeline_cache.cpp')
         raster=read(source_root/'src/video_core/renderer_vulkan/vk_rasterizer.cpp')
         # CodexAstraLocal: Keep complete production bodies; adapters only provide
         # Vulkan signatures, scheduler endpoints and controlled backing storage.
@@ -80,9 +82,11 @@ def main():
             'void Scheduler::AllocateWorkerCommandBuffers()']:parts.append(function(schedule,sig))
         for sig in ['void RenderManager::BeginRendering(const Framebuffer*',
             'void RenderManager::BeginRendering(const RenderPass&',
-            'void RenderManager::EndRendering()']:parts.append(function(render,sig))
+            'void RenderManager::EndRendering(']:parts.append(function(render,sig))
         (output/'production.inc').write_text('\n\n'.join(parts)+'\n')
-        (output/'renderpass.inc').write_text(section(render_header,'struct RenderPass {','\n};')+'\n};\n')
+        (output/'renderpass.inc').write_text(
+            section(render_header,'enum class PassEndReason', ';')+';\n'+
+            section(render_header,'struct RenderPass {','\n};')+'\n};\n')
         (output/'bind-commands.inc').write_text(section(pipeline,
             '        if (is_dirty || bound_pipeline != selected) {','        // AstraEH: Invalidate even'))
         draw=function(raster,'bool RasterizerVulkan::Draw(')

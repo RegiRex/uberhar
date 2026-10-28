@@ -34,6 +34,7 @@ import org.citra.citra_emu.databinding.DialogSoftwareKeyboardBinding
 import org.citra.citra_emu.databinding.FragmentHomeSettingsBinding
 import org.citra.citra_emu.features.settings.SettingKeys
 import org.citra.citra_emu.features.settings.model.Settings
+import org.citra.citra_emu.features.settings.model.TestingSettings
 import org.citra.citra_emu.features.settings.ui.TestingPanelController
 import org.citra.citra_emu.features.settings.ui.SettingsActivity
 import org.citra.citra_emu.features.settings.utils.SettingsFile
@@ -223,6 +224,9 @@ class HomeSettingsFragment : Fragment() {
 
     // CodexAstraLocal: A remembered target makes per-title presets one tap away below the home logo.
     private fun setupTestingPanel() {
+        // CodexAstraLocal: Release.beta.alpha availability comes from native version metadata, not flavor.
+        binding.testingPanel.root.isVisible = TestingSettings.available
+        if (!TestingSettings.available) return
         var target = preferences.getString("uberhar_testing_title", "") ?: ""
         testingController = TestingPanelController(binding.testingPanel, viewLifecycleOwner, target)
         fun renderTarget() {

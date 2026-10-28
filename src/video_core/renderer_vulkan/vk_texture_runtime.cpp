@@ -1217,7 +1217,9 @@ vk::ImageView Surface::CopyImageView() noexcept {
         copy_layout = vk::ImageLayout::eUndefined;
     }
 
-    runtime.renderpass_cache.EndRendering();
+    // CodexAstraLocal TEST-ONLY LOG: Count the existing feedback copy boundary;
+    // remove this reason tag with pass-cost diagnostics, retaining EndRendering.
+    runtime.renderpass_cache.EndRendering(PassEndReason::Feedback);
 
     const RecordParams params = {
         .aspect = Aspect(),

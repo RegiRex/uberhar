@@ -2,6 +2,7 @@
 // Licensed under GPLv2 or any later version
 // Refer to the license.txt file included.
 
+#include <limits>
 #include <cryptopp/sha.h>
 #include "common/alignment.h"
 #include "common/file_util.h"
@@ -159,11 +160,18 @@ Loader::ResultStatus CIAContainer::Load(std::span<const u8> file_data) {
 }
 
 Loader::ResultStatus CIAContainer::LoadHeader(std::span<const u8> header_data, std::size_t offset) {
-    if (header_data.size() - offset < sizeof(CIAHeader)) {
+    // CodexAstraLocal: Enforce PR2648's metadata cap before all loader allocations, not only
+    // streaming writes.
+    has_header = false;
+    if (offset > header_data.size() || header_data.size() - offset < sizeof(CIAHeader)) {
         return Loader::ResultStatus::Error;
     }
 
-    std::memcpy(&cia_header, header_data.data(), sizeof(CIAHeader));
+    std::memcpy(&cia_header, header_data.data() + offset, sizeof(CIAHeader));
+    if (cia_header.header_size < sizeof(CIAHeader) || GetContentOffset() > 8 * 1024 * 1024 ||
+        cia_header.content_size > std::numeric_limits<u64>::max() - GetContentOffset() - 0x3F) {
+        return Loader::ResultStatus::ErrorInvalidFormat;
+    }
     has_header = true;
 
     return Loader::ResultStatus::Success;
@@ -232,7 +240,8 @@ const std::unique_ptr<Loader::SMDH>& CIAContainer::GetSMDH() const {
 }
 
 u64 CIAContainer::GetCertificateOffset() const {
-    return Common::AlignUp(cia_header.header_size, CIA_SECTION_ALIGNMENT);
+    // CodexAstraLocal: Header-sized media fields must not wrap before the metadata cap check.
+    return Common::AlignUp<u64>(cia_header.header_size, CIA_SECTION_ALIGNMENT);
 }
 
 u64 CIAContainer::GetTicketOffset() const {
@@ -283,7 +292,8 @@ u64 CIAContainer::GetTotalContentSize() const {
 
 u64 CIAContainer::GetContentSize(std::size_t index) const {
     // If the content doesn't exist in the CIA, it doesn't have a size.
-    if (!cia_header.IsContentPresent(index)) {
+    // CodexAstraLocal: CIA bitmap bits address encoded TMD indices, including sparse DLC bundles.
+    if (!cia_header.IsContentPresent(cia_tmd.GetContentIndexByIndex(index))) {
         return 0;
     }
 

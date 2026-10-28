@@ -73,6 +73,23 @@ class DocumentFile(private val file: File) {
 ''',
         "Application.kt": '''package org.citra.citra_emu
 object CitraApplication { val appContext = android.content.Context() }
+// CodexAstraLocal: Native launch state is a boundary; all Testing persistence remains production code.
+object NativeLibrary {
+    var running = false
+    var requestedRightEye = false
+    var alphaTestingAvailable = true
+    var effectiveHardware = false
+    var effectiveDelay = 0
+    var effectiveFiltering = true
+    var effectiveDepth = 0
+    fun isRunning() = running
+    fun isAlphaTestingAvailable() = alphaTestingAvailable
+    fun getRequestedRightEyeRenderDisabled() = requestedRightEye
+    fun getEffectiveHardwareShaders() = effectiveHardware
+    fun getEffectiveRenderThreadDelayUs() = effectiveDelay
+    fun getEffectiveLinearFiltering() = effectiveFiltering
+    fun getEffectiveStereoDepth() = effectiveDepth
+}
 object R { object string {
 ''' + "\n".join(f"const val {name} = {number}" for number, name in enumerate(resources, 1)) + "\n} }\n",
         "SettingKeys.kt": '''package org.citra.citra_emu.features.settings
@@ -90,6 +107,7 @@ object Log { fun error(message: String) { System.err.println(message) } }
 ''',
         "ScopeCheck.kt": r'''import java.io.File
 import org.ini4j.Wini
+import org.citra.citra_emu.NativeLibrary
 import org.citra.citra_emu.features.settings.model.*
 import org.citra.citra_emu.features.settings.utils.SettingsFile
 import org.citra.citra_emu.features.settings.ui.SettingsActivityView
@@ -174,26 +192,59 @@ fun main(args: Array<String>) {
     check(read(title).get("Layout", "layouts_to_cycle") == "1, 4")
     check(config.readBytes().contentEquals(originalGlobal))
 
-    // Testing changes persist separately and never overwrite the ordinary model or title/global values.
+    // CodexAstraLocal: Exercise defaults and title-only experiments through real INI round trips.
     val beforeTesting = title.readBytes()
-    TestingSettings.load()
+    val testingFile = File(folder, "config/testing.ini")
+    val experimentKeys = listOf("disable_right_eye_render", "use_hw_shader",
+        "delay_game_render_thread_us", "filter_mode", "factor_3d")
+    fun checkBaseline() {
+        check(!TestingSettings.disableRightEyeRender && !TestingSettings.hardwareShaders)
+        check(TestingSettings.renderThreadDelayUs == 0 && TestingSettings.linearFiltering)
+        check(TestingSettings.stereoDepth == 0)
+    }
+    TestingSettings.load("")
     check(!TestingSettings.enabled)
+    checkBaseline()
     TestingSettings.enabled = true
     TestingSettings.preset = 2
     TestingSettings.resolution = 2
+    // CodexAstraLocal: Accidental global experiment requests must never be serialized or inherited.
+    TestingSettings.disableRightEyeRender = true
+    TestingSettings.hardwareShaders = true
+    TestingSettings.renderThreadDelayUs = 100
+    TestingSettings.linearFiltering = false
+    TestingSettings.stereoDepth = 1
     check(TestingSettings.save())
-    TestingSettings.load()
+    check(experimentKeys.all { read(testingFile).get("Testing", it) == null })
+    TestingSettings.load("")
     check(TestingSettings.enabled && TestingSettings.preset == 2 && TestingSettings.resolution == 2)
+    checkBaseline()
     check(title.readBytes().contentEquals(beforeTesting) && config.readBytes().contentEquals(originalGlobal))
     check(IntSetting.UBERHAR_TEST_MODE.int == 3 && IntSetting.RESOLUTION_FACTOR.int == 4)
-    // CodexAstraLocal: Per-title Testing choices do not contaminate other titles or global defaults.
+
+    // CodexAstraLocal: CPU-only Combo retains the request but vetoes effective hardware vertices.
     TestingSettings.load("000400000f700100")
-    check(TestingSettings.preset == 2 && TestingSettings.resolution == 2)
+    checkBaseline()
     TestingSettings.preset = 1
     TestingSettings.resolution = 4
+    TestingSettings.disableRightEyeRender = true
+    TestingSettings.hardwareShaders = true
+    TestingSettings.renderThreadDelayUs = 100
+    TestingSettings.linearFiltering = false
+    TestingSettings.stereoDepth = 1
     check(TestingSettings.save())
+    TestingSettings.load("000400000f700100")
+    check(TestingSettings.hardwareShaders && !TestingSettings.effectiveHardwareShaders())
+    check(TestingSettings.requestedRightEyeRenderDisabled())
+    check(TestingSettings.effectiveRenderThreadDelayUs() == 100)
+    check(!TestingSettings.effectiveLinearFiltering() && TestingSettings.effectiveStereoDepth() == 1)
+    for (preset in listOf(0, 2)) {
+        TestingSettings.preset = preset
+        check(TestingSettings.effectiveHardwareShaders())
+    }
     TestingSettings.load("0004000000123400")
     check(TestingSettings.preset == 2 && TestingSettings.resolution == 2)
+    checkBaseline()
     TestingSettings.load("")
     TestingSettings.preset = 0
     check(TestingSettings.save())
@@ -201,8 +252,81 @@ fun main(args: Array<String>) {
     check(TestingSettings.preset == 1 && TestingSettings.resolution == 4)
     check(TestingSettings.useGlobalChoices())
     check(TestingSettings.preset == 0 && TestingSettings.resolution == 2)
-    TestingSettings.enabled = false
+    checkBaseline()
+    check(experimentKeys.all { read(testingFile).get("Testing.000400000F700100", it) == null })
+
+    // CodexAstraLocal: Hostile global keys, malformed title values and numeric bounds use safe defaults.
+    val testingIni = read(testingFile)
+    for ((key, value) in mapOf("disable_right_eye_render" to "true", "use_hw_shader" to "true",
+        "delay_game_render_thread_us" to "100", "filter_mode" to "false", "factor_3d" to "1")) {
+        testingIni.put("Testing", key, value)
+        testingIni.put("Testing.000400000F700100", key, "broken")
+    }
+    write(testingFile, testingIni)
+    TestingSettings.load("000400000f700100")
+    checkBaseline()
+    TestingSettings.load("0004000000123400")
+    checkBaseline()
+    for (value in listOf("-1", "16001", "99999999999999999999")) {
+        val malformed = read(testingFile)
+        malformed.put("Testing.000400000F700100", "delay_game_render_thread_us", value)
+        malformed.put("Testing.000400000F700100", "factor_3d", value)
+        write(testingFile, malformed)
+        TestingSettings.load("000400000f700100")
+        check(TestingSettings.renderThreadDelayUs == 0 && TestingSettings.stereoDepth == 0)
+    }
+    TestingSettings.renderThreadDelayUs = 16000
+    TestingSettings.stereoDepth = 1
     check(TestingSettings.save())
+    TestingSettings.load("000400000f700100")
+    check(TestingSettings.renderThreadDelayUs == 16000 && TestingSettings.stereoDepth == 1)
+
+    // CodexAstraLocal: All running controls read the native launch snapshot despite pending disk edits.
+    NativeLibrary.running = true
+    NativeLibrary.requestedRightEye = true
+    NativeLibrary.effectiveHardware = true
+    NativeLibrary.effectiveDelay = 100
+    NativeLibrary.effectiveFiltering = false
+    NativeLibrary.effectiveDepth = 1
+    TestingSettings.disableRightEyeRender = false
+    TestingSettings.hardwareShaders = false
+    TestingSettings.renderThreadDelayUs = 0
+    TestingSettings.linearFiltering = true
+    TestingSettings.stereoDepth = 0
+    TestingSettings.preset = 1
+    check(TestingSettings.save())
+    TestingSettings.load("000400000f700100")
+    check(TestingSettings.requestedRightEyeRenderDisabled() && TestingSettings.effectiveHardwareShaders())
+    check(TestingSettings.effectiveRenderThreadDelayUs() == 100)
+    check(!TestingSettings.effectiveLinearFiltering() && TestingSettings.effectiveStereoDepth() == 1)
+    // CodexAstraLocal: A resolution save cannot replace native launch controls with pending title values.
+    TestingSettings.resolution = 4
+    check(TestingSettings.save())
+    TestingSettings.load("000400000f700100")
+    check(TestingSettings.requestedRightEyeRenderDisabled() && TestingSettings.effectiveHardwareShaders())
+    check(TestingSettings.effectiveRenderThreadDelayUs() == 100)
+    check(!TestingSettings.effectiveLinearFiltering() && TestingSettings.effectiveStereoDepth() == 1)
+    NativeLibrary.running = false
+    check(!TestingSettings.requestedRightEyeRenderDisabled() && !TestingSettings.effectiveHardwareShaders())
+    check(TestingSettings.effectiveRenderThreadDelayUs() == 0)
+    check(TestingSettings.effectiveLinearFiltering() && TestingSettings.effectiveStereoDepth() == 0)
+
+    // CodexAstraLocal: Beta/full availability rejects writes/resets and ignores a stale enabled alpha file.
+    TestingSettings.disableRightEyeRender = true
+    TestingSettings.hardwareShaders = true
+    TestingSettings.renderThreadDelayUs = 100
+    TestingSettings.linearFiltering = false
+    TestingSettings.stereoDepth = 1
+    check(TestingSettings.save())
+    val alphaBytes = testingFile.readBytes()
+    NativeLibrary.alphaTestingAvailable = false
+    TestingSettings.load("000400000f700100")
+    check(!TestingSettings.available && !TestingSettings.enabled)
+    check(!TestingSettings.requestedRightEyeRenderDisabled() && !TestingSettings.effectiveHardwareShaders())
+    check(TestingSettings.effectiveRenderThreadDelayUs() == 0)
+    check(TestingSettings.effectiveLinearFiltering() && TestingSettings.effectiveStereoDepth() == 0)
+    check(!TestingSettings.save() && !TestingSettings.useGlobalChoices())
+    check(testingFile.readBytes().contentEquals(alphaBytes)) { "Beta changed preserved alpha preferences" }
     // CodexAstraLocal: Driver exceptions are a third independent store; null resumes global inheritance.
     check(DriverSettings.save("000400000f700100", DriverSettings.Selection("content://driver=v27", "v27")))
     check(DriverSettings.load("000400000f700100")?.driver == "content://driver=v27")
@@ -211,6 +335,17 @@ fun main(args: Array<String>) {
     check(DriverSettings.load("000400000f700100")?.driver == DriverSettings.SYSTEM)
     check(DriverSettings.save("000400000f700100", null))
     check(DriverSettings.load("000400000f700100") == null)
+    // CodexAstraLocal: Ordinary per-title drivers remain editable with alpha Testing unavailable.
+    check(!TestingSettings.available && testingFile.readBytes().contentEquals(alphaBytes))
+    NativeLibrary.alphaTestingAvailable = true
+    TestingSettings.load("000400000f700100")
+    check(TestingSettings.enabled && TestingSettings.hardwareShaders && !TestingSettings.linearFiltering)
+    check(TestingSettings.renderThreadDelayUs == 100 && TestingSettings.stereoDepth == 1)
+    TestingSettings.enabled = false
+    check(TestingSettings.save())
+    check(!TestingSettings.requestedRightEyeRenderDisabled() && !TestingSettings.effectiveHardwareShaders())
+    check(TestingSettings.effectiveRenderThreadDelayUs() == 0)
+    check(TestingSettings.effectiveLinearFiltering() && TestingSettings.effectiveStereoDepth() == 0)
     check(!DriverSettings.save("../config", DriverSettings.Selection("bad", "bad")))
     check(title.readBytes().contentEquals(beforeTesting) && config.readBytes().contentEquals(originalGlobal))
     a.loadSettings("000400000f700100")
@@ -246,7 +381,7 @@ fun main(args: Array<String>) {
     config.writeText("[Renderer]\nturbo_limit=400\n")
     Settings().loadSettings("")
     check(IntSetting.TURBO_LIMIT.int == 400) { "Legacy turbo cap was lost by section matching" }
-    println("PASS: production settings/INI title isolation, sparse saves, limiter alias, inheritance reset, unknown retention, immediate layout saves, Testing separation and ID validation")
+    println("PASS: production settings/INI title isolation, sparse saves, limiter alias, inheritance reset, unknown retention, immediate layout saves, Testing title isolation/reset, CPU veto, launch snapshots, alpha/beta preservation, driver independence and ID validation")
 }
 ''',
     }

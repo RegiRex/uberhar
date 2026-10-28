@@ -15,5 +15,7 @@ extern const char g_build_fullname[];
 extern const char g_build_version[];
 extern const char g_build_variant[];
 extern const char g_shader_cache_version[];
+// CodexAstraLocal: One version-derived gate governs both native overlays and Android Testing UI.
+extern const bool g_uberhar_alpha_testing;
 
 } // namespace Common

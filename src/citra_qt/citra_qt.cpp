@@ -1401,10 +1401,10 @@ bool GMainWindow::LoadROM(const QString& filename) {
 
         case Core::System::ResultStatus::ErrorLoader_ErrorEncrypted: {
             QMessageBox::critical(this, tr("Encrypted application"),
-                                  tr("Encrypted applications are not supported.<br/>"
-                                     "<a "
-                                     "href='https://azahar-emu.org/blog/game-loading-changes/'>"
-                                     "Please check our blog for more info.</a>"));
+                                  // CodexAstraLocal: Explain supplied-key failures after enabling
+                                  // encrypted files.
+                                  tr("Unable to decrypt this application. Check the matching AES keys "
+                                     "and title seed in your user folder. See the log for details."));
             break;
         }
         case Core::System::ResultStatus::ErrorLoader_ErrorInvalidFormat:
@@ -2490,10 +2490,10 @@ void GMainWindow::OnCIAInstallReport(Service::AM::InstallStatus status, QString 
         break;
     case Service::AM::InstallStatus::ErrorEncrypted:
         QMessageBox::critical(this, tr("CIA Encrypted"),
-                              tr("Your CIA file is encrypted.<br/>"
-                                 "<a "
-                                 "href='https://azahar-emu.org/blog/game-loading-changes/'>"
-                                 "Please check our blog for more info.</a>"));
+                              // CodexAstraLocal: CIA imports now distinguish missing material from
+                              // unsupported files.
+                              tr("Unable to decrypt this CIA. Check the supplied common key and "
+                                 "ticket. See the log for details."));
         break;
     case Service::AM::InstallStatus::ErrorFileNotFound:
         QMessageBox::critical(this, tr("Unable to find File"),

@@ -216,6 +216,16 @@ object NativeLibrary {
      */
     external fun getRunningTitleId(): Long
 
+    // CodexAstraLocal: Report the running setting request; compatibility may still forbid skipping.
+    external fun getRequestedRightEyeRenderDisabled(): Boolean
+
+    // CodexAstraLocal: UI availability shares native's release.beta.alpha gate and launch settings.
+    external fun isAlphaTestingAvailable(): Boolean
+    external fun getEffectiveHardwareShaders(): Boolean
+    external fun getEffectiveRenderThreadDelayUs(): Int
+    external fun getEffectiveLinearFiltering(): Boolean
+    external fun getEffectiveStereoDepth(): Int
+
     /**
      * Returns the performance stats for the current game
      */

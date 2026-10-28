@@ -18,10 +18,14 @@ object UberharGraphicsProfile {
         BooleanSetting.UBERHAR_HYBRID_TEV to true,
         BooleanSetting.UBERHAR_FORCE_TEV to !mode.allowsSpecializedFragments,
         BooleanSetting.UBERHAR_CPU_VERTEX_BRIDGE to false,
-        BooleanSetting.LINEAR_FILTERING to true,
+        // CodexAstraLocal: Show effective launch controls while keeping ordinary saved values untouched.
+        BooleanSetting.HW_SHADER to TestingSettings.effectiveHardwareShaders(),
+        BooleanSetting.SHADER_JIT to true,
+        BooleanSetting.LINEAR_FILTERING to TestingSettings.effectiveLinearFiltering(),
         BooleanSetting.SHADERS_ACCURATE_MUL to true,
         BooleanSetting.DISK_SHADER_CACHE to true,
-        BooleanSetting.DISABLE_RIGHT_EYE_RENDER to false,
+        // CodexAstraLocal: Reflect the separate title opt-in instead of the old unconditional OFF.
+        BooleanSetting.DISABLE_RIGHT_EYE_RENDER to TestingSettings.requestedRightEyeRenderDisabled(),
         BooleanSetting.SWAP_EYES_3D to false,
         BooleanSetting.DUMP_TEXTURES to false,
         BooleanSetting.CUSTOM_TEXTURES to false,
@@ -33,10 +37,10 @@ object UberharGraphicsProfile {
         IntSetting.GRAPHICS_API to 2,
         IntSetting.TEXTURE_FILTER to 0,
         IntSetting.TEXTURE_SAMPLING to 0,
-        IntSetting.DELAY_RENDER_THREAD_US to 0,
+        IntSetting.DELAY_RENDER_THREAD_US to TestingSettings.effectiveRenderThreadDelayUs(),
         IntSetting.RENDER_3D_WHICH_DISPLAY to 0,
         IntSetting.STEREOSCOPIC_3D_MODE to 0,
-        IntSetting.STEREOSCOPIC_3D_DEPTH to 0
+        IntSetting.STEREOSCOPIC_3D_DEPTH to TestingSettings.effectiveStereoDepth()
     )
 
     // CodexAstraUlt: The presenter passes the same selection used to lock the settings screen.

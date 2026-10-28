@@ -1,9 +1,11 @@
 // Copyright 2017-2026 Citra Emulator Project / Azahar Emulator Project
-// Licensed under GPLv2 or any later version
-// Refer to the license.txt file included.
+// Licensed under GPLv3 or any later version
+// Refer to the misc/licenses/gplv3.txt file included.
 
 #include <cstring>
 #include <memory>
+#include <limits>
+#include <string_view>
 #include <span>
 #include <cryptopp/aes.h>
 #include <cryptopp/modes.h>
@@ -39,7 +41,11 @@ u64 GetModId(u64 program_id) {
  * @param size Size of compressed buffer
  * @return Size of decompressed buffer
  */
+// CodexAstraLocal: Azahar PR2648 rejects truncated LZSS footers before reading their size.
 static std::size_t LZSS_GetDecompressedSize(std::span<const u8> buffer) {
+    if (buffer.size() < sizeof(u32)) {
+        return buffer.size();
+    }
     u32 offset_size;
     std::memcpy(&offset_size, buffer.data() + buffer.size() - sizeof(u32), sizeof(u32));
     return offset_size + buffer.size();
@@ -53,15 +59,26 @@ static std::size_t LZSS_GetDecompressedSize(std::span<const u8> buffer) {
  * @param decompressed_size Size of decompressed buffer
  * @return True on success, otherwise false
  */
+// CodexAstraLocal: Azahar PR2648 validates footer and output bounds before decompression.
 static bool LZSS_Decompress(std::span<const u8> compressed, std::span<u8> decompressed) {
+    if (compressed.size() < 8 || decompressed.size() < compressed.size()) {
+        return false;
+    }
+
     const u8* footer = compressed.data() + compressed.size() - 8;
 
     u32 buffer_top_and_bottom;
     std::memcpy(&buffer_top_and_bottom, footer, sizeof(u32));
 
+    const std::size_t top = (buffer_top_and_bottom >> 24) & 0xFF;
+    const std::size_t bottom = buffer_top_and_bottom & 0xFFFFFF;
+    if (top > compressed.size() || bottom > compressed.size()) {
+        return false;
+    }
+
     std::size_t out = decompressed.size();
-    std::size_t index = compressed.size() - ((buffer_top_and_bottom >> 24) & 0xFF);
-    std::size_t stop_index = compressed.size() - (buffer_top_and_bottom & 0xFFFFFF);
+    std::size_t index = compressed.size() - top;
+    std::size_t stop_index = compressed.size() - bottom;
 
     std::memset(decompressed.data(), 0, decompressed.size());
     std::memcpy(decompressed.data(), compressed.data(), compressed.size());
@@ -202,13 +219,18 @@ Loader::ResultStatus NCCHContainer::LoadHeader() {
         // This is a NCSD file, open subfile as NCCH
         if (FileUtil::MakeMagic('N', 'C', 'S', 'D') == ncch_header.magic) {
             is_ncsd = true;
-            NCSD_Header ncsd_header;
-            file->ReadAtBytes(&ncsd_header, sizeof(NCSD_Header), 0);
-            ASSERT(FileUtil::MakeMagic('N', 'C', 'S', 'D') == ncsd_header.magic);
-            ASSERT(partition < 8);
-
-            size_t ncch_offset = ncsd_header.partitions[partition].offset * kBlockSize;
-            size_t ncch_size = ncsd_header.partitions[partition].size * kBlockSize;
+            // CodexAstraLocal: Validate encrypted/unencrypted CCI partition extents before subfile
+            // creation.
+            NCSD_Header ncsd_header{};
+            if (file->ReadAtBytes(&ncsd_header, sizeof(ncsd_header), 0) != sizeof(ncsd_header) ||
+                partition >= 8) {
+                return Loader::ResultStatus::ErrorInvalidFormat;
+            }
+            const u64 ncch_offset = static_cast<u64>(ncsd_header.partitions[partition].offset) * kBlockSize;
+            const u64 ncch_size = static_cast<u64>(ncsd_header.partitions[partition].size) * kBlockSize;
+            if (ncch_offset > file->GetSize() || ncch_size > file->GetSize() - ncch_offset) {
+                return Loader::ResultStatus::ErrorInvalidFormat;
+            }
 
             file = std::make_unique<FileUtil::SubIOFile>(std::move(file), ncch_offset, ncch_size);
 
@@ -223,11 +245,7 @@ Loader::ResultStatus NCCHContainer::LoadHeader() {
 
     LOG_DEBUG(Service_FS, "NCCH type: {}", file->GetType().to_string());
 
-    if (!ncch_header.no_crypto) {
-        // Encrypted NCCH are not supported
-        return Loader::ResultStatus::ErrorEncrypted;
-    }
-
+    // CodexAstraLocal: Plus permits encrypted headers; key availability is checked by Load.
     has_header = true;
     return Loader::ResultStatus::Success;
 }
@@ -247,6 +265,150 @@ Loader::ResultStatus NCCHContainer::Load() {
         if (header_res != Loader::ResultStatus::Success) {
             return header_res;
         }
+        // CodexAstraLocal: Restore Plus NCCH crypto using only the existing supplied key/seed
+        // stores.
+        bool failed_to_decrypt = false;
+        if (!ncch_header.no_crypto) {
+            is_encrypted = true;
+
+            // Find primary and secondary keys
+            if (ncch_header.fixed_key) {
+                LOG_DEBUG(Service_FS, "Fixed-key crypto");
+                primary_key.fill(0);
+                secondary_key.fill(0);
+            } else {
+                using namespace HW::AES;
+                InitKeys();
+                std::array<u8, 16> key_y_primary{}, key_y_secondary{};
+
+                std::copy(ncch_header.signature, ncch_header.signature + key_y_primary.size(),
+                          key_y_primary.begin());
+
+                if (!ncch_header.seed_crypto) {
+                    key_y_secondary = key_y_primary;
+                } else {
+                    auto opt{FileSys::GetSeed(ncch_header.program_id)};
+                    if (!opt.has_value()) {
+                        LOG_ERROR(Service_FS, "Seed for program {:016X} not found",
+                                  ncch_header.program_id);
+                        failed_to_decrypt = true;
+                    } else {
+                        auto seed{*opt};
+                        std::array<u8, 32> input;
+                        std::memcpy(input.data(), key_y_primary.data(), key_y_primary.size());
+                        std::memcpy(input.data() + key_y_primary.size(), seed.data(), seed.size());
+                        CryptoPP::SHA256 sha;
+                        std::array<u8, CryptoPP::SHA256::DIGESTSIZE> hash;
+                        sha.CalculateDigest(hash.data(), input.data(), input.size());
+                        std::memcpy(key_y_secondary.data(), hash.data(), key_y_secondary.size());
+                    }
+                }
+
+                SetKeyY(KeySlotID::NCCHSecure1, key_y_primary);
+                if (!IsNormalKeyAvailable(KeySlotID::NCCHSecure1)) {
+                    LOG_ERROR(Service_FS, "Secure1 KeyX missing");
+                    failed_to_decrypt = true;
+                }
+                primary_key = GetNormalKey(KeySlotID::NCCHSecure1);
+
+                switch (ncch_header.secondary_key_slot) {
+                case 0:
+                    LOG_DEBUG(Service_FS, "Secure1 crypto");
+                    SetKeyY(KeySlotID::NCCHSecure1, key_y_secondary);
+                    if (!IsNormalKeyAvailable(KeySlotID::NCCHSecure1)) {
+                        LOG_ERROR(Service_FS, "Secure1 KeyX missing");
+                        failed_to_decrypt = true;
+                    }
+                    secondary_key = GetNormalKey(KeySlotID::NCCHSecure1);
+                    break;
+                case 1:
+                    LOG_DEBUG(Service_FS, "Secure2 crypto");
+                    SetKeyY(KeySlotID::NCCHSecure2, key_y_secondary);
+                    if (!IsNormalKeyAvailable(KeySlotID::NCCHSecure2)) {
+                        LOG_ERROR(Service_FS, "Secure2 KeyX missing");
+                        failed_to_decrypt = true;
+                    }
+                    secondary_key = GetNormalKey(KeySlotID::NCCHSecure2);
+                    break;
+                case 10:
+                    LOG_DEBUG(Service_FS, "Secure3 crypto");
+                    SetKeyY(KeySlotID::NCCHSecure3, key_y_secondary);
+                    if (!IsNormalKeyAvailable(KeySlotID::NCCHSecure3)) {
+                        LOG_ERROR(Service_FS, "Secure3 KeyX missing");
+                        failed_to_decrypt = true;
+                    }
+                    secondary_key = GetNormalKey(KeySlotID::NCCHSecure3);
+                    break;
+                case 11:
+                    LOG_DEBUG(Service_FS, "Secure4 crypto");
+                    SetKeyY(KeySlotID::NCCHSecure4, key_y_secondary);
+                    if (!IsNormalKeyAvailable(KeySlotID::NCCHSecure4)) {
+                        LOG_ERROR(Service_FS, "Secure4 KeyX missing");
+                        failed_to_decrypt = true;
+                    }
+                    secondary_key = GetNormalKey(KeySlotID::NCCHSecure4);
+                    break;
+                default:
+                    // CodexAstraLocal: Unknown crypto methods must not use a zero or stale key.
+                    LOG_ERROR(Service_FS, "Unsupported NCCH secondary key slot {}",
+                              ncch_header.secondary_key_slot);
+                    failed_to_decrypt = true;
+                    break;
+                }
+            }
+
+            // CodexAstraLocal: Preserve upstream version-specific section counters and attribution.
+            // Find CTR for each section
+            // Written with reference to
+            // https://github.com/d0k3/GodMode9/blob/99af6a73be48fa7872649aaa7456136da0df7938/arm9/source/game/ncch.c#L34-L52
+            if (ncch_header.version == 0 || ncch_header.version == 2) {
+                LOG_DEBUG(Loader, "NCCH version 0/2");
+                // In this version, CTR for each section is a magic number prefixed by partition ID
+                // (reverse order)
+                std::reverse_copy(ncch_header.partition_id, ncch_header.partition_id + 8,
+                                  exheader_ctr.begin());
+                exefs_ctr = romfs_ctr = exheader_ctr;
+                exheader_ctr[8] = 1;
+                exefs_ctr[8] = 2;
+                romfs_ctr[8] = 3;
+            } else if (ncch_header.version == 1) {
+                LOG_DEBUG(Loader, "NCCH version 1");
+                // In this version, CTR for each section is the section offset prefixed by partition
+                // ID, as if the entire NCCH image is encrypted using a single CTR stream.
+                std::copy(ncch_header.partition_id, ncch_header.partition_id + 8,
+                          exheader_ctr.begin());
+                exefs_ctr = romfs_ctr = exheader_ctr;
+                auto u32ToBEArray = [](u32 value) -> std::array<u8, 4> {
+                    return std::array<u8, 4>{
+                        static_cast<u8>(value >> 24),
+                        static_cast<u8>((value >> 16) & 0xFF),
+                        static_cast<u8>((value >> 8) & 0xFF),
+                        static_cast<u8>(value & 0xFF),
+                    };
+                };
+                auto offset_exheader = u32ToBEArray(0x200); // exheader offset
+                // CodexAstraLocal: Version 1 encodes 32-bit byte offsets; reject rather than wrap
+                // them.
+                const u64 exefs_bytes = static_cast<u64>(ncch_header.exefs_offset) * kBlockSize;
+                const u64 romfs_bytes = static_cast<u64>(ncch_header.romfs_offset) * kBlockSize;
+                if (exefs_bytes > std::numeric_limits<u32>::max() ||
+                    romfs_bytes > std::numeric_limits<u32>::max()) {
+                    failed_to_decrypt = true;
+                }
+                auto offset_exefs = u32ToBEArray(static_cast<u32>(exefs_bytes));
+                auto offset_romfs = u32ToBEArray(static_cast<u32>(romfs_bytes));
+                std::copy(offset_exheader.begin(), offset_exheader.end(),
+                          exheader_ctr.begin() + 12);
+                std::copy(offset_exefs.begin(), offset_exefs.end(), exefs_ctr.begin() + 12);
+                std::copy(offset_romfs.begin(), offset_romfs.end(), romfs_ctr.begin() + 12);
+            } else {
+                LOG_ERROR(Service_FS, "Unknown NCCH version {}", ncch_header.version);
+                failed_to_decrypt = true;
+            }
+        } else {
+            LOG_DEBUG(Service_FS, "No crypto");
+            is_encrypted = false;
+        }
 
         if (ncch_header.content_size == file->GetSize()) {
             // The NCCH is a proto version, which does not use media size units
@@ -254,10 +416,7 @@ Loader::ResultStatus NCCHContainer::Load() {
             block_size = 1;
         }
 
-        if (!ncch_header.no_crypto) {
-            // Encrypted NCCH are not supported
-            return Loader::ResultStatus::ErrorEncrypted;
-        }
+
 
         // System archives and DLC don't have an extended header but have RomFS
         // Proto apps don't have an ext header size
@@ -270,6 +429,27 @@ Loader::ResultStatus NCCHContainer::Load() {
             file->Seek(sizeof(NCCH_Header), SEEK_SET);
             if (!read_exheader(file.get())) {
                 return Loader::ResultStatus::Error;
+            }
+
+            // CodexAstraLocal: Retain Plus tolerance for already-decrypted merged dumps.
+            if (is_encrypted) {
+                // This ID check is masked to low 32-bit as a toleration to ill-formed ROM created
+                // by merging games and its updates.
+                if ((exheader_header.system_info.jump_id & 0xFFFFFFFF) ==
+                    (ncch_header.program_id & 0xFFFFFFFF)) {
+                    LOG_WARNING(Service_FS, "NCCH is marked as encrypted but with decrypted "
+                                            "exheader. Force no crypto scheme.");
+                    is_encrypted = false;
+                } else {
+                    if (failed_to_decrypt) {
+                        LOG_ERROR(Service_FS, "Failed to decrypt");
+                        return Loader::ResultStatus::ErrorEncrypted;
+                    }
+                    CryptoPP::byte* data = reinterpret_cast<CryptoPP::byte*>(&exheader_header);
+                    CryptoPP::CTR_Mode<CryptoPP::AES>::Decryption(
+                        primary_key.data(), primary_key.size(), exheader_ctr.data())
+                        .ProcessData(data, data, sizeof(exheader_header));
+                }
             }
 
             const auto mods_path =
@@ -330,9 +510,22 @@ Loader::ResultStatus NCCHContainer::Load() {
         }
 
         // DLC can have an ExeFS and a RomFS but no extended header
+        // CodexAstraLocal: DLC/system NCCH can omit exheaders; still fail closed before sections.
+        if (is_encrypted && failed_to_decrypt) {
+            LOG_ERROR(Service_FS, "NCCH decryption material unavailable for program {:016X}",
+                      ncch_header.program_id);
+            return Loader::ResultStatus::ErrorEncrypted;
+        }
+
         if (ncch_header.exefs_size) {
-            u32 exefs_offset = ncch_header.exefs_offset * block_size;
-            u32 exefs_size = ncch_header.exefs_size * block_size;
+            // CodexAstraLocal: Widen media-block arithmetic and validate before reading decrypted
+            // metadata.
+            const u64 exefs_offset = static_cast<u64>(ncch_header.exefs_offset) * block_size;
+            const u64 exefs_size = static_cast<u64>(ncch_header.exefs_size) * block_size;
+            if (exefs_offset > file->GetSize() || exefs_size > file->GetSize() - exefs_offset ||
+                exefs_size < sizeof(ExeFs_Header)) {
+                return Loader::ResultStatus::ErrorInvalidFormat;
+            }
 
             LOG_DEBUG(Service_FS, "ExeFS offset:                0x{:08X}", exefs_offset);
             LOG_DEBUG(Service_FS, "ExeFS size:                  0x{:08X}", exefs_size);
@@ -343,6 +536,14 @@ Loader::ResultStatus NCCHContainer::Load() {
             if (exefs_file->ReadAtBytes(&exefs_header, sizeof(ExeFs_Header), 0) !=
                 sizeof(ExeFs_Header))
                 return Loader::ResultStatus::Error;
+
+            // CodexAstraLocal: ExeFS metadata uses the primary NCCH key.
+            if (is_encrypted) {
+                CryptoPP::byte* data = reinterpret_cast<CryptoPP::byte*>(&exefs_header);
+                CryptoPP::CTR_Mode<CryptoPP::AES>::Decryption(primary_key.data(),
+                                                              primary_key.size(), exefs_ctr.data())
+                    .ProcessData(data, data, sizeof(exefs_header));
+            }
 
             has_exefs = true;
         }
@@ -430,9 +631,14 @@ Loader::ResultStatus NCCHContainer::LoadSectionExeFS(const char* name, std::vect
     // instead of the ExeFS.
     if (std::strcmp(name, "logo") == 0) {
         if (ncch_header.logo_region_offset && ncch_header.logo_region_size) {
-            std::size_t logo_offset = ncch_header.logo_region_offset * block_size;
-            std::size_t logo_size = ncch_header.logo_region_size * block_size;
-
+            // CodexAstraLocal: Malformed media-unit fields must not wrap or allocate beyond the
+            // file.
+            const u64 logo_offset = static_cast<u64>(ncch_header.logo_region_offset) * block_size;
+            const u64 logo_size = static_cast<u64>(ncch_header.logo_region_size) * block_size;
+            if (logo_offset > file->GetSize() || logo_size > file->GetSize() - logo_offset ||
+                logo_size > 256 * 1024 * 1024) {
+                return Loader::ResultStatus::ErrorInvalidFormat;
+            }
             buffer.resize(logo_size);
             file->Seek(logo_offset, SEEK_SET);
 
@@ -455,26 +661,60 @@ Loader::ResultStatus NCCHContainer::LoadSectionExeFS(const char* name, std::vect
     for (unsigned section_number = 0; section_number < kMaxSections; section_number++) {
         const auto& section = exefs_header.section[section_number];
 
+        // CodexAstraLocal: Decrypted section names are fixed-width bytes, not trusted C strings.
+        const std::string_view section_name(section.name,
+            std::find(std::begin(section.name), std::end(section.name), '\0') - std::begin(section.name));
         // Load the specified section...
-        if (strcmp(section.name, name) == 0) {
+        if (section_name == name) {
             LOG_DEBUG(Service_FS, "{} - offset: 0x{:08X}, size: 0x{:08X}, name: {}", section_number,
-                      section.offset, section.size, section.name);
+                      section.offset, section.size, section_name);
 
-            s64 section_offset =
-                is_proto ? section.offset : (section.offset + sizeof(ExeFs_Header));
+            // CodexAstraLocal: Bound section allocations to the container and maximum 3DS memory
+            // size.
+            const u64 section_offset = static_cast<u64>(section.offset) +
+                                       (is_proto ? 0 : sizeof(ExeFs_Header));
+            const u64 section_size = is_proto ? Common::AlignUp<u64>(section.size, 0x10) :
+                                                static_cast<u64>(section.size);
+            if (section_offset > exefs_file->GetSize() ||
+                section_size > exefs_file->GetSize() - section_offset ||
+                section_size > 256 * 1024 * 1024) {
+                return Loader::ResultStatus::ErrorInvalidFormat;
+            }
             exefs_file->Seek(section_offset, SEEK_SET);
 
-            size_t section_size = is_proto ? Common::AlignUp(section.size, 0x10) : section.size;
+            // CodexAstraLocal: Icon/banner use primary crypto; executable/data use secondary
+            // crypto.
+            std::array<u8, 16> key;
+            if (section_name == "icon" || section_name == "banner") {
+                key = primary_key;
+            } else {
+                key = secondary_key;
+            }
 
-            if (strcmp(section.name, ".code") == 0 && is_compressed) {
+            CryptoPP::CTR_Mode<CryptoPP::AES>::Decryption dec(key.data(), key.size(),
+                                                              exefs_ctr.data());
+            dec.Seek(section.offset + sizeof(ExeFs_Header));
+
+            if (section_name == ".code" && is_compressed) {
                 // Section is compressed, read compressed .code section...
                 std::vector<u8> temp_buffer(section_size);
                 if (exefs_file->ReadBytes(temp_buffer.data(), temp_buffer.size()) !=
                     temp_buffer.size())
                     return Loader::ResultStatus::Error;
 
+                // CodexAstraLocal: Decrypt before LZSS decoding, with the section-relative counter.
+                if (is_encrypted) {
+                    dec.ProcessData(temp_buffer.data(), temp_buffer.data(), section.size);
+                }
+
                 // Decompress .code section...
-                buffer.resize(LZSS_GetDecompressedSize(temp_buffer));
+                // CodexAstraLocal: A wrong key/malformed footer cannot request multi-gigabyte
+                // output.
+                const auto decompressed_size = LZSS_GetDecompressedSize(temp_buffer);
+                if (decompressed_size > 256 * 1024 * 1024) {
+                    return Loader::ResultStatus::ErrorInvalidFormat;
+                }
+                buffer.resize(decompressed_size);
                 if (!LZSS_Decompress(temp_buffer, buffer)) {
                     return Loader::ResultStatus::ErrorInvalidFormat;
                 }
@@ -483,6 +723,9 @@ Loader::ResultStatus NCCHContainer::LoadSectionExeFS(const char* name, std::vect
                 buffer.resize(section_size);
                 if (exefs_file->ReadBytes(buffer.data(), section_size) != section_size)
                     return Loader::ResultStatus::Error;
+                if (is_encrypted) {
+                    dec.ProcessData(buffer.data(), buffer.data(), section.size);
+                }
             }
 
             return Loader::ResultStatus::Success;
@@ -604,14 +847,18 @@ Loader::ResultStatus NCCHContainer::ReadRomFS(std::shared_ptr<RomFSReader>& romf
     if (!file || !file->IsOpen())
         return Loader::ResultStatus::Error;
 
-    u32 romfs_offset = (ncch_header.romfs_offset * block_size) + 0x1000;
-    u32 romfs_size = (ncch_header.romfs_size * block_size) - 0x1000;
+    // CodexAstraLocal: Validate the IVFC prefix before subtraction and widen media-unit arithmetic.
+    const u64 region_offset = static_cast<u64>(ncch_header.romfs_offset) * block_size;
+    const u64 region_size = static_cast<u64>(ncch_header.romfs_size) * block_size;
+    if (region_size < 0x1000 || region_offset > file->GetSize() ||
+        region_size > file->GetSize() - region_offset) {
+        return Loader::ResultStatus::ErrorInvalidFormat;
+    }
+    const u64 romfs_offset = region_offset + 0x1000;
+    const u64 romfs_size = region_size - 0x1000;
 
     LOG_DEBUG(Service_FS, "RomFS offset:           0x{:08X}", romfs_offset);
     LOG_DEBUG(Service_FS, "RomFS size:             0x{:08X}", romfs_size);
-
-    if (file->GetSize() < romfs_offset + romfs_size)
-        return Loader::ResultStatus::Error;
 
     // We reopen the file, to allow its position to be independent from file's
     std::unique_ptr<FileUtil::IOFileBase> romfs_file_inner;
@@ -620,9 +867,17 @@ Loader::ResultStatus NCCHContainer::ReadRomFS(std::shared_ptr<RomFSReader>& romf
     if (!romfs_file_inner->IsOpen())
         return Loader::ResultStatus::Error;
 
-    std::shared_ptr<RomFSReader> direct_romfs =
-        std::make_shared<DirectRomFSReader>(std::make_unique<FileUtil::SubIOFile>(
+    // CodexAstraLocal: RomFS exposes data after its 0x1000-byte crypto header; keep that CTR bias.
+    std::shared_ptr<RomFSReader> direct_romfs;
+    if (is_encrypted) {
+        direct_romfs = std::make_shared<DirectRomFSReader>(
+            std::make_unique<FileUtil::SubIOFile>(std::move(romfs_file_inner), romfs_offset,
+                                                romfs_size),
+            secondary_key, romfs_ctr, 0x1000);
+    } else {
+        direct_romfs = std::make_shared<DirectRomFSReader>(std::make_unique<FileUtil::SubIOFile>(
             std::move(romfs_file_inner), romfs_offset, romfs_size));
+    }
 
     const auto path =
         fmt::format("{}mods/{:016X}/", FileUtil::GetUserPath(FileUtil::UserPath::LoadDir),
@@ -645,6 +900,7 @@ Loader::ResultStatus NCCHContainer::DumpRomFS(const std::string& target_path) {
                   file->Filename());
         return Loader::ResultStatus::ErrorEncrypted;
     }
+
 
     std::shared_ptr<RomFSReader> direct_romfs;
     Loader::ResultStatus result = ReadRomFS(direct_romfs, false);

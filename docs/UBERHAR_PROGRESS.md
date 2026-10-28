@@ -1,3 +1,24 @@
+<!-- CodexAstraLocal: .56 candidate combines compatibility/controls with a narrow GPU-work reduction; hosted and hardware acceptance remain separate. -->
+## 0.1.56 — depth ownership, GPU attribution and comparison controls
+
+Retain the .55 baseline and avoid depth/stencil invalidation for Vulkan draws that
+only read the resolved attachment. Bounded exit counters distinguish opportunities
+from actual invalidations. Existing sampled GPU intervals now carry fulfilled
+worker-side pipeline/shader identity, mixed-pass markers, frame/target identity
+and natural pass-end reasons without additional waits or diagnostic pass splits.
+
+Add title-only Hardware Shaders, render-thread delay, Linear Filtering, 0/1% guest
+slider and right-eye controls, a shared-scroll settings header, and a compiled
+alpha-only gate. Preserve normal defaults and saved Custom preferences; hardware
+fallback retains the actual vertex ABI and retries rejected draws on the CPU.
+Port pinned Azahar installer safety and selected Azahar Plus encrypted file support
+with supplied keys, validated staged promotion and upstream attribution retained.
+
+Affected source/executable/Android checks and independent review precede submission;
+full hosted shader, Android, signing and publication gates and owner handheld tests
+remain required. No measured speed gain is claimed. See [release scope](releases/0.1.56.md)
+and [compatibility provenance](UBERHAR_FILE_COMPATIBILITY.md).
+
 <!-- CodexAstraLocal: .55 implementation checkpoint; hosted and hardware qualification are separate. -->
 ## 0.1.55 — adaptive specialization, warm reuse and testing controls
 

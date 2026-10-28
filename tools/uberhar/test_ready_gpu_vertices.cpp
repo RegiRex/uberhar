@@ -11,6 +11,8 @@
 #include "video_core/renderer_vulkan/uberhar_gpu_vertex_policy.h"
 #include "video_core/renderer_vulkan/pica_to_vk.h"
 #include "video_core/rasterizer_cache/framebuffer_base.h"
+// CodexAstraLocal: Exercise the production format-aware depth/stencil write predicate.
+#include "video_core/renderer_vulkan/vk_graphics_pipeline.h"
 
 namespace Common::Log {
 void Stop() {}
@@ -37,10 +39,16 @@ public:
         }
     };
     const Surface& GetSurface(SurfaceId) { ++reads; return surface; }
-    void InvalidateRegion(PAddr address, u32 bytes, SurfaceId) {
+    void InvalidateRegion(PAddr address, u32 bytes, SurfaceId owner) {
         if (address != 4096 || bytes != 64) throw std::runtime_error("Bad invalidation");
         ++invalidations;
+        // CodexAstraLocal: Retain exact owners/order to catch lost color writes.
+        owners.push_back(owner);
     }
+    // CodexAstraLocal: Use the real saturating counters at the recording boundary.
+    void RecordFramebufferDepthInvalidation(bool writes) { depth_stats.Record(writes); }
+    FramebufferDepthInvalidationStats depth_stats;
+    std::vector<SurfaceId> owners;
     u64 reads{}, invalidations{};
     Surface surface;
 };
@@ -168,14 +176,86 @@ int main() {
         h.CancelInvalidation();
     }
     Check(cache.reads == 0 && cache.invalidations == 0, "Abandoned candidate dirtied framebuffer");
+    // CodexAstraLocal: Canceled preparation must not inflate either exit population.
+    Check(cache.depth_stats.invalidated == 0 && cache.depth_stats.read_only == 0,
+          "Canceled candidate entered depth exit counters");
     { const VideoCore::FramebufferHelper<FakeBackend> h{&cache,&fb,false,regs,area}; }
     Check(cache.reads == 2 && cache.invalidations == 2, "CPU retry lost color/depth ownership");
     { const VideoCore::FramebufferHelper<FakeBackend> h{&cache,&fb,false,regs,area}; }
     Check(cache.invalidations == 4, "Accepted GPU draw lost ownership");
+    Check(cache.depth_stats.invalidated == 2 && cache.depth_stats.read_only == 0,
+          "Conservative default depth ownership was not counted");
+
+    // CodexAstraLocal: Named permissions exercise the real Vulkan predicate and
+    // helper destructor together. All stencil actions intentionally remain Keep:
+    // nonzero writable masks stay conservative regardless of operation analysis.
+    using Format = VideoCore::PixelFormat;
+    struct DepthCase {
+        Format format;
+        bool test, write, stencil;
+        u8 mask;
+        bool expected;
+    };
+    const std::array depth_cases{
+        DepthCase{Format::D16, true, false, false, 0, false},
+        DepthCase{Format::D24, true, false, true, 255, false},
+        DepthCase{Format::D24S8, true, false, true, 0, false},
+        DepthCase{Format::D24S8, false, false, false, 255, false},
+        DepthCase{Format::D24S8, false, false, true, 1, true},
+        DepthCase{Format::D24S8, false, false, true, 128, true},
+        DepthCase{Format::D24S8, false, false, true, 255, true},
+        DepthCase{Format::D16, true, true, false, 0, true},
+        DepthCase{Format::D24, true, true, false, 0, true},
+        DepthCase{Format::D24S8, true, true, true, 0, true},
+        DepthCase{Format::D24S8, true, false, true, 0, false},
+        DepthCase{Format::Invalid, false, false, false, 0, false},
+    };
+    u64 depth_checks{};
+    for (const auto& test : depth_cases) {
+        Vulkan::PipelineInfo info{};
+        info.state.attachments.depth = test.format;
+        info.state.depth_stencil.depth_test_enable.Assign(test.test);
+        info.state.depth_stencil.depth_write_enable.Assign(test.write);
+        info.state.depth_stencil.stencil_test_enable.Assign(test.stencil);
+        info.dynamic_info.stencil_write_mask = test.mask;
+        Check(info.IsDepthWriteEnabled() == test.expected, "Effective depth/stencil permission");
+        for (bool color : {false, true}) for (bool depth : {false, true}) {
+            for (bool canceled : {false, true}) {
+                VideoCore::RasterizerCache<FakeBackend> record;
+                FakeBackend::Framebuffer target;
+                target.color_id = color ? VideoCore::SurfaceId{2} : VideoCore::SurfaceId{};
+                target.depth_id = depth ? VideoCore::SurfaceId{3} : VideoCore::SurfaceId{};
+                {
+                    const VideoCore::FramebufferHelper<FakeBackend> helper{
+                        &record, &target, false, regs, area};
+                    helper.SetDepthWriteEnabled(info.IsDepthWriteEnabled());
+                    if (canceled) helper.CancelInvalidation();
+                }
+                std::vector<VideoCore::SurfaceId> expected;
+                if (!canceled && color) expected.push_back(target.color_id);
+                if (!canceled && depth && test.expected) expected.push_back(target.depth_id);
+                Check(record.owners == expected && record.reads == expected.size(),
+                      "Read-only depth changed color/owner invalidation order");
+                Check(record.depth_stats.invalidated == (!canceled && depth && test.expected) &&
+                          record.depth_stats.read_only == (!canceled && depth && !test.expected),
+                      "Depth exit counters include absent/canceled attachment");
+                ++depth_checks;
+            }
+        }
+    }
+    // CodexAstraLocal: Diagnostic totals remain bounded without wrapping into
+    // plausible small populations on an arbitrarily long renderer lifetime.
+    VideoCore::FramebufferDepthInvalidationStats saturated{
+        std::numeric_limits<u64>::max(), std::numeric_limits<u64>::max()};
+    saturated.Record(true);
+    saturated.Record(false);
+    Check(saturated.invalidated == std::numeric_limits<u64>::max() &&
+              saturated.read_only == std::numeric_limits<u64>::max(), "Depth counters wrapped");
     std::printf("PASS: %llu production admission checks, 200000 readiness decisions (%llu GPU/%llu CPU), "
                 "%llu production assembly draw differentials (%llu promoted, %llu Shader), "
-                "Vulkan topology mapping and framebuffer cancellation/retry\n",
+                "Vulkan topology mapping and framebuffer cancellation/retry, "
+                "%llu depth/stencil ownership cases\n",
                 (unsigned long long)checks, (unsigned long long)gpu, (unsigned long long)cpu,
                 (unsigned long long)assembly_draws, (unsigned long long)promoted,
-                (unsigned long long)shader_promoted);
+                (unsigned long long)shader_promoted, (unsigned long long)depth_checks);
 }

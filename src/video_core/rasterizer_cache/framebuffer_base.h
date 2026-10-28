@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include <limits> // CodexAstraLocal: Saturate bounded depth-exit diagnostic counters.
+
 #include "common/hash.h"
 #include "common/math_util.h"
 #include "video_core/pica/regs_rasterizer.h"
@@ -55,6 +57,20 @@ static_assert(std::has_unique_object_representations_v<FramebufferParams>,
 
 template <class T>
 class RasterizerCache;
+
+// CodexAstraLocal TEST-ONLY LOG: Two cumulative helper-exit counters describe
+// bookkeeping, not GPU savings. Remove with the .56 depth comparison logs.
+struct FramebufferDepthInvalidationStats {
+    void Record(bool writes) noexcept {
+        auto& count = writes ? invalidated : read_only;
+        if (count != std::numeric_limits<u64>::max()) {
+            ++count;
+        }
+    }
+
+    u64 invalidated{};
+    u64 read_only{};
+};
 
 /**
  * @brief FramebufferHelper is a RAII wrapper over backend specific framebuffer handle that
@@ -118,6 +134,10 @@ public:
     // Cancel only before submission; normal and compute draws keep invalidation.
     void CancelInvalidation() const noexcept { invalidate_on_exit = false; }
 
+    // CodexAstraLocal: Call only with the current resolved attachment's effective
+    // depth/stencil write permission. Other backends retain conservative ownership.
+    void SetDepthWriteEnabled(bool enabled) const noexcept { depth_write_enabled = enabled; }
+
     ~FramebufferHelper() {
         if (!invalidate_on_exit)
             return;
@@ -133,7 +153,12 @@ public:
             invalidate(fb->color_id, fb->color_level);
         }
         if (fb->depth_id) {
-            invalidate(fb->depth_id, fb->depth_level);
+            // CodexAstraLocal: Read-only tests do not author depth/stencil memory.
+            // Color writes above still invalidate every overlapping cached alias.
+            res_cache->RecordFramebufferDepthInvalidation(depth_write_enabled);
+            if (depth_write_enabled) {
+                invalidate(fb->depth_id, fb->depth_level);
+            }
         }
     }
 
@@ -161,6 +186,8 @@ private:
     ViewportInfo viewport;
     // AstraPro: Per-helper ownership; no global cache-invalidation suppression.
     mutable bool invalidate_on_exit{true};
+    // CodexAstraLocal: Default to the inherited path until a backend proves read-only use.
+    mutable bool depth_write_enabled{true};
 };
 
 } // namespace VideoCore

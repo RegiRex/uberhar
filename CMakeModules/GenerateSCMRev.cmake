@@ -3,6 +3,13 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/CMakeModules")
 include(GenerateBuildInfo)
 generate_build_info()
 
+# CodexAstraLocal: Match Gradle's ../../UBERHAR_VERSION source; stale Testing files
+# are inert outside alpha releases, regardless of Debug/Release or product flavor.
+include(ReadUberharVersion)
+read_uberhar_alpha_version("${CMAKE_SOURCE_DIR}/UBERHAR_VERSION" UBERHAR_ALPHA_TESTING)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${CMAKE_SOURCE_DIR}/UBERHAR_VERSION")
+
 # The variable SRC_DIR must be passed into the script (since it uses the current build directory for all values of CMAKE_*_DIR)
 set(VIDEO_CORE "${CMAKE_SOURCE_DIR}/src/video_core")
 set(HASH_FILES

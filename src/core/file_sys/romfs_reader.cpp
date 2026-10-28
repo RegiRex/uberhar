@@ -19,6 +19,9 @@ SERIALIZE_EXPORT_IMPL(FileSys::DirectRomFSReader)
 namespace FileSys {
 
 std::size_t DirectRomFSReader::ReadFile(std::size_t offset, std::size_t length, u8* buffer) {
+    // CodexAstraLocal: Refuse out-of-range offsets before subtraction and CTR positioning.
+    if (offset >= GetSize())
+        return 0;
     length = std::min(length, GetSize() - offset);
     if (length == 0)
         return 0; // Crypto++ does not like zero size buffer
@@ -29,6 +32,12 @@ std::size_t DirectRomFSReader::ReadFile(std::size_t offset, std::size_t length, 
     // Skip cache if the read is too big
     if (segments.size() == 1 && segments[0].second > cache_line_size) {
         length = file->ReadAtBytes(buffer, length, offset);
+        // CodexAstraLocal: Large reads bypass cache but retain the same section-relative CTR.
+        if (is_encrypted && length) {
+            CryptoPP::CTR_Mode<CryptoPP::AES>::Decryption d(key.data(), key.size(), ctr.data());
+            d.Seek(crypto_offset + offset);
+            d.ProcessData(buffer, buffer, length);
+        }
         LOG_TRACE(Service_FS, "RomFS Cache SKIP: offset={}, length={}", offset, length);
         return length;
     }
@@ -43,6 +52,12 @@ std::size_t DirectRomFSReader::ReadFile(std::size_t offset, std::size_t length, 
         if (!cache_entry.first) {
             // If not found, read from disk and cache the data
             read_size = file->ReadAtBytes(cache_entry.second.data(), read_size, page);
+            // CodexAstraLocal: Cache plaintext after decrypting exactly the bytes actually read.
+            if (is_encrypted && read_size) {
+                CryptoPP::CTR_Mode<CryptoPP::AES>::Decryption d(key.data(), key.size(), ctr.data());
+                d.Seek(crypto_offset + page);
+                d.ProcessData(cache_entry.second.data(), cache_entry.second.data(), read_size);
+            }
             LOG_TRACE(Service_FS, "RomFS Cache MISS: page={}, length={}, into={}", page, seg.second,
                       (seg.first - page));
         } else {
@@ -56,6 +71,13 @@ std::size_t DirectRomFSReader::ReadFile(std::size_t offset, std::size_t length, 
         std::memcpy(buffer + read_progress, cache_entry.second.data() + (seg.first - page),
                     copy_amount);
         read_progress += copy_amount;
+        // CodexAstraLocal: A short underlying read must not turn stale cache tail bytes into a hit.
+        if (read_size < cache_line_size) {
+            cache.clear();
+        }
+        if (copy_amount < seg.second) {
+            break;
+        }
     }
     return read_progress;
 }

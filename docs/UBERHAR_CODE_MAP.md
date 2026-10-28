@@ -1,3 +1,40 @@
+<!-- CodexAstraLocal: .56 reduces redundant depth ownership work and identifies existing GPU samples. -->
+## 0.1.56 depth ownership and GPU sample attribution
+
+- `framebuffer_base`, `rasterizer_cache_base`, `vk_rasterizer`: resolved Vulkan
+  depth/stencil write permission controls helper-exit invalidation. Other backends
+  preserve conservative ownership. Two bounded counters distinguish performed
+  invalidations from read-only exits; neither is a GPU-time savings estimate.
+- `vk_render_manager`, `vk_pipeline_cache`, `vk_texture_runtime`: fixed sample
+  slots receive fulfilled worker-side pipeline/shader IDs after actual draws;
+  release/acquire publication plus completed ticks/query availability protect reuse.
+  Mixed passes, natural end causes and one slowest resolved pass per report expose
+  cost without new completion waits or render-pass splits.
+- `test_ready_gpu_vertices`, `test_compute_census`, `test_gpu_pass_attribution`,
+  cached draw-use and stream-order fixtures cover ownership, current-format writes,
+  failed draws, actual selection, mixed identities and safe publication. The alpha
+  gate and GPU attribution checks also run in the standard host release probe.
+
+<!-- CodexAstraLocal: .56 alpha control integration; APK/device qualification remains separate. -->
+## 0.1.56 alpha controls and hardware-vertex integration
+
+- `CMakeModules/ReadUberharVersion.cmake`, `common/scm_rev`: one generated
+  release.beta.alpha gate shared by JNI/UI and native overlay. Beta/full builds
+  ignore retained Testing files without rewriting them.
+- Android `TestingSettings`, `TestingPanelController`, `UberharGraphicsProfile`,
+  Settings/Home presenters and JNI `config`/`native`: title-only Hardware Shaders,
+  guest render-thread delay, Linear Filtering and 0/1% guest slider beside the
+  right-eye control; restart-latched values, effective displays and normal driver access.
+- `vk_pipeline_cache::BindPipeline`: ordinary hardware fallback retains translated
+  VS/GS while explicit CPU-layout fallback keeps trivial VS; no extra shader algorithm.
+- `vk_rasterizer::AccelerateDrawBatchInternal`: profile pipeline refusal retries
+  CPU rendering instead of inheriting Custom's async no-draw success. Bounded
+  TEST-ONLY counters count actual ordinary GPU enqueues, not accepted no-ops.
+- `test_alpha_testing_version.cmake`, Android layering/persistence, cached draw-use
+  and fragment-routing fixtures: actual version gate, independent storage/latches,
+  shader-stage identity and refused/actual draw coverage. Details and retirement
+  decisions are in [per-game settings](UBERHAR_PER_GAME_SETTINGS.md).
+
 <!-- CodexAstraLocal: .55 implementation map for maintainers; private hardware reports remain outside Git. -->
 ## 0.1.55 adaptive specialization and driver/testing controls
 

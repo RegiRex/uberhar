@@ -7,6 +7,7 @@
 #include "common/uberhar_test_profile.h" // CodexAstraLocal: Bound diagnostics to Native/Combo.
 #include "video_core/rasterizer_cache/pixel_format.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
+#include "video_core/renderer_vulkan/vk_pipeline_cache.h" // CodexAstraLocal: Fulfilled worker binding.
 #include "video_core/renderer_vulkan/vk_render_manager.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/renderer_vulkan/vk_texture_runtime.h"
@@ -42,7 +43,7 @@ RenderManager::RenderManager(const Instance& instance, Scheduler& scheduler)
         }
     }
     LOG_INFO(Render_Vulkan,
-        "Uberhar GPU pass timing: schema=1 enabled={} slots=16 stride=257 max_samples_per_frame=4 "
+        "Uberhar GPU pass timing: schema=2 enabled={} slots=16 stride=257 max_samples_per_frame=4 "
         "wait=false turnip_flush_requested={} effective_pass_flush={}",
         bool(diagnostic_queries), Settings::values.turnip_pass_end_flush.GetValue(), ShouldFlushPass());
     } catch (...) {
@@ -74,8 +75,16 @@ void RenderManager::BeginDiagnosticPass(const RenderPass& info, bool framebuffer
     for (u32 i = 0; i < diagnostic_samples.size(); ++i) {
         auto& sample = diagnostic_samples[i];
         if (sample.pending) continue;
-        sample = {0, u64{info.render_area.extent.width} * info.render_area.extent.height,
-                  true, false, info.do_clear != 0, framebuffer_pass};
+        // CodexAstraLocal: A free slot has no outstanding worker/GPU user. Reset
+        // publication before queueing the new immutable owner/pass identity.
+        diagnostic_published[i].store(false, std::memory_order_relaxed);
+        sample = {};
+        sample.pixels = u64{info.render_area.extent.width} * info.render_area.extent.height;
+        sample.pending = true;
+        sample.clear = info.do_clear != 0;
+        sample.framebuffer_pass = framebuffer_pass;
+        sample.pass_id = diagnostic_passes;
+        sample.frame_begin = diagnostic_frame;
         diagnostic_active = static_cast<int>(i);
         ++diagnostic_frame_samples;
         // CodexAstraLocal: EndRendering already closed the previous pass. Query
@@ -92,24 +101,64 @@ void RenderManager::BeginDiagnosticPass(const RenderPass& info, bool framebuffer
 void RenderManager::EndDiagnosticPass() {
     if (diagnostic_active < 0) return;
     const auto i = static_cast<u32>(diagnostic_active);
-    scheduler.Record([pool = *diagnostic_queries, i](vk::CommandBuffer cmdbuf) {
+    scheduler.Record([this, pool = *diagnostic_queries, i](vk::CommandBuffer cmdbuf) {
         cmdbuf.writeTimestamp(vk::PipelineStageFlagBits::eBottomOfPipe, pool, i * 2 + 1);
+        // CodexAstraLocal: All post-draw observers precede this command. Host
+        // readers acquire publication AND require completed tick/available queries.
+        diagnostic_published[i].store(true, std::memory_order_release);
     });
     // CodexAstraLocal: Stamp the final recording tick, after the pass/barrier;
     // only a completed pair can be polled or reused across command buffers.
     diagnostic_samples[i].tick = scheduler.CurrentTick();
     diagnostic_samples[i].ended = true;
+    diagnostic_samples[i].frame_end = diagnostic_frame;
     diagnostic_active = -1;
+}
+
+// CodexAstraLocal TEST-ONLY LOG: Only sampled draws queue this bounded observer.
+// No clocks, Vulkan work or resource owner survive the pass; remove with timing.
+void RenderManager::RecordDiagnosticDraw(const PipelineCache& pipelines, u32 color_addr,
+                                        u32 depth_addr) {
+    if (diagnostic_active < 0) return;
+    const auto i = static_cast<u32>(diagnostic_active);
+    scheduler.Record([this, &pipelines, i, frame = diagnostic_frame, color_addr, depth_addr]
+                     (vk::CommandBuffer) {
+        auto& draw = diagnostic_samples[i].attribution;
+        const auto* selected = pipelines.GetBoundDiagnosticPipeline();
+        const u64 pipeline = selected ? selected->Key() : 0;
+        const auto shaders = selected ? selected->ExecutionShaders() : std::array<u64, 3>{};
+        const std::array<u32, 2> target{color_addr, depth_addr};
+        if (!draw.draws) {
+            draw.first_frame = frame;
+            draw.first_pipeline = pipeline;
+            draw.first_shaders = shaders;
+            draw.first_target = target;
+        } else {
+            draw.pipeline_changes += draw.last_pipeline != pipeline;
+            draw.shader_changes += draw.last_shaders != shaders;
+            draw.target_changes += draw.last_target != target;
+        }
+        ++draw.draws;
+        draw.unattributed += selected == nullptr;
+        draw.last_frame = frame;
+        draw.last_pipeline = pipeline;
+        draw.last_shaders = shaders;
+        draw.last_target = target;
+    });
 }
 
 void RenderManager::PollDiagnostics(bool final) noexcept {
     if (!diagnostics_enabled) return;
     diagnostic_frame_samples = 0;
+    // CodexAstraLocal: Ordinal of the existing rasterizer TickFrame boundary;
+    // it is not a guest command-list ID or proof of a complete presented frame.
+    if (!final) ++diagnostic_frame;
     try {
         if (diagnostic_queries && !diagnostic_errors) {
             for (u32 i = 0; i < diagnostic_samples.size(); ++i) {
                 auto& sample = diagnostic_samples[i];
-                if (!sample.pending || !sample.ended || !scheduler.IsFree(sample.tick)) continue;
+                if (!sample.pending || !sample.ended || !scheduler.IsFree(sample.tick) ||
+                    !diagnostic_published[i].load(std::memory_order_acquire)) continue;
                 std::array<u64, 4> values{};
                 const auto result = instance.GetDevice().getQueryPoolResults(
                     *diagnostic_queries, i * 2, 2, sizeof(values), values.data(), sizeof(u64) * 2,
@@ -129,6 +178,16 @@ void RenderManager::PollDiagnostics(bool final) noexcept {
                 diagnostic_max_ns = std::max(diagnostic_max_ns, static_cast<u64>(ns));
                 diagnostic_pixels += sample.pixels;
                 diagnostic_clear_samples += sample.clear;
+                // CodexAstraLocal: A->B->A remains mixed even though endpoint IDs
+                // match. Change counts are transitions, never unique-shader counts.
+                diagnostic_draws += sample.attribution.draws;
+                diagnostic_unattributed += sample.attribution.unattributed;
+                diagnostic_mixed_shader_samples += sample.attribution.shader_changes != 0;
+                diagnostic_mixed_pipeline_samples += sample.attribution.pipeline_changes != 0;
+                if (!diagnostic_slowest.pending || ns > diagnostic_slowest_ns) {
+                    diagnostic_slowest = sample;
+                    diagnostic_slowest_ns = ns;
+                }
                 ++diagnostic_sampled;
                 sample.pending = false;
             }
@@ -143,17 +202,49 @@ void RenderManager::PollDiagnostics(bool final) noexcept {
         // sampled pass+dependency time is not pure shader time or a pixel count.
         // Remove after driver policy/admission experiments are qualified.
         LOG_INFO(Render_Vulkan,
-            "Uberhar GPU passes {}: schema=1 passes={} reused={} clears={} policy_flushes={} "
+            "Uberhar GPU passes {}: schema=2 passes={} reused={} clears={} policy_flushes={} "
             "samples={} gpu_ms={:.3f} max_pass_ms={:.3f} sampled_target_pixels={} clear_samples={} "
             "pending={} ring_full={} unavailable={} errors={} current_tick={} completed_tick={} "
             "framebuffer_samples={} framebuffer_ms={:.3f} utility_samples={} utility_ms={:.3f} "
+            "sampled_draws={} unattributed_draws={} mixed_shader_samples={} mixed_pipeline_samples={} "
+            "end_explicit={} end_pass_change={} end_submission={} end_feedback={} feedback_requests={} "
             "scope=sampled_pass_plus_dependencies presentation_time=unmeasured bandwidth=unavailable",
             final ? "final" : "progress", diagnostic_passes, diagnostic_reuses, diagnostic_clears,
             diagnostic_flushes, diagnostic_sampled, diagnostic_ns / 1e6, diagnostic_max_ns / 1e6,
             diagnostic_pixels, diagnostic_clear_samples, pending, diagnostic_full,
             diagnostic_unavailable, diagnostic_errors, scheduler.CurrentTick(),
             scheduler.GetMasterSemaphore()->KnownGpuTick(), diagnostic_kind_samples[1],
-            diagnostic_kind_ns[1] / 1e6, diagnostic_kind_samples[0], diagnostic_kind_ns[0] / 1e6);
+            diagnostic_kind_ns[1] / 1e6, diagnostic_kind_samples[0], diagnostic_kind_ns[0] / 1e6,
+            diagnostic_draws, diagnostic_unattributed, diagnostic_mixed_shader_samples,
+            diagnostic_mixed_pipeline_samples, diagnostic_end_reasons[0], diagnostic_end_reasons[1],
+            diagnostic_end_reasons[2], diagnostic_end_reasons[3], diagnostic_feedback_requests);
+        // CodexAstraLocal TEST-ONLY LOG: One slowest resolved pass per report;
+        // no claim of per-shader GPU time, complete-frame time or distinct count.
+        // IDs name process-local live objects and may be recycled after retirement.
+        // Remove after shader/pass/attachment attribution is qualified.
+        if (diagnostic_slowest.pending) {
+            const auto& slow = diagnostic_slowest;
+            const auto& draw = slow.attribution;
+            LOG_INFO(Render_Vulkan,
+                "Uberhar GPU pass representative: schema=2 selection=slowest_resolved_since_report "
+                "pass={} frame_begin={} frame_end={} draw_frame_first={} draw_frame_last={} "
+                "tick={} gpu_ms={:.3f} framebuffer={} clear={} target_pixels={} end_reason={} "
+                "draws={} unattributed={} pipeline_changes={} shader_changes={} target_changes={} "
+                "pipeline_first={:016X} pipeline_last={:016X} "
+                "shaders_first=[{:016X},{:016X},{:016X}] shaders_last=[{:016X},{:016X},{:016X}] "
+                "color_first={:08X} depth_first={:08X} color_last={:08X} depth_last={:08X} "
+                "frame_scope=rasterizer_tick ids=process_local_live_objects stages=vs_fs_gs "
+                "scope=sampled_pass_plus_dependencies shader_time=unapportioned",
+                slow.pass_id, slow.frame_begin, slow.frame_end, draw.first_frame, draw.last_frame,
+                slow.tick, diagnostic_slowest_ns / 1e6, slow.framebuffer_pass, slow.clear, slow.pixels,
+                static_cast<u32>(slow.end_reason), draw.draws, draw.unattributed, draw.pipeline_changes,
+                draw.shader_changes, draw.target_changes, draw.first_pipeline, draw.last_pipeline,
+                draw.first_shaders[0], draw.first_shaders[1], draw.first_shaders[2],
+                draw.last_shaders[0], draw.last_shaders[1], draw.last_shaders[2],
+                draw.first_target[0], draw.first_target[1], draw.last_target[0], draw.last_target[1]);
+            diagnostic_slowest = {};
+            diagnostic_slowest_ns = 0;
+        }
     } catch (...) {
         // CodexAstraLocal: Optional observer failure stops further query work,
         // retaining the pool until ordinary GPU teardown instead of risking reuse.
@@ -194,7 +285,8 @@ void RenderManager::BeginRendering(const RenderPass& new_pass, bool framebuffer_
         return;
     }
 
-    EndRendering();
+    // CodexAstraLocal: Classify the existing state-change boundary only.
+    EndRendering(PassEndReason::PassChange);
     BeginDiagnosticPass(new_pass, framebuffer_pass);
     scheduler.Record([info = new_pass](vk::CommandBuffer cmdbuf) {
         const vk::RenderPassBeginInfo renderpass_begin_info = {
@@ -210,10 +302,15 @@ void RenderManager::BeginRendering(const RenderPass& new_pass, bool framebuffer_
     pass = new_pass;
 }
 
-void RenderManager::EndRendering() {
+void RenderManager::EndRendering(PassEndReason reason) {
+    // CodexAstraLocal TEST-ONLY LOG: Feedback requests may find no active pass;
+    // count those separately from actual endings. Remove with pass diagnostics.
+    if (diagnostics_enabled && reason == PassEndReason::Feedback) ++diagnostic_feedback_requests;
     if (!pass.render_pass) {
         return;
     }
+    if (diagnostics_enabled) ++diagnostic_end_reasons[static_cast<std::size_t>(reason)];
+    if (diagnostic_active >= 0) diagnostic_samples[diagnostic_active].end_reason = reason;
 
     scheduler.Record([images = images, aspects = aspects,
                       shadow_rendering = shadow_rendering](vk::CommandBuffer cmdbuf) {

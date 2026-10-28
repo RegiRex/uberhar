@@ -600,8 +600,36 @@ void DirectFullModuleRouting() {
     Require(owner != nullptr, "direct full module admits existing CPU vertex pipeline");
 }
 
+// CodexAstraLocal: Exercise real binding and fallback stage selection with ordinary HW
+// input. Driver allocation remains a boundary; translated VS/GS must survive without a ready token.
+void OrdinaryHardwareVertexFallback() {
+    PipelineCache p;
+    p.instance.geometry_shaders = true;
+    const auto config = Config();
+    auto info = Info();
+    p.Fresh(config);
+    p.current_shaders = {&p.other_shader, nullptr, &p.generic_shader};
+    auto* hardware = p.GetTevFallback(info, false);
+    Require(hardware && hardware->stages[0] == &p.other_shader &&
+            hardware->stages[2] == &p.generic_shader, "HW fallback retains translated VS and GS");
+    Require(p.BindPipeline(info, true), "ordinary hardware generic draw binds");
+    Advance(p);
+    Require(p.scheduler.completed.back().pipeline == hardware->Handle(),
+            "ordinary hardware bind selects hardware-layout generic pipeline");
+    p.Fresh(config);
+    auto layout = SoftwareLayout();
+    auto* cpu = p.GetTevFallback(info, true);
+    Require(cpu && cpu->stages[0] == &p.trivial_vertex_shader && !cpu->stages[2],
+            "CPU fallback keeps trivial VS and no GS");
+    Require(p.BindPipeline(info, true, nullptr, true, nullptr, &layout), "CPU generic draw binds");
+    Advance(p);
+    Require(p.scheduler.completed.back().pipeline == cpu->Handle(),
+            "CPU bind selects CPU-layout generic pipeline");
+}
+
 int main() {
     try {
+        OrdinaryHardwareVertexFallback();
         RealSelectionAndTransport(); ActualBankReuse(); FailuresProfilesAndModes();
         SharedLimitsAndAllocation();
         BindTransportAndModes(); KeyAndDynamicState();

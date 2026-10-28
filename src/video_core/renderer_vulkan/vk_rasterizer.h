@@ -166,6 +166,8 @@ private:
     // AstraPro: Bounded host-state evidence shared by Native and Combo.
     u32 fixed_attribute_max_bytes{};
     u64 fixed_attribute_over_legacy{}, diagnostic_draws{};
+    // CodexAstraLocal TEST-ONLY LOG: Actual ordinary-HW dispatch coverage; remove after placement tests.
+    u64 ordinary_gpu_draws{}, ordinary_gpu_vertices{};
     // CodexAstraUlt-2: Count input fallbacks; only the first four emit a record.
     u64 ready_vertex_zero_stride_rejections{};
     // CodexAstraUlt: Count each additional input-parity fallback separately, with

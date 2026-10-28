@@ -1,6 +1,6 @@
 // Copyright 2015-2026 Citra Emulator Project / Azahar Emulator Project
-// Licensed under GPLv2 or any later version
-// Refer to the license.txt file included.
+// Licensed under GPLv3 or any later version
+// Refer to the misc/licenses/gplv3.txt file included.
 
 #pragma once
 
@@ -10,7 +10,10 @@
 #include <future>
 #include <memory>
 #include <mutex>
+#include <set>
+#include <span>
 #include <string>
+#include <utility>
 #include <vector>
 #include <boost/serialization/array.hpp>
 #include <boost/serialization/shared_ptr.hpp>
@@ -18,6 +21,8 @@
 #include "common/construct.h"
 #include "common/swap.h"
 #include "core/file_sys/cia_container.h"
+#include "core/file_sys/cia_install_transaction.h"
+#include "core/file_sys/ncch_install_verifier.h"
 #include "core/file_sys/file_backend.h"
 #include "core/file_sys/ncch_container.h"
 #include "core/global.h"
@@ -124,16 +129,23 @@ using ProgressCallback = void(std::size_t, std::size_t);
 
 class NCCHCryptoFile final {
 public:
-    NCCHCryptoFile(const std::string& out_file, bool encrypted_content);
+    NCCHCryptoFile(const std::string& out_file, bool encrypted_content, u64 expected_size = 0);
 
     void Write(const u8* buffer, std::size_t length);
+    // CodexAstraLocal: Propagate final compressor/crypto/host write errors before staged promotion.
+    bool Finalize();
     bool IsError() {
         return is_error;
     }
 
 private:
     friend class CIAFile;
+    // CodexAstraLocal: Short writes must fail installation instead of advancing logical counters.
+    void WriteExact(const void* buffer, std::size_t length);
     std::unique_ptr<FileUtil::IOFileBase> file;
+    // CodexAstraLocal: Original NCCH hashes verify transformed bytes before staged publication.
+    std::unique_ptr<FileSys::NCCHInstallVerifier> verifier;
+    u64 expected_size = 0;
     bool is_error = false;
     bool is_not_ncch = false;
     bool decryption_authorized = false;
@@ -174,6 +186,7 @@ private:
 };
 
 class CIAFile;
+class Module;
 void AuthorizeCIAFileDecryption(CIAFile* cia_file, Kernel::HLERequestContext& ctx);
 
 // A file handled returned for CIAs to be written into and subsequently installed.
@@ -192,6 +205,28 @@ public:
         Result result{0};
     };
 
+    // CodexAstraLocal: Azahar PR2648 separates owned worker input from emulation-thread mutation.
+    /// The result of the host file system work needed before the contents of a title can be
+    /// imported. It is produced by the static Prepare functions, which do not touch any CIAFile
+    /// and can run on any thread, and is then applied to the CIAFile on the emulation thread.
+    struct PreparedTitleMetadata {
+        InstallResult install_result{};
+        FileSys::TitleMetadata tmd;
+        bool is_update = false;
+        std::vector<std::string> content_paths;
+    };
+
+    /// Parses and saves a TMD, and creates the folders and paths for its contents.
+    static PreparedTitleMetadata PrepareTitleMetadata(Service::FS::MediaType media_type,
+                                                      bool is_update, std::span<const u8> tmd_data,
+                                                      std::size_t offset,
+                                                      FileSys::CIAInstallTransaction* transaction = nullptr);
+
+    /// Creates the folders and paths for the contents of an already installed TMD.
+    static PreparedTitleMetadata PrepareAdditionalContent(Service::FS::MediaType media_type,
+                                                          bool is_update,
+                                                          FileSys::TitleMetadata tmd);
+
     explicit CIAFile(Core::System& system_, Service::FS::MediaType media_type,
                      bool from_cdn = false);
     ~CIAFile();
@@ -199,17 +234,20 @@ public:
     ResultVal<std::size_t> Read(u64 offset, std::size_t length, u8* buffer) const override;
     InstallResult WriteTicket();
     InstallResult WriteTitleMetadata(std::span<const u8> tmd_data, std::size_t offset);
+    InstallResult ApplyTitleMetadata(PreparedTitleMetadata&& prepared);
     ResultVal<std::size_t> WriteContentData(u64 offset, std::size_t length, const u8* buffer);
     ResultVal<std::size_t> Write(u64 offset, std::size_t length, bool flush, bool update_timestamp,
                                  const u8* buffer) override;
 
-    Result PrepareToImportContent(const FileSys::TitleMetadata& tmd);
     Result ProvideTicket(const FileSys::Ticket& ticket);
-    Result ProvideTMDForAdditionalContent(const FileSys::TitleMetadata& tmd);
+    Result ApplyAdditionalContent(PreparedTitleMetadata&& prepared);
     const FileSys::TitleMetadata& GetTMD();
     FileSys::Ticket& GetTicket();
     CIAInstallState GetCiaInstallState() {
         return install_state;
+    }
+    bool IsUpdate() const {
+        return is_update;
     }
 
     ResultVal<std::size_t> WriteContentDataIndexed(u16 content_index, u64 offset,
@@ -234,9 +272,21 @@ public:
     }
 
     void AuthorizeDecryptionFromHLE();
+    // CodexAstraLocal: Only explicit frontend file installs enable staged supplied-key decryption.
+    void EnableExternalInstall(bool ticket_fixup_required);
 
 private:
     friend void AuthorizeCIAFileDecryption(CIAFile* cia_file, Kernel::HLERequestContext& ctx);
+
+    // CodexAstraLocal: Preserve the prepare/apply ownership boundary for all metadata imports.
+    static void PrepareContentPaths(Service::FS::MediaType media_type,
+                                    PreparedTitleMetadata& prepared);
+    Result ApplyContentPreparation(PreparedTitleMetadata&& prepared);
+    // CodexAstraLocal: Finalize each output before switching content or publishing an install.
+    bool FinishCurrentContent();
+    std::unique_ptr<FileSys::CIAInstallTransaction> external_transaction;
+    bool close_success = true;
+    bool external_ticket_fixup_required = false;
 
     Core::System& system;
 
@@ -247,6 +297,9 @@ private:
     bool is_closed = false;
     bool is_cancel = false;
     bool is_additional_content = false;
+    // CodexAstraLocal: Failed imports must not delete another installed title.
+    // Whether a TMD was installed by this file, so its title has contents to clean up on abort.
+    bool tmd_installed = false;
 
     // Whether it's installing an update, and what step of installation it is at
     bool is_update = false;
@@ -281,6 +334,9 @@ public:
     u64 title_id;
     Service::FS::MediaType media_type;
     bool tmd_provided;
+    // CodexAstraLocal: Exclude dependent content work until async metadata application finishes.
+    // Set while the TMD of this title is being prepared asynchronously.
+    bool tmd_import_pending = false;
 };
 
 // A file handled returned for Tickets to be written into and subsequently installed.
@@ -297,17 +353,17 @@ public:
     bool Close() override;
     void Flush() const override;
 
-    Result Commit();
-    u64 GetTitleID() {
-        return title_id;
+    // CodexAstraLocal: Worker commits own their bytes instead of mutable file-handle state.
+    /// Returns a copy of the ticket data written so far.
+    std::vector<u8> GetData() const {
+        return data;
     }
-    u64 GetTicketID() {
-        return ticket_id;
-    }
+
+    /// Installs a ticket from its data, returning its title id and ticket id.
+    static ResultVal<std::pair<u64, u64>> Commit(std::span<const u8> ticket_data);
 
 private:
     u64 written = 0;
-    u64 title_id, ticket_id;
     std::vector<u8> data;
 };
 
@@ -326,7 +382,15 @@ public:
     bool Close() override;
     void Flush() const override;
 
-    Result Commit();
+    // CodexAstraLocal: Copy metadata and retain the intended import identity for async completion.
+    /// Returns a copy of the TMD data written so far.
+    std::vector<u8> GetData() const {
+        return data;
+    }
+
+    const std::shared_ptr<CurrentImportingTitle>& GetImportingTitle() const {
+        return importing_title;
+    }
 
 private:
     u64 written = 0;
@@ -337,9 +401,10 @@ private:
 // A file handled returned for contents to be written into and subsequently installed.
 class ContentFile final : public FileSys::FileBackend {
 public:
-    explicit ContentFile(const std::shared_ptr<CurrentImportingTitle>& import_context, u16 index_,
-                         ImportContentContext& import_context_)
-        : import_context(import_context_), importing_title(import_context), index(index_) {}
+    // CodexAstraLocal: Resolve removable contexts by identity through weak module ownership.
+    explicit ContentFile(std::weak_ptr<Module> am_,
+                         const std::shared_ptr<CurrentImportingTitle>& import_context, u16 index_)
+        : am(std::move(am_)), importing_title(import_context), index(index_) {}
     ~ContentFile();
 
     ResultVal<std::size_t> Read(u64 offset, std::size_t length, u8* buffer) const override;
@@ -352,16 +417,18 @@ public:
 
     void Cancel(FS::MediaType media_type, u64 title_id);
 
-    ImportContentContext& GetImportContext() {
-        return import_context;
-    }
+    // CodexAstraLocal: Surviving handles must tolerate context removal.
+    /// Returns the import context of this content, or nullptr if it no longer exists.
+    ImportContentContext* GetImportContext();
 
     void SetWritten(u64 written_) {
         written = written_;
     }
 
 private:
-    ImportContentContext& import_context;
+    // CodexAstraLocal: A retained reference would dangle after cancellation/removal.
+    // The import context is looked up on every use, as it can be erased while this file is open.
+    std::weak_ptr<Module> am;
 
     u64 written = 0;
     std::shared_ptr<CurrentImportingTitle> importing_title;
@@ -1094,6 +1161,16 @@ public:
         // Placed on the interface level so that only am:net and am:app have it.
         std::shared_ptr<Network::ArticBase::Client> artic_client = nullptr;
     };
+
+    // CodexAstraLocal: Stable lookups and snapshots isolate async work from mutable import maps.
+    /// Returns the first import content context of the title with the given index, or nullptr.
+    ImportContentContext* FindImportContentContext(u64 title_id, u16 index);
+
+    /// Returns the content indices of the title that have an import pending.
+    std::set<u16> GetPendingImportContentIndices(u64 title_id) const;
+
+    /// Returns whether the title has an import pending.
+    bool IsTitleImportPending(u64 title_id) const;
 
     void ForceO3DSDeviceID() {
         force_old_device_id = true;

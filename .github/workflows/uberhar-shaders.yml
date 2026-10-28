@@ -46,15 +46,21 @@ jobs:
         # CodexAstraLocal: CPU Software's small helper gate shares the pinned
         # Catch fixture with native tests without building the full guest core.
         # CodexAstraLocal: The settings-layer fixture uses the same INI parser as Android.
-        run: git submodule update --init --depth 1 externals/fmt externals/xxHash externals/boost externals/nihstro externals/vulkan-headers externals/microprofile externals/xbyak externals/libretro-common/libretro-common externals/glslang externals/catch2 externals/inih/inih
+        # CodexAstraLocal: Compatibility fixtures use pinned real crypto/seekable code.
+        run: git submodule update --init --depth 1 externals/fmt externals/xxHash externals/boost externals/nihstro externals/vulkan-headers externals/microprofile externals/xbyak externals/libretro-common/libretro-common externals/glslang externals/catch2 externals/inih/inih externals/cryptopp externals/zstd
       - name: Install validation tools
         # CodexAstraLocal: The cached-buffer lifetime gate submits real Vulkan
         # draws through an explicitly selected software ICD and real fences.
         run: |
           sudo apt-get update
-          sudo apt-get install -y glslang-tools spirv-tools libegl1-mesa-dev libgl1-mesa-dri libvulkan1 mesa-vulkan-drivers
+          # CodexAstraLocal: Z3DS synthetic roundtrips link the system zstd public API.
+          sudo apt-get install -y glslang-tools spirv-tools libegl1-mesa-dev libgl1-mesa-dri libvulkan1 mesa-vulkan-drivers libzstd-dev
           python3 -m venv /tmp/uberhar-test-env
           /tmp/uberhar-test-env/bin/pip install moderngl==5.12.0 glcontext==3.0.0
+      # CodexAstraLocal: Require real crypto/seekable synthetic checks and all
+      # deliberate defects before the remaining generator/renderer release gates.
+      - name: Test file compatibility with pinned dependencies
+        run: bash tools/uberhar/run_file_compatibility_checks.sh
       - name: Compile production generator and emit cases
         run: bash tools/uberhar/build_probe.sh
       # CodexAstraLocal: Keep the old gates and require exact UBO/proctex/
@@ -172,12 +178,37 @@ jobs:
       # CodexAstraLocal: Retain allocation and terminal worker-boundary controls.
       # CodexAstraLocal: Retain descriptor pixels, sources and failure controls.
       # CodexAstraLocal: Preserve proof-cache extraction and compiler failures.
+      # CodexAstraLocal: Preserve all six file checks, dependency failures, alpha
+      # classification and sampled GPU-attribution proofs without broad build uploads.
       - name: Upload CPU coordination contract evidence
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: uberhar-host-coordination-proof-${{ github.run_number }}
           path: |
+            build/uberhar-probe/file-compatibility-gate/*.log
+            build/uberhar-probe/file-compatibility-gate/*.sha256
+            build/uberhar-probe/installer-security/**/provenance.json
+            build/uberhar-probe/installer-security/**/*.stdout
+            build/uberhar-probe/installer-security/**/*.stderr
+            build/uberhar-probe/cia-install-transaction/**/provenance.json
+            build/uberhar-probe/cia-install-transaction/**/*.stdout
+            build/uberhar-probe/cia-install-transaction/**/*.stderr
+            build/uberhar-probe/romfs-crypto-reader/**/provenance.json
+            build/uberhar-probe/romfs-crypto-reader/**/*.stdout
+            build/uberhar-probe/romfs-crypto-reader/**/*.stderr
+            build/uberhar-probe/ncch-crypto/**/provenance.json
+            build/uberhar-probe/ncch-crypto/**/*.stdout
+            build/uberhar-probe/ncch-crypto/**/*.stderr
+            build/uberhar-probe/ncch-install-integrity/**/provenance.json
+            build/uberhar-probe/ncch-install-integrity/**/*.log
+            build/uberhar-probe/z3ds-close/**/provenance.json
+            build/uberhar-probe/z3ds-close/**/*.stdout
+            build/uberhar-probe/z3ds-close/**/*.stderr
+            build/uberhar-probe/gpu-pass-attribution/**/provenance.json
+            build/uberhar-probe/gpu-pass-attribution/**/*.stdout
+            build/uberhar-probe/gpu-pass-attribution/**/*.stderr
+            build/uberhar-probe/alpha-version/**
             build/uberhar-probe/parallel-transport/**/provenance.json
             build/uberhar-probe/parallel-transport/**/*.stdout
             build/uberhar-probe/parallel-transport/**/*.stderr

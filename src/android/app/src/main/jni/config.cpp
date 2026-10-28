@@ -3,6 +3,7 @@
 // Refer to the license.txt file included.
 
 #include <iomanip>
+#include <charconv> // CodexAstraLocal: Whole-string decimal alpha controls match Kotlin parsing.
 #include <memory>
 #include <ranges>
 #include <sstream>
@@ -15,6 +16,7 @@
 #include "common/param_package.h"
 #include "common/setting_keys.h"
 #include "common/settings.h"
+#include "common/scm_rev.h"
 #include "common/uberhar_test_profile.h" // AstraEH: Temporary renderer experiment overrides.
 #include "core/core.h"
 #include "core/hle/service/cfg/cfg.h"
@@ -99,6 +101,29 @@ namespace {
 // CodexAstraLocal: Keep an active testing launch stable when an editor changes next-launch preferences.
 bool testing_overlay_active{};
 long testing_overlay_preset{};
+// CodexAstraLocal: Eye suppression is title-only and frozen with the launch preset.
+bool testing_overlay_disable_right_eye_render{};
+// CodexAstraLocal: Additional title-only requests are frozen for the same launch lifetime.
+bool testing_overlay_hardware_shaders{};
+u16 testing_overlay_render_thread_delay_us{};
+// CodexAstraLocal: Preserve baseline display filtering and guest slider until explicit opt-in.
+bool testing_overlay_linear_filtering{true};
+u8 testing_overlay_stereo_depth{};
+
+// CodexAstraLocal: INIReader's generic integer parser accepts prefixes and base-0 values.
+// These UI controls instead require a complete decimal integer, including a supported '+' sign.
+int ReadTestingDecimal(const INIReader& reader, const std::string& section,
+                       const std::string& key) {
+    const auto text = reader.GetString(section, key, "");
+    if (text.empty()) return 0;
+    const char* begin = text.data();
+    const char* end = begin + text.size();
+    if (*begin == '+') ++begin;
+    if (begin == end) return 0;
+    int value{};
+    const auto result = std::from_chars(begin, end, value, 10);
+    return result.ec == std::errc{} && result.ptr == end ? value : 0;
+}
 
 template <typename Type>
 Type ReadConfigValue(const INIReader& reader, const std::string& group,
@@ -185,7 +210,17 @@ void Config::ReadSetting(const std::string& group, Settings::SwitchableSetting<T
 void Config::ApplyTestingOverlay() {
     // CodexAstraLocal: Renderer/master choices are fixed for a launch. Resolution
     // can reload from the same title's Testing overlay through normal ApplySettings.
-    if (!runtime_reload) testing_overlay_active = false;
+    // CodexAstraLocal: A new launch cannot inherit the previous title's opt-in, even on early return.
+    if (!runtime_reload || !Common::g_uberhar_alpha_testing) {
+        testing_overlay_active = false;
+        testing_overlay_disable_right_eye_render = false;
+        testing_overlay_hardware_shaders = false;
+        testing_overlay_render_thread_delay_us = 0;
+        testing_overlay_linear_filtering = true;
+        testing_overlay_stereo_depth = 0;
+    }
+    // CodexAstraLocal: Hidden stale Testing preferences must be entirely inert in beta/full builds.
+    if (!Common::g_uberhar_alpha_testing) return;
     if (title_id == 0 || (runtime_reload && !testing_overlay_active)) return;
     std::string buffer;
     const auto path = FileUtil::GetUserPath(FileUtil::UserPath::ConfigDir) + "testing.ini";
@@ -211,6 +246,16 @@ void Config::ApplyTestingOverlay() {
     if (!runtime_reload) {
         testing_overlay_active = true;
         testing_overlay_preset = preset;
+        // CodexAstraLocal: Never inherit a global suppression flag; each title must explicitly opt in.
+        testing_overlay_disable_right_eye_render =
+            testing.GetBoolean(section, "disable_right_eye_render", false);
+        // CodexAstraLocal: Hardware and guest delay never inherit global experimental choices.
+        testing_overlay_hardware_shaders = testing.GetBoolean(section, "use_hw_shader", false);
+        const auto delay = ReadTestingDecimal(testing, section, "delay_game_render_thread_us");
+        testing_overlay_render_thread_delay_us = delay >= 0 && delay <= 16000 ? delay : 0;
+        testing_overlay_linear_filtering = testing.GetBoolean(section, "filter_mode", true);
+        const auto depth = ReadTestingDecimal(testing, section, "factor_3d");
+        testing_overlay_stereo_depth = depth == 1 ? 1 : 0;
         Settings::values.uberhar_test_mode = preset == 0 ? Settings::UberharTestMode::Native :
                                                           Settings::UberharTestMode::Automatic;
         Settings::values.uberhar_cpu_vertex_only = preset == 1;
@@ -484,7 +529,37 @@ void Config::ReadValues() {
 
     // AstraEH: Apply last, after reloading every saved setting; never write these overrides to INI.
     ApplyTestingOverlay();
-    Settings::ApplyUberharTestProfile();
+    // CodexAstraLocal: Preserve the latched opt-in through live resolution reloads and missing files.
+    Settings::ApplyUberharTestProfile(testing_overlay_active &&
+                                     testing_overlay_disable_right_eye_render,
+                                     testing_overlay_active && testing_overlay_hardware_shaders,
+                                     testing_overlay_active ? testing_overlay_render_thread_delay_us : 0,
+                                     !testing_overlay_active || testing_overlay_linear_filtering,
+                                     testing_overlay_active ? testing_overlay_stereo_depth : 0);
+    // CodexAstraLocal TEST-ONLY LOG: Remove after the owner completes the Native/Combo
+    // right-eye comparison; requested/effective here describe settings, not heuristic eligibility.
+    LOG_INFO(Config, "Testing right-eye: title={:016X} active={} requested={} effective={} live={}",
+             title_id, testing_overlay_active, testing_overlay_disable_right_eye_render,
+             Settings::values.disable_right_eye_render.GetValue(), runtime_reload);
+    // CodexAstraLocal TEST-ONLY LOG: Remove with the alpha controls when each is promoted to
+    // normal per-game policy or retired. Requests/permissions are not counts of GPU executions.
+    if (Common::g_uberhar_alpha_testing) {
+        try {
+            LOG_INFO(Config, "Testing controls: title={:016X} active={} hardware_requested={} "
+                             "hardware_effective={} combo_cpu_vertices={} delay_requested_us={} "
+                             "delay_effective_us={} linear_filtering={} guest_3d_slider_percent={} live={}",
+                     title_id, testing_overlay_active, testing_overlay_hardware_shaders,
+                     Settings::values.use_hw_shader.GetValue(),
+                     Settings::values.uberhar_test_mode.GetValue() == Settings::UberharTestMode::Automatic &&
+                         Settings::values.uberhar_cpu_vertex_only.GetValue(),
+                     testing_overlay_render_thread_delay_us,
+                     Settings::values.delay_game_render_thread_us.GetValue(),
+                     Settings::values.filter_mode.GetValue(), Settings::values.factor_3d.GetValue(),
+                     runtime_reload);
+        } catch (...) {
+            // CodexAstraLocal TEST-ONLY LOG: Observer allocation failures cannot alter settings reload.
+        }
+    }
 }
 
 void Config::Reload() {

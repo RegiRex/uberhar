@@ -13,6 +13,13 @@ using u8=unsigned char; using u32=unsigned; using s32=int; using u64=unsigned lo
 static unsigned checks{};
 static void Require(bool ok,const char* why){++checks;if(!ok)throw std::runtime_error(why);}
 #define ASSERT(x) Require(bool(x),#x)
+// CodexAstraLocal: Profile setting is a controlled boundary; production chooses refusal behavior.
+namespace Settings {
+enum class Mode { Custom, Native, Combo };
+struct Selection { Mode value{Mode::Custom}; Mode GetValue() const { return value; } };
+inline struct { Selection uberhar_test_mode; } values;
+bool IsUberharTestProfile(Mode mode) { return mode != Mode::Custom; }
+}
 namespace vk {
 using DeviceSize=u64;
 struct CommandBuffer {
@@ -57,8 +64,23 @@ struct FramebufferHelper {mutable unsigned canceled{};void CancelInvalidation()c
 // actual production functions below decide whether and where a draw is queued.
 struct RasterizerVulkan {
  Scheduler scheduler;
+ // CodexAstraLocal: Count only draws really enqueued by the extracted production body.
+ u64 ordinary_gpu_draws{}, ordinary_gpu_vertices{};
  Ring uniform_buffer{scheduler},texture_buffer{scheduler},texture_lf_buffer{scheduler};
- struct Regs {struct {u32 num_vertices{3};}pipeline;}regs;
+ // CodexAstraLocal: Guest targets are observer inputs; they do not change queued work.
+ struct Regs {
+  struct {u32 num_vertices{3};}pipeline;
+  struct {struct {
+   u32 GetColorBufferPhysicalAddress()const{return 0x1000;}
+   u32 GetDepthBufferPhysicalAddress()const{return 0x2000;}
+  }framebuffer;}framebuffer;
+ }regs;
+ // CodexAstraLocal: Sample timing itself has a separate fixture. This endpoint
+ // records hook coverage without fabricating additional driver commands.
+ struct PassObserver {
+  unsigned calls{};
+  template<class... T>void RecordDiagnosticDraw(T&&...){++calls;}
+ }renderpass_cache;
  struct {int vs_setup{};}pica;
  struct {bool preferred{};}cpu_bridge;
  struct {struct {struct {u32 binding_count{1};}vertex_layout;}state;}pipeline_info;
@@ -95,20 +117,25 @@ struct RasterizerVulkan {
 int main(){
  try{
   unsigned cases{};
+  // CodexAstraLocal: Custom retains its old async contract; profiles retry CPU on refusal.
+  for(auto mode : {Settings::Mode::Custom, Settings::Mode::Native, Settings::Mode::Combo})
   for(bool ready_route:{false,true})for(bool pending:{false,true})
    for(bool indexed:{false,true})for(bool flush:{false,true})for(unsigned capture=0;capture<4;++capture){
+    Settings::values.uberhar_test_mode.value = mode;
     RasterizerVulkan r;r.ready_vertex_attempt=ready_route;r.bind_ready=!pending;
     r.index_flush=flush;r.bind_flush=flush;
     VertexCapture token{capture!=0,capture>=2,capture==3};r.vertex_capture=capture?&token:nullptr;
     const bool accepted=r.AccelerateDrawBatchInternal(indexed);
     if(pending){
-     Require(accepted==!ready_route,"pending return contract unchanged");
+     Require(accepted==(!ready_route && mode==Settings::Mode::Custom),"pending return contract unchanged");
      Require(r.scheduler.draws==0&&r.scheduler.records==0,"pending pipeline queues no draw");
+     Require(r.renderpass_cache.calls==0,"refused draw adds no pass attribution");
      Require(r.ready_pipeline.stamps==0,"pending pipeline publishes no optional draw use");
      Require(r.uniform_buffer.stamps==0&&r.texture_buffer.stamps==0&&r.texture_lf_buffer.stamps==0,
              "no queued draw must not stamp");
     }else{
      Require(accepted&&r.scheduler.draws==1&&r.scheduler.records==1,"one actual accelerated draw");
+     Require(r.renderpass_cache.calls==1,"actual draw has exactly one attribution hook");
      Require(r.ready_pipeline.stamps==1 && r.ready_pipeline.last==r.scheduler.CurrentTick(),
              "actual accelerated draw stamps optional pipeline once at final tick");
      for(const auto* ring:{&r.uniform_buffer,&r.texture_buffer,&r.texture_lf_buffer}){
@@ -116,6 +143,10 @@ int main(){
       Require(ring->last==r.scheduler.CurrentTick(),"actual accelerated final tick");
      }
     }
+    Require(r.ordinary_gpu_draws == unsigned(!pending && !ready_route),
+            "ordinary GPU coverage excludes refused and ready-only draws");
+    Require(r.ordinary_gpu_vertices == 3 * r.ordinary_gpu_draws,
+            "ordinary GPU vertex coverage follows real enqueue");
     ++cases;
    }
   for(bool packet:{false,true}){

@@ -114,10 +114,10 @@ void FmtLogMessageImpl(Class, Level level, const char *, unsigned, const char *,
 namespace Vulkan {
 class Instance {
 public:
-  bool dynamic{};
+  bool dynamic{}, geometry_shaders{};
   bool IsExtendedDynamicStateSupported() const { return dynamic; }
   vk::Device GetDevice() const { return {}; }
-  bool UseGeometryShaders() const { return false; }
+  bool UseGeometryShaders() const { return geometry_shaders; }
   bool IsFragmentShaderBarycentricSupported() const { return false; }
   template <class... T> void ReportMemoryUsage(T &&...) const {}
 };
@@ -545,14 +545,15 @@ PipelineCache::~PipelineCache() {
   mandatory_pipelines.clear();
   curr_disk_cache.reset();
 }
-GraphicsPipeline *PipelineCache::GetTevFallback(const PipelineInfo &i, bool) {
+GraphicsPipeline *PipelineCache::GetTevFallback(const PipelineInfo &i, bool cpu_vertex) {
   prepared_cpu_family = owned_family ? &*owned_family : nullptr;
   if (generic_mode == 3)
     return nullptr;
-  auto stages = current_shaders;
-  stages[0] = &trivial_vertex_shader;
+  // CodexAstraLocal: Execute production vertex-stage selection rather than a CPU-only
+  // stand-in; only driver compilation/readiness remains a controlled boundary here.
+#include "generic_vertex_selection.inc"
+  auto stages = shaders;
   stages[1] = &generic_shader;
-  stages[2] = nullptr;
   auto k = i.state.ExecutionHash(instance.dynamic, HostShaderIds(stages));
   auto it = tev_pipelines.find(k);
   if (it != tev_pipelines.end())

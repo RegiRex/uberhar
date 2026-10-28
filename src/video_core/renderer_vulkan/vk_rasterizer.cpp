@@ -120,7 +120,11 @@ RasterizerVulkan::RasterizerVulkan(Memory::MemorySystem& memory, Pica::PicaCore&
         .range = VK_WHOLE_SIZE,
     });
 
-    scheduler.RegisterOnSubmit([&renderpass_cache] { renderpass_cache.EndRendering(); });
+    // CodexAstraLocal TEST-ONLY LOG: Identify natural submission pass ends without
+    // adding a flush; remove this reason tag after the GPU-cost comparison.
+    scheduler.RegisterOnSubmit([&renderpass_cache] {
+        renderpass_cache.EndRendering(PassEndReason::Submission);
+    });
 
     // Prepare the static buffer descriptor set.
     const auto buffer_set = pipeline_cache.Acquire(DescriptorHeapType::Buffer);
@@ -149,6 +153,14 @@ RasterizerVulkan::RasterizerVulkan(Memory::MemorySystem& memory, Pica::PicaCore&
 }
 
 RasterizerVulkan::~RasterizerVulkan() {
+    // CodexAstraLocal TEST-ONLY LOG: Final actual-queue coverage for Hardware Shaders;
+    // remove after the placement comparison, preserving normal draw ownership.
+    try {
+        LOG_INFO(Render_Vulkan, "Uberhar ordinary GPU totals: draws={} vertices={} scope=queued_draws",
+                 ordinary_gpu_draws, ordinary_gpu_vertices);
+    } catch (...) {
+        // CodexAstraLocal TEST-ONLY LOG: A missing diagnostic must not affect renderer destruction.
+    }
     // AstraPro Log Line: One bounded lifetime summary, never a per-draw log.
     LOG_INFO(Render_Vulkan,
              "Uberhar uniform transport totals: pending_vs_resyncs={} "
@@ -775,6 +787,10 @@ bool RasterizerVulkan::AccelerateDrawBatchInternal(bool is_indexed) {
     if (!pipeline_cache.BindPipeline(pipeline_info, wait_built, nullptr, !cpu_bridge.preferred,
                                      ready_vertex_pipeline)) {
         // AstraPro: A ready-key mismatch requires CPU recovery, not a skipped draw.
+        // CodexAstraLocal: The alpha ordinary-HW experiment must also retry the full CPU
+        // route on refusal. Preserve inherited Custom async behavior outside the profiles.
+        if (Settings::IsUberharTestProfile(Settings::values.uberhar_test_mode.GetValue()))
+            return false;
         return !ready_vertex_attempt;
     }
 
@@ -815,6 +831,11 @@ bool RasterizerVulkan::AccelerateDrawBatchInternal(bool is_indexed) {
                     draw(cmdbuf);
                     evidence.Recorded();
                 });
+                // CodexAstraLocal TEST-ONLY LOG: Associate sampled passes with actual draws;
+                // remove with the GPU-cost comparison, preserving capture ownership.
+                renderpass_cache.RecordDiagnosticDraw(
+                    pipeline_cache, regs.framebuffer.framebuffer.GetColorBufferPhysicalAddress(),
+                    regs.framebuffer.framebuffer.GetDepthBufferPhysicalAddress());
                 // CodexAstraLocal: Capture publication is still a real draw;
                 // stamp only after its final bind/index preparation and enqueue.
                 // CodexAstraLocal: Retiring GPU-specialized owners need the
@@ -826,6 +847,17 @@ bool RasterizerVulkan::AccelerateDrawBatchInternal(bool is_indexed) {
         }
     }
     scheduler.Record(draw);
+    // CodexAstraLocal TEST-ONLY LOG: Sample fulfilled worker-side pipeline selection;
+    // remove after GPU pass-cost attribution, without changing command ordering.
+    renderpass_cache.RecordDiagnosticDraw(
+        pipeline_cache, regs.framebuffer.framebuffer.GetColorBufferPhysicalAddress(),
+        regs.framebuffer.framebuffer.GetDepthBufferPhysicalAddress());
+    // CodexAstraLocal TEST-ONLY LOG: Count actual enqueued ordinary GPU draws, not
+    // accepted no-ops/missing targets. Remove after the hardware-placement comparison.
+    if (!ready_vertex_attempt) {
+        ++ordinary_gpu_draws;
+        ordinary_gpu_vertices += params.vertex_count;
+    }
     // CodexAstraLocal: No failed/pending attempt reaches this successful draw stamp.
     if (ready_vertex_pipeline) pipeline_cache.CompleteReadyGpuDraw(ready_vertex_pipeline);
 
@@ -971,6 +1003,9 @@ bool RasterizerVulkan::Draw(bool accelerate, bool is_indexed,
 
     pipeline_info.state.attachments.color = framebuffer->Format(SurfaceType::Color);
     pipeline_info.state.attachments.depth = framebuffer->Format(SurfaceType::Depth);
+    // CodexAstraLocal: Only resolved depth/stencil format proves whether this draw writes.
+    // Read-only tests must not invalidate otherwise reusable depth surface contents.
+    fb_helper.SetDepthWriteEnabled(pipeline_info.IsDepthWriteEnabled());
 
     // CodexAstraLocal: Preserve the exact optional Combo rectangle admission.
     // AstraEH: Admit a complete compute operation before texture/fragment setup.
@@ -1136,7 +1171,9 @@ bool RasterizerVulkan::Draw(bool accelerate, bool is_indexed,
                      "topology={} vertices={} lighting={} shadow={} clip={} flip={} "
                      "viewport=[{},{},{},{}] scissor=[{},{},{},{}] "
                      "color_addr={:08X} depth_addr={:08X} output_mask={:04X} "
-                     "input_count={} fixed_max_bytes={} sample=host_state_not_gpu_output",
+                     "input_count={} fixed_max_bytes={} ordinary_gpu_draws={} "
+                     "ordinary_gpu_vertices={} depth_exit_invalidated={} depth_exit_read_only={} "
+                     "sample=host_state_not_gpu_output",
                      pipeline_cache.GetProgramID(), diagnostic_draws, accelerate,
                      ready_vertex_attempt, ready_vertex_pipeline ? ready_vertex_pipeline->Key() : 0,
                      ready_vertex_pipeline ? ready_vertex_pipeline->ShaderStageMask() : 0,
@@ -1148,7 +1185,9 @@ bool RasterizerVulkan::Draw(bool accelerate, bool is_indexed,
                      regs.framebuffer.framebuffer.GetColorBufferPhysicalAddress(),
                      regs.framebuffer.framebuffer.GetDepthBufferPhysicalAddress(),
                      regs.vs.output_mask.Value(), regs.vs.max_input_attribute_index.Value() + 1,
-                     fixed_attribute_max_bytes);
+                     fixed_attribute_max_bytes, ordinary_gpu_draws, ordinary_gpu_vertices,
+                     res_cache.GetFramebufferDepthInvalidationStats().invalidated,
+                     res_cache.GetFramebufferDepthInvalidationStats().read_only);
         }
     }
 
@@ -1190,6 +1229,11 @@ bool RasterizerVulkan::Draw(bool accelerate, bool is_indexed,
                 cmdbuf.draw(vertex_count, 1, 0, 0);
             });
         }
+        // CodexAstraLocal TEST-ONLY LOG: Both CPU upload paths reach one actual draw;
+        // remove this association after the GPU-cost comparison is complete.
+        renderpass_cache.RecordDiagnosticDraw(
+            pipeline_cache, regs.framebuffer.framebuffer.GetColorBufferPhysicalAddress(),
+            regs.framebuffer.framebuffer.GetDepthBufferPhysicalAddress());
         // CodexAstraLocal: Ordinary and deferred CPU draws both consumed the
         // cached ranges at this final tick, after pass/bind/geometry flushes.
         MarkCachedShaderBuffersUsed();

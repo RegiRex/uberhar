@@ -649,7 +649,11 @@ bool PipelineCache::BindPipeline(PipelineInfo& info, bool wait_built,
         // Until the ready bank is complete this wait is real, separately measured work.
         // AstraPro: A promoted draw uses its hardware-VS pipeline, never a
         // trivial-VS CPU pipeline with the hardware vertex-buffer layout.
-        auto* generic = ready_gpu_vertex ? ready_gpu_vertex : GetTevFallback(info, true);
+        // CodexAstraLocal: Hardware Shaders may enter the ordinary acceleration route
+        // without a ready token. Preserve its translated VS/GS and vertex input layout;
+        // only explicitly CPU-produced vertices may use the trivial VS fallback.
+        auto* generic = ready_gpu_vertex ? ready_gpu_vertex
+                                        : GetTevFallback(info, cpu_vertex_layout != nullptr);
         if (generic && !generic->IsDone()) {
             const auto activity_start = Common::UberharActivity::Capture();
             const auto start = std::chrono::steady_clock::now();
@@ -2119,6 +2123,14 @@ void PipelineCache::ReportUberharStats(const char* kind) {
                  Settings::values.disable_spirv_optimizer.GetValue());
     }
     if (Settings::values.uberhar_test_mode.GetValue() != Settings::UberharTestMode::Custom) {
+        // CodexAstraLocal TEST-ONLY LOG: Describe allowed routes without labeling Native's
+        // ordinary-HW experiment CPU-only. Actual enqueue counts live in the rasterizer log.
+        // Remove the experimental route labels after the hardware-placement comparison.
+        const bool ready_gpu_allowed = allow_ready_gpu_vertices &&
+                                      !Settings::values.uberhar_cpu_vertex_only.GetValue();
+        const char* vertex_engine = Settings::values.use_hw_shader.GetValue()
+            ? (ready_gpu_allowed ? "cpu_and_ready_and_ordinary_gpu" : "cpu_and_ordinary_gpu")
+            : (ready_gpu_allowed ? "cpu_and_ready_gpu" : "cpu");
         // AstraEH: Foreground generic waits must not disappear from measured stutter.
         // AstraPro: CPU and optional GPU vertices may share these fragment-route counts.
         // CodexAstraLocal: Include the new exclusive CPU-specialized route in this
@@ -2130,7 +2142,7 @@ void PipelineCache::ReportUberharStats(const char* kind) {
                  "complete_ready_bank=false optimized_gpu_draws={} specialized_optional_cpu={}",
                  kind, virtual_generic_draws, virtual_recovery_draws, virtual_waits,
                  virtual_wait_ns / 1000000.0, virtual_max_wait_ns / 1000000.0,
-                 allow_ready_gpu_vertices ? "cpu_and_ready_gpu" : "cpu", virtual_specialized_gpu_draws,
+                 vertex_engine, virtual_specialized_gpu_draws,
                  ready_cpu_selected);
     }
     if (allow_static_cpu_tev && ready_vertex_worker) {

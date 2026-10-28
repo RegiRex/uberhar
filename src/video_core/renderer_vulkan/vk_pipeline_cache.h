@@ -114,6 +114,11 @@ public:
     void CompleteReadyGpuDraw(GraphicsPipeline* pipeline);
     void RetireReadyCpuAfterWorkerDrain();
 
+    // CodexAstraLocal TEST-ONLY LOG: Command-worker-only view after a real draw;
+    // selected fallback arbitration has already updated this actual binding.
+    // Copy its immutable IDs before optional owners retire; remove with pass timing.
+    const GraphicsPipeline* GetBoundDiagnosticPipeline() const noexcept { return bound_pipeline; }
+
     /// Binds a pipeline using the provided information
     // AstraEH: A ready CPU bridge may bind its generic pipeline directly; admitting
     // another GPU-vertex fallback is optional while the shared CPU route warms.

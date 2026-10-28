@@ -2,14 +2,15 @@
 <resources>
     <!-- CodexAstraLocal: Testing is a temporary global overlay; saved title settings remain distinct. -->
     <string name="uberhar_testing">Testing</string>
-    <string name="uberhar_testing_description">Temporary choices for every game. Turn off to restore saved global and per-game settings. Other graphics settings stay unchanged.</string>
-    <string name="uberhar_testing_restart_required">Close the game before changing Testing, its rendering preset, or its resolution.</string>
+    <!-- CodexAstraLocal: Alpha experiments keep normal saved choices separate and require a launch. -->
+    <string name="uberhar_testing_description">Temporary rendering choices. Select a game to compare its graphics controls. Turn off to restore saved global and per-game settings.</string>
+    <string name="uberhar_testing_restart_required">Close the game before changing Testing or its launch controls. Resolution can change during play.</string>
     <string name="uberhar_testing_native">Native</string>
     <string name="uberhar_testing_combo_cpu">Combo · CPU Vertices ON</string>
     <string name="uberhar_testing_combo_gpu">Combo · CPU Vertices OFF</string>
     <string name="uberhar_testing_resolution_2x">2×</string>
     <string name="uberhar_testing_resolution_4x">4×</string>
-    <string name="uberhar_testing_active_summary">Testing active: %1$s · %2$d×. These temporary values override saved rendering mode, CPU Vertices and resolution.</string>
+    <string name="uberhar_testing_active_summary">Testing active: %1$s · %2$d×. Temporary rendering and title controls override saved settings.</string>
     <string name="uberhar_testing_save_failed">Could not save Testing settings. Recheck the displayed selection before launching a game.</string>
     <string name="uberhar_game_settings">Game Settings</string>
     <string name="uberhar_game_settings_title">%1$s · %2$s</string>
@@ -542,8 +543,9 @@
     <string name="loader_error_applying_patches">Error applying patches</string>
     <string name="loader_error_applying_patches_description">A generic error occurred while applying a patch to the application. Please check the log for more details.</string>
     <string name="loader_error_patch_wrong_application">Failed to apply a patch because it is designed for a different application. Please make sure you are using the patches for the right application, region and version.</string>
-    <string name="loader_error_encrypted">Your ROM is Encrypted</string>
-    <string name="loader_error_encrypted_description"><![CDATA[Azahar does not support encrypted applications. Read our <a href="https://azahar-emu.org/blog/game-loading-changes/">blog post</a> for more information.]]></string>
+    <!-- CodexAstraLocal: Encrypted input now uses supplied keys; report missing material accurately. -->
+    <string name="loader_error_encrypted">Unable to decrypt application</string>
+    <string name="loader_error_encrypted_description">Check that the matching AES keys and, when required, title seed are present in your user folder. The application may also use unsupported encryption or be damaged. See the log for details.</string>
     <string name="loader_error_file_not_found">ROM file does not exist</string>
     <string name="no_game_present">No bootable game present!</string>
     <string name="invalid_rom">Invalid ROM</string>
@@ -711,7 +713,7 @@
     <string name="save_load_error">Save/Load Error</string>
     <string name="fatal_error">Fatal Error</string>
     <string name="fatal_error_message">A fatal error occurred. Check the log for details.\nContinuing emulation may result in crashes and bugs.</string>
-    <string name="unsupported_encrypted">Unsupported encrypted application</string>
+    <string name="unsupported_encrypted">Unable to decrypt application</string>
     <string name="invalid_system_mode">Invalid system mode</string>
     <string name="invalid_system_mode_message">New 3DS exclusive applications cannot be loaded without enabling the New 3DS mode.</string>
     <string name="savestate_build_mismatch_message"><![CDATA[Could not load savestate because it was created on a different Azahar version:<br/><b>Azahar %1$s</b>.<br/><br/>Please read our blog entry <a href="https://azahar-emu.org/blog/understanding-save-states/">understanding savestates</a> for more information.<br/><br/>To recover your progress, downgrade to <b>Azahar %1$s</b>, load this savestate and use the application\'s built-in save functionality.]]></string>
@@ -807,7 +809,7 @@
     <string name="cia_install_success">\"%s\" has been installed successfully</string>
     <string name="cia_install_error_aborted">The installation of \"%s\" was aborted.\n Please see the log for more details</string>
     <string name="cia_install_error_invalid">\"%s\" is not a valid CIA</string>
-    <string name="cia_install_error_encrypted">\"%s\" must be decrypted before being used with Azahar.\n A real 3DS is required</string>
+    <string name="cia_install_error_encrypted">Unable to decrypt %s. Check the supplied common key and ticket, then see the log for details.</string>
     <string name="cia_install_error_unknown">An unknown error occurred while installing \"%s\".\n Please see the log for more details</string>
 
     <!-- Memory Sizes -->
@@ -1211,9 +1213,28 @@
     <string name="uberhar_testing_target">Testing game: %1$s</string>
     <string name="uberhar_testing_select_game">Choose Testing game</string>
     <string name="uberhar_testing_use_global">Use global Testing choices</string>
-    <string name="uberhar_testing_reset_confirmation">Remove this game’s Testing preset and resolution choices? It will inherit the global Testing choices. Normal saved settings are unchanged.</string>
-    <string name="uberhar_testing_live_description">Resolution changes apply now. Exit the game before changing its rendering preset or the Testing switch.</string>
+    <!-- CodexAstraLocal: Reset clears the title experiment; live wording distinguishes its restart boundary. -->
+    <!-- CodexAstraLocal: Reset restores the title experiment baselines without inheriting global opt-ins. -->
+    <string name="uberhar_testing_reset_confirmation">Remove this game’s Testing choices? Preset and resolution will inherit global choices. Hardware Shaders and Disable Right Eye Render reset to OFF, delay and 3D slider to zero, and Linear Filtering to ON. Normal saved settings are unchanged.</string>
+    <string name="uberhar_testing_live_description">Resolution changes apply now. Other controls show this launch’s values; exit the game to change them or the Testing switch.</string>
     <string name="uberhar_testing_resolution_override">Change the active resolution using the Testing controls on the main Settings page.</string>
+    <!-- CodexAstraLocal: State the heuristic risk without promising redundant work or a speed gain. -->
+    <string name="uberhar_testing_right_eye_description">Experimental heuristic skipping for this game only. May cause flickering or missing graphics. Default OFF; changes apply next launch.</string>
+    <string name="uberhar_testing_right_eye_select_game">Choose a game to enable this experimental heuristic. May cause flickering or missing graphics. Default OFF for every game.</string>
+    <string name="uberhar_testing_right_eye_override">Change Disable Right Eye Render in this game’s Testing controls after exiting the game.</string>
+    <!-- CodexAstraLocal: Explain player-visible placement, scheduling and display comparisons. -->
+    <string name="uberhar_testing_select_game_controls">Choose a game to edit these launch controls.</string>
+    <string name="uberhar_testing_hardware_description">Allow ordinary GPU vertex shaders for this game. Default OFF. Combo can still use ready GPU vertex shaders when OFF. Changes apply next launch.</string>
+    <string name="uberhar_testing_hardware_cpu_only">CPU Vertices ON keeps Hardware Shaders OFF. Your saved Hardware Shaders choice is retained for other presets.</string>
+    <string name="uberhar_testing_delay_description">Delay the game’s render-thread response by 0–16000 microseconds. Default 0; use 100 to compare the captured Azahar setting. Changes apply next launch.</string>
+    <string name="uberhar_testing_delay_range">Enter a whole number from 0 to 16000.</string>
+    <string name="uberhar_testing_delay_value">Render-thread delay: %1$d μs</string>
+    <string name="uberhar_testing_linear_description">Smooth the displayed image with Linear Filtering. Default ON; OFF uses nearest filtering. Changes apply next launch.</string>
+    <string name="uberhar_testing_stereo_depth">Guest 3D slider</string>
+    <string name="uberhar_testing_stereo_depth_0">0%</string>
+    <string name="uberhar_testing_stereo_depth_1">1%</string>
+    <string name="uberhar_testing_stereo_description">3D slider value seen by the game, even with mono display. Default 0%; 1% matches the captured Azahar setting. Changes apply next launch.</string>
+    <string name="uberhar_testing_launch_override">Change this launch control in the game’s Testing panel after exiting the game.</string>
     <string name="uberhar_game_driver">GPU driver for this game</string>
     <string name="uberhar_game_driver_selected">GPU driver: %1$s</string>
     <string name="uberhar_game_driver_inherit">Use global GPU driver</string>

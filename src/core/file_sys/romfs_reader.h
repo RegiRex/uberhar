@@ -9,6 +9,7 @@
 #include <boost/serialization/array.hpp>
 #include <boost/serialization/base_object.hpp>
 #include <boost/serialization/export.hpp>
+#include <boost/serialization/version.hpp>
 #include "common/alignment.h"
 #include "common/common_types.h"
 #include "common/file_util.h"
@@ -45,7 +46,14 @@ private:
  */
 class DirectRomFSReader : public RomFSReader {
 public:
-    DirectRomFSReader(std::unique_ptr<FileUtil::IOFileBase>&& file) : file(std::move(file)) {}
+    DirectRomFSReader(std::unique_ptr<FileUtil::IOFileBase>&& file)
+        : is_encrypted(false), file(std::move(file)) {}
+
+    // CodexAstraLocal: Restore Plus offset-aware encrypted reads while retaining plaintext readers.
+    DirectRomFSReader(std::unique_ptr<FileUtil::IOFileBase>&& file, const std::array<u8, 16>& key,
+                      const std::array<u8, 16>& ctr, std::size_t crypto_offset)
+        : is_encrypted(true), file(std::move(file)), key(key), ctr(ctr),
+          crypto_offset(crypto_offset) {}
 
     ~DirectRomFSReader() override = default;
 
@@ -60,7 +68,12 @@ public:
     bool CacheReady(std::size_t file_offset, std::size_t length) override;
 
 private:
+    // CodexAstraLocal: Zero defaults preserve older plaintext-reader save states.
+    bool is_encrypted = false;
     std::unique_ptr<FileUtil::IOFileBase> file;
+    std::array<u8, 16> key{};
+    std::array<u8, 16> ctr{};
+    u64 crypto_offset = 0;
 
     // Total cache size: 128KB
     static constexpr std::size_t cache_line_size = (1 << 13); // About 8KB
@@ -80,9 +93,16 @@ private:
                                                                  std::size_t length);
 
     template <class Archive>
-    void serialize(Archive& ar, const unsigned int) {
+    // CodexAstraLocal: Version the appended crypto fields; version 0 contains only base and file.
+    void serialize(Archive& ar, const unsigned int version) {
         ar& boost::serialization::base_object<RomFSReader>(*this);
         ar & file;
+        if (version >= 1) {
+            ar & is_encrypted;
+            ar & key;
+            ar & ctr;
+            ar & crypto_offset;
+        }
     }
     friend class boost::serialization::access;
 };
@@ -135,5 +155,7 @@ private:
 
 } // namespace FileSys
 
+// CodexAstraLocal: Read the original plaintext-reader schema without consuming unrelated bytes.
+BOOST_CLASS_VERSION(FileSys::DirectRomFSReader, 1)
 BOOST_CLASS_EXPORT_KEY(FileSys::DirectRomFSReader)
 BOOST_CLASS_EXPORT_KEY(FileSys::ArticRomFSReader)

@@ -359,6 +359,14 @@ public:
     // this ordering fixture; real Vulkan query validity has separate checks.
     bool diagnostics_enabled{};
     u64 diagnostic_reuses{}, diagnostic_flushes{};
+    // CodexAstraLocal: This order fixture disables sampling; keep its new
+    // observer/reason endpoints inert instead of omitting production calls.
+    u64 diagnostic_feedback_requests{};
+    std::array<u64, static_cast<std::size_t>(PassEndReason::Count)> diagnostic_end_reasons{};
+    struct Sample { PassEndReason end_reason{}; };
+    std::array<Sample, 16> diagnostic_samples{};
+    int diagnostic_active{-1};
+    template <typename T> void RecordDiagnosticDraw(const T&, u32, u32) {}
     void BeginDiagnosticPass(const RenderPass&, bool) {}
     void EndDiagnosticPass() {}
     bool ShouldFlushPass() const { return instance.ShouldFlush(); }
@@ -371,7 +379,7 @@ public:
     u32 num_draws{};
     void BeginRendering(const Framebuffer*, Common::Rectangle<u32>);
     void BeginRendering(const RenderPass&, bool framebuffer_pass = false);
-    void EndRendering();
+    void EndRendering(PassEndReason reason = PassEndReason::Explicit);
 };
 enum class BufferType : u32 { Upload, Download, Stream };
 constexpr u64 WATCHES_RESERVE_CHUNK = 0x1000;
@@ -476,6 +484,13 @@ struct Raster {
     Framebuffer framebuffer;
     Common::Rectangle<u32> draw_rect{0, 32, 32, 0};
     u32 pipeline_info{}, software_layout{};
+    // CodexAstraLocal: Diagnostic guest-target endpoints are inert in this
+    // unsampled fixture; preserve the production post-enqueue call unchanged.
+    struct DiagnosticTarget {
+        u32 GetColorBufferPhysicalAddress() const { return 0x1000; }
+        u32 GetDepthBufferPhysicalAddress() const { return 0x2000; }
+    };
+    struct { struct { DiagnosticTarget framebuffer; } framebuffer; } regs;
     struct { void* ready{}; } cpu_bridge;
     // CodexAstraLocal: Witness the real CPU-tail hook at its final tick. The
     // separate cached-buffer gate executes the three actual ring stamps/reads.

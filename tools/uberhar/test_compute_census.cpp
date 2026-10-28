@@ -65,7 +65,8 @@ namespace vk {
 enum class Format { eR8G8B8A8Unorm, Other };
 class SystemError : public std::system_error { using std::system_error::system_error; };
 }
-namespace VideoCore { enum class PixelFormat { RGBA8, Other }; }
+// CodexAstraLocal: Distinct resolved depth formats exercise the production predicate.
+namespace VideoCore { enum class PixelFormat { RGBA8, Other, D24, D24S8 }; }
 namespace Vulkan {
 enum class SurfaceType { Color, Depth };
 struct HardwareVertex { Common::Vec4f position, color; };
@@ -80,7 +81,11 @@ struct Framebuffer {
     bool Handle() const { return handle; }
     unsigned color_id{1}, color_level{};
     VideoCore::PixelFormat format{VideoCore::PixelFormat::RGBA8};
-    VideoCore::PixelFormat Format(SurfaceType) const { return format; }
+    // CodexAstraLocal: Depth changes independently from the color attachment.
+    VideoCore::PixelFormat depth_format{VideoCore::PixelFormat::D24};
+    VideoCore::PixelFormat Format(SurfaceType type) const {
+        return type == SurfaceType::Depth ? depth_format : format;
+    }
     std::array<int, 1> Images() const { return {7}; }
 };
 class ComputeRectRenderer {
@@ -138,10 +143,18 @@ struct Fixture {
     struct FramebufferHelper {
         Vulkan::Framebuffer* target{};
         unsigned* cancellations{};
+        // CodexAstraLocal: Observe the actual extracted call after format resolution.
+        unsigned* depth_updates{};
+        bool* depth_writes{};
         struct View { s32 x{}, y{}, width{64}, height{32}; };
         struct Rect { s32 left{}, bottom{}, right{64}, top{32}; };
         Vulkan::Framebuffer* Framebuffer() const { return target; }
         void CancelInvalidation() const { ++*cancellations; }
+        // CodexAstraLocal: The extracted Draw configures resolved depth write ownership.
+        void SetDepthWriteEnabled(bool writes) const {
+            ++*depth_updates;
+            *depth_writes = writes;
+        }
         View Viewport() const { return {}; }
         Rect DrawRect() const { return {}; }
     };
@@ -149,14 +162,23 @@ struct Fixture {
         Surface surface;
         Vulkan::Framebuffer* target{};
         unsigned cancellations{};
+        // CodexAstraLocal: Record only resolved permission updates, not simulated GPU writes.
+        unsigned depth_updates{};
+        bool depth_writes{true};
         Surface& GetSurface(unsigned) { return surface; }
-        FramebufferHelper GetFramebufferSurfaces(bool, bool) { return {target, &cancellations}; }
+        FramebufferHelper GetFramebufferSurfaces(bool, bool) {
+            return {target, &cancellations, &depth_updates, &depth_writes};
+        }
     } res_cache;
     struct {
         struct { struct { VideoCore::PixelFormat color{}, depth{}; } attachments;
-                 struct { bool stencil_test_enable{}; } depth_stencil; } state;
+                 // CodexAstraLocal: Effective write bits feed the real predicate below.
+                 struct { bool stencil_test_enable{}, depth_test_enable{}, depth_write_enable{}; }
+                     depth_stencil; } state;
+        struct { u8 stencil_write_mask{}; } dynamic_info;
         bool GetFinalColorWriteMask(int) const { return true; }
-        bool IsDepthWriteEnabled() const { return false; }
+        // CodexAstraLocal: Extract the production format-aware depth/stencil proof.
+#include "depth_predicate.inc"
     } pipeline_info;
     int instance{};
     unsigned graphics_fallthrough{}, sync_calls{}, nonempty_calls{};
@@ -476,7 +498,33 @@ void TestSupportedFallback() {
     }
 }
 
+// CodexAstraLocal: Actual Draw must refresh its attachment before proving no
+// writes. Test both format transition directions, stencil masks and no-target exit.
+void TestResolvedDepthWrites() {
+    using F = VideoCore::PixelFormat;
+    for (const auto previous : {F::D24, F::D24S8}) {
+        for (const auto resolved : {F::D24, F::D24S8}) {
+            for (const u8 mask : {0, 1, 128, 255}) for (bool stencil : {false, true}) {
+                Vulkan::Fixture f;
+                f.compute_rect = nullptr;
+                f.pipeline_info.state.attachments.depth = previous;
+                f.pipeline_info.state.depth_stencil.stencil_test_enable = stencil;
+                f.pipeline_info.dynamic_info.stencil_write_mask = mask;
+                f.target.depth_format = resolved;
+                const bool expected = resolved == F::D24S8 && stencil && mask != 0;
+                Check(!f.Route() && f.res_cache.depth_updates == 1 &&
+                          f.res_cache.depth_writes == expected,
+                      "depth permission uses current resolved format");
+            }
+        }
+    }
+    Vulkan::Fixture no_target;
+    no_target.target.handle = false;
+    Check(no_target.Route() && no_target.res_cache.depth_updates == 0,
+          "no-target exit retains conservative helper default");
+}
+
 int main() {
-    try { TestBins(); TestAdmission(); TestReports(); TestEffectiveAdmission(); TestSupportedFallback(); TestDeferredAdmission(); std::printf("PASS checks=%u bank_bytes=%zu\n", checks, sizeof(Vulkan::ComputeStateCensus)); }
+    try { TestBins(); TestAdmission(); TestReports(); TestEffectiveAdmission(); TestSupportedFallback(); TestDeferredAdmission(); TestResolvedDepthWrites(); std::printf("PASS checks=%u bank_bytes=%zu\n", checks, sizeof(Vulkan::ComputeStateCensus)); }
     catch (const std::exception& error) { std::fprintf(stderr,"FAILED: %s\n",error.what()); return 1; }
 }

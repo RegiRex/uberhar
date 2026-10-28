@@ -1,3 +1,55 @@
+# CURRENT — 0.1.56 build authorized; sleep after submission
+
+<!-- CodexAstraLocal: October 28 owner approved the report and directed completion of the build and computer sleep. -->
+Finish .56 with the reviewed compatibility/controls work plus the recommended
+read-only-depth invalidation reduction and bounded GPU sample attribution.
+Run affected executable preflight, repair genuine failures, and obtain independent
+architect review. Preserve signing/shader/Android/publication gates. Submit through
+RegiRex/uberhar's existing trusted hybrid-shaders workflow, save the handoff and
+stop all agents; hosted compilation can finish independently. The owner explicitly
+requests computer sleep after completion of local submission/report work.
+No device installation or gameplay testing is requested. Root alone owns device
+operations if later authorized. Broader pass containment/copy reuse/draw grouping
+remain follow-up candidates. Do not spend tokens polling a submitted build.
+
+---
+
+# HISTORICAL — 0.1.56 settings controls source work complete; report checkpoint
+
+<!-- CodexAstraLocal: October 28 owner requests extend the earlier file-compatibility scope. -->
+The isolated .56 branch includes installer/file compatibility, scrollable per-game
+Testing, and title-only right-eye, Hardware Shaders, render-thread delay, Linear
+Filtering and 0/1% guest slider controls. Testing uses the compiled alpha-version
+gate; beta/full builds hide and ignore stale overrides. Keep ordinary defaults,
+saved Custom preferences, CPU-only veto and complete-draw safeguards intact.
+Focused local checks and independent review are complete. No APK, publication,
+installation or device test was performed for these controls. Do not begin those
+actions automatically at this report checkpoint. Architect GPU-work candidates
+remain proposals, not implemented optimizations. Root alone owns device operations.
+See docs/UBERHAR_PER_GAME_SETTINGS.md for controls and retirement policy, and the
+latest private UBERHAR_ACTIVE_HANDOFF.md for validation/report pointers. Preserve
+other worktrees and private artifacts. Completed agents stop; do not poll or rerun
+passed checks without changed code, failure or a concrete unresolved concern.
+
+---
+
+# HISTORICAL — 0.1.56 installer safety and file compatibility source work
+
+<!-- CodexAstraLocal: October 27 owner authorization supersedes historical build/capture directions below. -->
+Port Azahar PR2648 safety first, then only pinned Azahar Plus file compatibility.
+Base is submitted db72da0a3704510d66c943d33fabd097928af845; preserve other worktrees.
+Keep rendering, installed-storage wrappers, saves, supplied-key facilities and
+existing authorization intact. No bundled key/seed material, cheats, ZipPass,
+Android-version expansion, broad merge or renderer rebase. Retain upstream license
+and authorship notices plus adjacent CodexAstraLocal purpose comments.
+Root alone owns concurrent .55 device capture; no developer ADB/device/install work.
+Source checks and independent review are authorized; no APK build or publication
+while owner .55 tests continue. Run finite affected executable checks, record
+provenance, and yield with handles during automation. Stop after this scope.
+See docs/UBERHAR_FILE_COMPATIBILITY.md for pinned donors and validation boundaries.
+
+---
+
 # CURRENT — 0.1.55 approved; stop after prerelease submission
 
 <!-- CodexAstraLocal: Owner approved the complete post-.54 driver/architecture package on October 23, 2026; this supersedes historical pause and removed-renderer instructions below. -->
