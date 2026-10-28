@@ -228,6 +228,12 @@ jobs:
             "platforms;android-35" "build-tools;35.0.0" \
             "ndk;27.3.13750724" "cmake;3.30.3"
 
+      # CodexAstraLocal: Catch private installer dependencies in Android's public AM header early.
+      - name: Compile Android AM public header interface
+        run: |
+          python3 tools/uberhar/test_am_header_interface.py \
+            --ndk "$ANDROID_SDK_ROOT/ndk/27.3.13750724"
+
       - name: Execute ARM64 shader return contract
         run: |
           export ANDROID_NDK_HOME="$ANDROID_SDK_ROOT/ndk/27.3.13750724"
@@ -395,12 +401,15 @@ jobs:
       # when a candidate fails before Android packaging or publication.
       # CodexAstraLocal: Preserve typed renderer recovery in the existing guest
       # JIT gate, including raw outcomes and the exact extracted callback bodies.
+      # CodexAstraLocal: Retain early public-header compiler evidence on failure as well.
       - name: Upload ARM64 shader contract evidence
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: uberhar-arm64-shader-proof-${{ github.run_number }}
           path: |
+            build/uberhar-probe/am-header-interface/**/provenance.json
+            build/uberhar-probe/am-header-interface/**/*.log
             build/uberhar-probe/shader-a64-return/**/provenance.json
             build/uberhar-probe/shader-a64-return/**/*.log
             build/uberhar-probe/shader-a64-return/**/*.jsonl

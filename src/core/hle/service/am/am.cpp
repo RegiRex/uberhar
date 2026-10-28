@@ -25,6 +25,8 @@
 #include "core/file_sys/certificate.h"
 #include "core/file_sys/errors.h"
 #include "core/file_sys/ncch_container.h"
+// CodexAstraLocal: Only the installer implementation owns the Crypto++-backed verifier.
+#include "core/file_sys/ncch_install_verifier.h"
 #include "core/file_sys/otp.h"
 #include "core/file_sys/seed_db.h"
 #include "core/file_sys/title_metadata.h"
@@ -124,6 +126,9 @@ public:
     // CodexAstraLocal: External encrypted content hashes reject wrong keys before staged promotion.
     std::vector<std::unique_ptr<CryptoPP::SHA256>> content_hashes;
 };
+
+// CodexAstraLocal: Keep unique_ptr destruction here, with the private verifier complete.
+NCCHCryptoFile::~NCCHCryptoFile() = default;
 
 NCCHCryptoFile::NCCHCryptoFile(const std::string& out_file, bool encrypted_content, u64 expected_size_)
     : expected_size(expected_size_) {

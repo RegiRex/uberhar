@@ -1,4 +1,19 @@
-# CURRENT — 0.1.56 build authorized; sleep after submission
+# CURRENT — 0.1.56 Android header repair; stop after resubmission
+
+<!-- CodexAstraLocal: October 28 owner requested repair after the actual hosted Android failure. -->
+Initial run40664385698 passed the shader gate but failed Android compilation:
+am.h exposed a private Crypto++ dependency to JNI consumers. Keep that dependency
+private, move verifier destruction out of line, qualify the affected consumers
+under their actual target flags and preserve the installer fixture. Add an early
+public-header compile regression gate. Submit the corrected exact tree through
+the existing workflow, report the accepted run, then stop; no hosted polling loop.
+No device test/install or new sleep action is requested in this repair turn.
+Previous sleep authorization below was one-time. Repair evidence and latest resume:
+/home/regirex/uberhar-recovery/build056-repair/RESUME.md
+
+---
+
+# HISTORICAL — 0.1.56 build authorized; sleep after submission
 
 <!-- CodexAstraLocal: October 28 owner approved the report and directed completion of the build and computer sleep. -->
 Finish .56 with the reviewed compatibility/controls work plus the recommended

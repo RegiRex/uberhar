@@ -13,7 +13,10 @@ def main():
   fixture=read('tools/uberhar/test_ncch_install_integrity.cpp');read('tools/uberhar/test_ncch_install_integrity.py');am=read('src/core/hle/service/am/am.cpp');header=read('src/core/hle/service/am/am.h');ncch=read('src/core/file_sys/ncch_container.h');read('src/core/file_sys/ncch_install_verifier.h')
   structures=ncch[ncch.index('struct NCSD_Partitions'):ncch.index('namespace FileSys')]
   cls=definition(header,'class NCCHCryptoFile final')+';';cls=cls.replace('private:','public:')
-  methods='\n'.join(definition(am,s) for s in ['void NCCHCryptoFile::WriteExact(','bool NCCHCryptoFile::Finalize(','void NCCHCryptoFile::Write('])
+  # CodexAstraLocal: Preserve the production out-of-line owner destructor in this extracted class.
+  destructor='NCCHCryptoFile::~NCCHCryptoFile() = default;'
+  require(am.count(destructor)==1,'NCCH verifier destruction boundary changed')
+  methods=destructor+'\n'+'\n'.join(definition(am,s) for s in ['void NCCHCryptoFile::WriteExact(','bool NCCHCryptoFile::Finalize(','void NCCHCryptoFile::Write('])
   variants=[('candidate',methods,None),('skip-inner-hash',replace_once(methods,'if (verifier && !verifier->Verify())','if (false)'),b'FAIL bad inner crypto rejected\n')]
   for label,body,expected in variants:
    case=out/label;case.mkdir();cpp=case/'fixture.cpp';obj=case/'fixture.o';exe=case/'fixture';cpp.write_text(fixture.replace('// @STRUCTURES@',structures).replace('// @CLASS@',cls).replace('// @METHODS@',body))

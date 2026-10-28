@@ -22,7 +22,6 @@
 #include "common/swap.h"
 #include "core/file_sys/cia_container.h"
 #include "core/file_sys/cia_install_transaction.h"
-#include "core/file_sys/ncch_install_verifier.h"
 #include "core/file_sys/file_backend.h"
 #include "core/file_sys/ncch_container.h"
 #include "core/global.h"
@@ -37,6 +36,11 @@ class System;
 
 namespace FileUtil {
 class IOFile;
+}
+
+// CodexAstraLocal: Keep the installer's private crypto dependency out of frontend headers.
+namespace FileSys {
+class NCCHInstallVerifier;
 }
 
 namespace Service::FS {
@@ -130,6 +134,8 @@ using ProgressCallback = void(std::size_t, std::size_t);
 class NCCHCryptoFile final {
 public:
     NCCHCryptoFile(const std::string& out_file, bool encrypted_content, u64 expected_size = 0);
+    // CodexAstraLocal: Destroy the incomplete verifier where its implementation is available.
+    ~NCCHCryptoFile();
 
     void Write(const u8* buffer, std::size_t length);
     // CodexAstraLocal: Propagate final compressor/crypto/host write errors before staged promotion.
