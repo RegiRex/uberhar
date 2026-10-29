@@ -15,11 +15,19 @@ private:
     std::unique_ptr<INIReader> android_config;
     // CodexAstraLocal: Sparse title values are read-only and never merged into the global file.
     std::unique_ptr<INIReader> title_config;
+    // CodexAstraLocal: Parse Testing once, then compose each setting in scope order.
+    std::unique_ptr<INIReader> testing_config;
+    std::string testing_section;
     u64 title_id{};
     bool runtime_reload{};
     bool HasTitleValue(const std::string& group, const std::string& key) const;
     bool KeepRunningValue(const std::string& key) const;
-    void ApplyTestingOverlay();
+    void LoadTestingOverlay();
+    bool HasTestingValue(const std::string& group, const std::string& key, bool title_scope) const;
+    bool HasTitleBackendOverride() const;
+    template <typename Type>
+    Type ReadTestingValue(const std::string& group, const std::string& key,
+                          const Type& fallback, bool title_scope) const;
     std::string android_config_loc;
 
     bool LoadINI(const std::string& default_contents = "", bool retry = true);

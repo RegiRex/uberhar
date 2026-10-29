@@ -1,4 +1,24 @@
-# CURRENT — 0.1.56 Settings repair; stop after rebuilt prerelease submission
+# CURRENT — 0.1.56 settings precedence correction; stop after submission
+
+<!-- CodexAstraLocal: Latest owner explicitly requires Options to be global-only, every per-game choice to beat globals, and no blanket settings restrictions beyond real conflicts. -->
+The .56-r1 validation missed cross-layer precedence: global Testing still beat
+ordinary per-game values, and the title Testing switch changed the global master.
+Correct both and rebuild the same app version0.1.56 as revision0.1.56-r2.
+Resolve ordinary globals -> explicit global Testing defaults -> ordinary title
+choices -> explicit title Testing choices -> actual model conflicts. Testing
+enabled is itself title-overridable; save only edited keys and preserve inheritance.
+Options always edits global scope. In-game Game Settings receives its explicit
+title; no global-to-running-title redirect. Remove old blanket profile locks and
+silent overwrites; keep actual backend/CPU-only conflicts, launch-owned resources
+and no-skipped-draw constraints. Preserve unconfigured profile defaults and saved
+Custom files. Developers split UI/model/native, architect reviews independently.
+Run affected checks once, repair failures, submit exact tree to existing gated
+workflow and STOP after report/checkpoint. No hosted polling/device tests/sleep.
+Latest checkpoint: /home/regirex/uberhar-recovery/build056-precedence-repair/RESUME.md
+
+---
+
+# HISTORICAL — 0.1.56 Settings repair; stop after rebuilt prerelease submission
 
 <!-- CodexAstraLocal: October 28 owner reported inaccessible Testing experiments/Settings crashes and explicitly authorized rebuilding .56. -->
 Repair RecyclerView initialization before Testing-header inflation and reload

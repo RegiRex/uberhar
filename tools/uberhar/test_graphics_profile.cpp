@@ -30,6 +30,26 @@ int main() {
         values.spirv_shader_gen = false;
         values.use_hw_shader = true;
         values.use_shader_jit = false;
+        // CodexAstraLocal: Exercise deliberate choices opposite to every former
+        // blanket profile default; none are requirements of Native/Combo.
+        values.disable_spirv_optimizer = false;
+        values.shaders_accurate_mul = false;
+        values.use_disk_shader_cache = false;
+        values.texture_filter = static_cast<TextureFilter>(1);
+        values.texture_sampling = static_cast<TextureSampling>(1);
+        values.delay_game_render_thread_us = 321;
+        values.filter_mode = false;
+        values.render_3d = StereoRenderOption::Anaglyph;
+        values.factor_3d = 37;
+        values.render_3d_which_display = static_cast<StereoWhichDisplay>(1);
+        values.disable_right_eye_render = true;
+        values.swap_eyes_3d = true;
+        values.dump_textures = true;
+        values.custom_textures = true;
+        values.async_custom_loading = false;
+        values.use_skip_duplicate_frames = true;
+        values.async_shader_compilation = true;
+        values.uberhar_cpu_vertex_bridge = true;
         values.uberhar_hybrid_tev = false;
         values.resolution_factor = 3;
         values.use_integer_scaling = true;
@@ -48,9 +68,23 @@ int main() {
                   !values.uberhar_parallel_texture_decode.GetValue(),
               "preset erased isolated comparison controls");
         Check(values.graphics_api.GetValue() == GraphicsAPI::Vulkan, "profile must select Vulkan");
-        Check(!values.use_hw_shader.GetValue() && values.use_shader_jit.GetValue(),
-              "profile must use CPU JIT with GPU vertex specialization disabled");
-        Check(values.disable_spirv_optimizer.GetValue(), "first-use optimizer still active");
+        Check(values.use_hw_shader.GetValue() == (mode == UberharTestMode::Native),
+              "CPU-only Combo veto or independent Native hardware preference changed");
+        Check(!values.use_shader_jit.GetValue() && !values.disable_spirv_optimizer.GetValue() &&
+                  !values.shaders_accurate_mul.GetValue() && !values.use_disk_shader_cache.GetValue(),
+              "profile erased explicit JIT, optimizer, accuracy or cache choices");
+        Check(static_cast<int>(values.texture_filter.GetValue()) == 1 &&
+                  static_cast<int>(values.texture_sampling.GetValue()) == 1 &&
+                  values.delay_game_render_thread_us.GetValue() == 321 && !values.filter_mode.GetValue(),
+              "profile erased texture filtering, sampling, delay or display filtering");
+        Check(values.render_3d.GetValue() == StereoRenderOption::Anaglyph &&
+                  values.factor_3d.GetValue() == 37 &&
+                  static_cast<int>(values.render_3d_which_display.GetValue()) == 1 &&
+                  values.disable_right_eye_render.GetValue() && values.swap_eyes_3d.GetValue(),
+              "profile erased independent stereo or eye settings");
+        Check(values.dump_textures.GetValue() && values.custom_textures.GetValue() &&
+                  !values.async_custom_loading.GetValue() && values.use_skip_duplicate_frames.GetValue(),
+              "profile erased texture replacement/dump or duplicate-frame preferences");
         Check(values.uberhar_hybrid_tev.GetValue(), "generic CPU recovery disabled");
         // CodexAstraUlt: Replace AstraPro's three-mode expectation with an independent
         // four-mode matrix: existing Combo alone permits optional specialized fragments.
@@ -81,6 +115,16 @@ int main() {
         Check(!CanSelect(false, false, 7, 7) && !CanSelect(true, true, 7, 7) &&
                   !CanSelect(true, false, 7, 8) && CanSelect(true, false, 7, 7),
               "ready GPU selection bypasses completion/failure/identity");
+    }
+    // CodexAstraLocal: Hardware is an independent preference except for Combo CPU-only.
+    for (const auto mode : {UberharTestMode::Native, UberharTestMode::Automatic}) {
+        for (bool requested : {false, true}) {
+            values.uberhar_test_mode = mode;
+            values.uberhar_cpu_vertex_only = false;
+            values.use_hw_shader = requested;
+            ApplyUberharTestProfile();
+            Check(values.use_hw_shader.GetValue() == requested, "profile erased hardware choice");
+        }
     }
     // CodexAstraLocal: Retirement preserves requested scale, guest CPU/timing and
     // saved CPU vertex preferences; legacy Software no longer claims CPU pixels.

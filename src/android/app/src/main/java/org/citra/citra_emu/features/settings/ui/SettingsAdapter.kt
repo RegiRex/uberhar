@@ -48,9 +48,7 @@ import org.citra.citra_emu.features.settings.model.AbstractSetting
 import org.citra.citra_emu.features.settings.model.AbstractShortSetting
 import org.citra.citra_emu.features.settings.model.AbstractStringSetting
 import org.citra.citra_emu.features.settings.model.FloatSetting
-import org.citra.citra_emu.features.settings.model.IntSetting
 import org.citra.citra_emu.features.settings.model.ScaledFloatSetting
-import org.citra.citra_emu.features.settings.model.TestingSettings
 import org.citra.citra_emu.features.settings.model.UberharTestModeSwitch
 import org.citra.citra_emu.features.settings.model.view.DateTimeSetting
 import org.citra.citra_emu.features.settings.model.view.InputBindingSetting
@@ -690,11 +688,10 @@ class SettingsAdapter(private val fragmentView: SettingsFragmentView, public val
         return true
     }
 
-    // CodexAstraLocal: A pending reset must also respect Testing's frozen resolution,
-    // even though the normal resolution preference is otherwise editable during play.
+    // CodexAstraLocal: Reset follows the same resource lifetime as ordinary editing;
+    // Testing resolution precedence no longer blocks changes to the saved title preference.
     private fun isRuntimeResetBlocked(setting: AbstractSetting): Boolean =
-        EmulationActivity.isRunning() && (!setting.isRuntimeEditable ||
-            (TestingSettings.enabled && setting.key == IntSetting.RESOLUTION_FACTOR.key))
+        EmulationActivity.isRunning() && !setting.isRuntimeEditable
 
     fun onInputBindingLongClick(setting: InputBindingSetting, position: Int): Boolean {
         MaterialAlertDialogBuilder(context)

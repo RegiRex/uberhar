@@ -17,7 +17,6 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import org.citra.citra_emu.BuildConfig
 import org.citra.citra_emu.CitraApplication
 import org.citra.citra_emu.R
-import org.citra.citra_emu.activities.EmulationActivity
 import org.citra.citra_emu.display.ScreenLayout
 import org.citra.citra_emu.display.StereoMode
 import org.citra.citra_emu.display.StereoWhichDisplay
@@ -34,7 +33,6 @@ import org.citra.citra_emu.features.settings.model.ScaledFloatSetting
 import org.citra.citra_emu.features.settings.model.Settings
 import org.citra.citra_emu.features.settings.model.StringSetting
 import org.citra.citra_emu.features.settings.model.TestingSettings
-import org.citra.citra_emu.features.settings.model.UberharGraphicsProfile
 import org.citra.citra_emu.features.settings.model.UberharTestMode
 import org.citra.citra_emu.features.settings.model.UberharTestModeSwitch
 import org.citra.citra_emu.features.settings.model.view.DateTimeSetting
@@ -92,6 +90,10 @@ class SettingsFragmentPresenter(private val fragmentView: SettingsFragmentView) 
         if (setting.section == null || setting.key == null) {
             return
         }
+
+        // CodexAstraLocal: Same-value selections must persist as explicit title overrides,
+        // including dialog callbacks that do not report an ordinary value change.
+        if (settings.markPerGameSettingEdited(setting)) fragmentView.onSettingChanged()
 
         val section = settings.getSection(setting.section!!)!!
         if (section.getSetting(setting.key!!) == null) {
@@ -1004,9 +1006,19 @@ class SettingsFragmentPresenter(private val fragmentView: SettingsFragmentView) 
 
     private fun addGraphicsSettings(sl: ArrayList<SettingsItem>) {
         settingsActivity.setToolbarTitle(settingsActivity.getString(R.string.preferences_graphics))
+        // CodexAstraLocal: Resolve title precedence before enforcing the renderer's actual requirements.
+        val resolvedMode = TestingSettings.resolvedMode(settings)
+        val usesProfile = resolvedMode != UberharTestMode.CUSTOM
+        // CodexAstraLocal: An inherited mode cannot lock a title's backend choice. An
+        // explicitly chosen profile owns Vulkan; changing that mode releases this conflict.
+        val titleTestingPreset = settings.gameId?.let {
+            SettingsFile.readTestingFile().get("Testing.$it", "preset")?.toIntOrNull()
+        }
+        val profileOwnsBackend = usesProfile && (!settings.isPerGame ||
+            settings.isPerGameOverride(IntSetting.UBERHAR_TEST_MODE) ||
+            (TestingSettings.enabled && titleTestingPreset in 0..2))
         // CodexAstraUlt: Extend AstraEH's exclusive presets with the generic-fragment Combo
         // comparison. All choices share one persisted mode; custom settings remain untouched.
-        val mode = UberharTestMode.from(IntSetting.UBERHAR_TEST_MODE.int)
         sl.add(HeaderSetting(R.string.uberhar_test_modes))
         // CodexAstraLocal: Only supported Native/Combo modes remain selectable; IDs migrate.
         val modes = listOf(
@@ -1029,7 +1041,7 @@ class SettingsFragmentPresenter(private val fragmentView: SettingsFragmentView) 
             BooleanSetting.UBERHAR_CPU_VERTEX_ONLY.defaultValue
         ))
         // CodexAstraLocal: Keep independent controls immediately below CPU Vertices
-        // and outside the custom-settings lock so every relevant preset can compare.
+        // so every relevant preset can compare the same preferences.
         sl.add(SwitchSetting(
             BooleanSetting.UBERHAR_NATIVE_FULL_FRAGMENTS,
             R.string.uberhar_native_full_fragments,
@@ -1075,7 +1087,8 @@ class SettingsFragmentPresenter(private val fragmentView: SettingsFragmentView) 
             BooleanSetting.UBERHAR_CPU_EXECUTION_CENSUS.key,
             BooleanSetting.UBERHAR_CPU_EXECUTION_CENSUS.defaultValue
         ))
-        val customStart = sl.size
+        // CodexAstraLocal: Ordinary preferences stay editable in every profile; only genuine
+        // setting conflicts and renderer launch boundaries restrict their controls.
         sl.apply {
             add(HeaderSetting(R.string.renderer))
             add(
@@ -1089,7 +1102,19 @@ class SettingsFragmentPresenter(private val fragmentView: SettingsFragmentView) 
                     IntSetting.GRAPHICS_API.defaultValue,
                     isEnabled = !GraphicsUtil.isUsingAngleForOpenGL(),
                     disabledMessage = R.string.setting_disabled_description_angle
-                )
+                ).apply {
+                    if (profileOwnsBackend) {
+                        // CodexAstraLocal: Project only this actual mode conflict, never erase its saved value.
+                        val saved = setting as AbstractIntSetting
+                        setting = object : AbstractIntSetting by saved {
+                            override var int: Int
+                                get() = 2
+                                set(value) { saved.int = value }
+                        }
+                        isEnabled = false
+                        disabledMessage = R.string.uberhar_renderer_required
+                    }
+                }
             )
             add(
                 SwitchSetting(
@@ -1116,7 +1141,7 @@ class SettingsFragmentPresenter(private val fragmentView: SettingsFragmentView) 
                     R.string.async_shaders_description,
                     BooleanSetting.ASYNC_SHADERS.key,
                     BooleanSetting.ASYNC_SHADERS.defaultValue
-                )
+                ).apply { if (usesProfile) requireBooleanValue(this, false) }
             )
             // AstraEH: Renderer options are read at game startup; descriptions require a restart.
             add(
@@ -1126,7 +1151,7 @@ class SettingsFragmentPresenter(private val fragmentView: SettingsFragmentView) 
                     R.string.uberhar_hybrid_tev_description,
                     BooleanSetting.UBERHAR_HYBRID_TEV.key,
                     BooleanSetting.UBERHAR_HYBRID_TEV.defaultValue
-                )
+                ).apply { if (usesProfile) requireBooleanValue(this, true) }
             )
             // AstraEH: Isolate bridge performance without disabling the broader fragment fallback.
             add(
@@ -1136,7 +1161,7 @@ class SettingsFragmentPresenter(private val fragmentView: SettingsFragmentView) 
                     R.string.uberhar_cpu_vertex_bridge_description,
                     BooleanSetting.UBERHAR_CPU_VERTEX_BRIDGE.key,
                     BooleanSetting.UBERHAR_CPU_VERTEX_BRIDGE.defaultValue
-                )
+                ).apply { if (usesProfile) requireBooleanValue(this, false) }
             )
             // AstraEH: Force mode is a correctness diagnostic, not a performance preset.
             add(
@@ -1146,7 +1171,9 @@ class SettingsFragmentPresenter(private val fragmentView: SettingsFragmentView) 
                     R.string.uberhar_force_tev_description,
                     BooleanSetting.UBERHAR_FORCE_TEV.key,
                     BooleanSetting.UBERHAR_FORCE_TEV.defaultValue
-                )
+                ).apply {
+                    if (usesProfile) requireBooleanValue(this, resolvedMode == UberharTestMode.NATIVE)
+                }
             )
             add(
                 SingleChoiceSetting(
@@ -1156,11 +1183,9 @@ class SettingsFragmentPresenter(private val fragmentView: SettingsFragmentView) 
                     R.array.resolutionFactorNames,
                     R.array.resolutionFactorValues,
                     IntSetting.RESOLUTION_FACTOR.key,
-                    IntSetting.RESOLUTION_FACTOR.defaultValue,
-                    // CodexAstraLocal: Edit an active Testing resolution through its own
-                    // live controls, leaving the ordinary saved resolution unchanged.
-                    isEnabled = !(TestingSettings.enabled && EmulationActivity.isRunning()),
-                    disabledMessage = R.string.uberhar_testing_resolution_override
+                    // CodexAstraLocal: Ordinary title resolution remains editable under Testing;
+                    // an explicit title Testing resolution wins through normal precedence.
+                    IntSetting.RESOLUTION_FACTOR.defaultValue
                 )
             )
             add(
@@ -1268,15 +1293,7 @@ class SettingsFragmentPresenter(private val fragmentView: SettingsFragmentView) 
                     R.string.disable_right_eye_render_description,
                     BooleanSetting.DISABLE_RIGHT_EYE_RENDER.key,
                     BooleanSetting.DISABLE_RIGHT_EYE_RENDER.defaultValue
-                ).apply {
-                    // CodexAstraLocal: Testing can override a saved Custom profile too; show its
-                    // requested flag read-only here and edit only the separate Testing preference.
-                    if (TestingSettings.enabled) {
-                        UberharGraphicsProfile.applyTo(this, UberharTestMode.NATIVE)
-                        isEnabled = false
-                        disabledMessage = R.string.uberhar_testing_right_eye_override
-                    }
-                }
+                )
             )
 
             add(
@@ -1395,26 +1412,23 @@ class SettingsFragmentPresenter(private val fragmentView: SettingsFragmentView) 
             //     )
             // )
         }
-        // AstraEH: Keep both resolution controls editable; lock and display the effective
-        // values of the session profile without overwriting the user's custom settings.
-        // CodexAstraLocal: Testing also overrides a saved Custom mode; display its actual profile.
-        val effectiveMode = if (TestingSettings.enabled) {
-            if (TestingSettings.preset == 0) UberharTestMode.NATIVE else UberharTestMode.AUTOMATIC
-        } else mode
-        if (effectiveMode != UberharTestMode.CUSTOM) {
-            for (item in sl.subList(customStart, sl.size)) {
-                // CodexAstraLocal: Permit generator comparison without disabling the profile.
-                if (item.setting == IntSetting.RESOLUTION_FACTOR ||
-                    item.setting == BooleanSetting.SPIRV_SHADER_GEN ||
-                    item.setting == BooleanSetting.USE_INTEGER_SCALING ||
-                    item.type == SettingsItem.TYPE_HEADER
-                ) continue
-                // CodexAstraUlt: Display the effective fragment choice for this exact preset.
-                UberharGraphicsProfile.applyTo(item, effectiveMode)
-                item.isEnabled = false
-                item.disabledMessage = R.string.uberhar_test_locked
-            }
+    }
+
+    // CodexAstraLocal: Only backend conflicts project an enforced checkbox value; the saved
+    // preference remains intact, and all unconstrained rows retain their original setters.
+    private fun requireBooleanValue(
+        item: SwitchSetting,
+        required: Boolean,
+        reason: Int = R.string.uberhar_renderer_required
+    ) {
+        val saved = item.setting as AbstractBooleanSetting
+        item.setting = object : AbstractBooleanSetting by saved {
+            override var boolean: Boolean
+                get() = required
+                set(value) { saved.boolean = value }
         }
+        item.isEnabled = false
+        item.disabledMessage = reason
     }
 
     private fun addLayoutSettings(sl: ArrayList<SettingsItem>) {
@@ -2115,16 +2129,9 @@ class SettingsFragmentPresenter(private val fragmentView: SettingsFragmentView) 
                     BooleanSetting.HW_SHADER.key,
                     BooleanSetting.HW_SHADER.defaultValue
                 ).apply {
-                    // CodexAstraLocal: Debug must show the effective profile value, not a saved true
-                    // that the profile replaces; edit the separate alpha request in Testing.
-                    if (TestingSettings.enabled ||
-                        UberharTestMode.from(IntSetting.UBERHAR_TEST_MODE.int) != UberharTestMode.CUSTOM
-                    ) {
-                        UberharGraphicsProfile.applyTo(this, UberharTestMode.NATIVE)
-                        isEnabled = false
-                        disabledMessage = if (TestingSettings.enabled) {
-                            R.string.uberhar_testing_launch_override
-                        } else R.string.uberhar_test_locked
+                    // CodexAstraLocal: CPU-only Combo vetoes GPU vertex execution in either editor.
+                    if (TestingSettings.hardwareShadersConflictsWithCpuVertices(settings)) {
+                        requireBooleanValue(this, false, R.string.uberhar_testing_hardware_cpu_only)
                     }
                 }
             )
@@ -2135,16 +2142,7 @@ class SettingsFragmentPresenter(private val fragmentView: SettingsFragmentView) 
                     R.string.shader_jit_description,
                     BooleanSetting.SHADER_JIT.key,
                     BooleanSetting.SHADER_JIT.defaultValue
-                ).apply {
-                    // CodexAstraLocal: The same profile requires CPU shader JIT regardless of saved Custom state.
-                    if (TestingSettings.enabled ||
-                        UberharTestMode.from(IntSetting.UBERHAR_TEST_MODE.int) != UberharTestMode.CUSTOM
-                    ) {
-                        UberharGraphicsProfile.applyTo(this, UberharTestMode.NATIVE)
-                        isEnabled = false
-                        disabledMessage = R.string.uberhar_test_locked
-                    }
-                }
+                )
             )
             add(
                 SwitchSetting(

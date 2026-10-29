@@ -166,6 +166,7 @@ object R { object string {
     const val uberhar_testing_native = 4
     const val uberhar_testing_combo_cpu = 5
     const val uberhar_testing_combo_gpu = 6
+    const val uberhar_testing_custom = 7
 } }
 """,
     "SettingsUi.kt": """package org.citra.citra_emu.features.settings.ui
@@ -294,14 +295,19 @@ fun main(args: Array<String>) {
     }
     NativeLibrary.running = true
     NativeLibrary.titleId = 0x000400000F700100L
-    val (running, _) = open("graphics", "")
-    check(SettingsFragmentPresenter.lastBuiltScope == "000400000F700100")
-    TestingSettings.load("0004000000123400")
-    running.loadSettingsList()
-    check(SettingsFragmentPresenter.lastBuiltScope == "000400000F700100")
-    running.onDestroyView()
-    running.onDetach()
-    println("PASS: production fragment root/submenu and global/title creation, parent layout params, scrolling-header adapter composition, ordinary-row navigation, insets, recreation and resume/running-title scope")
+    // CodexAstraLocal: Active emulation cannot retarget global or another title's editor.
+    for (title in listOf("", "000400000F700100", "0004000000123400")) {
+        for (menu in listOf("config", "graphics")) {
+            val (running, _) = open(menu, title)
+            check(SettingsFragmentPresenter.lastBuiltScope == title)
+            TestingSettings.load("0004000000000001")
+            running.loadSettingsList()
+            check(SettingsFragmentPresenter.lastBuiltScope == title)
+            running.onDestroyView()
+            running.onDetach()
+        }
+    }
+    println("PASS: production fragment root/submenu and global/title creation, parent layout params, scrolling-header adapter composition, ordinary-row navigation, insets, recreation and explicit scope during resume/emulation")
 }
 """,
 }

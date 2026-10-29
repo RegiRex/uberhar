@@ -17,7 +17,6 @@ import androidx.fragment.app.Fragment
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.ConcatAdapter
 import androidx.recyclerview.widget.RecyclerView
-import org.citra.citra_emu.NativeLibrary
 import org.citra.citra_emu.R
 import org.citra.citra_emu.databinding.FragmentSettingsBinding
 import org.citra.citra_emu.databinding.ListItemSettingsTestingBinding
@@ -137,7 +136,10 @@ class SettingsFragment :
             else R.string.uberhar_global_settings_scope
         )
         header.settingsScope.text = if (TestingSettings.enabled) {
-            val presetName = getString(TESTING_PRESETS.first { it.first == TestingSettings.preset }.second)
+            // CodexAstraLocal: Sparse Testing may keep the ordinary Custom renderer unchanged.
+            val presetName = getString(TESTING_PRESETS.firstOrNull {
+                it.first == TestingSettings.preset
+            }?.second ?: R.string.uberhar_testing_custom)
             scope + "\n" + getString(R.string.uberhar_testing_active_summary, presetName, TestingSettings.resolution)
         } else scope
         header.settingsScope.isVisible = true
@@ -145,18 +147,15 @@ class SettingsFragment :
 
     override fun loadSettingsList() {
         // CodexAstraLocal: Activity resume can follow another editor's scope change. Refresh
-        // Testing before building effective/locked rows, including submenus without a panel.
+        // Testing before building rows, including submenus without a panel.
         loadTestingScope()
         fragmentPresenter.loadSettingsList()
     }
 
-    // CodexAstraLocal: Match the panel's running-title precedence without reloading ordinary
-    // settings, so a restored editor keeps unsaved Custom values and current Testing scope.
+    // CodexAstraLocal: The explicit editor scope survives resume and active emulation;
+    // global Settings must never become a title editor implicitly.
     private fun loadTestingScope() {
-        val runningTitle = if (NativeLibrary.isRunning()) {
-            SettingsFile.normalizeGameId("%016X".format(NativeLibrary.getRunningTitleId()))
-        } else null
-        TestingSettings.load(runningTitle ?: requireArguments().getString(ARGUMENT_GAME_ID) ?: "")
+        TestingSettings.load(requireArguments().getString(ARGUMENT_GAME_ID) ?: "")
     }
 
     override fun loadSubMenu(menuKey: String) {

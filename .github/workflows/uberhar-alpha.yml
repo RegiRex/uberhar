@@ -482,11 +482,11 @@ jobs:
       # and earned beta releases according to the version classification below.
       - name: Publish GitHub release
         run: |
-          # CodexAstraLocal: Owner requested the Settings repair as another .56 APK.
+          # CodexAstraLocal: Owner requested corrected settings precedence as another .56 APK.
           # Preserve the original published .56 assets/source; retire this one-off at the next alpha.
           release_tag="$UBERHAR_VERSION"
           if [ "$UBERHAR_VERSION" = '0.1.56' ]; then
-            release_tag='0.1.56-r1'
+            release_tag='0.1.56-r2'
           fi
           if gh release view "$release_tag" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
             echo 'This release tag already exists; select a new version/revision before publishing again' >&2

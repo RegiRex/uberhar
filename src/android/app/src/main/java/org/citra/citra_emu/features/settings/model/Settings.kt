@@ -37,6 +37,16 @@ class Settings {
             (saved.key !in removedOverrides || saved.valueAsString != globalValues[saved.key])
     }
 
+    // CodexAstraLocal: Selecting the displayed value is still an explicit title choice;
+    // it must defeat a different global Testing value and survive a later global edit.
+    fun markPerGameSettingEdited(setting: AbstractSetting): Boolean {
+        val saved = canonical(setting) ?: return false
+        if (!isPerGame || !isPerGameSetting(saved)) return false
+        removedOverrides.remove(saved.key)
+        titleOverrides.add(saved.key!!)
+        return true
+    }
+
     fun resetPerGameSetting(setting: AbstractSetting) {
         val saved = canonical(setting) ?: return
         if (!isPerGame || !isPerGameSetting(saved)) return

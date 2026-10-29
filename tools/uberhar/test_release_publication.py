@@ -96,7 +96,7 @@ def run_case(script: str, binary: Path, version: str, prerelease: bool,
         assert (result.returncode == 0) == expected_success, (version, scenario, result.stderr)
         calls = [json.loads(line) for line in calls_path.read_text().splitlines()]
         # CodexAstraLocal: The owner's .56 repair keeps APK version/asset names, preserving the old tag.
-        release_tag = '0.1.56-r1' if version == '0.1.56' else version
+        release_tag = '0.1.56-r2' if version == '0.1.56' else version
         assert calls[0] == ["release", "view", release_tag, "--repo", "RegiRex/uberhar"], calls
         if scenario.get("existing"):
             assert len(calls) == 1, calls

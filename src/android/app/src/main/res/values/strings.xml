@@ -1,17 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- CodexAstraLocal: Testing is a temporary global overlay; saved title settings remain distinct. -->
+    <!-- CodexAstraLocal: Each scope owns its sparse Testing choices; title settings outrank globals. -->
     <string name="uberhar_testing">Testing</string>
     <!-- CodexAstraLocal: Alpha experiments keep normal saved choices separate and require a launch. -->
     <!-- CodexAstraLocal: Options edits working global defaults, with optional per-game Testing overrides. -->
-    <string name="uberhar_testing_description">Temporary rendering choices. Edit defaults for all games or select a game for its own choices. Turn off to restore saved global and per-game settings.</string>
+    <string name="uberhar_testing_description">Testing choices for this settings scope. Options edits global defaults; Game Settings edits one game. Explicit game settings take precedence over globals. Turn Testing off to use normal saved settings.</string>
     <string name="uberhar_testing_restart_required">Close the game before changing Testing or its launch controls. Resolution can change during play.</string>
     <string name="uberhar_testing_native">Native</string>
     <string name="uberhar_testing_combo_cpu">Combo · CPU Vertices ON</string>
     <string name="uberhar_testing_combo_gpu">Combo · CPU Vertices OFF</string>
+    <!-- CodexAstraLocal: Sparse Testing can retain Custom mode or values outside the quick buttons. -->
+    <string name="uberhar_testing_custom">Custom</string>
+    <string name="uberhar_testing_other_values">Current resolution: %1$d×; guest 3D slider: %2$d%%. Quick buttons change only the selected value.</string>
+    <string name="uberhar_renderer_required">Required by the selected Native/Combo rendering mode. Choose a compatible mode to change this setting.</string>
     <string name="uberhar_testing_resolution_2x">2×</string>
     <string name="uberhar_testing_resolution_4x">4×</string>
-    <string name="uberhar_testing_active_summary">Testing active: %1$s · %2$d×. Temporary rendering and title controls override saved settings.</string>
+    <string name="uberhar_testing_active_summary">Testing active: %1$s · %2$d×. Game settings take precedence over global defaults.</string>
     <string name="uberhar_testing_save_failed">Could not save Testing settings. Recheck the displayed selection before launching a game.</string>
     <string name="uberhar_game_settings">Game Settings</string>
     <string name="uberhar_game_settings_title">%1$s · %2$s</string>
@@ -1217,7 +1221,7 @@
     <!-- CodexAstraLocal: Reset clears the title experiment; live wording distinguishes its restart boundary. -->
     <!-- CodexAstraLocal: Reset restores the title experiment baselines without inheriting global opt-ins. -->
     <!-- CodexAstraLocal: Reset now resumes current global values for every Testing control. -->
-    <string name="uberhar_testing_reset_confirmation">Remove this game’s Testing choices? All Testing controls will inherit the current defaults for all games. Normal saved settings are unchanged.</string>
+    <string name="uberhar_testing_reset_confirmation">Remove this game’s Testing choices, including its Testing switch? Its normal saved settings will still take precedence over global defaults.</string>
     <string name="uberhar_testing_live_description">Resolution changes apply now. Other controls show this launch’s values; exit the game to change them or the Testing switch.</string>
     <string name="uberhar_testing_resolution_override">Change the active resolution using the Testing controls on the main Settings page.</string>
     <!-- CodexAstraLocal: Explain the heuristic in either global or title scope without a speed claim. -->

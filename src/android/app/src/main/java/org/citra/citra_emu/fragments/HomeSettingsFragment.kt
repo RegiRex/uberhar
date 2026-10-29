@@ -44,7 +44,6 @@ import org.citra.citra_emu.ui.main.MainActivity
 import org.citra.citra_emu.utils.GameHelper
 import org.citra.citra_emu.utils.GpuDriverHelper
 import org.citra.citra_emu.utils.PermissionsHandler
-import org.citra.citra_emu.viewmodel.GamesViewModel
 import org.citra.citra_emu.viewmodel.DriverViewModel
 import org.citra.citra_emu.viewmodel.HomeViewModel
 
@@ -56,8 +55,6 @@ class HomeSettingsFragment : Fragment() {
 
     private val homeViewModel: HomeViewModel by activityViewModels()
     private val driverViewModel: DriverViewModel by activityViewModels()
-    // CodexAstraLocal: Reuse library titles; the selected editor scope does not alter ordinary game preferences.
-    private val gamesViewModel: GamesViewModel by activityViewModels()
     private var testingController: TestingPanelController? = null
 
     private val preferences
@@ -227,28 +224,8 @@ class HomeSettingsFragment : Fragment() {
         // CodexAstraLocal: Release.beta.alpha availability comes from native version metadata, not flavor.
         binding.testingPanel.root.isVisible = TestingSettings.available
         if (!TestingSettings.available) return
-        var target = preferences.getString("uberhar_testing_title", "") ?: ""
-        testingController = TestingPanelController(binding.testingPanel, viewLifecycleOwner, target)
-        fun renderTarget() {
-            val game = gamesViewModel.games.value.firstOrNull { "%016X".format(it.titleId) == target }
-            binding.testingPanel.testingTarget.text = if (target.isEmpty()) {
-                getString(R.string.uberhar_testing_global_choices)
-            } else getString(R.string.uberhar_testing_target, game?.title ?: target)
-        }
-        binding.testingPanel.testingTarget.isVisible = true
-        binding.testingPanel.testingTarget.setOnClickListener {
-            val games = gamesViewModel.games.value.filter { it.titleId != 0L }.distinctBy { it.titleId }
-            val labels = listOf(getString(R.string.uberhar_testing_global_choices)) + games.map { it.title }
-            MaterialAlertDialogBuilder(requireContext())
-                .setTitle(R.string.uberhar_testing_select_game)
-                .setItems(labels.toTypedArray()) { _, position ->
-                    target = if (position == 0) "" else "%016X".format(games[position - 1].titleId)
-                    preferences.edit().putString("uberhar_testing_title", target).apply()
-                    testingController?.setGame(target)
-                    renderTarget()
-                }.show()
-        }
-        renderTarget()
+        // CodexAstraLocal: Options owns global defaults; title choices belong to Game Settings.
+        testingController = TestingPanelController(binding.testingPanel, viewLifecycleOwner, "")
     }
 
     override fun onStart() {

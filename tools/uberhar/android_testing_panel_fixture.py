@@ -42,7 +42,7 @@ open class PanelWidget(context: Context = Context()) : View(context) {
             if (field != value) { field = value; checked?.invoke(this, value) }
         }
     val children = mutableListOf<View>()
-    var checkedId = 0
+    var checkedId = -1
     private var checked: ((PanelWidget, Boolean) -> Unit)? = null
     private var selected: ((PanelWidget, Int, Boolean) -> Unit)? = null
     fun setText(value: Int) { text = context.getString(value) }
@@ -54,9 +54,10 @@ open class PanelWidget(context: Context = Context()) : View(context) {
         if (checkedId == id) return
         val previous = checkedId
         checkedId = id
-        if (previous != 0) selected?.invoke(this, previous, false)
+        if (previous != -1) selected?.invoke(this, previous, false)
         selected?.invoke(this, id, true)
     }
+    fun clearChecked() { check(-1) }
     fun userCheck(value: Boolean) { if (isEnabled && visible) isChecked = value }
 }
 class EditText(context: Context) : PanelWidget(context) {
@@ -181,17 +182,24 @@ fun checkTestingPanel(folder: File) {
     val directory = File(folder, "panel-controls").apply { mkdirs() }
     DirectoryInitialization.userDirectory = directory.path
     val normal = File(directory, "config/config.ini").apply {
-        parentFile.mkdirs(); writeText("[Renderer]\nuse_hw_shader=true\nfilter_mode=false\n")
+        parentFile.mkdirs(); writeText("[Renderer]\nuse_hw_shader=false\nfilter_mode=true\n")
     }
     val savedNormal = normal.readBytes()
     val testing = File(directory, "config/testing.ini")
     fun readTesting() = testing.inputStream().use(::Wini)
     val owner = object : androidx.lifecycle.LifecycleOwner {}
-    val binding = PanelTestingBinding()
-    val panel = TestingPanelController(binding, owner, "")
-    val launchControls = listOf(binding.testingDisableRightEyeRender, binding.testingHardwareShaders,
-        binding.testingRenderThreadDelay, binding.testingLinearFiltering,
+    fun launchWidgets(binding: PanelTestingBinding) = listOf(binding.testingDisableRightEyeRender,
+        binding.testingHardwareShaders, binding.testingRenderThreadDelay, binding.testingLinearFiltering,
         binding.testingStereoDepth0, binding.testingStereoDepth1)
+    var binding = PanelTestingBinding()
+    var panel = TestingPanelController(binding, owner, "")
+    var launchControls = launchWidgets(binding)
+    // CodexAstraLocal: Each screen owns an immutable scope and fresh widgets, as in production.
+    fun openPanel(titleId: String) {
+        binding = PanelTestingBinding()
+        panel = TestingPanelController(binding, owner, titleId)
+        launchControls = launchWidgets(binding)
+    }
     check(!binding.testingControls.visible && launchControls.none { it.isEnabled })
     binding.testingEnabled.userCheck(true)
     check(binding.testingControls.visible && launchControls.all { it.isEnabled }) {
@@ -207,7 +215,7 @@ fun checkTestingPanel(folder: File) {
     checkNotNull(delay.input).setText("16001")
     delay.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
     check(delay.input.error != null && !delay.dismissed)
-    check(readTesting().get("Testing", "delay_game_render_thread_us") == "0")
+    check(readTesting().get("Testing", "delay_game_render_thread_us") == null)
     delay.input.setText("100")
     delay.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
     check(delay.dismissed)
@@ -228,7 +236,7 @@ fun checkTestingPanel(folder: File) {
     binding.testingPresets.children[2].performClick()
     check(binding.testingHardwareShaders.isEnabled && binding.testingHardwareShaders.isChecked)
 
-    panel.setGame("000400000F700100")
+    openPanel("000400000F700100")
     check(launchControls.all { it.isEnabled } && binding.testingUseGlobal.visible)
     check(binding.testingDisableRightEyeRender.isChecked && binding.testingHardwareShaders.isChecked)
     val globalBefore = checkNotNull(readTesting()["Testing"]).toMap()
@@ -242,9 +250,9 @@ fun checkTestingPanel(folder: File) {
     }
     check(readTesting().get("Testing.000400000F700100", "disable_right_eye_render") == "false")
     check(checkNotNull(readTesting()["Testing"]).toMap() == globalBefore) { "Title edits changed global defaults" }
-    panel.setGame("0004000000123400")
+    openPanel("0004000000123400")
     check(binding.testingDisableRightEyeRender.isChecked && binding.testingHardwareShaders.isChecked)
-    panel.setGame("000400000F700100")
+    openPanel("000400000F700100")
     check(!binding.testingDisableRightEyeRender.isChecked && !binding.testingHardwareShaders.isChecked)
     binding.testingUseGlobal.performClick()
     checkNotNull(AlertDialog.lastShown).getButton(AlertDialog.BUTTON_NEGATIVE).performClick()
@@ -254,8 +262,20 @@ fun checkTestingPanel(folder: File) {
     check(binding.testingDisableRightEyeRender.isChecked && binding.testingHardwareShaders.isChecked)
     check(readTesting().get("Testing.000400000F700100", "disable_right_eye_render") == null)
 
-    // CodexAstraLocal: Running title owns edits even if Options was previously showing globals.
-    panel.setGame("")
+    // CodexAstraLocal: The title switch is sparse and cannot change the global master.
+    val globalBeforeSwitch = checkNotNull(readTesting()["Testing"]).toMap()
+    binding.testingEnabled.userCheck(false)
+    check(!binding.testingControls.visible)
+    check(readTesting().get("Testing.000400000F700100", "enabled") == "false")
+    check(checkNotNull(readTesting()["Testing"]).toMap() == globalBeforeSwitch)
+    openPanel("0004000000123400")
+    check(binding.testingEnabled.isChecked)
+    openPanel("000400000F700100")
+    check(!binding.testingEnabled.isChecked)
+    binding.testingEnabled.userCheck(true)
+
+    // CodexAstraLocal: Options keeps global scope while a title is running, including live controls.
+    openPanel("")
     NativeLibrary.running = true
     EmulationActivity.running = true
     NativeLibrary.requestedRightEye = false
@@ -266,28 +286,70 @@ fun checkTestingPanel(folder: File) {
     panel.render()
     check(launchControls.none { it.isEnabled } && !binding.testingEnabled.isEnabled)
     check(binding.testingPresets.children.none { it.isEnabled })
-    check(!binding.testingDisableRightEyeRender.isChecked && !binding.testingHardwareShaders.isChecked)
-    check(binding.testingLinearFiltering.isChecked)
-    check(binding.testingStereoDepth.checkedId == R.id.testing_stereo_depth_0)
-    check(binding.testingRenderThreadDelay.text.toString().endsWith("17"))
+    check(binding.testingDisableRightEyeRender.isChecked && binding.testingHardwareShaders.isChecked)
+    check(!binding.testingLinearFiltering.isChecked)
+    check(binding.testingStereoDepth.checkedId == R.id.testing_stereo_depth_1)
+    check(binding.testingRenderThreadDelay.text.toString().endsWith("100"))
     val runningBytes = testing.readBytes()
-    binding.testingHardwareShaders.userCheck(true)
-    binding.testingDisableRightEyeRender.userCheck(true)
+    binding.testingHardwareShaders.userCheck(false)
+    binding.testingDisableRightEyeRender.userCheck(false)
     binding.testingRenderThreadDelay.performClick()
-    binding.testingLinearFiltering.userCheck(false)
-    binding.testingStereoDepth1.performClick()
+    binding.testingLinearFiltering.userCheck(true)
+    binding.testingStereoDepth0.performClick()
     binding.testingPresets.children[0].performClick()
     binding.testingEnabled.userCheck(false)
     check(testing.readBytes().contentEquals(runningBytes)) { "Launch controls edited while running" }
     check(binding.testingResolution4x.isEnabled)
     binding.testingResolution4x.performClick()
-    check(readTesting().get("Testing.000400000F700100", "resolution") == "4")
-    check(readTesting().get("Testing", "resolution") == "2")
-    check(NativeLibrary.reloadCount == 1 && NativeLibrary.framebufferCount == 1)
-    check(!binding.testingHardwareShaders.isChecked && binding.testingLinearFiltering.isChecked)
+    check(readTesting().get("Testing", "resolution") == "4")
+    check(readTesting().get("Testing.000400000F700100", "resolution") == null)
+    check(NativeLibrary.reloadCount == 0 && NativeLibrary.framebufferCount == 0) {
+        "Global Options retargeted or reloaded the running title"
+    }
+    openPanel("000400000F700100")
+    check(!binding.testingDisableRightEyeRender.isChecked && !binding.testingHardwareShaders.isChecked)
+    check(binding.testingLinearFiltering.isChecked)
     check(binding.testingStereoDepth.checkedId == R.id.testing_stereo_depth_0)
+    check(binding.testingRenderThreadDelay.text.toString().endsWith("17"))
+    binding.testingResolution2x.performClick()
+    check(readTesting().get("Testing.000400000F700100", "resolution") == "2")
+    check(readTesting().get("Testing", "resolution") == "4")
+    check(NativeLibrary.reloadCount == 1 && NativeLibrary.framebufferCount == 1)
+    openPanel("0004000000123400")
+    binding.testingResolution2x.performClick()
+    check(readTesting().get("Testing.0004000000123400", "resolution") == "2")
+    check(NativeLibrary.reloadCount == 1 && NativeLibrary.framebufferCount == 1)
+    check(binding.testingHardwareShaders.isChecked && !binding.testingLinearFiltering.isChecked)
+    openPanel("")
+    check(binding.testingResolution.checkedId == R.id.testing_resolution_4x)
+    check(TestingSettings.gameId == null)
     NativeLibrary.running = false
     EmulationActivity.running = false
+
+    // CodexAstraLocal: Normal title values outside Testing quick choices survive display and edits.
+    val ordinaryTitle = File(directory, "GameSettings/0004000000555500.ini").apply {
+        parentFile.mkdirs()
+        writeText("[Renderer]\nuberhar_test_mode=0\nresolution_factor=3\nfactor_3d=2\n")
+    }
+    val ordinaryTitleBytes = ordinaryTitle.readBytes()
+    val globalBeforeOtherValues = checkNotNull(readTesting()["Testing"]).toMap()
+    openPanel("0004000000555500")
+    check(TestingSettings.resolution == 3 && TestingSettings.effectiveStereoDepth() == 2)
+    check(binding.testingResolution.checkedId == -1 && binding.testingStereoDepth.checkedId == -1) {
+        "An inherited ordinary value was misrepresented by a Testing quick-choice button"
+    }
+    check(binding.testingPresets.children.none { (it as android.widget.PanelWidget).isChecked })
+    check(binding.testingDescription.text.toString().endsWith("3, 2"))
+    binding.testingDisableRightEyeRender.userCheck(false)
+    check(TestingSettings.resolution == 3 && TestingSettings.effectiveStereoDepth() == 2)
+    check(readTesting().get("Testing.0004000000555500", "resolution") == null)
+    check(readTesting().get("Testing.0004000000555500", "factor_3d") == null)
+    binding.testingResolution2x.performClick()
+    binding.testingStereoDepth1.performClick()
+    check(TestingSettings.resolution == 2 && TestingSettings.effectiveStereoDepth() == 1)
+    check(ordinaryTitle.readBytes().contentEquals(ordinaryTitleBytes))
+    check(checkNotNull(readTesting()["Testing"]).toMap() == globalBeforeOtherValues)
+    openPanel("")
 
     // CodexAstraLocal: Alpha gating and Testing OFF hide/disable experiments, preserving all files.
     val alphaBytes = testing.readBytes()

@@ -141,6 +141,18 @@ object SettingsFile {
         }
     }
 
+    // CodexAstraLocal: Resolve Testing against saved ordinary choices without changing enum-backed
+    // editor values. A missing title/config is an empty layer, never a write or model reset.
+    fun readRawSettingsFile(gameId: String? = null): Wini = try {
+        val ini = if (gameId == null) getOptionalConfigFile(FILE_NAME_CONFIG, false)
+            else getCustomGameSettingsFile(gameId, false)
+        if (ini == null) Wini() else
+            CitraApplication.appContext.contentResolver.openInputStream(ini.uri)!!.use { Wini(it) }
+    } catch (e: Exception) {
+        Log.error("[SettingsFile] Error reading ordinary settings: ${e.message}")
+        Wini()
+    }
+
     // CodexAstraLocal: Independent overlay/driver stores preserve ordinary config and title inheritance.
     fun readTestingFile(): Wini = readAuxiliaryFile("testing")
     fun saveTestingFile(writer: Wini): Boolean = saveAuxiliaryFile("testing", writer)

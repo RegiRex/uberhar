@@ -10,15 +10,6 @@
         android:paddingHorizontal="16dp"
         android:visibility="visible">
 
-        <!-- CodexAstraLocal: Home selects the title whose separate Testing choices are edited. -->
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/testing_target"
-            style="?attr/materialButtonOutlinedStyle"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="@string/uberhar_testing_global_choices"
-            android:visibility="gone" />
-
         <com.google.android.material.materialswitch.MaterialSwitch
             android:id="@+id/testing_enabled"
             android:layout_width="match_parent"
