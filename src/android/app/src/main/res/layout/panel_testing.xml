@@ -83,7 +83,7 @@
                         android:text="@string/uberhar_testing_resolution_4x" />
                 </com.google.android.material.button.MaterialButtonToggleGroup>
             </LinearLayout>
-            <!-- CodexAstraLocal: Keep the explicit per-title experiment beside preset/resolution. -->
+            <!-- CodexAstraLocal: Global defaults and title overrides share the same launch controls. -->
             <com.google.android.material.materialswitch.MaterialSwitch
                 android:id="@+id/testing_disable_right_eye_render"
                 android:layout_width="match_parent"
@@ -98,7 +98,7 @@
                 android:text="@string/uberhar_testing_right_eye_description"
                 android:textAppearance="?attr/textAppearanceBodySmall" />
 
-            <!-- CodexAstraLocal: Separate title controls preserve the preset baseline until selected. -->
+            <!-- CodexAstraLocal: Testing controls preserve the preset baseline until explicitly selected. -->
             <com.google.android.material.materialswitch.MaterialSwitch
                 android:id="@+id/testing_hardware_shaders"
                 android:layout_width="match_parent"

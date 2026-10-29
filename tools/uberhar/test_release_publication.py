@@ -95,17 +95,19 @@ def run_case(script: str, binary: Path, version: str, prerelease: bool,
         )
         assert (result.returncode == 0) == expected_success, (version, scenario, result.stderr)
         calls = [json.loads(line) for line in calls_path.read_text().splitlines()]
-        assert calls[0] == ["release", "view", version, "--repo", "RegiRex/uberhar"], calls
+        # CodexAstraLocal: The owner's .56 repair keeps APK version/asset names, preserving the old tag.
+        release_tag = '0.1.56-r1' if version == '0.1.56' else version
+        assert calls[0] == ["release", "view", release_tag, "--repo", "RegiRex/uberhar"], calls
         if scenario.get("existing"):
             assert len(calls) == 1, calls
             return
-        assert calls[1] == ["api", f"repos/RegiRex/uberhar/git/ref/tags/{version}"], calls
+        assert calls[1] == ["api", f"repos/RegiRex/uberhar/git/ref/tags/{release_tag}"], calls
         if scenario.get("tag_sha") not in (None, expected_sha):
             assert len(calls) == 2, calls
             return
         assert len(calls) == (3 if scenario.get("create_fails") else 4), calls
         create = calls[2]
-        assert create[:3] == ["release", "create", version], create
+        assert create[:3] == ["release", "create", release_tag], create
         assert flag(create, "--draft") is True, create
         assert create[create.index("--target") + 1] == expected_sha, create
         assert create[create.index("--notes-file") + 1] == "artifacts/release-notes.md", create
@@ -121,7 +123,7 @@ def run_case(script: str, binary: Path, version: str, prerelease: bool,
             assert flag(operation, "--prerelease", False) is prerelease, (version, operation)
             assert flag(operation, "--latest") is False, operation
         if not scenario.get("create_fails"):
-            assert calls[3][:3] == ["release", "edit", version], calls
+            assert calls[3][:3] == ["release", "edit", release_tag], calls
             assert flag(calls[3], "--draft") is False, calls[3]
 
 
@@ -139,7 +141,7 @@ def main() -> None:
         executable.write_text(FAKE_GH)
         executable.chmod(0o700)
         cases = 0
-        for version, prerelease in (("0.1.24", True), ("0.2.0", False)):
+        for version, prerelease in (("0.1.24", True), ("0.1.56", True), ("0.2.0", False)):
             for scenario, success in (
                 ({}, True), ({"tag_sha": "a" * 40}, True),
                 ({"existing": True}, False), ({"tag_sha": "b" * 40}, False),

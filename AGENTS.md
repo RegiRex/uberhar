@@ -1,4 +1,22 @@
-# CURRENT — 0.1.56 Android header repair; stop after resubmission
+# CURRENT — 0.1.56 Settings repair; stop after rebuilt prerelease submission
+
+<!-- CodexAstraLocal: October 28 owner reported inaccessible Testing experiments/Settings crashes and explicitly authorized rebuilding .56. -->
+Repair RecyclerView initialization before Testing-header inflation and reload
+Testing scope before resumed Settings rows. Enable the five experiment controls
+as global Testing defaults on Options with matching Kotlin/native title fallback.
+Preserve normal Custom preferences, explicit title false/zero values, confirmed
+inheritance reset, launch locks, live resolution, alpha gate and CPU-only veto.
+Validate affected model/controller/lifecycle/native paths and actual Android
+Kotlin/resources; independent architect reviews. App version stays0.1.56. Publish
+as0.1.56-r1 through existing gates, retaining original0.1.56 artifacts/tag; remove
+this one-off publication revision mapping when advancing to the next alpha.
+Stop after submission/report; no hosted polling, automatic install/gameplay/sleep.
+Root alone may read Thor state/logs. Saved evidence/checkpoint:
+/home/regirex/uberhar-recovery/build056-settings-repair/RESUME.md
+
+---
+
+# HISTORICAL — 0.1.56 Android header repair; stop after resubmission
 
 <!-- CodexAstraLocal: October 28 owner requested repair after the actual hosted Android failure. -->
 Initial run40664385698 passed the shader gate but failed Android compilation:

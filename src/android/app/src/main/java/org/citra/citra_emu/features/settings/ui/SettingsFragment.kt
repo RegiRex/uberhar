@@ -17,8 +17,8 @@ import androidx.fragment.app.Fragment
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.ConcatAdapter
 import androidx.recyclerview.widget.RecyclerView
+import org.citra.citra_emu.NativeLibrary
 import org.citra.citra_emu.R
-import org.citra.citra_emu.activities.EmulationActivity
 import org.citra.citra_emu.databinding.FragmentSettingsBinding
 import org.citra.citra_emu.databinding.ListItemSettingsTestingBinding
 import org.citra.citra_emu.features.settings.model.AbstractSetting
@@ -65,12 +65,14 @@ class SettingsFragment :
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         settingsAdapter = SettingsAdapter(this, requireActivity())
+        // CodexAstraLocal: Parent-aware inflation asks RecyclerView for layout params even
+        // with attachToRoot=false, so install its manager before inflating the scrolling header.
+        binding.listSettings.layoutManager = LinearLayoutManager(activity)
         // CodexAstraLocal: A separate header adapter preserves each settings row's existing
         // bindingAdapterPosition, click/reset behavior and recycling without index offsets.
         testingHeader = ListItemSettingsTestingBinding.inflate(layoutInflater, binding.listSettings, false)
         binding.listSettings.apply {
             adapter = ConcatAdapter(TestingHeaderAdapter(testingHeader!!.root), settingsAdapter!!)
-            layoutManager = LinearLayoutManager(activity)
         }
         setupTestingPanel()
         fragmentPresenter.onViewCreated(settingsAdapter!!)
@@ -115,7 +117,7 @@ class SettingsFragment :
         val isRoot = requireArguments().getString(ARGUMENT_MENU_TAG) == SettingsFile.FILE_NAME_CONFIG
         val header = testingHeader ?: return
         header.testingPanel.root.isVisible = isRoot
-        TestingSettings.load(requireArguments().getString(ARGUMENT_GAME_ID) ?: "")
+        loadTestingScope()
         if (!isRoot) return
         testingPanelController = TestingPanelController(
             header.testingPanel, viewLifecycleOwner,
@@ -142,7 +144,19 @@ class SettingsFragment :
     }
 
     override fun loadSettingsList() {
+        // CodexAstraLocal: Activity resume can follow another editor's scope change. Refresh
+        // Testing before building effective/locked rows, including submenus without a panel.
+        loadTestingScope()
         fragmentPresenter.loadSettingsList()
+    }
+
+    // CodexAstraLocal: Match the panel's running-title precedence without reloading ordinary
+    // settings, so a restored editor keeps unsaved Custom values and current Testing scope.
+    private fun loadTestingScope() {
+        val runningTitle = if (NativeLibrary.isRunning()) {
+            SettingsFile.normalizeGameId("%016X".format(NativeLibrary.getRunningTitleId()))
+        } else null
+        TestingSettings.load(runningTitle ?: requireArguments().getString(ARGUMENT_GAME_ID) ?: "")
     }
 
     override fun loadSubMenu(menuKey: String) {

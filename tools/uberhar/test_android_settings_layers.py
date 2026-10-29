@@ -7,10 +7,12 @@ import tempfile
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--inih-root', type=Path, default=Path('externals/inih/inih'))
+# CodexAstraLocal: Compare a retained pre-repair source without changing the working tree.
+parser.add_argument('--source', type=Path)
 args = parser.parse_args()
 root = Path(__file__).resolve().parents[2]
 inih = args.inih_root.resolve()
-source = (root / 'src/android/app/src/main/jni/config.cpp').read_text()
+source = (args.source or root / 'src/android/app/src/main/jni/config.cpp').read_text()
 start = source.index('// CodexAstraLocal: Typed overlay parsing')
 end = source.index('void Config::ReadValues()', start)
 # CodexAstraLocal: Exercise the real post-load order, including profile enforcement of the opt-in.
@@ -109,7 +111,7 @@ int main() {
     cfg.ApplyTestingOverlay();
     assert(v.resolution_factor.GetValue() == 4 && testing_overlay_active);
     assert(v.uberhar_test_mode.GetValue() == Settings::UberharTestMode::Native);
-    // CodexAstraLocal: Native and both Combo presets accept only an enabled explicit title opt-in.
+    // CodexAstraLocal: Explicit true/false title choices override the global Testing defaults.
     for (int preset = 0; preset <= 2; ++preset) {
         for (bool requested : {false, true}) {
             FileUtil::test_file = "[Testing]\nenabled=true\ndisable_right_eye_render=true\npreset=" +
@@ -136,17 +138,19 @@ int main() {
         assert(v.disable_right_eye_render.GetValue());
     }
     cfg.runtime_reload = false;
-    for (const auto& title_choice : {"", "[Testing.000400000F700100]\ndisable_right_eye_render=broken\n"}) {
-        FileUtil::test_file = std::string("[Testing]\nenabled=true\ndisable_right_eye_render=true\n") + title_choice;
-        ApplyEffective(cfg);
-        assert(!v.disable_right_eye_render.GetValue());
-    }
-    // CodexAstraLocal: A different title and global-only context cannot inherit another title's opt-in.
+    // CodexAstraLocal: Missing title keys inherit global choices; malformed explicit keys use baseline.
+    FileUtil::test_file = "[Testing]\nenabled=true\ndisable_right_eye_render=true\n";
+    ApplyEffective(cfg);
+    assert(v.disable_right_eye_render.GetValue());
+    FileUtil::test_file += "[Testing.000400000F700100]\ndisable_right_eye_render=broken\n";
+    ApplyEffective(cfg);
+    assert(!v.disable_right_eye_render.GetValue());
+    // CodexAstraLocal: Another title inherits global choices, never the first title's override.
     FileUtil::test_file = "[Testing]\nenabled=true\ndisable_right_eye_render=true\n"
-                         "[Testing.000400000F700100]\ndisable_right_eye_render=true\n";
+                         "[Testing.000400000F700100]\ndisable_right_eye_render=false\n";
     Config other_title{0x400000123400};
     ApplyEffective(other_title);
-    assert(!v.disable_right_eye_render.GetValue());
+    assert(v.disable_right_eye_render.GetValue());
     Config global;
     ApplyEffective(global);
     assert(!testing_overlay_active && !testing_overlay_disable_right_eye_render);
@@ -177,14 +181,35 @@ int main() {
         assert(v.delay_game_render_thread_us.GetValue() == 100);
         assert(!v.filter_mode.GetValue() && v.factor_3d.GetValue() == 1);
     }
-    cfg.runtime_reload = false;
-    FileUtil::test_file = "[Testing]\nenabled=true\npreset=0\nuse_hw_shader=true\n"
-        "delay_game_render_thread_us=100\nfilter_mode=false\nfactor_3d=1\n";
-    ApplyEffective(cfg);
-    assert(!v.use_hw_shader.GetValue() && v.delay_game_render_thread_us.GetValue() == 0);
-    assert(v.filter_mode.GetValue() && v.factor_3d.GetValue() == 0);
+    // CodexAstraLocal: Home Options defaults reach actual native profile application for every preset.
+    for (int preset = 0; preset <= 2; ++preset) {
+        cfg.runtime_reload = false;
+        const auto defaults = std::string("[Testing]\nenabled=true\npreset=") +
+            std::to_string(preset) + "\nuse_hw_shader=true\ndisable_right_eye_render=true\n"
+            "delay_game_render_thread_us=100\nfilter_mode=false\nfactor_3d=1\n";
+        FileUtil::test_file = defaults;
+        ApplyEffective(cfg);
+        assert(v.disable_right_eye_render.GetValue());
+        assert(v.use_hw_shader.GetValue() == (preset != 1));
+        assert(v.delay_game_render_thread_us.GetValue() == 100);
+        assert(!v.filter_mode.GetValue() && v.factor_3d.GetValue() == 1);
+        FileUtil::test_file += "[Testing.000400000F700100]\nuse_hw_shader=false\n"
+            "disable_right_eye_render=false\ndelay_game_render_thread_us=0\n"
+            "filter_mode=true\nfactor_3d=0\n";
+        ApplyEffective(cfg);
+        assert(!v.disable_right_eye_render.GetValue() && !v.use_hw_shader.GetValue());
+        assert(v.delay_game_render_thread_us.GetValue() == 0);
+        assert(v.filter_mode.GetValue() && v.factor_3d.GetValue() == 0);
+        // CodexAstraLocal: Removing title choices restores inheritance without persisting normal settings.
+        FileUtil::test_file = defaults;
+        ApplyEffective(cfg);
+        assert(v.disable_right_eye_render.GetValue() && v.use_hw_shader.GetValue() == (preset != 1));
+        assert(v.delay_game_render_thread_us.GetValue() == 100);
+        assert(!v.filter_mode.GetValue() && v.factor_3d.GetValue() == 1);
+    }
     for (const auto* invalid_delay : {"-1", "16001", "broken", "100garbage", "1garbage", "0x10", "2147483648"}) {
-        FileUtil::test_file = std::string("[Testing]\nenabled=true\n[Testing.000400000F700100]\n") +
+        FileUtil::test_file = std::string("[Testing]\nenabled=true\ndelay_game_render_thread_us=100\n"
+            "factor_3d=1\nfilter_mode=false\n[Testing.000400000F700100]\n") +
             "delay_game_render_thread_us=" + invalid_delay + "\nfactor_3d=" + invalid_delay + "\nfilter_mode=broken\n";
         ApplyEffective(cfg);
         assert(v.delay_game_render_thread_us.GetValue() == 0 && v.factor_3d.GetValue() == 0);

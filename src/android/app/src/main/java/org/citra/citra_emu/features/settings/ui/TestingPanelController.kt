@@ -56,20 +56,20 @@ class TestingPanelController(
                 TestingSettings.resolution = if (checkedId == R.id.testing_resolution_4x) 4 else 2
             }
         }
-        // CodexAstraLocal: Explicit title-only opt-in shares the preset's restart boundary.
+        // CodexAstraLocal: Both global Options and title overrides share the preset's restart boundary.
         binding.testingDisableRightEyeRender.setOnCheckedChangeListener { _, checked ->
-            if (!rendering && gameId.isNotEmpty()) change {
+            if (!rendering) change {
                 TestingSettings.disableRightEyeRender = checked
             }
         }
-        // CodexAstraLocal: New controls are launch-only and preserve the separate title overlay.
+        // CodexAstraLocal: Hardware requests work in either scope while preserving CPU-only admission.
         binding.testingHardwareShaders.setOnCheckedChangeListener { _, checked ->
-            if (!rendering && gameId.isNotEmpty() && TestingSettings.preset != 1) change {
+            if (!rendering && TestingSettings.preset != 1) change {
                 TestingSettings.hardwareShaders = checked
             }
         }
         binding.testingRenderThreadDelay.setOnClickListener {
-            if (TestingSettings.available && !EmulationActivity.isRunning() && gameId.isNotEmpty()) {
+            if (TestingSettings.available && TestingSettings.enabled && !EmulationActivity.isRunning()) {
                 val input = EditText(context).apply {
                     inputType = InputType.TYPE_CLASS_NUMBER
                     setText(TestingSettings.renderThreadDelayUs.toString())
@@ -98,12 +98,12 @@ class TestingPanelController(
         }
         // CodexAstraLocal: Presentation filtering and guest slider input are independent launch controls.
         binding.testingLinearFiltering.setOnCheckedChangeListener { _, checked ->
-            if (!rendering && gameId.isNotEmpty()) change {
+            if (!rendering) change {
                 TestingSettings.linearFiltering = checked
             }
         }
         binding.testingStereoDepth.addOnButtonCheckedListener { _, checkedId, checked ->
-            if (checked && !rendering && gameId.isNotEmpty()) change {
+            if (checked && !rendering) change {
                 TestingSettings.stereoDepth = if (checkedId == R.id.testing_stereo_depth_1) 1 else 0
             }
         }
@@ -171,35 +171,35 @@ class TestingPanelController(
         val running = EmulationActivity.isRunning()
         // CodexAstraLocal: Hide alpha controls, not the ordinary per-title driver selector.
         val available = TestingSettings.available
+        // CodexAstraLocal: Global Options is a working editor; only launch ownership and the
+        // CPU-only preset restrict active controls, independently of whether a title is selected.
+        val controlsEnabled = available && TestingSettings.enabled
+        val launchControlsEnabled = controlsEnabled && !running
         binding.testingEnabled.isVisible = available
         binding.testingDescription.isVisible = available
         binding.testingEnabled.isChecked = TestingSettings.enabled
-        binding.testingEnabled.isEnabled = !running
+        binding.testingEnabled.isEnabled = available && !running
         binding.testingControls.isVisible = available && TestingSettings.enabled
         binding.testingDescription.setText(
             if (running) R.string.uberhar_testing_live_description else R.string.uberhar_testing_description
         )
         chips.forEach { (preset, chip) ->
             chip.isChecked = TestingSettings.preset == preset
-            chip.isEnabled = !running
+            chip.isEnabled = launchControlsEnabled
         }
         binding.testingResolution.check(
             if (TestingSettings.resolution == 4) R.id.testing_resolution_4x else R.id.testing_resolution_2x
         )
-        binding.testingResolution2x.isEnabled = true
-        binding.testingResolution4x.isEnabled = true
-        // CodexAstraLocal: Global defaults cannot opt other games in; running state is native-latched.
+        binding.testingResolution2x.isEnabled = controlsEnabled
+        binding.testingResolution4x.isEnabled = controlsEnabled
+        // CodexAstraLocal: Global requests are editable before launch; running state stays native-latched.
         binding.testingDisableRightEyeRender.isChecked = TestingSettings.requestedRightEyeRenderDisabled()
-        binding.testingDisableRightEyeRender.isEnabled = gameId.isNotEmpty() && !running
-        binding.testingRightEyeDescription.setText(
-            if (gameId.isEmpty()) R.string.uberhar_testing_right_eye_select_game
-            else R.string.uberhar_testing_right_eye_description
-        )
+        binding.testingDisableRightEyeRender.isEnabled = launchControlsEnabled
+        binding.testingRightEyeDescription.setText(R.string.uberhar_testing_right_eye_description)
         binding.testingHardwareShaders.isChecked = TestingSettings.effectiveHardwareShaders()
-        binding.testingHardwareShaders.isEnabled = gameId.isNotEmpty() && !running && TestingSettings.preset != 1
+        binding.testingHardwareShaders.isEnabled = launchControlsEnabled && TestingSettings.preset != 1
         binding.testingHardwareDescription.setText(
             when {
-                gameId.isEmpty() -> R.string.uberhar_testing_select_game_controls
                 TestingSettings.preset == 1 -> R.string.uberhar_testing_hardware_cpu_only
                 else -> R.string.uberhar_testing_hardware_description
             }
@@ -207,16 +207,16 @@ class TestingPanelController(
         binding.testingRenderThreadDelay.text = context.getString(
             R.string.uberhar_testing_delay_value, TestingSettings.effectiveRenderThreadDelayUs()
         )
-        binding.testingRenderThreadDelay.isEnabled = gameId.isNotEmpty() && !running
+        binding.testingRenderThreadDelay.isEnabled = launchControlsEnabled
         // CodexAstraLocal: Resolution alone can change live; display the native launch values here.
         binding.testingLinearFiltering.isChecked = TestingSettings.effectiveLinearFiltering()
-        binding.testingLinearFiltering.isEnabled = gameId.isNotEmpty() && !running
+        binding.testingLinearFiltering.isEnabled = launchControlsEnabled
         binding.testingStereoDepth.check(
             if (TestingSettings.effectiveStereoDepth() == 1) R.id.testing_stereo_depth_1
             else R.id.testing_stereo_depth_0
         )
-        binding.testingStereoDepth0.isEnabled = gameId.isNotEmpty() && !running
-        binding.testingStereoDepth1.isEnabled = gameId.isNotEmpty() && !running
+        binding.testingStereoDepth0.isEnabled = launchControlsEnabled
+        binding.testingStereoDepth1.isEnabled = launchControlsEnabled
         binding.testingUseGlobal.isVisible = available && gameId.isNotEmpty()
         binding.testingUseGlobal.isEnabled = !running
         binding.gameDriver.isVisible = gameId.isNotEmpty()

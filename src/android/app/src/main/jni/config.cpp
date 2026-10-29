@@ -101,9 +101,9 @@ namespace {
 // CodexAstraLocal: Keep an active testing launch stable when an editor changes next-launch preferences.
 bool testing_overlay_active{};
 long testing_overlay_preset{};
-// CodexAstraLocal: Eye suppression is title-only and frozen with the launch preset.
+// CodexAstraLocal: Resolved title/global eye suppression is frozen with the launch preset.
 bool testing_overlay_disable_right_eye_render{};
-// CodexAstraLocal: Additional title-only requests are frozen for the same launch lifetime.
+// CodexAstraLocal: Additional resolved Testing requests are frozen for the same launch lifetime.
 bool testing_overlay_hardware_shaders{};
 u16 testing_overlay_render_thread_delay_us{};
 // CodexAstraLocal: Preserve baseline display filtering and guest slider until explicit opt-in.
@@ -246,15 +246,23 @@ void Config::ApplyTestingOverlay() {
     if (!runtime_reload) {
         testing_overlay_active = true;
         testing_overlay_preset = preset;
-        // CodexAstraLocal: Never inherit a global suppression flag; each title must explicitly opt in.
+        // CodexAstraLocal: The Options panel supplies Testing defaults; explicit title keys,
+        // including false/zero, override them. A malformed present key uses its safe baseline.
+        const std::string global_section{"Testing"};
+        const auto control_section = [&](const std::string& key) -> const std::string& {
+            return testing.HasValue(section, key) ? section : global_section;
+        };
         testing_overlay_disable_right_eye_render =
-            testing.GetBoolean(section, "disable_right_eye_render", false);
-        // CodexAstraLocal: Hardware and guest delay never inherit global experimental choices.
-        testing_overlay_hardware_shaders = testing.GetBoolean(section, "use_hw_shader", false);
-        const auto delay = ReadTestingDecimal(testing, section, "delay_game_render_thread_us");
+            testing.GetBoolean(control_section("disable_right_eye_render"),
+                               "disable_right_eye_render", false);
+        testing_overlay_hardware_shaders =
+            testing.GetBoolean(control_section("use_hw_shader"), "use_hw_shader", false);
+        const auto delay = ReadTestingDecimal(testing, control_section("delay_game_render_thread_us"),
+                                              "delay_game_render_thread_us");
         testing_overlay_render_thread_delay_us = delay >= 0 && delay <= 16000 ? delay : 0;
-        testing_overlay_linear_filtering = testing.GetBoolean(section, "filter_mode", true);
-        const auto depth = ReadTestingDecimal(testing, section, "factor_3d");
+        testing_overlay_linear_filtering =
+            testing.GetBoolean(control_section("filter_mode"), "filter_mode", true);
+        const auto depth = ReadTestingDecimal(testing, control_section("factor_3d"), "factor_3d");
         testing_overlay_stereo_depth = depth == 1 ? 1 : 0;
         Settings::values.uberhar_test_mode = preset == 0 ? Settings::UberharTestMode::Native :
                                                           Settings::UberharTestMode::Automatic;

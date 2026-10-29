@@ -14,12 +14,11 @@ object TestingSettings {
     var enabled = false
     var preset = 0
     var resolution = 2
-    // CodexAstraLocal: This experimental override never inherits global defaults.
+    // CodexAstraLocal: Options edits global Testing defaults; title overrides inherit until selected.
     var disableRightEyeRender = false
-    // CodexAstraLocal: Experiments are explicit per-title requests, never inherited globally.
     var hardwareShaders = false
     var renderThreadDelayUs = 0
-    // CodexAstraLocal: Match standard profile defaults until a title explicitly selects a comparison.
+    // CodexAstraLocal: Unselected experiments retain the standard profile defaults.
     var linearFiltering = true
     var stereoDepth = 0
     var gameId: String? = null
@@ -39,20 +38,18 @@ object TestingSettings {
         resolution = file.get(section, "resolution")?.toIntOrNull()?.takeIf {
             it == 2 || it == 4
         } ?: globalResolution
-        // CodexAstraLocal: Invalid/missing title choices fail OFF, matching native INI parsing.
-        disableRightEyeRender = gameId != null &&
-            file.get(section, "disable_right_eye_render")?.lowercase() in setOf("true", "yes", "on", "1")
-        hardwareShaders = gameId != null &&
-            file.get(section, "use_hw_shader")?.lowercase() in setOf("true", "yes", "on", "1")
-        renderThreadDelayUs = if (gameId != null) {
-            file.get(section, "delay_game_render_thread_us")?.toIntOrNull()?.takeIf { it in 0..16000 } ?: 0
-        } else 0
-        // CodexAstraLocal: Global or malformed experiment values cannot change another title's baseline.
-        linearFiltering = gameId == null ||
-            file.get(section, "filter_mode")?.lowercase() !in setOf("false", "no", "off", "0")
-        stereoDepth = if (gameId != null) {
-            file.get(section, "factor_3d")?.toIntOrNull()?.takeIf { it in 0..1 } ?: 0
-        } else 0
+        // CodexAstraLocal: Missing title keys inherit global experiments; malformed explicit values
+        // keep the documented baseline, matching native parsing without touching Custom settings.
+        fun experimentValue(key: String) = file.get(section, key) ?: file.get("Testing", key)
+        disableRightEyeRender =
+            experimentValue("disable_right_eye_render")?.lowercase() in setOf("true", "yes", "on", "1")
+        hardwareShaders =
+            experimentValue("use_hw_shader")?.lowercase() in setOf("true", "yes", "on", "1")
+        renderThreadDelayUs = experimentValue("delay_game_render_thread_us")?.toIntOrNull()
+            ?.takeIf { it in 0..16000 } ?: 0
+        linearFiltering =
+            experimentValue("filter_mode")?.lowercase() !in setOf("false", "no", "off", "0")
+        stereoDepth = experimentValue("factor_3d")?.toIntOrNull()?.takeIf { it in 0..1 } ?: 0
     }
 
     fun save(): Boolean {
@@ -62,14 +59,12 @@ object TestingSettings {
         file.put("Testing", "enabled", enabled)
         file.put(section, "preset", preset.coerceIn(0, 2))
         file.put(section, "resolution", if (resolution == 4) 4 else 2)
-        // CodexAstraLocal: Saving global Testing defaults must never enable this for every game.
-        if (gameId != null) {
-            file.put(section, "disable_right_eye_render", disableRightEyeRender)
-            file.put(section, "use_hw_shader", hardwareShaders)
-            file.put(section, "delay_game_render_thread_us", renderThreadDelayUs.coerceIn(0, 16000))
-            file.put(section, "filter_mode", linearFiltering)
-            file.put(section, "factor_3d", stereoDepth.takeIf { it in 0..1 } ?: 0)
-        }
+        // CodexAstraLocal: Global and title editors share the separate, temporary Testing store.
+        file.put(section, "disable_right_eye_render", disableRightEyeRender)
+        file.put(section, "use_hw_shader", hardwareShaders)
+        file.put(section, "delay_game_render_thread_us", renderThreadDelayUs.coerceIn(0, 16000))
+        file.put(section, "filter_mode", linearFiltering)
+        file.put(section, "factor_3d", stereoDepth.takeIf { it in 0..1 } ?: 0)
         return SettingsFile.saveTestingFile(file)
     }
 
@@ -78,26 +73,26 @@ object TestingSettings {
     fun requestedRightEyeRenderDisabled(): Boolean = if (NativeLibrary.isRunning()) {
         NativeLibrary.getRequestedRightEyeRenderDisabled()
     } else {
-        enabled && gameId != null && disableRightEyeRender
+        enabled && disableRightEyeRender
     }
 
     // CodexAstraLocal: CPU-only Combo vetoes GPU vertices; live resolution edits keep launch values.
     fun effectiveHardwareShaders(): Boolean = if (NativeLibrary.isRunning()) {
         NativeLibrary.getEffectiveHardwareShaders()
-    } else enabled && gameId != null && hardwareShaders && preset != 1
+    } else enabled && hardwareShaders && preset != 1
 
     fun effectiveRenderThreadDelayUs(): Int = if (NativeLibrary.isRunning()) {
         NativeLibrary.getEffectiveRenderThreadDelayUs()
-    } else if (enabled && gameId != null) renderThreadDelayUs else 0
+    } else if (enabled) renderThreadDelayUs else 0
 
     // CodexAstraLocal: Running displays use launch-latched native values, never pending disk edits.
     fun effectiveLinearFiltering(): Boolean = if (NativeLibrary.isRunning()) {
         NativeLibrary.getEffectiveLinearFiltering()
-    } else if (enabled && gameId != null) linearFiltering else true
+    } else if (enabled) linearFiltering else true
 
     fun effectiveStereoDepth(): Int = if (NativeLibrary.isRunning()) {
         NativeLibrary.getEffectiveStereoDepth()
-    } else if (enabled && gameId != null) stereoDepth else 0
+    } else if (enabled) stereoDepth else 0
 
     // CodexAstraLocal: Removing title keys resumes ongoing inheritance; no normal settings are touched.
     fun useGlobalChoices(): Boolean {
@@ -106,7 +101,7 @@ object TestingSettings {
         val file = SettingsFile.readTestingFile()
         file[section]?.remove("preset")
         file[section]?.remove("resolution")
-        // CodexAstraLocal: Reset each title-only experiment to its standard profile baseline.
+        // CodexAstraLocal: Clearing title experiments restores the current global Testing choices.
         file[section]?.remove("disable_right_eye_render")
         file[section]?.remove("use_hw_shader")
         file[section]?.remove("delay_game_render_thread_us")

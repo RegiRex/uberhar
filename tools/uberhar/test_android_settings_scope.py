@@ -12,6 +12,8 @@ from pathlib import Path
 import re
 import subprocess
 
+from android_testing_panel_fixture import panel_stubs
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -30,8 +32,11 @@ def main():
         "TestingSettings.kt", "DriverSettings.kt",
     )]
     files += [source / "features/settings/utils/SettingsFile.kt", source / "utils/BiMap.kt"]
+    # CodexAstraLocal: Execute the real panel handlers as well as persistence for both editor scopes.
+    files += [source / "features/settings/ui/TestingPanelController.kt"]
     combined = "\n".join(path.read_text() for path in files)
     resources = sorted(set(re.findall(r"R\.string\.(\w+)", combined)))
+    ids = sorted(set(re.findall(r"R\.id\.(\w+)", combined)))
     keys = sorted(set(re.findall(r"SettingKeys\.(\w+)\(\)", combined)))
     # CodexAstraLocal: Only platform/JNI boundaries are substituted; all value and INI logic is real.
     stubs = {
@@ -82,6 +87,9 @@ object NativeLibrary {
     var effectiveDelay = 0
     var effectiveFiltering = true
     var effectiveDepth = 0
+    var runningTitle = 0x000400000F700100L
+    var reloadCount = 0
+    var framebufferCount = 0
     fun isRunning() = running
     fun isAlphaTestingAvailable() = alphaTestingAvailable
     fun getRequestedRightEyeRenderDisabled() = requestedRightEye
@@ -89,9 +97,15 @@ object NativeLibrary {
     fun getEffectiveRenderThreadDelayUs() = effectiveDelay
     fun getEffectiveLinearFiltering() = effectiveFiltering
     fun getEffectiveStereoDepth() = effectiveDepth
+    fun getRunningTitleId() = runningTitle
+    fun reloadSettings() { reloadCount++ }
+    fun isPortraitMode() = false
+    fun updateFramebuffer(portrait: Boolean) { framebufferCount++ }
 }
 object R { object string {
-''' + "\n".join(f"const val {name} = {number}" for number, name in enumerate(resources, 1)) + "\n} }\n",
+''' + "\n".join(f"const val {name} = {number}" for number, name in enumerate(resources, 1)) +
+        "\n} object id {\n" +
+        "\n".join(f"const val {name} = {number}" for number, name in enumerate(ids, 1000)) + "\n} }\n",
         "SettingKeys.kt": '''package org.citra.citra_emu.features.settings
 object SettingKeys {
 ''' + "\n".join(f'fun {key}() = "{key}"' for key in keys) + "\n}\n",
@@ -192,7 +206,7 @@ fun main(args: Array<String>) {
     check(read(title).get("Layout", "layouts_to_cycle") == "1, 4")
     check(config.readBytes().contentEquals(originalGlobal))
 
-    // CodexAstraLocal: Exercise defaults and title-only experiments through real INI round trips.
+    // CodexAstraLocal: Exercise global defaults and inherited/title experiments with real INI round trips.
     val beforeTesting = title.readBytes()
     val testingFile = File(folder, "config/testing.ini")
     val experimentKeys = listOf("disable_right_eye_render", "use_hw_shader",
@@ -208,23 +222,31 @@ fun main(args: Array<String>) {
     TestingSettings.enabled = true
     TestingSettings.preset = 2
     TestingSettings.resolution = 2
-    // CodexAstraLocal: Accidental global experiment requests must never be serialized or inherited.
+    // CodexAstraLocal: Global Options selections persist and become the inherited title defaults.
     TestingSettings.disableRightEyeRender = true
     TestingSettings.hardwareShaders = true
     TestingSettings.renderThreadDelayUs = 100
     TestingSettings.linearFiltering = false
     TestingSettings.stereoDepth = 1
     check(TestingSettings.save())
-    check(experimentKeys.all { read(testingFile).get("Testing", it) == null })
+    check(experimentKeys.all { read(testingFile).get("Testing", it) != null })
     TestingSettings.load("")
     check(TestingSettings.enabled && TestingSettings.preset == 2 && TestingSettings.resolution == 2)
-    checkBaseline()
+    fun checkGlobalExperiments() {
+        check(TestingSettings.disableRightEyeRender && TestingSettings.hardwareShaders)
+        check(TestingSettings.renderThreadDelayUs == 100 && !TestingSettings.linearFiltering)
+        check(TestingSettings.stereoDepth == 1)
+    }
+    checkGlobalExperiments()
+    check(TestingSettings.requestedRightEyeRenderDisabled() && TestingSettings.effectiveHardwareShaders())
+    check(TestingSettings.effectiveRenderThreadDelayUs() == 100)
+    check(!TestingSettings.effectiveLinearFiltering() && TestingSettings.effectiveStereoDepth() == 1)
     check(title.readBytes().contentEquals(beforeTesting) && config.readBytes().contentEquals(originalGlobal))
     check(IntSetting.UBERHAR_TEST_MODE.int == 3 && IntSetting.RESOLUTION_FACTOR.int == 4)
 
     // CodexAstraLocal: CPU-only Combo retains the request but vetoes effective hardware vertices.
     TestingSettings.load("000400000f700100")
-    checkBaseline()
+    checkGlobalExperiments()
     TestingSettings.preset = 1
     TestingSettings.resolution = 4
     TestingSettings.disableRightEyeRender = true
@@ -244,7 +266,7 @@ fun main(args: Array<String>) {
     }
     TestingSettings.load("0004000000123400")
     check(TestingSettings.preset == 2 && TestingSettings.resolution == 2)
-    checkBaseline()
+    checkGlobalExperiments()
     TestingSettings.load("")
     TestingSettings.preset = 0
     check(TestingSettings.save())
@@ -252,10 +274,10 @@ fun main(args: Array<String>) {
     check(TestingSettings.preset == 1 && TestingSettings.resolution == 4)
     check(TestingSettings.useGlobalChoices())
     check(TestingSettings.preset == 0 && TestingSettings.resolution == 2)
-    checkBaseline()
+    checkGlobalExperiments()
     check(experimentKeys.all { read(testingFile).get("Testing.000400000F700100", it) == null })
 
-    // CodexAstraLocal: Hostile global keys, malformed title values and numeric bounds use safe defaults.
+    // CodexAstraLocal: Explicit malformed title values use baselines; absent keys inherit globals.
     val testingIni = read(testingFile)
     for ((key, value) in mapOf("disable_right_eye_render" to "true", "use_hw_shader" to "true",
         "delay_game_render_thread_us" to "100", "filter_mode" to "false", "factor_3d" to "1")) {
@@ -266,7 +288,7 @@ fun main(args: Array<String>) {
     TestingSettings.load("000400000f700100")
     checkBaseline()
     TestingSettings.load("0004000000123400")
-    checkBaseline()
+    checkGlobalExperiments()
     for (value in listOf("-1", "16001", "99999999999999999999")) {
         val malformed = read(testingFile)
         malformed.put("Testing.000400000F700100", "delay_game_render_thread_us", value)
@@ -381,10 +403,13 @@ fun main(args: Array<String>) {
     config.writeText("[Renderer]\nturbo_limit=400\n")
     Settings().loadSettings("")
     check(IntSetting.TURBO_LIMIT.int == 400) { "Legacy turbo cap was lost by section matching" }
-    println("PASS: production settings/INI title isolation, sparse saves, limiter alias, inheritance reset, unknown retention, immediate layout saves, Testing title isolation/reset, CPU veto, launch snapshots, alpha/beta preservation, driver independence and ID validation")
+    checkTestingPanel(folder)
+    println("PASS: production settings/INI title isolation, sparse saves, limiter alias, inheritance reset, unknown retention, immediate layout saves, Testing global/title defaults and panel interactions, CPU veto, launch snapshots, alpha/beta preservation, driver independence and ID validation")
 }
 ''',
     }
+    # CodexAstraLocal: Substitute Android widgets, dialogs and lifecycle only; controller/model are real.
+    stubs.update(panel_stubs())
     for name, contents in stubs.items():
         path = output / name
         path.write_text(contents)

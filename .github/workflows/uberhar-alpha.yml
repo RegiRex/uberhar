@@ -477,17 +477,23 @@ jobs:
           sha256sum --check apk-sha256.txt
 
       # AstraEH: Attach assets to a draft first; publish only when all uploads succeed.
-      # Existing versions are never overwritten: increment UBERHAR_VERSION for the next iteration.
+      # Existing release tags are never overwritten; same-version repairs use a revision tag.
       # CodexAstraLocal: The same gated job publishes alpha prereleases
       # and earned beta releases according to the version classification below.
       - name: Publish GitHub release
         run: |
-          if gh release view "$UBERHAR_VERSION" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
-            echo 'This version already exists; increment UBERHAR_VERSION before publishing again' >&2
+          # CodexAstraLocal: Owner requested the Settings repair as another .56 APK.
+          # Preserve the original published .56 assets/source; retire this one-off at the next alpha.
+          release_tag="$UBERHAR_VERSION"
+          if [ "$UBERHAR_VERSION" = '0.1.56' ]; then
+            release_tag='0.1.56-r1'
+          fi
+          if gh release view "$release_tag" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo 'This release tag already exists; select a new version/revision before publishing again' >&2
             exit 1
           fi
           # AstraEH: An inherited tag must never redirect this release to unrelated upstream code.
-          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$UBERHAR_VERSION" > existing-tag.json 2>/dev/null; then
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$release_tag" > existing-tag.json 2>/dev/null; then
             test "$(jq -r '.object.sha' existing-tag.json)" = "$GITHUB_SHA"
           fi
           # CodexAstraLocal: Replace the unconditional prerelease flag with the owner's
@@ -498,11 +504,11 @@ jobs:
           if [[ "${UBERHAR_VERSION##*.}" =~ ^0+$ ]]; then
             release_prerelease=false
           fi
-          gh release create "$UBERHAR_VERSION" --repo "$GITHUB_REPOSITORY" \
-            --target "$GITHUB_SHA" --title "Uberhar $UBERHAR_VERSION" \
+          gh release create "$release_tag" --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" --title "Uberhar $release_tag" \
             --draft "--prerelease=$release_prerelease" --latest=false --notes-file artifacts/release-notes.md \
             "artifacts/uberhar-$UBERHAR_VERSION-arm64.apk" artifacts/apk-sha256.txt \
             "artifacts/uberhar-$UBERHAR_VERSION-validation.zip" \
             "artifacts/uberhar-$UBERHAR_VERSION-native-symbols.zip"
-          gh release edit "$UBERHAR_VERSION" --repo "$GITHUB_REPOSITORY" \
+          gh release edit "$release_tag" --repo "$GITHUB_REPOSITORY" \
             --draft=false "--prerelease=$release_prerelease" --latest=false

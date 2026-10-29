@@ -3,7 +3,8 @@
     <!-- CodexAstraLocal: Testing is a temporary global overlay; saved title settings remain distinct. -->
     <string name="uberhar_testing">Testing</string>
     <!-- CodexAstraLocal: Alpha experiments keep normal saved choices separate and require a launch. -->
-    <string name="uberhar_testing_description">Temporary rendering choices. Select a game to compare its graphics controls. Turn off to restore saved global and per-game settings.</string>
+    <!-- CodexAstraLocal: Options edits working global defaults, with optional per-game Testing overrides. -->
+    <string name="uberhar_testing_description">Temporary rendering choices. Edit defaults for all games or select a game for its own choices. Turn off to restore saved global and per-game settings.</string>
     <string name="uberhar_testing_restart_required">Close the game before changing Testing or its launch controls. Resolution can change during play.</string>
     <string name="uberhar_testing_native">Native</string>
     <string name="uberhar_testing_combo_cpu">Combo · CPU Vertices ON</string>
@@ -1215,16 +1216,16 @@
     <string name="uberhar_testing_use_global">Use global Testing choices</string>
     <!-- CodexAstraLocal: Reset clears the title experiment; live wording distinguishes its restart boundary. -->
     <!-- CodexAstraLocal: Reset restores the title experiment baselines without inheriting global opt-ins. -->
-    <string name="uberhar_testing_reset_confirmation">Remove this game’s Testing choices? Preset and resolution will inherit global choices. Hardware Shaders and Disable Right Eye Render reset to OFF, delay and 3D slider to zero, and Linear Filtering to ON. Normal saved settings are unchanged.</string>
+    <!-- CodexAstraLocal: Reset now resumes current global values for every Testing control. -->
+    <string name="uberhar_testing_reset_confirmation">Remove this game’s Testing choices? All Testing controls will inherit the current defaults for all games. Normal saved settings are unchanged.</string>
     <string name="uberhar_testing_live_description">Resolution changes apply now. Other controls show this launch’s values; exit the game to change them or the Testing switch.</string>
     <string name="uberhar_testing_resolution_override">Change the active resolution using the Testing controls on the main Settings page.</string>
-    <!-- CodexAstraLocal: State the heuristic risk without promising redundant work or a speed gain. -->
-    <string name="uberhar_testing_right_eye_description">Experimental heuristic skipping for this game only. May cause flickering or missing graphics. Default OFF; changes apply next launch.</string>
-    <string name="uberhar_testing_right_eye_select_game">Choose a game to enable this experimental heuristic. May cause flickering or missing graphics. Default OFF for every game.</string>
+    <!-- CodexAstraLocal: Explain the heuristic in either global or title scope without a speed claim. -->
+    <string name="uberhar_testing_right_eye_description">Experimental heuristic skipping. May cause flickering or missing graphics. Default OFF; changes apply next launch.</string>
     <string name="uberhar_testing_right_eye_override">Change Disable Right Eye Render in this game’s Testing controls after exiting the game.</string>
     <!-- CodexAstraLocal: Explain player-visible placement, scheduling and display comparisons. -->
-    <string name="uberhar_testing_select_game_controls">Choose a game to edit these launch controls.</string>
-    <string name="uberhar_testing_hardware_description">Allow ordinary GPU vertex shaders for this game. Default OFF. Combo can still use ready GPU vertex shaders when OFF. Changes apply next launch.</string>
+    <!-- CodexAstraLocal: Hardware admission is available in global Options as well as title overrides. -->
+    <string name="uberhar_testing_hardware_description">Allow ordinary GPU vertex shaders. Default OFF. Combo can still use ready GPU vertex shaders when OFF. Changes apply next launch.</string>
     <string name="uberhar_testing_hardware_cpu_only">CPU Vertices ON keeps Hardware Shaders OFF. Your saved Hardware Shaders choice is retained for other presets.</string>
     <string name="uberhar_testing_delay_description">Delay the game’s render-thread response by 0–16000 microseconds. Default 0; use 100 to compare the captured Azahar setting. Changes apply next launch.</string>
     <string name="uberhar_testing_delay_range">Enter a whole number from 0 to 16000.</string>

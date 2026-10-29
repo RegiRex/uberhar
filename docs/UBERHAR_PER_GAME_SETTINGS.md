@@ -1,9 +1,10 @@
 # Android per-game settings and Testing controls
 
 <!-- CodexAstraLocal: Record the owner's approved scope and the implementation boundary without claiming an unbuilt feature is installed. -->
-This feature is included in the 0.1.54 candidate. It is not part of the installed
-0.1.53 APK. Full Android build gates and device UI validation are separate steps;
-the owner performs the .53/.54 performance comparison before adoption.
+Introduced in 0.1.54 and expanded in 0.1.55/0.1.56, these controls support separate
+global defaults and per-game choices. The corrected 0.1.56 rebuild also exposes
+all five new experiments on Options. Build checks and device UI validation remain
+separate steps; this document describes the current source behavior.
 
 ## Owner controls
 
@@ -31,9 +32,10 @@ The top of the main Settings page has a **Testing** switch. When enabled it expo
 | Combo · CPU Vertices ON | 2× or 4× |
 | Combo · CPU Vertices OFF | 2× or 4× |
 
-<!-- CodexAstraLocal: Include explicit title experiments without implying ordinary preferences are overwritten. -->
+<!-- CodexAstraLocal: Global experiments and title overrides never overwrite ordinary preferences. -->
 Testing selects the rendering mode, Combo CPU-vertex choice and resolution, with
-separate title-only experiments described below. It applies to every game until
+separate experiments described below. Global Testing defaults apply to every game
+unless that title has an override. The overlay remains active until
 switched off. Disabling it reveals the untouched global/per-game choices. A scope banner
 distinguishes the saved values being edited from the active Testing preset.
 Change the Testing controls between games. Resetting saved game preferences does
@@ -46,7 +48,7 @@ not disable an active Testing overlay.
 2. Apply supported sparse overrides from `GameSettings/<16-digit-title-ID>.ini`.
 3. Apply the separate `config/testing.ini` overlay when enabled on an alpha build.
 4. Apply the existing Uberhar rendering profile rules, retaining the launch-latched
-   title experiments through live resolution reloads.
+   Testing experiments through live resolution reloads.
 
 Zero/invalid title IDs use globals and do not share a title-override file.
 Console identity, accounts, storage, networking, controllers and turbo cap stay
@@ -63,9 +65,15 @@ settings/model/INI code with real ini4j and host substitutes for Android file,
 resource and JNI-key boundaries. It checks title isolation, sparse persistence,
 inheritance reset, unknown-key retention, legacy turbo cap and Testing separation.
 <!-- CodexAstraLocal: JNI launch snapshots are test boundaries, not proof of native lifecycle behavior. -->
-It also checks experiment defaults/bounds, title isolation/reset, CPU-only hardware
+It also checks global experiment persistence and inheritance, defaults/bounds, title isolation/reset, CPU-only hardware
 veto, displays against substituted native launch snapshots, beta/full refusal to
 rewrite preserved alpha preferences, and independent per-title driver editing.
+<!-- CodexAstraLocal: Real controller listeners are exercised with host substitutes, not a device UI. -->
+The fixture also compiles `TestingPanelController` and invokes its actual listeners
+in global and title contexts. Host widget/dialog/lifecycle/JNI substitutes check
+control availability, delay input validation, reset cancellation/confirmation,
+launch locks and resolution reload calls; they do not qualify Android rendering,
+native lifecycle execution or gameplay.
 Supply `--kotlinc` and `--ini4j`, with a compatible `JAVA_HOME`.
 
 `tools/uberhar/test_android_settings_layers.py` executes the production native
@@ -84,7 +92,7 @@ existing owner settings or start gameplay merely to read this document.
 Home **Options** now presents Testing directly below the flower. Choose global
 Testing defaults or a library game, then select Native / Combo CPU Vertices ON /
 OFF and 2× / 4×. The same controls remain on the main Settings page. The Testing
-master is global; preset/resolution exceptions are stored per title in
+master is global; exceptions for every Testing control are stored per title in
 `testing.ini`, independently of ordinary title configuration. **Use global Testing
 choices** requires confirmation and removes only that title's Testing overrides.
 Testing OFF restores normal saved settings at the next launch.
@@ -95,16 +103,16 @@ The ordinary resolution setting stays separate; use the Testing buttons to chang
 an active override without overwriting normal preferences.
 
 <!-- CodexAstraLocal: Document the explicit right-eye experiment, restart boundary and observer limits. -->
-The next build adds **Disable Right Eye Render** beside Testing preset/resolution.
-It defaults OFF and must be enabled separately for each selected game; a global
-Testing key cannot enable it for other games. Native and both Combo choices honor
+The panel includes **Disable Right Eye Render** beside Testing preset/resolution.
+<!-- CodexAstraLocal: The repaired global Options panel can set experiments inherited by games. -->
+It defaults OFF and can be changed globally or for a selected game. Native and both Combo choices honor
 the override without selecting Custom. It uses the inherited heuristic to skip
 command lists/display transfers and may cause flickering or missing graphics;
 it does not prove the omitted work was redundant. The title compatibility gate
 can still forbid suppression. The running switch shows the native requested
 setting and requires exiting the game to change it; live resolution changes
-preserve that launch request. **Use global Testing choices** also resets this
-title-only experiment to OFF. Testing OFF restores ordinary saved/profile
+preserve that launch request. **Use global Testing choices** restores the current
+global right-eye choice. Testing OFF restores ordinary saved/profile
 behavior at the next launch, including Native/Combo's normal OFF default.
 
 ## 0.1.56 alpha Testing controls
@@ -116,12 +124,13 @@ the gate. Beta/full builds hide Testing and ignore stale `testing.ini` overlays
 without rewriting the file. Home hides the Testing panel; **Game Settings** keeps
 the ordinary per-game GPU driver selector available.
 
-<!-- CodexAstraLocal: Explicit per-title controls preserve the established Native/Combo baseline. -->
-Choose a title to edit these controls; global keys cannot enable them for every
-game. All require exiting the game. While running, the UI shows the native launch
+<!-- CodexAstraLocal: Repair Options by enabling global experiments with the same title inheritance. -->
+With Testing ON, edit these controls directly under **Testing defaults for all
+games**, or select a title to save its own choices. All require exiting the game.
+While running, the UI shows the native launch
 values; only the resolution selector can apply a change immediately.
 
-| Title control | Baseline | Behavior |
+| Testing control | Baseline | Behavior |
 |---|---|---|
 | Disable Right Eye Render | OFF | Existing heuristic opt-in and compatibility exclusions above. |
 | Hardware Shaders | OFF | Enables ordinary GPU-vertex admission. Combo can still promote ready GPU vertices while OFF. Combo CPU Vertices ON vetoes it and displays OFF while retaining the saved request for other presets. |
@@ -129,11 +138,14 @@ values; only the resolution selector can apply a change immediately.
 | Linear Filtering | ON | Final presentation sampling; OFF selects nearest filtering. |
 | Guest 3D slider | 0% | Select0% or1%. This value reaches guest HID even with mono display;1% matches the captured Azahar comparison. |
 
-Requests are stored only in `[Testing.<title-ID>]` under
+<!-- CodexAstraLocal: Missing title keys inherit; malformed explicit values retain documented baselines. -->
+Global requests are stored in `[Testing]`, with title requests in `[Testing.<title-ID>]`, under
 `disable_right_eye_render`, `use_hw_shader`, `delay_game_render_thread_us`,
-`filter_mode` and `factor_3d`. Missing/malformed values restore the listed baselines.
+`filter_mode` and `factor_3d`. Missing title keys inherit global choices; malformed
+explicit values and missing global values use the listed baselines.
 **Use global Testing choices** removes all five title requests as well as the
-title preset/resolution override. It retains normal global/per-game preferences
+title preset/resolution override, restoring current global choices for all controls.
+It retains normal global/per-game preferences
 and the independent driver choice. Hardware Shaders ON changes ordinary Native
 CPU-vertex behavior and is an experiment, not a renamed standard Native route.
 Graphics and Debug show effective profile values while preserving saved Custom
