@@ -459,6 +459,9 @@ public:
     // CodexAstraLocal: Optional retirement reads immutable dependency identities
     // only after command drain, and waits for compiler epilogue plus GPU use.
     const StaticPipelineInfo& ExecutionState() const { return info.state; }
+    // CodexAstraUlt-2: Startup preparation must propagate a lost device instead
+    // of treating it as an ordinary cache miss and entering gameplay on it.
+    bool DeviceLost() const { return device_lost.load(std::memory_order_acquire); }
     auto ExecutionShaders() const { return HostShaderIds(stages); }
     bool ReferencesShader(const Shader* shader) const noexcept {
         return std::find(stages.begin(), stages.end(), shader) != stages.end();
@@ -509,6 +512,8 @@ private:
     std::atomic<u64> fallback_uses{};
     std::atomic<u64> driver_build_ns{};
     std::atomic_bool failed{};
+    // CodexAstraUlt-2: Publish the failure category before terminal completion.
+    std::atomic_bool device_lost{};
     std::chrono::steady_clock::time_point queued_at{};
 };
 

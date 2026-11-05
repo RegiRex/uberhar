@@ -124,7 +124,9 @@ struct Mode {
     UberharTestMode value{UberharTestMode::Automatic};
     auto GetValue() const { return value; }
 };
-inline struct Values { Mode uberhar_test_mode; } values;
+// CodexAstraUlt-2: Explicit cache preference for production startup gating.
+struct CachePreference { bool enabled{true}; bool GetValue() const { return enabled; } };
+inline struct Values { Mode uberhar_test_mode; CachePreference use_disk_shader_cache; } values;
 }
 '''
 
@@ -164,6 +166,9 @@ def main() -> None:
               function(disk_source,'void ShaderDiskCache::ReportOptionalFailure(')]
     for signature in ('bool PipelineCache::PreferReadySpecializedFragment(',
                       'bool PipelineCache::ReadyVertexShaders()',
+                      'bool PipelineCache::IsCpuFragmentLayout(',
+                      'void PipelineCache::SetAccurateMul(',
+                      'void PipelineCache::PrepareRecordedPipelines(',
                       'GraphicsPipeline* PipelineCache::PrepareReadyCpuFragment(',
                       'void PipelineCache::CompleteReadyCpuDraw(',
                       'void PipelineCache::CompleteReadyGpuDraw(',
@@ -177,6 +182,12 @@ def main() -> None:
                       'bool PipelineCache::BindPipeline(',
                       'void PipelineCache::ClearTevFallbacks()'):
         parts.append(function(cpp,signature))
+    # CodexAstraUlt-2: Exercise the real resident bank and recording logic with
+    # the same controlled Vulkan endpoints used by the existing binding fixture.
+    prepared_header = read('src/video_core/renderer_vulkan/uberhar_precompiled_cache.h')
+    (out/'precompiled_cache.inc').write_text(function(prepared_header, 'class PrecompiledCache') + ';\n')
+    parts.append(function(disk_source, 'void ShaderDiskCache::ObservePrecompileRecipe('))
+    parts.append(function(disk_source, 'std::unique_ptr<Shader> ShaderDiskCache::CompilePreparedFragment('))
     # CodexAstraLocal: Hardware input must exercise the real fallback VS/GS selection;
     # the old driver adapter unconditionally substituted CPU stages and hid this contract.
     fallback = function(cpp, 'GraphicsPipeline* PipelineCache::GetTevFallback(')
@@ -189,6 +200,8 @@ def main() -> None:
         'std::optional<std::pair<u64, Shader* const>> ShaderDiskCache::UseStaticTevFragmentShader('))
     parts.append(function(cpp,'bool PipelineCache::ReadyGpuFragmentPreflight('))
     disk_header=read('src/video_core/renderer_vulkan/vk_shader_disk_cache.h')
+    (out/'precompile_members.inc').write_text(disk_header[disk_header.index('    std::vector<Precompile::Recipe> precompile_recipes;'):
+        disk_header.index('    // CodexAstraLocal: Optional disk I/O')])
     parts.append(function(disk_header,'bool OptionalFragmentPending() const').replace(
         'bool OptionalFragmentPending()', 'bool ShaderDiskCache::OptionalFragmentPending()'))
     old_members=disk_header[disk_header.index('    struct ReadyFragmentKey {'):
@@ -242,15 +255,19 @@ def main() -> None:
     cases=[('normal',body,None)]
     if args.mutants and not args.static_tev:
         for name,old,new,expected in [
-            ('wrong-selected-owner','pipeline = ready;','pipeline = generic;','actual G/S/G pipeline identity'),
+            # CodexAstraUlt-2: A production ordering regression must execute and
+            # fail at the no-generic-work assertion, not merely fail compilation.
+            ('generic-before-ready','if (!select_ready_cpu(nullptr)) {','if (true) {',
+             'ready full avoids generic creation and wait'),
+            ('wrong-selected-owner','pipeline = ready;','pipeline = generic;','ready full draws without generic dependency'),
             ('hash-only','ready->Key() != candidate.key || !ready->MatchesExecution(candidate.pipeline, owners)',
              'ready->Key() != candidate.key','hash collision cannot replace actual execution equality'),
             ('missing-postdraw-use','ready_cpu_bank->DrawQueued(token, scheduler.CurrentTick());',
              '(void)token;','actual after-Map draw tick retained'),
             ('stale-warming-pointer','if (warming_ready_vertex == owner) warming_ready_vertex = nullptr;',
              '(void)owner;','retirement clears shared warming raw pointer'),
-            ('missing-cpu-cap','!ReadyVertexPolicy::CanQueue(ready_vertex_pipelines.size() + ReadyCpuOwned() +\n                                    retiring_ready_gpu_active, pending || retiring_ready_gpu_active)',
-             '!ReadyVertexPolicy::CanQueue(ready_vertex_pipelines.size() + retiring_ready_gpu_active, pending || retiring_ready_gpu_active)','combined physical cap includes CPU owner'),
+            ('missing-cpu-cap','!ReadyVertexPolicy::CanQueue(ready_vertex_pipelines.size() + ReadyCpuOwned() +\n                                    retiring_ready_gpu_active + PreparedPipelineCount(), pending || retiring_ready_gpu_active)',
+             '!ReadyVertexPolicy::CanQueue(ready_vertex_pipelines.size() + retiring_ready_gpu_active + PreparedPipelineCount(), pending || retiring_ready_gpu_active)','combined physical cap includes CPU owner'),
             ('uncharged-gpu-work','++ready_optional_attempts;','(void)ready_optional_attempts;',
              'GPU attempt charged before worker admission'),
             ('stale-generic-constants','tev_push_constants.Invalidate();','(void)constants_dirty;',
@@ -267,8 +284,8 @@ def main() -> None:
     header_mutations={}
     if args.mutants and args.static_tev:
         for name,old,new,expected in [
-            ('no-full-promotion','if (partial.ready) {\n            if (allow_full) advance(full);',
-             'if (partial.ready) {\n            if (false) advance(full);','CPU demand still promotes full while partial ready'),
+            ('no-full-promotion','if (allow_full) advance(full);\n            return select(partial);',
+             'if (false) advance(full);\n            return select(partial);','CPU demand still promotes full while partial ready'),
             # CodexAstraLocal: Mutate the live condition while retaining the new
             # lazy-transport body, so these controls still exercise real routing.
             ('partial-priority','if (full.ready) {','if (false) {','exact ready full wins priority'),

@@ -1,3 +1,24 @@
+<!-- CodexAstraUlt-2: New owner-authorized branch implementation; local evidence is separate from hosted/device qualification. -->
+## 0.1.57 — precompiled-first comparison
+
+Implemented on `uberhar/precompiled-first` from 0.1.56-r2 (`0723b003`).
+Known full CPU fragment/pipeline descriptions prepare before gameplay; compatible
+stock records can seed them without stock-cache mutation. Ready prepared/adaptive
+specializations are selected before generic creation/wait. Preparation retains a
+bounded useful bank, attempts transient warming of excess known recipes, and saves
+completed startup cache work. Unknown states retain the complete fallback.
+
+Independent architecture/lifetime and cleanliness reviews accompany the executable
+codec, import, bank, terminal-device-loss, compiler-policy, cache-lifecycle and
+workflow checks. Production fragment generation and TEV-family checks pass locally.
+Full Vulkan fixture execution remains blocked by an unavailable oversized pinned
+header; complete shader-pixel and Android validation belongs to the hosted gates.
+No Thor speedup, visual correctness, crash fix or APK completion is claimed here.
+
+The isolated comparison uses the existing signing/validation gates and cannot
+publish a regular release. All new purpose comments use `CodexAstraUlt-2`.
+See [architecture, limitations and test plan](UBERHAR_PRECOMPILATION.md).
+
 <!-- CodexAstraLocal: .56 candidate combines compatibility/controls with a narrow GPU-work reduction; hosted and hardware acceptance remain separate. -->
 ## 0.1.56 — depth ownership, GPU attribution and comparison controls
 

@@ -29,6 +29,7 @@
 #include "video_core/shader/generator/shader_gen.h"
 // CodexAstraLocal: Fixed ownership and bounded automatic CPU PSO reuse.
 #include "video_core/renderer_vulkan/uberhar_cpu_fragment_cache.h"
+#include "video_core/renderer_vulkan/uberhar_precompiled_cache.h" // CodexAstraUlt-2: Stable prepared CPU owners.
 #include "video_core/renderer_vulkan/vk_vertex_capture.h" // CodexAstraLocal: Owned binding witness.
 
 namespace Pica {
@@ -108,6 +109,14 @@ public:
     // CodexAstraLocal: A draw-local generation token carries selection lifetime
     // through actual enqueue; the post-draw stamp covers recorded GPU use.
     using CpuFragmentToken = ReadyCpuBank::Token;
+
+    // CodexAstraUlt-2: Prepared residents share the existing aggregate limits.
+    std::size_t PreparedModuleCount() const {
+        return precompiled_cache ? precompiled_cache->ResidentModuleCount() : 0;
+    }
+    std::size_t PreparedPipelineCount() const {
+        return precompiled_cache ? precompiled_cache->ResidentPipelineCount() : 0;
+    }
     void CompleteReadyCpuDraw(CpuFragmentToken token);
     // CodexAstraLocal: Stamp actual optional GPU draw enqueue, including a flush
     // between selection and draw, before allowing completed-tick retirement.
@@ -200,11 +209,15 @@ private:
     // CodexAstraUlt: One gate covers optional fragment warming, binding and transport;
     // mandatory unsupported-state recovery continues through UseFragmentShader independently.
     bool PreferReadySpecializedFragment(const Pica::Shader::UserConfig& user) const;
+    // CodexAstraUlt-2: Startup and adaptive full fragments use the same proven CPU ABI.
+    bool IsCpuFragmentLayout(const PipelineInfo& info, const VertexLayout& software_layout) const;
 
-    // CodexAstraLocal: Optional CPU-fragment selection requires a completed generic
-    // draw and the caller's real software layout. Failure changes no draw state.
+    // CodexAstraUlt-2 / CodexAstraLocal: Exact ready CPU fragments need only the
+    // caller's real software layout. New work requires a ready generic or partial
+    // draw; a missing generic never admits work on a cold miss.
     GraphicsPipeline* PrepareReadyCpuFragment(PipelineInfo& info, GraphicsPipeline* generic,
-                                              const VertexLayout& software_layout, CpuFragmentToken* cpu_use, bool* partial_use) noexcept;
+                                              const VertexLayout& software_layout, CpuFragmentToken* cpu_use,
+                                              bool* partial_use) noexcept;
 
     // AstraEH: Only the serial TEV worker reads/writes generic modules; reports use atomics.
     // AstraEH: Compiler workers receive the exact options/path captured with their profile.
@@ -230,6 +243,9 @@ private:
     /// Loads the shader disk cache
     void LoadDiskCache(const std::atomic_bool& stop_loading = std::atomic_bool{false},
                        const VideoCore::DiskResourceLoadCallback& callback = {});
+    // CodexAstraUlt-2: Build immutable recorded CPU recipes on this renderer's device.
+    void PrepareRecordedPipelines(const std::atomic_bool& stop_loading,
+                                  const VideoCore::DiskResourceLoadCallback& callback);
 
     /// Switches the disk cache at runtime to use a different title ID
     void SwitchDiskCache(u64 title_id, const std::atomic_bool& stop_loading,
@@ -290,6 +306,9 @@ private:
     // Active, retired and destruction-queued owners remain charged to their
     // original tier: eight full plus eight partial, at most sixteen combined.
     std::unique_ptr<ReadyCpuBank> ready_cpu_bank;
+    // CodexAstraUlt-2: Stable prepared owners outlive draws and are cleared only after drains.
+    std::unique_ptr<PrecompiledCache> precompiled_cache;
+    u64 prepared_cpu_selected{};
     // CodexAstraLocal: Lifetime attempts remain diagnostics. CPU/GPU share
     // renewable bounded work credit, spent before allocation and never refunded.
     std::size_t ready_optional_attempts{};

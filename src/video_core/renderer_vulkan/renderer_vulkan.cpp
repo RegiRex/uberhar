@@ -141,7 +141,10 @@ RendererVulkan::~RendererVulkan() {
     scheduler.BeginShutdown();
     scheduler.Finish();
     main_present_window.WaitPresent();
-    device.waitIdle();
+    // CodexAstraUlt-2: A known lost device cannot complete another Vulkan wait;
+    // startup already latched cancellation, and CPU owners have drained above.
+    if (!scheduler.DeviceLost())
+        device.waitIdle();
 
     device.destroyShaderModule(present_vertex_shader);
     for (u32 i = 0; i < PRESENT_PIPELINES; i++) {

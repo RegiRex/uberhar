@@ -32,6 +32,13 @@ GraphicsPipeline* Warm(PipelineCache& p, bool partial, const FSConfig& config = 
 void PromotionAndPriority() {
     PipelineCache p;
     auto* partial=Warm(p,true);
+    // CodexAstraUlt-2: Remove the formerly required generic after draining its
+    // use. Pending full work must still leave the ready partial immediately usable.
+    Advance(p);
+    p.tev_pipelines.clear();
+    p.generic_mode=3;
+    const auto generic_requests=p.generic_requests;
+    const auto required_waits=Probe::required_waits;
     p.allow_full_cpu_fragments=true;
     bool pending_full_selected_partial=false;
     for(unsigned frame=0;frame<14;++frame) {
@@ -52,6 +59,8 @@ void PromotionAndPriority() {
     Require(bool(token) && p.ready_cpu_bank->AllSlots()[token.slot].owner.get()!=partial &&
             p.ready_cpu_full_selected==before+1, "exact ready full wins priority");
     Require(Probe::optional_waits==0, "promotion adds no optional wait");
+    Require(p.generic_requests==generic_requests && Probe::required_waits==required_waits,
+            "ready partial promotes full without generic construction or wait");
 }
 
 // CodexAstraLocal: Start with both modules absent so the partial tier actually

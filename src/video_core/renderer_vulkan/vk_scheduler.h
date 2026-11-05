@@ -48,6 +48,14 @@ public:
     // CodexAstraUlt-2: Destructor drains may not rethrow a reported terminal error.
     void BeginShutdown() noexcept { shader_failure.BeginShutdown(); }
 
+    // CodexAstraUlt-2: Loading-thread device loss cancels future submissions just
+    // like a terminal worker failure. Teardown drains captures without GPU waits.
+    void ReportDeviceLost() {
+        device_lost.store(true, std::memory_order_release);
+        shader_failure.Fail();
+    }
+    bool DeviceLost() const { return device_lost.load(std::memory_order_acquire); }
+
     /// Waits for the given tick to trigger on the GPU.
     void Wait(u64 tick);
 
@@ -245,6 +253,8 @@ private:
     std::mutex queue_mutex;
     std::condition_variable_any event_cv;
     VideoCore::ShaderFailureState shader_failure;
+    // CodexAstraUlt-2: Distinguish an unusable device from recoverable cache absence.
+    std::atomic_bool device_lost{};
     // CodexAstraLocal TEST-ONLY LOG: Only queue-age accumulation crosses threads;
     // other counters belong to the command producer. Remove after qualification.
     bool diagnostics_enabled{};

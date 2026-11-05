@@ -48,11 +48,15 @@ jobs:
     # these jobs. Retain main pushes and deliberate main/comparison manual runs.
     # CodexAstraLocal: The isolated .48 CPU comparison uses its own reusable
     # workflow below, so current main shader steps cannot run on historical code.
+    # CodexAstraUlt-2: Admit the owner's exact precompiled-first PR head to the
+    # existing shader gates; keep fork/other-repository heads outside this lane.
     if: >-
       (github.event_name == 'pull_request' &&
        github.event.pull_request.base.ref == 'uberhar/hybrid-shaders' &&
        github.event.pull_request.head.repo.full_name == github.repository &&
-       github.event.pull_request.head.ref == 'uberhar/codexastra-diag-comparison') ||
+       (github.event.pull_request.head.ref == 'uberhar/codexastra-diag-comparison' ||
+        (github.repository == 'RegiRex/uberhar' &&
+         github.event.pull_request.head.ref == 'uberhar/precompiled-first'))) ||
       (github.event_name == 'push' && github.ref == 'refs/heads/uberhar/hybrid-shaders') ||
       (github.event_name == 'workflow_dispatch' &&
        (github.ref == 'refs/heads/uberhar/hybrid-shaders' ||
@@ -83,13 +87,16 @@ jobs:
     # depend on a shader-job result to exclude untrusted branches and fork PRs.
     # CodexAstraLocal: Admit only the additional exact CPU comparison head; the
     # inherited restore-only key path and certificate pin still fail closed.
+    # CodexAstraUlt-2: The precompiled-first artifact uses the same trusted PR
+    # signing path; no new push/manual route or replacement key is introduced.
     if: >-
       (github.event_name == 'pull_request' &&
        github.event.pull_request.base.ref == 'uberhar/hybrid-shaders' &&
        github.event.pull_request.head.repo.full_name == github.repository &&
        (github.event.pull_request.head.ref == 'uberhar/codexastra-diag-comparison' ||
         (github.repository == 'RegiRex/uberhar' &&
-         github.event.pull_request.head.ref == 'uberhar/cpu-only-048-comparison'))) ||
+         (github.event.pull_request.head.ref == 'uberhar/cpu-only-048-comparison' ||
+          github.event.pull_request.head.ref == 'uberhar/precompiled-first')))) ||
       (github.event_name == 'push' && github.ref == 'refs/heads/uberhar/hybrid-shaders') ||
       (github.event_name == 'workflow_dispatch' &&
        (github.ref == 'refs/heads/uberhar/hybrid-shaders' ||
@@ -377,7 +384,9 @@ jobs:
         with:
           # CodexAstraLocal: Distinguish the experiment download without changing
           # numeric app version, package identity, signing or ordinary releases.
-          name: uberhar-${{ steps.version.outputs.value }}${{ (github.head_ref == 'uberhar/cpu-only-048-comparison' || github.ref == 'refs/heads/uberhar/cpu-only-048-comparison') && '-cpu-only-comparison' || '' }}-arm64
+          # CodexAstraUlt-2: Keep the isolated candidate visibly distinct from
+          # ordinary releases and the retained historical CPU comparison.
+          name: uberhar-${{ steps.version.outputs.value }}${{ (github.head_ref == 'uberhar/precompiled-first' || github.ref == 'refs/heads/uberhar/precompiled-first') && '-precompiled-first-comparison' || (github.head_ref == 'uberhar/cpu-only-048-comparison' || github.ref == 'refs/heads/uberhar/cpu-only-048-comparison') && '-cpu-only-comparison' || '' }}-arm64
           path: artifacts/
           if-no-files-found: error
           retention-days: 30
@@ -482,12 +491,9 @@ jobs:
       # and earned beta releases according to the version classification below.
       - name: Publish GitHub release
         run: |
-          # CodexAstraLocal: Owner requested corrected settings precedence as another .56 APK.
-          # Preserve the original published .56 assets/source; retire this one-off at the next alpha.
+          # CodexAstraUlt-2: The next alpha retires the historical .56 repair alias;
+          # existing tags and releases still cannot be overwritten below.
           release_tag="$UBERHAR_VERSION"
-          if [ "$UBERHAR_VERSION" = '0.1.56' ]; then
-            release_tag='0.1.56-r2'
-          fi
           if gh release view "$release_tag" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
             echo 'This release tag already exists; select a new version/revision before publishing again' >&2
             exit 1
