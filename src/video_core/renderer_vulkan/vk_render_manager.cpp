@@ -21,9 +21,16 @@ using VideoCore::SurfaceType;
 
 RenderManager::RenderManager(const Instance& instance, Scheduler& scheduler)
     : instance{instance}, scheduler{scheduler} {
+    // CodexAstraLocal: Freeze experiments with the renderer, independently of
+    // the optional GPU observer. An OFF observer allocates no query pool.
+    const bool uberhar = Settings::IsUberharTestProfile(Settings::values.uberhar_test_mode.GetValue());
+    reuse_contained_pass = uberhar && Settings::values.uberhar_reuse_contained_pass.GetValue();
     // CodexAstraLocal TEST-ONLY LOG: Query capability is explicit; no timing
     // failure may disable valid graphics. Remove after pass costs are qualified.
-    diagnostics_enabled = Settings::IsUberharTestProfile(Settings::values.uberhar_test_mode.GetValue());
+    diagnostics_enabled = uberhar && Settings::values.uberhar_gpu_observer.GetValue();
+    LOG_INFO(Render_Vulkan, "Uberhar pass controls: containment={} gpu_observer_requested={} "
+             "turnip_flush_requested={} effective_pass_flush={}", reuse_contained_pass,
+             diagnostics_enabled, Settings::values.turnip_pass_end_flush.GetValue(), ShouldFlushPass());
     if (!diagnostics_enabled) return;
     try {
     diagnostic_next_report = std::chrono::steady_clock::now() + std::chrono::seconds{5};
@@ -148,6 +155,20 @@ void RenderManager::RecordDiagnosticDraw(const PipelineCache& pipelines, u32 col
 }
 
 void RenderManager::PollDiagnostics(bool final) noexcept {
+    // CodexAstraLocal TEST-ONLY LOG: Mechanism coverage remains visible with GPU
+    // queries OFF; check a clock only every64 frame callbacks. Remove on qualification.
+    if (final || (++mechanism_frames & 63) == 0) {
+        try {
+            const auto now = std::chrono::steady_clock::now();
+            if (final || now >= mechanism_next_report) {
+                LOG_INFO(Render_Vulkan,
+                    "Uberhar pass reuse: enabled={} accepted={} refused={} submission_boundaries={} "
+                    "gpu_timing_measured={} final={}", reuse_contained_pass, contained_pass_reuses,
+                    containment_refusals, containment_submission_boundaries, bool(diagnostic_queries), final);
+                mechanism_next_report = now + std::chrono::seconds{5};
+            }
+        } catch (...) {}
+    }
     if (!diagnostics_enabled) return;
     diagnostic_frame_samples = 0;
     // CodexAstraLocal: Ordinal of the existing rasterizer TickFrame boundary;
@@ -253,7 +274,7 @@ void RenderManager::PollDiagnostics(bool final) noexcept {
 }
 
 void RenderManager::BeginRendering(const Framebuffer* framebuffer,
-                                   Common::Rectangle<u32> draw_rect) {
+                                   Common::Rectangle<u32> draw_rect, bool reads_storage) {
     const vk::Rect2D render_area = {
         .offset{
             .x = static_cast<s32>(draw_rect.left),
@@ -272,18 +293,45 @@ void RenderManager::BeginRendering(const Framebuffer* framebuffer,
         .do_clear = false,
     };
     // CodexAstraLocal: End the previous pass using its own attachment metadata before replacement.
-    BeginRendering(new_pass, true);
+    BeginRendering(new_pass, true, !framebuffer->shadow_rendering && !reads_storage);
     images = framebuffer->Images();
     aspects = framebuffer->Aspects();
     shadow_rendering = framebuffer->shadow_rendering;
 }
 
-void RenderManager::BeginRendering(const RenderPass& new_pass, bool framebuffer_pass) {
+void RenderManager::BeginRendering(const RenderPass& new_pass, bool framebuffer_pass,
+                                  bool allow_containment) {
     if (pass == new_pass) [[likely]] {
+        // CodexAstraLocal: Exact reuse must not erase a hazard introduced by
+        // this draw; subsequent smaller draws cannot treat that pass as ordinary.
+        containment_eligible &= allow_containment;
         num_draws++;
         if (diagnostics_enabled) ++diagnostic_reuses;
         return;
     }
+
+    // CodexAstraLocal: PPSSPP-style compatible pass reuse, without reordering
+    // commands or changing LOAD/STORE. Retain the original area through A/B/C;
+    // utility, clear, feedback and explicit submission boundaries remain intact.
+    const auto contains = [](const vk::Rect2D& outer, const vk::Rect2D& inner) {
+        return inner.offset.x >= outer.offset.x && inner.offset.y >= outer.offset.y &&
+               s64{inner.offset.x} + inner.extent.width <= s64{outer.offset.x} + outer.extent.width &&
+               s64{inner.offset.y} + inner.extent.height <= s64{outer.offset.y} + outer.extent.height;
+    };
+    // CodexAstraLocal: Retain an existing driver's submission opportunity at
+    // would-be pass boundaries; merging must not starve the GPU command queue.
+    const bool submission_due = num_draws > MinDrawsToFlush && ShouldFlushPass();
+    if (reuse_contained_pass && pass.render_pass && submission_due)
+        ++containment_submission_boundaries;
+    if (reuse_contained_pass && !submission_due && pass.render_pass && containment_eligible && allow_containment &&
+        framebuffer_pass && !pass.do_clear && !new_pass.do_clear &&
+        pass.framebuffer == new_pass.framebuffer && pass.render_pass == new_pass.render_pass &&
+        contains(pass.render_area, new_pass.render_area)) {
+        ++contained_pass_reuses;
+        ++num_draws;
+        return;
+    }
+    if (reuse_contained_pass && pass.render_pass) ++containment_refusals;
 
     // CodexAstraLocal: Classify the existing state-change boundary only.
     EndRendering(PassEndReason::PassChange);
@@ -300,6 +348,7 @@ void RenderManager::BeginRendering(const RenderPass& new_pass, bool framebuffer_
     });
 
     pass = new_pass;
+    containment_eligible = framebuffer_pass && allow_containment && !new_pass.do_clear;
 }
 
 void RenderManager::EndRendering(PassEndReason reason) {
@@ -370,6 +419,7 @@ void RenderManager::EndRendering(PassEndReason reason) {
     images = {};
     aspects = {};
     shadow_rendering = false;
+    containment_eligible = false;
 
     // The Mali guide recommends flushing at the end of each major renderpass
     // Testing has shown this has a significant effect on rendering performance

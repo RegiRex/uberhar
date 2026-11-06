@@ -55,7 +55,7 @@ void Equal(const std::vector<OutputVertex>& a,const std::vector<OutputVertex>& b
 
 // CodexAstraLocal: Seed old buffer values, vary tails and winding, and compare
 // both emitted values and final private state after normal or throwing handlers.
-void Case(PipelineRegs::TriangleTopology topology,u32 tail,bool winding,u32 count,int throw_at) {
+void Case(PipelineRegs::TriangleTopology topology,u32 tail,bool winding,u32 count,int throw_at,bool typed) {
     PrimitiveAssembler scalar{topology},bulk{topology};
     const auto ignore=[](const auto&,const auto&,const auto&){};
     for(u32 i=0;i<2;++i){scalar.SubmitVertex(Vertex(900+i),ignore);bulk.SubmitVertex(Vertex(900+i),ignore);}
@@ -72,7 +72,11 @@ void Case(PipelineRegs::TriangleTopology topology,u32 tail,bool winding,u32 coun
     };};
     const PrimitiveAssembler::TriangleHandler ah=callback(a,acalls),bh=callback(b,bcalls);
     try{for(const auto& v:vertices)scalar.SubmitVertex(v,ah);}catch(const Thrown&){athrow=true;}
-    try{bulk.SubmitOrdered(count,[&](u32 i)noexcept->const OutputVertex&{return vertices[i];},bh);}catch(const Thrown&){bthrow=true;}
+    const auto getter=[&](u32 i)noexcept->const OutputVertex&{return vertices[i];};
+    try{
+        if(typed) bulk.SubmitOrderedTyped(count,getter,callback(b,bcalls));
+        else bulk.SubmitOrdered(count,getter,bh);
+    }catch(const Thrown&){bthrow=true;}
     Need(athrow==bthrow,"exception point");Equal(a,b);Need(State(scalar)==State(bulk),"serialized/raw retained state");
     const auto next=[&](auto& out){return [&](const OutputVertex& x,const OutputVertex& y,const OutputVertex& z){out.push_back(x);out.push_back(y);out.push_back(z);};};
     for(u32 i=0;i<5;++i){scalar.SubmitVertex(Vertex(500+i),next(a));bulk.SubmitVertex(Vertex(500+i),next(b));}
@@ -81,7 +85,7 @@ void Case(PipelineRegs::TriangleTopology topology,u32 tail,bool winding,u32 coun
 
 // CodexAstraLocal: Persistent partitions include zero/one/two tails and storage
 // boundaries. Each topology case retains externally issued winding in draw order.
-void Partitions(PipelineRegs::TriangleTopology topology) {
+void Partitions(PipelineRegs::TriangleTopology topology,bool typed) {
     PrimitiveAssembler scalar{topology},bulk{topology};
     std::vector<OutputVertex> a,b,vertices;
     for(u32 i=0;i<9000;++i)vertices.push_back(Vertex(i));
@@ -93,7 +97,9 @@ void Partitions(PipelineRegs::TriangleTopology topology) {
     for(u32 count:{0U,1U,2U,3U,4U,4095U,0U,4096U,5U}) {
         scalar.SetWinding();bulk.SetWinding();
         for(u32 i=0;i<count;++i)scalar.SubmitVertex(vertices[start+i],h(a));
-        bulk.SubmitOrdered(count,[&](u32 i)noexcept->const OutputVertex&{return vertices[start+i];},h(b));
+        const auto getter=[&](u32 i)noexcept->const OutputVertex&{return vertices[start+i];};
+        if(typed) bulk.SubmitOrderedTyped(count,getter,h(b));
+        else bulk.SubmitOrdered(count,getter,h(b));
         Equal(a,b);Need(State(scalar)==State(bulk),"persistent partition state");start+=count;
     }
 }
@@ -101,15 +107,17 @@ void Partitions(PipelineRegs::TriangleTopology topology) {
 // storage-boundary cases and continuation after a throw use the same oracle.
 int main()try{
     u32 cases{};
+    // CodexAstraLocal: Typed and OFF paths share the byte/state/throw oracle.
+    for(bool typed:{false,true})
     for(auto topology:{PipelineRegs::TriangleTopology::List,PipelineRegs::TriangleTopology::Shader,
                        PipelineRegs::TriangleTopology::Strip,PipelineRegs::TriangleTopology::Fan}) {
         for(u32 tail:{0U,1U,2U})for(bool winding:{false,true}) {
             for(u32 count:{0U,1U,2U,3U,4U,5U,6U,7U,63U,64U,65U,255U,256U,257U,4095U,4096U,4097U}) {
-                Case(topology,tail,winding,count,-1);++cases;
+                Case(topology,tail,winding,count,-1,typed);++cases;
             }
-            for(int event:{0,1,2,5}){Case(topology,tail,winding,24,event);++cases;}
+            for(int event:{0,1,2,5}){Case(topology,tail,winding,24,event,typed);++cases;}
         }
-        Partitions(topology);
+        Partitions(topology,typed);
     }
-    std::cout<<"{\"cases\":"<<cases<<",\"partitions\":36,\"checks\":"<<checks<<"}\n";
+    std::cout<<"{\"cases\":"<<cases<<",\"partitions\":72,\"checks\":"<<checks<<"}\n";
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}

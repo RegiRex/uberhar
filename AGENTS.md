@@ -1,4 +1,60 @@
-# CURRENT — 0.1.56 settings precedence correction; stop after submission
+# CURRENT — 0.1.57 work reduction; validation, release and root-only qualification
+
+<!-- CodexAstraLocal: November 6 owner authorizes the full approved .57 implementation and subsequent root-operated Dark Moon/Xenoblade tests. This supersedes older report-only and stop-after-submission blocks. -->
+Continue the authorized .57 work from .56-r2 commit
+0723b003d92d20df45778b046672c77739e78599 on
+uberhar/0.1.57-work-reduction. The owner-approved scope is changed-only pure-state
+preparation, guarded contained-pass reuse, typed ordered CPU append, Include
+scissor narrowing, bounded adaptive histories, independent GPU observer and frame
+census controls, a narrow Turnip static-state experiment, displayed-eye-only
+presentation preparation and a separate default-OFF early-right-eye experiment.
+The early experiment also requires original Disable Right Eye Render and its title
+compatibility policy; future resource consumers remain a qualification risk.
+
+Every experiment belongs in alpha quick Testing with ordinary-global -> global
+Testing -> ordinary-title -> title-Testing precedence, including explicit false/zero.
+Keep settings initialization/crash fixes, live resolution, saved Custom data and
+real launch/resource boundaries. Retire the Hardware Shader quick experiment and
+fix ordinary hardware shaders OFF in Native/Combo; retain Custom/OpenGL and Combo's
+independent ready-GPU route. Remove Linear Filtering only from quick Testing,
+preserve/migrate its ordinary preference, and restore Optimize generic shaders to
+quick Testing. Turnip pass-end submission remains in Graphics. ADPF is deferred:
+no trustworthy CPU-work-duration/target contract is implemented for hints.
+
+Validation is ongoing. Focused local fixture results do not establish a complete
+Android build, publication, rendering correctness or hardware improvement. No .57
+APK has been built/published or hardware-qualified at this checkpoint. Run affected
+executable/Android/shader checks and independent review on the integrated tree;
+repair real failures without dropping gates or repeatedly rerunning passed checks.
+The retired .56-r2 publication exception must not redirect .57: use the existing
+gated workflow and the immutable new version tag, preserving prior releases.
+
+Root owns integration, publication and all device operations. After the required
+gates, root verifies APK hash/signature, updates without uninstalling or losing
+saves/data, and performs the authorized Dark Moon/Xenoblade comparisons. Match
+Standard mode, closed background apps, healthy Wi-Fi, driver, cache, settings and
+scene; keep Performance evidence separate. Record scene low/mean/high, app CPU,
+all-core utilization and CPU7/GPU context at lows/highs. Capture has no arbitrary
+time, sample or inactivity cutoff while testing remains active. Standard's fixed
+fan mode must not be inferred to differ from raw fan codes alone.
+
+Archive confirmed removed code by feature under docs/reference/retired, outside
+built/packaged sources, with origin commit, license and restoration dependencies.
+New logical sections need CodexAstraLocal purpose comments; removable diagnostics
+need CodexAstraLocal TEST-ONLY LOG and removal conditions. Preserve private evidence.
+Agents announce automation, provide inspectable log/status handles, yield during
+it and stop after their assigned scope. Root completes the report/handoff, restores
+both host displays to the owner-requested 50%, then sleeps Thor and laptop at the
+authorized final completion. Historical sleep/stop instructions below do not move
+that endpoint. Touch-latency research remains after build submission.
+
+Current private checkpoint:
+/home/regirex/uberhar-recovery/build057-work-reduction/RESUME.md
+Public scope: docs/releases/0.1.57.md and docs/UBERHAR_PER_GAME_SETTINGS.md.
+
+---
+
+# HISTORICAL — 0.1.56 settings precedence correction; stop after submission
 
 <!-- CodexAstraLocal: Latest owner explicitly requires Options to be global-only, every per-game choice to beat globals, and no blanket settings restrictions beyond real conflicts. -->
 The .56-r1 validation missed cross-layer precedence: global Testing still beat

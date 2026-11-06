@@ -25,8 +25,9 @@ public:
     // pools may overlap; this does not reserve physical cores or cap all threads.
     explicit ParallelTextureDecoder(bool enabled_, unsigned processors =
                                         Common::Uberhar::AvailableProcessors(),
-                                    void (*worker_start)() = nullptr)
-        : enabled{enabled_}, pool{processors > 2 ? processors - 2 : 1, worker_start},
+                                    void (*worker_start)() = nullptr, bool adaptive = true)
+        : enabled{enabled_}, pool{processors > 2 ? processors - 2 : 1, worker_start,
+              Common::Uberhar::AuxiliaryBudget::Global(), nullptr, adaptive},
           last_report{Clock::now()} {}
 
     unsigned CreatedWorkers() const { return pool.CreatedWorkers(); }
@@ -54,7 +55,12 @@ public:
                 const u32 count = static_cast<u32>(pixels / 64);
                 work = pool.Run(count, Grain, [&](u32 first, u32 last) {
                     decode(info.width, info.height, source, dest, first, last);
-                }, measure);
+                }, measure, {
+                    // CodexAstraLocal: Reuse codec metadata, not texture bytes
+                    // or addresses. Different format/dimensions keep separate
+                    // recurring histories without hashing guest contents.
+                    1 + format, (std::uint64_t{info.width} << 32) | info.height,
+                    1 + static_cast<std::uint64_t>(convert)});
             }
         }
         if (!admitted) {
@@ -97,12 +103,15 @@ public:
                  "serial_samples={} parallel_samples={} serial_ns={} parallel_ns={} "
                  "owner_ns={} join_ns={} budget={} created={} startup_failures={} "
                  "adaptive_helpers={} adaptive_samples={} adaptive_rejected={} "
-                 "adaptive_trials={} adaptive_accepted={} adaptive_reverted={}",
+                 "adaptive_trials={} adaptive_accepted={} adaptive_reverted={} adaptive_enabled={} "
+                 "cohort_hits={} cohort_misses={} cohort_evictions={} cohort_expired={}",
                  final, enabled, calls, input_bytes, serial_calls, parallel_calls, owner_tiles,
                  worker_tiles, peak_threads, serial_samples, parallel_samples, serial_ns,
                  parallel_ns, owner_ns, join_ns, pool.Available(), pool.CreatedWorkers(),
                  pool.StartupFailures(), scheduling.desired, scheduling.samples,
-                 scheduling.rejected, scheduling.trials, scheduling.accepted, scheduling.reverted);
+                 scheduling.rejected, scheduling.trials, scheduling.accepted, scheduling.reverted,
+                 scheduling.enabled, scheduling.cohort_hits, scheduling.cohort_misses,
+                 scheduling.cohort_evictions, scheduling.cohort_expired);
     }
 
 private:

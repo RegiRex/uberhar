@@ -127,18 +127,65 @@ struct PrimitiveAssembler {
     // general scalar submission and Strip/Fan behavior remain inherited.
     template <typename Getter>
     void SubmitOrdered(u32 count, Getter&& get, const TriangleHandler& handler) {
+        SubmitOrderedImpl<false>(count, std::forward<Getter>(get), handler);
+    }
+
+    // CodexAstraLocal: A typed append handler removes per-triangle std::function
+    // dispatch without changing the retained pair, winding or throw boundary.
+    template <typename Getter, typename Handler>
+    void SubmitOrderedTyped(u32 count, Getter&& get, const Handler& handler) {
+        SubmitOrderedImpl<true>(count, std::forward<Getter>(get), handler);
+    }
+
+private:
+    // CodexAstraLocal: Exact scalar semantics for typed tails and Strip/Fan.
+    // The original public scalar entry remains the reference and OFF route.
+    template <typename Handler>
+    void SubmitVertexTyped(const OutputVertex& vtx, const Handler& handler) {
+        switch (topology) {
+        case PipelineRegs::TriangleTopology::List:
+        case PipelineRegs::TriangleTopology::Shader:
+            if (buffer_index < 2) buffer[buffer_index++] = vtx;
+            else {
+                buffer_index = 0;
+                if (topology == PipelineRegs::TriangleTopology::Shader && winding) {
+                    handler(buffer[1], buffer[0], vtx);
+                    winding = false;
+                } else handler(buffer[0], buffer[1], vtx);
+            }
+            break;
+        case PipelineRegs::TriangleTopology::Strip:
+        case PipelineRegs::TriangleTopology::Fan:
+            if (strip_ready) handler(buffer[0], buffer[1], vtx);
+            buffer[buffer_index] = vtx;
+            strip_ready |= (buffer_index == 1);
+            buffer_index = topology == PipelineRegs::TriangleTopology::Strip ? !buffer_index : 1;
+            break;
+        default:
+            // CodexAstraLocal: Preserve the inherited invalid-topology diagnostic.
+            SubmitVertex(vtx, handler);
+            break;
+        }
+    }
+
+    template <bool Typed, typename Getter, typename Handler>
+    void SubmitOrderedImpl(u32 count, Getter&& get, const Handler& handler) {
         static_assert(noexcept(get(u32{})), "borrowed getter must not throw");
         static_assert(std::is_same_v<decltype(get(u32{})), const OutputVertex&>,
                       "borrowed getter must retain immutable vertices");
+        const auto scalar = [&](const OutputVertex& vertex) {
+            if constexpr (Typed) SubmitVertexTyped(vertex, handler);
+            else SubmitVertex(vertex, handler);
+        };
         if (topology != PipelineRegs::TriangleTopology::List &&
             topology != PipelineRegs::TriangleTopology::Shader) {
             for (u32 index = 0; index < count; ++index)
-                SubmitVertex(get(index), handler);
+                scalar(get(index));
             return;
         }
         u32 index{};
         while (index < count && buffer_index != 0)
-            SubmitVertex(get(index++), handler);
+            scalar(get(index++));
         const OutputVertex* last_first{};
         const OutputVertex* last_second{};
         const auto preserve_pair = [&] {
@@ -168,7 +215,7 @@ struct PrimitiveAssembler {
         }
         preserve_pair();
         while (index < count)
-            SubmitVertex(get(index++), handler);
+            scalar(get(index++));
     }
 
 private:

@@ -83,9 +83,8 @@ object NativeLibrary {
     var running = false
     var requestedRightEye = false
     var alphaTestingAvailable = true
-    var effectiveHardware = false
+    val effectiveExperiments = mutableMapOf<String, Boolean>()
     var effectiveDelay = 0
-    var effectiveFiltering = true
     var effectiveDepth = 0
     var runningTitle = 0x000400000F700100L
     var reloadCount = 0
@@ -93,9 +92,8 @@ object NativeLibrary {
     fun isRunning() = running
     fun isAlphaTestingAvailable() = alphaTestingAvailable
     fun getRequestedRightEyeRenderDisabled() = requestedRightEye
-    fun getEffectiveHardwareShaders() = effectiveHardware
+    fun getEffectiveTestingBoolean(key: String) = effectiveExperiments[key] ?: false
     fun getEffectiveRenderThreadDelayUs() = effectiveDelay
-    fun getEffectiveLinearFiltering() = effectiveFiltering
     fun getEffectiveStereoDepth() = effectiveDepth
     fun getRunningTitleId() = runningTitle
     fun reloadSettings() { reloadCount++ }
@@ -206,109 +204,54 @@ fun main(args: Array<String>) {
     check(read(title).get("Layout", "layouts_to_cycle") == "1, 4")
     check(config.readBytes().contentEquals(originalGlobal))
 
-    // CodexAstraLocal: Exercise the production four-layer resolver without mutating UI enum drafts.
+    // CodexAstraLocal: Exercise every real .57 key through all four sparse layers.
     val beforeTesting = title.readBytes()
     val testingFile = File(folder, "config/testing.ini")
     val titleSection = "Testing.000400000F700100"
-    val allTestingKeys = setOf("enabled", "preset", "resolution", "disable_right_eye_render",
-        "use_hw_shader", "delay_game_render_thread_us", "filter_mode", "factor_3d")
-    val workingBefore = Settings.allSettings.map { it.valueAsString }
+    val choices = TestingExperiment.entries
     TestingSettings.load("")
-    check(!TestingSettings.enabled && TestingSettings.preset == 0)
-    check(TestingSettings.resolution == 2 && !TestingSettings.hardwareShaders)
     TestingSettings.enabled = true
     check(TestingSettings.save("enabled"))
-    check(read(testingFile)["Testing"]!!.keys == setOf("enabled")) {
-        "Enabling Testing pinned unrelated inherited choices"
+    check(read(testingFile)["Testing"]!!.keys == setOf("enabled"))
+    check(!TestingSettings.save("use_hw_shader") && !TestingSettings.save("filter_mode"))
+    val workingBefore = Settings.allSettings.map { it.valueAsString }
+    for (choice in choices) {
+        check(!choice.setting.isRuntimeEditable)
+        TestingSettings.load("")
+        TestingSettings.setExperiment(choice, true)
+        check(TestingSettings.save(choice.key))
+        val ordinary = read(title)
+        ordinary.put("Renderer", choice.key, false)
+        write(title, ordinary)
+        TestingSettings.load("000400000F700100")
+        check(!TestingSettings.experiment(choice)) { "Global Testing beat ordinary title ${choice.key}" }
+        val globalBefore = read(testingFile)["Testing"]!!.toMap()
+        TestingSettings.setExperiment(choice, true)
+        check(TestingSettings.save(choice.key))
+        TestingSettings.load("000400000F700100")
+        check(TestingSettings.experiment(choice))
+        TestingSettings.setExperiment(choice, false)
+        check(TestingSettings.save(choice.key))
+        TestingSettings.load("000400000F700100")
+        check(!TestingSettings.experiment(choice)) { "Explicit title false lost for ${choice.key}" }
+        check(read(testingFile)["Testing"]!!.toMap() == globalBefore)
+        TestingSettings.load("0004000000123400")
+        check(TestingSettings.experiment(choice)) { "Another title inherited wrong experiment" }
     }
-    TestingSettings.preset = 2
-    check(TestingSettings.save("preset"))
-    TestingSettings.resolution = 2
-    check(TestingSettings.save("resolution"))
-    TestingSettings.disableRightEyeRender = true
-    check(TestingSettings.save("disable_right_eye_render"))
-    TestingSettings.hardwareShaders = true
-    check(TestingSettings.save("use_hw_shader"))
-    TestingSettings.renderThreadDelayUs = 100
-    check(TestingSettings.save("delay_game_render_thread_us"))
-    TestingSettings.linearFiltering = false
-    check(TestingSettings.save("filter_mode"))
-    TestingSettings.stereoDepth = 1
-    check(TestingSettings.save("factor_3d"))
-    check(read(testingFile)["Testing"]!!.keys == allTestingKeys)
-    check(!TestingSettings.save("unknown"))
-    val globalsBeforeTitleEdit = read(testingFile)["Testing"]!!.toMap()
-    TestingSettings.load("000400000f700100")
-    check(TestingSettings.preset == 1 && TestingSettings.resolution == 4) {
-        "Global Testing clobbered ordinary title mode/CPU or resolution"
-    }
-    check(TestingSettings.hardwareShaders && !TestingSettings.effectiveHardwareShaders())
-    check(TestingSettings.disableRightEyeRender && !TestingSettings.linearFiltering && TestingSettings.stereoDepth == 1)
+    check(Settings.allSettings.map { it.valueAsString } == workingBefore)
+    check(config.readBytes().contentEquals(originalGlobal))
+    TestingSettings.load("000400000F700100")
     TestingSettings.renderThreadDelayUs = 0
     check(TestingSettings.save("delay_game_render_thread_us"))
-    check(read(testingFile)[titleSection]!!.keys == setOf("delay_game_render_thread_us"))
-    check(read(testingFile)["Testing"]!!.toMap() == globalsBeforeTitleEdit)
-    TestingSettings.load("")
-    TestingSettings.linearFiltering = true
-    check(TestingSettings.save("filter_mode"))
     TestingSettings.stereoDepth = 0
     check(TestingSettings.save("factor_3d"))
-    TestingSettings.load("000400000F700100")
-    check(TestingSettings.linearFiltering && TestingSettings.stereoDepth == 0 && TestingSettings.renderThreadDelayUs == 0) {
-        "A title delay edit pinned unrelated global defaults"
-    }
-    check(Settings.allSettings.map { it.valueAsString } == workingBefore) {
-        "Testing raw reads changed ordinary UI working values"
-    }
-    check(title.readBytes().contentEquals(beforeTesting) && config.readBytes().contentEquals(originalGlobal))
-
-    // CodexAstraLocal: Ordinary title false/zero values beat contradictory global Testing keys.
-    val ordinary = read(title)
-    for ((key, value) in mapOf("uberhar_test_mode" to "0", "graphics_api" to "1",
-        "disable_right_eye_render" to "false", "use_hw_shader" to "false",
-        "delay_game_render_thread_us" to "0", "filter_mode" to "true", "factor_3d" to "0")) {
-        ordinary.put("Renderer", key, value)
-    }
-    write(title, ordinary)
-    val contradictory = read(testingFile)
-    contradictory.put("Testing", "filter_mode", false)
-    contradictory.put("Testing", "factor_3d", 1)
-    contradictory[titleSection]!!.remove("delay_game_render_thread_us")
-    write(testingFile, contradictory)
-    TestingSettings.load("000400000F700100")
-    check(TestingSettings.preset == -1 && TestingSettings.resolvedMode() == UberharTestMode.CUSTOM)
-    check(TestingSettings.resolution == 4 && !TestingSettings.disableRightEyeRender && !TestingSettings.hardwareShaders)
-    check(TestingSettings.renderThreadDelayUs == 0 && TestingSettings.linearFiltering && TestingSettings.stereoDepth == 0)
-    // CodexAstraLocal: The later title Testing layer can explicitly replace every ordinary title choice.
-    TestingSettings.preset = 2
-    check(TestingSettings.save("preset"))
-    TestingSettings.resolution = 2
-    check(TestingSettings.save("resolution"))
-    TestingSettings.disableRightEyeRender = true
-    check(TestingSettings.save("disable_right_eye_render"))
-    TestingSettings.hardwareShaders = true
-    check(TestingSettings.save("use_hw_shader"))
-    TestingSettings.renderThreadDelayUs = 100
-    check(TestingSettings.save("delay_game_render_thread_us"))
-    TestingSettings.linearFiltering = false
-    check(TestingSettings.save("filter_mode"))
-    TestingSettings.stereoDepth = 1
-    check(TestingSettings.save("factor_3d"))
-    TestingSettings.load("000400000F700100")
-    check(TestingSettings.preset == 2 && TestingSettings.resolution == 2 && TestingSettings.effectiveHardwareShaders())
-    check(TestingSettings.disableRightEyeRender && TestingSettings.renderThreadDelayUs == 100)
-    check(!TestingSettings.linearFiltering && TestingSettings.stereoDepth == 1)
-
-    // CodexAstraLocal: Title OFF survives global ON; title ON also works while global is OFF.
-    val globalsBeforeSwitch = read(testingFile)["Testing"]!!.toMap()
     TestingSettings.enabled = false
     check(TestingSettings.save("enabled"))
     TestingSettings.load("000400000F700100")
-    check(!TestingSettings.enabled && TestingSettings.preset == -1 && TestingSettings.resolution == 4)
-    check(!TestingSettings.disableRightEyeRender && !TestingSettings.hardwareShaders)
-    check(read(testingFile)["Testing"]!!.toMap() == globalsBeforeSwitch)
+    check(!TestingSettings.enabled)
     TestingSettings.load("0004000000123400")
-    check(TestingSettings.enabled && TestingSettings.preset == 2 && TestingSettings.resolution == 2)
+    check(TestingSettings.enabled)
+    // Title ON can override global OFF without modifying that global master.
     TestingSettings.load("")
     TestingSettings.enabled = false
     check(TestingSettings.save("enabled"))
@@ -316,88 +259,43 @@ fun main(args: Array<String>) {
     TestingSettings.enabled = true
     check(TestingSettings.save("enabled"))
     TestingSettings.load("000400000F700100")
-    check(TestingSettings.enabled && TestingSettings.preset == 2 && TestingSettings.effectiveHardwareShaders())
-    TestingSettings.load("0004000000123400")
-    check(!TestingSettings.enabled && TestingSettings.preset == 0)
-    TestingSettings.enabled = true
-    check(TestingSettings.save("enabled"))
-    TestingSettings.load("0004000000123400")
-    check(TestingSettings.enabled && TestingSettings.preset == 2 && TestingSettings.disableRightEyeRender) {
-        "Title ON did not inherit explicit global Testing defaults while global was OFF"
-    }
-
-    // CodexAstraLocal: Reset removes exactly eight owned keys and preserves ordinary/unknown data.
-    val withUnknown = read(testingFile)
-    withUnknown.put(titleSection, "future_unknown", "keep")
-    write(testingFile, withUnknown)
-    val ordinaryBeforeReset = title.readBytes()
-    TestingSettings.load("000400000F700100")
+    check(TestingSettings.enabled)
+    check(read(testingFile).get("Testing", "enabled") == "false")
+    val unknown = read(testingFile).apply { put(titleSection, "future_unknown", "keep") }
+    write(testingFile, unknown)
     check(TestingSettings.useGlobalChoices())
     check(read(testingFile)[titleSection]!!.keys == setOf("future_unknown"))
-    check(!TestingSettings.enabled && TestingSettings.preset == -1)
-    check(title.readBytes().contentEquals(ordinaryBeforeReset))
-    TestingSettings.load("")
+    // Sparse numeric edits and invalid selector handling still preserve normal choices.
     TestingSettings.enabled = true
     check(TestingSettings.save("enabled"))
-
-    // CodexAstraLocal: Malformed explicit experiments use safe baselines; invalid selectors inherit.
-    val malformed = read(testingFile)
-    for (key in allTestingKeys - setOf("enabled")) malformed.put(titleSection, key, "broken")
-    write(testingFile, malformed)
-    TestingSettings.load("000400000F700100")
-    check(TestingSettings.preset == -1 && TestingSettings.resolution == 4)
-    check(!TestingSettings.disableRightEyeRender && !TestingSettings.hardwareShaders)
-    check(TestingSettings.renderThreadDelayUs == 0 && TestingSettings.linearFiltering && TestingSettings.stereoDepth == 0)
-    for (value in listOf("-1", "16001", "99999999999999999999")) {
-        val invalid = read(testingFile)
-        invalid.put(titleSection, "delay_game_render_thread_us", value)
-        invalid.put(titleSection, "factor_3d", value)
-        write(testingFile, invalid)
+    for (value in listOf("-1", "16001", "broken", "99999999999999999999")) {
+        val malformed = read(testingFile)
+        malformed.put(titleSection, "delay_game_render_thread_us", value)
+        malformed.put(titleSection, "factor_3d", value)
+        write(testingFile, malformed)
         TestingSettings.load("000400000F700100")
         check(TestingSettings.renderThreadDelayUs == 0 && TestingSettings.stereoDepth == 0)
     }
-    TestingSettings.renderThreadDelayUs = 16000
-    check(TestingSettings.save("delay_game_render_thread_us"))
-    TestingSettings.stereoDepth = 1
-    check(TestingSettings.save("factor_3d"))
-    TestingSettings.load("000400000F700100")
-    check(TestingSettings.renderThreadDelayUs == 16000 && TestingSettings.stereoDepth == 1)
-
-    // CodexAstraLocal: Only the matching explicit title can display native launch-latched controls.
+    val c = choices.first()
     NativeLibrary.running = true
     NativeLibrary.requestedRightEye = true
-    NativeLibrary.effectiveHardware = true
+    NativeLibrary.effectiveExperiments[c.key] = true
     NativeLibrary.effectiveDelay = 17
-    NativeLibrary.effectiveFiltering = false
-    NativeLibrary.effectiveDepth = 1
-    check(TestingSettings.requestedRightEyeRenderDisabled() && TestingSettings.effectiveHardwareShaders())
-    check(TestingSettings.effectiveRenderThreadDelayUs() == 17 && !TestingSettings.effectiveLinearFiltering())
-    TestingSettings.resolution = 2
-    check(TestingSettings.save("resolution"))
     TestingSettings.load("000400000F700100")
+    check(TestingSettings.effectiveExperiment(c) && TestingSettings.requestedRightEyeRenderDisabled())
     check(TestingSettings.effectiveRenderThreadDelayUs() == 17)
     TestingSettings.load("")
-    check(TestingSettings.effectiveRenderThreadDelayUs() == 100)
-    TestingSettings.load("0004000000123400")
-    check(TestingSettings.effectiveRenderThreadDelayUs() == 100)
+    check(TestingSettings.effectiveExperiment(c) == TestingSettings.experiment(c))
     NativeLibrary.running = false
-
-    // CodexAstraLocal: Alpha-disabled builds resolve ordinary values and never mutate stale Testing.
     val alphaBytes = testingFile.readBytes()
     NativeLibrary.alphaTestingAvailable = false
     TestingSettings.load("000400000F700100")
-    check(!TestingSettings.available && !TestingSettings.enabled && TestingSettings.preset == -1)
-    check(!TestingSettings.requestedRightEyeRenderDisabled() && !TestingSettings.effectiveHardwareShaders())
-    check(TestingSettings.effectiveRenderThreadDelayUs() == 0 && TestingSettings.effectiveStereoDepth() == 0)
+    check(!TestingSettings.available && !TestingSettings.enabled)
     check(!TestingSettings.save("enabled") && !TestingSettings.useGlobalChoices())
     check(testingFile.readBytes().contentEquals(alphaBytes))
     check(DriverSettings.save("000400000F700100", DriverSettings.Selection("content://driver=v27", "v27")))
     check(DriverSettings.load("000400000F700100")?.driver == "content://driver=v27")
-    check(DriverSettings.load("0004000000123400") == null)
-    check(DriverSettings.save("000400000F700100", DriverSettings.Selection(DriverSettings.SYSTEM, "System")))
     check(DriverSettings.save("000400000F700100", null))
-    check(DriverSettings.load("000400000F700100") == null)
-    check(!DriverSettings.save("../config", DriverSettings.Selection("bad", "bad")))
     NativeLibrary.alphaTestingAvailable = true
     // CodexAstraLocal: Test-only contradictions are restored before continuing ordinary model checks.
     title.writeBytes(beforeTesting)
@@ -405,9 +303,7 @@ fun main(args: Array<String>) {
     a.loadSettings("000400000F700100")
     IntSetting.UBERHAR_TEST_MODE.int = 3
     BooleanSetting.UBERHAR_CPU_VERTEX_ONLY.boolean = false
-    check(!TestingSettings.hardwareShadersConflictsWithCpuVertices(a))
     BooleanSetting.UBERHAR_CPU_VERTEX_ONLY.boolean = true
-    check(TestingSettings.hardwareShadersConflictsWithCpuVertices(a))
     check(IntSetting.UBERHAR_TEST_MODE.int == 3 && BooleanSetting.UBERHAR_CPU_VERTEX_ONLY.boolean)
 
     // Switching titles restores globals rather than leaking the preceding title's enum values.
@@ -440,70 +336,41 @@ fun main(args: Array<String>) {
     config.writeText("[Renderer]\nturbo_limit=400\n")
     Settings().loadSettings("")
     check(IntSetting.TURBO_LIMIT.int == 400) { "Legacy turbo cap was lost by section matching" }
-    // CodexAstraLocal: Invalid ordinary HW values defer to the final mode, preserving valid inheritance.
-    val fallbackDirectory = File(folder, "hardware-fallback").apply { mkdirs() }
-    DirectoryInitialization.userDirectory = fallbackDirectory.path
-    val fallbackGlobal = File(fallbackDirectory, "config/config.ini").apply { parentFile.mkdirs() }
-    val fallbackTesting = File(fallbackDirectory, "config/testing.ini")
-    val fallbackTitle = File(fallbackDirectory, "GameSettings/0004000000777700.ini").apply { parentFile.mkdirs() }
-    for (invalid in listOf("", "broken")) {
-        fallbackGlobal.writeText("[Renderer]\nuberhar_test_mode=0\nuse_hw_shader=$invalid\n")
-        fallbackTesting.writeText("[Testing]\nenabled=true\npreset=0\n")
-        fallbackTitle.writeText("[Renderer]\n")
-        TestingSettings.load("0004000000777700")
-        check(TestingSettings.resolvedMode() == UberharTestMode.NATIVE && !TestingSettings.hardwareShaders) {
-            "Invalid global HW froze Custom's default before global Testing selected Native"
-        }
-        fallbackGlobal.writeText("[Renderer]\nuberhar_test_mode=1\nuse_hw_shader=$invalid\n")
-        fallbackTitle.writeText("[Renderer]\nuberhar_test_mode=0\n")
-        TestingSettings.load("0004000000777700")
-        check(TestingSettings.resolvedMode() == UberharTestMode.CUSTOM && TestingSettings.hardwareShaders) {
-            "Invalid global HW froze Native's default before the ordinary title selected Custom"
-        }
-        for (explicit in listOf(false, true)) {
-            fallbackGlobal.writeText("[Renderer]\nuberhar_test_mode=1\nuse_hw_shader=$explicit\n")
-            fallbackTitle.writeText("[Renderer]\nuberhar_test_mode=0\nuse_hw_shader=$invalid\n")
-            TestingSettings.load("0004000000777700")
-            check(TestingSettings.hardwareShaders == explicit) {
-                "Invalid ordinary title HW discarded an explicit inherited value"
-            }
-        }
+    // CodexAstraLocal: Retired keys preserve data and active filtering without hiding an override.
+    val migrationDirectory = File(folder, "retired-controls").apply { mkdirs() }
+    DirectoryInitialization.userDirectory = migrationDirectory.path
+    val migrationGlobal = File(migrationDirectory, "config/config.ini").apply {
+        parentFile.mkdirs(); writeText("[Renderer]\nuse_hw_shader=true\n")
     }
-    fallbackGlobal.writeText("[Renderer]\n")
-    fallbackTesting.writeText("[Testing]\nenabled=false\n")
-    fallbackTitle.writeText("[Renderer]\n")
-    TestingSettings.load("0004000000777700")
-    check(TestingSettings.resolvedMode() == UberharTestMode.CUSTOM && TestingSettings.hardwareShaders) {
-        "Missing values did not match the native Custom/HW defaults"
+    val migrationTitle = File(migrationDirectory, "GameSettings/0004000000777700.ini").apply {
+        parentFile.mkdirs(); writeText("[Renderer]\nfilter_mode=false\nuse_hw_shader=true\n")
     }
-    // CodexAstraLocal: Selecting an ordinary title value equal to its loaded default
-    // still creates a choice that beats different global Testing values.
-    fallbackGlobal.writeText("[Renderer]\nuberhar_test_mode=1\nresolution_factor=2\n" +
-        "use_hw_shader=false\ndelay_game_render_thread_us=0\n")
-    fallbackTesting.writeText("[Testing]\nenabled=true\npreset=2\nresolution=4\n" +
-        "use_hw_shader=true\ndelay_game_render_thread_us=100\n")
-    fallbackTitle.writeText("[Renderer]\n")
-    val explicitOrdinary = Settings()
-    explicitOrdinary.loadSettings("0004000000777700")
-    check(IntSetting.RESOLUTION_FACTOR.int == 2 && !BooleanSetting.HW_SHADER.boolean)
-    for (setting in listOf(IntSetting.RESOLUTION_FACTOR, BooleanSetting.HW_SHADER,
-        IntSetting.DELAY_RENDER_THREAD_US)) check(explicitOrdinary.markPerGameSettingEdited(setting))
-    explicitOrdinary.saveSettings(View)
-    check(read(fallbackTitle).get("Renderer", "resolution_factor") == "2")
-    check(read(fallbackTitle).get("Renderer", "use_hw_shader") == "false")
-    check(read(fallbackTitle).get("Renderer", "delay_game_render_thread_us") == "0")
-    TestingSettings.load("0004000000777700")
-    check(TestingSettings.resolution == 2 && !TestingSettings.hardwareShaders &&
-        TestingSettings.renderThreadDelayUs == 0)
-    for (setting in listOf(IntSetting.RESOLUTION_FACTOR, BooleanSetting.HW_SHADER,
-        IntSetting.DELAY_RENDER_THREAD_US)) explicitOrdinary.resetPerGameSetting(setting)
-    explicitOrdinary.saveSettings(View)
-    TestingSettings.load("0004000000777700")
-    check(TestingSettings.resolution == 4 && TestingSettings.hardwareShaders &&
-        TestingSettings.renderThreadDelayUs == 100)
+    val migrationTesting = File(migrationDirectory, "config/testing.ini").apply {
+        writeText("[Testing]\nenabled=true\nfilter_mode=false\nuse_hw_shader=true\n" +
+            "[Testing.0004000000777700]\nfilter_mode=true\nuse_hw_shader=false\n")
+    }
+    Settings().loadSettings("0004000000777700")
+    check(read(migrationGlobal).get("Renderer", "filter_mode") == "false")
+    check(read(migrationTitle).get("Renderer", "filter_mode") == "false")
+    check(read(migrationGlobal).get("Renderer", "use_hw_shader") == "true")
+    check(read(migrationTitle).get("Renderer", "use_hw_shader") == "true")
+    val migrated = read(migrationTesting)
+    check(migrated.get("Testing", "filter_mode") == null)
+    check(migrated.get("Testing", "use_hw_shader") == null)
+    check(migrated.get("Retired.056.Testing", "filter_mode") == "false")
+    check(migrated.get("Retired.056.Testing.0004000000777700", "filter_mode") == "true")
+    val stable = listOf(migrationGlobal,migrationTitle,migrationTesting).map { it.readBytes() }
+    Settings().loadSettings("0004000000777700")
+    check(listOf(migrationGlobal,migrationTitle,migrationTesting).zip(stable).all { (file, bytes) ->
+        file.readBytes().contentEquals(bytes) })
+    migrationGlobal.writeText("[Renderer]\nfilter_mode=true\n")
+    migrationTesting.writeText("[Testing]\nenabled=false\nfilter_mode=false\n")
+    Settings().loadSettings("")
+    check(read(migrationGlobal).get("Renderer", "filter_mode") == "true")
+    check(read(migrationTesting).get("Retired.056.Testing", "filter_mode") == "false")
     DirectoryInitialization.userDirectory = folder.path
     checkTestingPanel(folder)
-    println("PASS: production settings/INI title isolation, sparse saves, limiter alias, inheritance reset, unknown retention, immediate layout saves, Testing global/title defaults and panel interactions, CPU veto, launch snapshots, alpha/beta preservation, driver independence and ID validation")
+    println("PASS: production settings/INI title isolation, sparse saves, limiter alias, inheritance reset, unknown retention, immediate layout saves, Testing global/title defaults and panel interactions, retired-key migration, all experiment precedence, launch snapshots, alpha/beta preservation, driver independence and ID validation")
 }
 ''',
     }

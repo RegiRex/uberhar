@@ -5,6 +5,26 @@ package org.citra.citra_emu.features.settings.model
 
 import org.citra.citra_emu.features.settings.utils.SettingsFile
 import org.citra.citra_emu.NativeLibrary
+import org.citra.citra_emu.R
+
+// CodexAstraLocal: One catalog keeps quick labels, persisted keys and default values
+// aligned. Backend owners implement each setting; no placeholder control is listed.
+enum class TestingExperiment(val setting: BooleanSetting, val title: Int, val description: Int) {
+    UBERHAR_CHANGED_STATE_ONLY(BooleanSetting.UBERHAR_CHANGED_STATE_ONLY, R.string.uberhar_changed_state_only, R.string.uberhar_changed_state_only_description),
+    UBERHAR_REUSE_CONTAINED_PASS(BooleanSetting.UBERHAR_REUSE_CONTAINED_PASS, R.string.uberhar_reuse_contained_pass, R.string.uberhar_reuse_contained_pass_description),
+    UBERHAR_TYPED_PRIMITIVE_APPEND(BooleanSetting.UBERHAR_TYPED_PRIMITIVE_APPEND, R.string.uberhar_typed_primitive_append, R.string.uberhar_typed_primitive_append_description),
+    UBERHAR_INCLUDE_SCISSOR(BooleanSetting.UBERHAR_INCLUDE_SCISSOR, R.string.uberhar_include_scissor, R.string.uberhar_include_scissor_description),
+    UBERHAR_ADAPTIVE_CPU_WORKERS(BooleanSetting.UBERHAR_ADAPTIVE_CPU_WORKERS, R.string.uberhar_adaptive_cpu_workers, R.string.uberhar_adaptive_cpu_workers_description),
+    UBERHAR_GPU_OBSERVER(BooleanSetting.UBERHAR_GPU_OBSERVER, R.string.uberhar_gpu_observer, R.string.uberhar_gpu_observer_description),
+    UBERHAR_FRAME_WORKLOAD_CENSUS(BooleanSetting.UBERHAR_FRAME_WORKLOAD_CENSUS, R.string.uberhar_frame_workload_census, R.string.uberhar_frame_workload_census_description),
+    UBERHAR_STATIC_DYNAMIC_STATE(BooleanSetting.UBERHAR_STATIC_DYNAMIC_STATE, R.string.uberhar_static_dynamic_state, R.string.uberhar_static_dynamic_state_description),
+    UBERHAR_PREPARE_DISPLAYED_EYE_ONLY(BooleanSetting.UBERHAR_PREPARE_DISPLAYED_EYE_ONLY, R.string.uberhar_prepare_displayed_eye_only, R.string.uberhar_prepare_displayed_eye_only_description),
+    UBERHAR_EARLY_RIGHT_EYE(BooleanSetting.UBERHAR_EARLY_RIGHT_EYE, R.string.uberhar_early_right_eye, R.string.uberhar_early_right_eye_description),
+    OPTIMIZE_GENERIC_SHADERS(BooleanSetting.UBERHAR_OPTIMIZE_GENERIC_SHADERS,
+        R.string.uberhar_optimize_generic_shaders, R.string.uberhar_optimize_generic_shaders_description);
+    val key get() = setting.key
+    val defaultValue get() = setting.defaultValue
+}
 
 // CodexAstraLocal: Testing is a sparse layer in each scope; ordinary title choices
 // outrank global defaults and only explicitly selected title Testing keys supersede them.
@@ -24,16 +44,15 @@ object TestingSettings {
         }
     var resolution = 1
     var disableRightEyeRender = false
-    var hardwareShaders = true
     var renderThreadDelayUs = 0
-    var linearFiltering = true
     var stereoDepth = 0
+    private val experiments = TestingExperiment.entries.associateWith { it.defaultValue }.toMutableMap()
     var gameId: String? = null
         private set
 
     private val section get() = gameId?.let { "Testing.$it" } ?: "Testing"
     private val keys = setOf("enabled", "preset", "resolution", "disable_right_eye_render",
-        "use_hw_shader", "delay_game_render_thread_us", "filter_mode", "factor_3d")
+        "delay_game_render_thread_us", "factor_3d") + TestingExperiment.entries.map { it.key }
     private fun parsedBoolean(value: String?): Boolean? = when (value?.lowercase()) {
         "true", "yes", "on", "1" -> true
         "false", "no", "off", "0" -> false
@@ -47,14 +66,16 @@ object TestingSettings {
         var cpuVertices: Boolean = false,
         var resolution: Int = 1,
         var rightEye: Boolean = false,
-        var hardware: Boolean? = null,
         var delay: Int = 0,
-        var filtering: Boolean = true,
-        var depth: Int = 0
+        var depth: Int = 0,
+        val experiments: MutableMap<TestingExperiment, Boolean> =
+            TestingExperiment.entries.associateWith { it.defaultValue }.toMutableMap()
     )
 
     // CodexAstraLocal: Raw reads must not reload shared setting enums and discard unsaved UI edits.
     private fun resolve(titleId: String?, settings: Settings? = null): Choices {
+        // CodexAstraLocal: Retire legacy quick keys before either ordinary layer is read.
+        if (available) SettingsFile.migrateRetiredTestingSettings(titleId)
         val global = SettingsFile.readRawSettingsFile()["Renderer"]?.toMutableMap() ?: mutableMapOf()
         val title = titleId?.let {
             SettingsFile.readRawSettingsFile(it)["Renderer"]?.toMutableMap()
@@ -85,12 +106,12 @@ object TestingSettings {
                 values["graphics_api"]?.toIntOrNull() in 0..1) result.mode = UberharTestMode.CUSTOM
             values["resolution_factor"]?.toIntOrNull()?.let { result.resolution = it.coerceIn(0, 18) }
             values["disable_right_eye_render"]?.let { result.rightEye = boolean(it, result.rightEye) }
-            // CodexAstraLocal: Invalid ordinary values inherit; defer the profile default until
-            // all mode layers resolve, so an intermediate mode cannot pin Hardware Shaders.
-            parsedBoolean(values["use_hw_shader"])?.let { result.hardware = it }
             values["delay_game_render_thread_us"]?.toIntOrNull()?.let { result.delay = it.coerceIn(0, 65000) }
-            values["filter_mode"]?.let { result.filtering = boolean(it, result.filtering) }
             values["factor_3d"]?.toIntOrNull()?.let { result.depth = it }
+            TestingExperiment.entries.forEach { choice ->
+                values[choice.key]?.let { result.experiments[choice] =
+                    boolean(it, result.experiments.getValue(choice)) }
+            }
         }
         fun overlay(section: String) {
             testing.get(section, "preset")?.toIntOrNull()?.takeIf { it in 0..2 }?.let {
@@ -100,13 +121,15 @@ object TestingSettings {
             testing.get(section, "resolution")?.toIntOrNull()?.takeIf { it == 2 || it == 4 }
                 ?.let { result.resolution = it }
             testing.get(section, "disable_right_eye_render")?.let { result.rightEye = boolean(it, false) }
-            testing.get(section, "use_hw_shader")?.let { result.hardware = boolean(it, false) }
             testing.get(section, "delay_game_render_thread_us")?.let {
                 result.delay = it.toIntOrNull()?.takeIf { value -> value in 0..16000 } ?: 0
             }
-            testing.get(section, "filter_mode")?.let { result.filtering = boolean(it, true) }
             testing.get(section, "factor_3d")?.let {
                 result.depth = it.toIntOrNull()?.takeIf { value -> value in 0..1 } ?: 0
+            }
+            TestingExperiment.entries.forEach { choice ->
+                testing.get(section, choice.key)?.let { result.experiments[choice] =
+                    boolean(it, result.experiments.getValue(choice)) }
             }
         }
         ordinary(global, false)
@@ -129,10 +152,9 @@ object TestingSettings {
         }
         resolution = values.resolution
         disableRightEyeRender = values.rightEye
-        hardwareShaders = values.hardware ?: (mode == UberharTestMode.CUSTOM)
         renderThreadDelayUs = values.delay
-        linearFiltering = values.filtering
         stereoDepth = values.depth
+        experiments.putAll(values.experiments)
     }
 
     fun save(editedKey: String): Boolean {
@@ -143,11 +165,10 @@ object TestingSettings {
             "preset" -> preset.takeIf { it in 0..2 } ?: return false
             "resolution" -> if (resolution == 4) 4 else 2
             "disable_right_eye_render" -> disableRightEyeRender
-            "use_hw_shader" -> hardwareShaders
             "delay_game_render_thread_us" -> renderThreadDelayUs.coerceIn(0, 16000)
-            "filter_mode" -> linearFiltering
             "factor_3d" -> stereoDepth.takeIf { it in 0..1 } ?: 0
-            else -> return false
+            else -> TestingExperiment.entries.firstOrNull { it.key == editedKey }
+                ?.let { experiments.getValue(it) } ?: return false
         }
         val file = SettingsFile.readTestingFile()
         file.put(section, editedKey, value)
@@ -157,11 +178,13 @@ object TestingSettings {
     fun resolvedMode(settings: Settings? = null): UberharTestMode =
         if (settings == null) mode else resolve(settings.gameId, settings).mode
 
-    fun hardwareShadersConflictsWithCpuVertices(settings: Settings? = null): Boolean {
-        val choices = settings?.let { resolve(it.gameId, it) }
-        return (choices?.mode ?: mode) == UberharTestMode.AUTOMATIC &&
-            (choices?.cpuVertices ?: cpuVertices)
-    }
+    fun setExperiment(choice: TestingExperiment, value: Boolean) { experiments[choice] = value }
+    fun experiment(choice: TestingExperiment): Boolean = experiments.getValue(choice)
+    // CodexAstraLocal: Running-title controls display the launch-owned native value,
+    // while global Options and other titles keep their own saved scope.
+    fun effectiveExperiment(choice: TestingExperiment): Boolean = if (showsRunningTitle()) {
+        NativeLibrary.getEffectiveTestingBoolean(choice.key)
+    } else experiment(choice)
 
     // CodexAstraLocal: Only an explicit editor for the running title displays its launch snapshot.
     private fun showsRunningTitle() = gameId != null && NativeLibrary.isRunning() &&
@@ -171,17 +194,9 @@ object TestingSettings {
         NativeLibrary.getRequestedRightEyeRenderDisabled()
     } else disableRightEyeRender
 
-    fun effectiveHardwareShaders(): Boolean = if (showsRunningTitle()) {
-        NativeLibrary.getEffectiveHardwareShaders()
-    } else hardwareShaders && !hardwareShadersConflictsWithCpuVertices()
-
     fun effectiveRenderThreadDelayUs(): Int = if (showsRunningTitle()) {
         NativeLibrary.getEffectiveRenderThreadDelayUs()
     } else renderThreadDelayUs
-
-    fun effectiveLinearFiltering(): Boolean = if (showsRunningTitle()) {
-        NativeLibrary.getEffectiveLinearFiltering()
-    } else linearFiltering
 
     fun effectiveStereoDepth(): Int = if (showsRunningTitle()) {
         NativeLibrary.getEffectiveStereoDepth()
@@ -191,7 +206,7 @@ object TestingSettings {
         if (!available) return false
         if (gameId == null) return true
         val file = SettingsFile.readTestingFile()
-        // CodexAstraLocal: Remove only the eight owned title keys; future metadata survives.
+        // CodexAstraLocal: Remove only owned title keys; unrelated and retirement metadata survives.
         keys.forEach { file[section]?.remove(it) }
         val saved = SettingsFile.saveTestingFile(file)
         if (saved) load()

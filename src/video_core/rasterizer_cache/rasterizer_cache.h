@@ -53,7 +53,10 @@ RasterizerCache<T>::RasterizerCache(Memory::MemorySystem& memory_,
                       Common::Uberhar::AvailableProcessors(),
                       // CodexAstraLocal: Identify helpers once at startup so
                       // thread CPU samples cannot misclassify them as the owner.
-                      [] { Common::SetCurrentThreadName("Texture decode"); }} {
+                      [] { Common::SetCurrentThreadName("Texture decode"); },
+                      // CodexAstraLocal: OFF bypasses adaptive cohort work;
+                      // the established static texture worker pool remains.
+                      Settings::values.uberhar_adaptive_cpu_workers.GetValue()} {
     using TextureConfig = Pica::TexturingRegs::TextureConfig;
 
     // Create null handles for all cached resources

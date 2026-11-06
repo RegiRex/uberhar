@@ -1,0 +1,12 @@
+{
+  "author": "CodexAstraLocal",
+  "base_commit": "0723b003d92d20df45778b046672c77739e78599",
+  "feature": "same-version .56-r2 publication mapping",
+  "source_paths": [
+    ".github/workflows/uberhar-alpha.yml",
+    "tools/uberhar/test_release_publication.py"
+  ],
+  "patch_sha256": "9c4763327083f3c200a30128f9a6a7d10d802b79905b32f7607c5510037a82d3",
+  "license": "GPLv2-or-later; repository license.txt copied alongside the historical patch",
+  "restore": "Audit reverse patch against current workflow and tests; only restore a narrowly authorized same-version repair with a new unused revision tag. Preserve immutable published releases; never redirect .57 or later versions to an older tag."
+}

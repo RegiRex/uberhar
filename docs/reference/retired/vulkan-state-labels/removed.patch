@@ -1,0 +1,59 @@
+--- src/video_core/renderer_vulkan/vk_rasterizer.cpp
++++ src/video_core/renderer_vulkan/vk_rasterizer.cpp
+@@ -313,15 +313,12 @@
+ 
+ void RasterizerVulkan::SyncDrawState() {
+     SyncDrawUniforms();
+-
+-    // SyncCullMode();
++    // CodexAstraLocal: Convert current guest cull/blend/depth/stencil state directly.
+     pipeline_info.state.rasterization.cull_mode.Assign(regs.rasterizer.cull_mode);
+     // If the framebuffer is flipped, request to also flip vulkan viewport
+     const bool is_flipped = regs.framebuffer.framebuffer.IsFlipped();
+     pipeline_info.state.rasterization.flip_viewport.Assign(is_flipped);
+-    // SyncBlendEnabled();
+     pipeline_info.state.blending.blend_enable = regs.framebuffer.output_merger.alphablend_enable;
+-    // SyncBlendFuncs();
+     pipeline_info.state.blending.color_blend_eq.Assign(
+         regs.framebuffer.output_merger.alpha_blending.blend_equation_rgb);
+     pipeline_info.state.blending.alpha_blend_eq.Assign(
+@@ -334,18 +331,13 @@
+         regs.framebuffer.output_merger.alpha_blending.factor_source_a);
+     pipeline_info.state.blending.dst_alpha_blend_factor.Assign(
+         regs.framebuffer.output_merger.alpha_blending.factor_dest_a);
+-    // SyncBlendColor();
+     pipeline_info.dynamic_info.blend_color = regs.framebuffer.output_merger.blend_const.raw;
+-    // SyncLogicOp();
+-    // SyncColorWriteMask();
+     pipeline_info.state.blending.logic_op = regs.framebuffer.output_merger.logic_op;
+ 
+     const u32 color_mask = regs.framebuffer.framebuffer.allow_color_write != 0
+                                ? (regs.framebuffer.output_merger.depth_color_mask >> 8) & 0xF
+                                : 0;
+     pipeline_info.state.blending.color_write_mask = color_mask;
+-
+-    // SyncStencilTest();
+     const auto& stencil_test = regs.framebuffer.output_merger.stencil_test;
+     const bool test_enable = stencil_test.enable && regs.framebuffer.framebuffer.depth_format ==
+                                                         Pica::FramebufferRegs::DepthFormat::D24S8;
+@@ -357,12 +349,10 @@
+     pipeline_info.state.depth_stencil.stencil_compare_op.Assign(stencil_test.func);
+     pipeline_info.dynamic_info.stencil_reference = stencil_test.reference_value;
+     pipeline_info.dynamic_info.stencil_compare_mask = stencil_test.input_mask;
+-    // SyncStencilWriteMask();
+     pipeline_info.dynamic_info.stencil_write_mask =
+         (regs.framebuffer.framebuffer.allow_depth_stencil_write != 0)
+             ? static_cast<u32>(regs.framebuffer.output_merger.stencil_test.write_mask)
+             : 0;
+-    // SyncDepthTest();
+     const bool test_enabled = regs.framebuffer.output_merger.depth_test_enable == 1 ||
+                               regs.framebuffer.output_merger.depth_write_enable == 1;
+     const auto compare_op = regs.framebuffer.output_merger.depth_test_enable == 1
+@@ -371,7 +361,6 @@
+ 
+     pipeline_info.state.depth_stencil.depth_test_enable.Assign(test_enabled);
+     pipeline_info.state.depth_stencil.depth_compare_op.Assign(compare_op);
+-    // SyncDepthWriteMask();
+     const bool write_enable = (regs.framebuffer.framebuffer.allow_depth_stencil_write != 0 &&
+                                regs.framebuffer.output_merger.depth_write_enable);
+     pipeline_info.state.depth_stencil.depth_write_enable.Assign(write_enable);

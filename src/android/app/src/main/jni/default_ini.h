@@ -150,6 +150,46 @@ static const char* android_config_default_file_content = (BOOST_HANA_STRING(R"(
 # 0 (default): lower compilation latency, 1: optimize generic GPU programs.
 )") DECLARE_KEY(uberhar_optimize_generic_shaders) BOOST_HANA_STRING(R"(
 
+# CodexAstraLocal: Reuse unchanged PICA state; launch-owned .57 comparison.
+# Default: true. Avoid repeated state preparation when register values are unchanged. Restart the game after changing.
+)") DECLARE_KEY(uberhar_changed_state_only) BOOST_HANA_STRING(R"(
+
+# CodexAstraLocal: Reuse contained render passes; launch-owned .57 comparison.
+# Default: true. Reuse compatible render passes when the requested area fits safely. Restart the game after changing.
+)") DECLARE_KEY(uberhar_reuse_contained_pass) BOOST_HANA_STRING(R"(
+
+# CodexAstraLocal: Typed primitive append; launch-owned .57 comparison.
+# Default: true. Use direct ordered primitive assembly for supported CPU vertex work. Restart the game after changing.
+)") DECLARE_KEY(uberhar_typed_primitive_append) BOOST_HANA_STRING(R"(
+
+# CodexAstraLocal: Narrow included scissor; launch-owned .57 comparison.
+# Default: true. Restrict included drawing areas while preserving guest clipping. Restart the game after changing.
+)") DECLARE_KEY(uberhar_include_scissor) BOOST_HANA_STRING(R"(
+
+# CodexAstraLocal: Adaptive CPU workers; launch-owned .57 comparison.
+# Default: true. Adapt worker participation for recurring workloads. OFF keeps static workers and bypasses adaptive history. Restart the game after changing.
+)") DECLARE_KEY(uberhar_adaptive_cpu_workers) BOOST_HANA_STRING(R"(
+
+# CodexAstraLocal: Detailed GPU observer; launch-owned .57 comparison.
+# Default: true. Collect sampled GPU pass timings and attribution. OFF bypasses expensive GPU observation; ordinary logs remain. Restart the game after changing.
+)") DECLARE_KEY(uberhar_gpu_observer) BOOST_HANA_STRING(R"(
+
+# CodexAstraLocal: Frame workload census; launch-owned .57 comparison.
+# Default: false. Collect bounded rendering workload details for frame comparisons. OFF bypasses this census. Restart the game after changing.
+)") DECLARE_KEY(uberhar_frame_workload_census) BOOST_HANA_STRING(R"(
+
+# CodexAstraLocal: V38 static state path; launch-owned .57 comparison.
+# Default: false. Test a static alternative to extended dynamic state on V38. Border-color policy stays unchanged. Restart the game after changing.
+)") DECLARE_KEY(uberhar_static_dynamic_state) BOOST_HANA_STRING(R"(
+
+# CodexAstraLocal: Prepare displayed eye only; launch-owned .57 comparison.
+# Default: true. Avoid presentation preparation for an eye that will not be displayed. This does not remove guest drawing. Restart the game after changing.
+)") DECLARE_KEY(uberhar_prepare_displayed_eye_only) BOOST_HANA_STRING(R"(
+
+# CodexAstraLocal: Early right-eye suppression; launch-owned .57 comparison.
+# Default: false. Test guarded early suppression separately from the original heuristic. Also requires Disable Right Eye Render ON. Restart the game after changing.
+)") DECLARE_KEY(uberhar_early_right_eye) BOOST_HANA_STRING(R"(
+
 # Whether to emit PICA fragment shader using SPIRV or GLSL (Vulkan only)
 # 0: GLSL, 1: SPIR-V (default)
 )") DECLARE_KEY(spirv_shader_gen) BOOST_HANA_STRING(R"(

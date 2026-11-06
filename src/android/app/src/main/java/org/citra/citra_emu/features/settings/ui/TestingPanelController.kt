@@ -7,6 +7,9 @@ import android.view.View
 import android.text.InputType
 import android.widget.EditText
 import android.widget.Toast
+import android.widget.TextView
+import com.google.android.material.materialswitch.MaterialSwitch
+import org.citra.citra_emu.features.settings.model.TestingExperiment
 import androidx.core.view.isVisible
 import androidx.lifecycle.LifecycleOwner
 import com.google.android.material.chip.Chip
@@ -36,6 +39,7 @@ class TestingPanelController(
         2 to R.string.uberhar_testing_combo_gpu
     )
     private val chips = mutableMapOf<Int, Chip>()
+    private val experimentSwitches = mutableMapOf<TestingExperiment, MaterialSwitch>()
 
     init {
         presets.forEach { (preset, label) ->
@@ -62,11 +66,18 @@ class TestingPanelController(
                 TestingSettings.disableRightEyeRender = checked
             }
         }
-        // CodexAstraLocal: Hardware requests work in either scope while preserving CPU-only admission.
-        binding.testingHardwareShaders.setOnCheckedChangeListener { _, checked ->
-            if (!rendering && !TestingSettings.hardwareShadersConflictsWithCpuVertices()) change("use_hw_shader") {
-                TestingSettings.hardwareShaders = checked
+        // CodexAstraLocal: Every implemented .57 mechanism has an independent, scoped
+        // launch control in the shared scrolling panel, including generic optimization.
+        TestingExperiment.entries.forEach { choice ->
+            val toggle = MaterialSwitch(context).apply {
+                setText(choice.title)
+                setOnCheckedChangeListener { _, checked ->
+                    if (!rendering) change(choice.key) { TestingSettings.setExperiment(choice, checked) }
+                }
             }
+            experimentSwitches[choice] = toggle
+            binding.testingExperiments.addView(toggle)
+            binding.testingExperiments.addView(TextView(context).apply { setText(choice.description) })
         }
         binding.testingRenderThreadDelay.setOnClickListener {
             if (TestingSettings.available && TestingSettings.enabled && !EmulationActivity.isRunning()) {
@@ -96,12 +107,7 @@ class TestingPanelController(
                 dialog.show()
             }
         }
-        // CodexAstraLocal: Presentation filtering and guest slider input are independent launch controls.
-        binding.testingLinearFiltering.setOnCheckedChangeListener { _, checked ->
-            if (!rendering) change("filter_mode") {
-                TestingSettings.linearFiltering = checked
-            }
-        }
+        // CodexAstraLocal: Guest slider remains an independent launch input.
         binding.testingStereoDepth.addOnButtonCheckedListener { _, checkedId, checked ->
             if (checked && !rendering) change("factor_3d") {
                 TestingSettings.stereoDepth = if (checkedId == R.id.testing_stereo_depth_1) 1 else 0
@@ -193,22 +199,15 @@ class TestingPanelController(
         binding.testingDisableRightEyeRender.isChecked = TestingSettings.requestedRightEyeRenderDisabled()
         binding.testingDisableRightEyeRender.isEnabled = launchControlsEnabled
         binding.testingRightEyeDescription.setText(R.string.uberhar_testing_right_eye_description)
-        binding.testingHardwareShaders.isChecked = TestingSettings.effectiveHardwareShaders()
-        binding.testingHardwareShaders.isEnabled = launchControlsEnabled &&
-            !TestingSettings.hardwareShadersConflictsWithCpuVertices()
-        binding.testingHardwareDescription.setText(
-            when {
-                TestingSettings.hardwareShadersConflictsWithCpuVertices() -> R.string.uberhar_testing_hardware_cpu_only
-                else -> R.string.uberhar_testing_hardware_description
-            }
-        )
+        experimentSwitches.forEach { (choice, toggle) ->
+            toggle.isChecked = TestingSettings.effectiveExperiment(choice)
+            toggle.isEnabled = launchControlsEnabled
+        }
         binding.testingRenderThreadDelay.text = context.getString(
             R.string.uberhar_testing_delay_value, TestingSettings.effectiveRenderThreadDelayUs()
         )
         binding.testingRenderThreadDelay.isEnabled = launchControlsEnabled
         // CodexAstraLocal: Resolution alone can change live; display the native launch values here.
-        binding.testingLinearFiltering.isChecked = TestingSettings.effectiveLinearFiltering()
-        binding.testingLinearFiltering.isEnabled = launchControlsEnabled
         when (TestingSettings.effectiveStereoDepth()) {
             0 -> binding.testingStereoDepth.check(R.id.testing_stereo_depth_0)
             1 -> binding.testingStereoDepth.check(R.id.testing_stereo_depth_1)

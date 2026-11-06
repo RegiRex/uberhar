@@ -25,6 +25,8 @@ public:
     void SetEnabled(bool enable) {
         enabled = enable;
     }
+    // CodexAstraLocal: The separate draw experiment honors the same title veto.
+    bool CompatibilityAllowsSuppression() const { return enabled; }
 
 private:
     // CodexAstraLocal TEST-ONLY LOG: Bounded observer state counts decisions, never inferred

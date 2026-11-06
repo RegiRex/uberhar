@@ -7,6 +7,7 @@
 #include <cstring>
 #include <type_traits>
 #include "video_core/pica/primitive_assembly.h"
+#include "video_core/pica/uberhar_vertex_view.h" // CodexAstraLocal: Immediate borrowed FIFO view.
 
 namespace Pica {
 
@@ -17,8 +18,8 @@ template <typename Sink>
 class VertexAppendTransaction {
 public:
     VertexAppendTransaction(PrimitiveAssembler& assembler_, Sink& sink_,
-                            const PrimitiveAssembler::TriangleHandler& triangle_)
-        : assembler{assembler_}, sink{sink_}, triangle{triangle_} {}
+                            const PrimitiveAssembler::TriangleHandler& triangle_, bool typed_ = false)
+        : assembler{assembler_}, sink{sink_}, triangle{triangle_}, typed{typed_} {}
 
     bool Begin(u32 inputs) {
         if (!sink.BeginVertexAppend(inputs, checkpoint)) return false;
@@ -34,6 +35,16 @@ public:
         assembler.SubmitOrdered(count, get, triangle);
     }
 
+    // CodexAstraLocal: OFF retains the previous erased triangle callback. A
+    // range is consumed synchronously; neither path can retain borrowed results.
+    void operator()(const OrderedVertexView& vertices) {
+        if constexpr (requires { sink.AppendOrderedVertices(assembler, vertices); }) {
+            if (typed) { sink.AppendOrderedVertices(assembler, vertices); return; }
+        }
+        assembler.SubmitOrdered(vertices.Size(), vertices, triangle);
+    }
+    bool Typed() const { return typed; }
+
     void Rollback() noexcept {
         // CodexAstraLocal: All shader borrowers have joined before rollback;
         // restoring object bytes never evaluates uninitialized f24 components.
@@ -48,5 +59,6 @@ private:
     const PrimitiveAssembler::TriangleHandler& triangle;
     std::array<std::byte, sizeof(PrimitiveAssembler)> image;
     std::size_t checkpoint{};
+    const bool typed; // CodexAstraLocal: Launch-owned independent experiment.
 };
 } // namespace Pica

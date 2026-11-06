@@ -563,6 +563,18 @@ struct Values {
     SwitchableSetting<bool> turnip_pass_end_flush{false, Keys::turnip_pass_end_flush};
     // CodexAstraLocal: Optional generic shader optimization trades first-use compile cost for GPU cost.
     SwitchableSetting<bool> uberhar_optimize_generic_shaders{false, Keys::uberhar_optimize_generic_shaders};
+    // CodexAstraLocal: Independent launch-owned controls retain an exact baseline for each
+    // .57 mechanism; observer/census controls never change ordinary error or frame logging.
+    SwitchableSetting<bool> uberhar_changed_state_only{true, Keys::uberhar_changed_state_only};
+    SwitchableSetting<bool> uberhar_reuse_contained_pass{true, Keys::uberhar_reuse_contained_pass};
+    SwitchableSetting<bool> uberhar_typed_primitive_append{true, Keys::uberhar_typed_primitive_append};
+    SwitchableSetting<bool> uberhar_include_scissor{true, Keys::uberhar_include_scissor};
+    SwitchableSetting<bool> uberhar_adaptive_cpu_workers{true, Keys::uberhar_adaptive_cpu_workers};
+    SwitchableSetting<bool> uberhar_gpu_observer{true, Keys::uberhar_gpu_observer};
+    SwitchableSetting<bool> uberhar_frame_workload_census{false, Keys::uberhar_frame_workload_census};
+    SwitchableSetting<bool> uberhar_static_dynamic_state{false, Keys::uberhar_static_dynamic_state};
+    SwitchableSetting<bool> uberhar_prepare_displayed_eye_only{true, Keys::uberhar_prepare_displayed_eye_only};
+    SwitchableSetting<bool> uberhar_early_right_eye{false, Keys::uberhar_early_right_eye};
     SwitchableSetting<bool> uberhar_cpu_prefix_overlap{true, Keys::uberhar_cpu_prefix_overlap};
     SwitchableSetting<bool> uberhar_parallel_texture_decode{true, Keys::uberhar_parallel_texture_decode};
     // CodexAstraLocal: Optional process-frozen execution census, off by default;

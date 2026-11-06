@@ -150,6 +150,17 @@ bool Config::KeepRunningValue(const std::string& key) const {
         Settings::Keys::uberhar_cpu_execution_census,
         Settings::Keys::turnip_pass_end_flush,
         Settings::Keys::uberhar_optimize_generic_shaders,
+        // CodexAstraLocal: Every .57 experiment is frozen until the next launch.
+        Settings::Keys::uberhar_changed_state_only,
+        Settings::Keys::uberhar_reuse_contained_pass,
+        Settings::Keys::uberhar_typed_primitive_append,
+        Settings::Keys::uberhar_include_scissor,
+        Settings::Keys::uberhar_adaptive_cpu_workers,
+        Settings::Keys::uberhar_gpu_observer,
+        Settings::Keys::uberhar_frame_workload_census,
+        Settings::Keys::uberhar_static_dynamic_state,
+        Settings::Keys::uberhar_prepare_displayed_eye_only,
+        Settings::Keys::uberhar_early_right_eye,
         Settings::Keys::uberhar_hybrid_tev,
         Settings::Keys::uberhar_force_tev,
         Settings::Keys::uberhar_cpu_vertex_bridge,
@@ -167,8 +178,8 @@ bool Config::KeepRunningValue(const std::string& key) const {
     // CodexAstraLocal: Testing's resolved experiment requests stay fixed for a
     // launch, while resolution follows the same sparse layers on every reload.
     static constexpr std::array testing_keys{
-        Settings::Keys::disable_right_eye_render, Settings::Keys::use_hw_shader,
-        Settings::Keys::delay_game_render_thread_us, Settings::Keys::filter_mode,
+        Settings::Keys::disable_right_eye_render,
+        Settings::Keys::delay_game_render_thread_us,
         Settings::Keys::factor_3d,
     };
     return runtime_reload && (std::ranges::find(keys, key) != keys.end() ||
@@ -183,8 +194,23 @@ std::string TestingKey(const std::string& key) {
     if (key == Settings::Keys::uberhar_test_mode || key == Settings::Keys::uberhar_cpu_vertex_only)
         return "preset";
     if (key == Settings::Keys::resolution_factor) return "resolution";
-    if (key == Settings::Keys::disable_right_eye_render || key == Settings::Keys::use_hw_shader ||
-        key == Settings::Keys::delay_game_render_thread_us || key == Settings::Keys::filter_mode ||
+    // CodexAstraLocal: Retired Hardware/Filtering Testing keys cannot remain hidden overrides.
+    static constexpr std::array experiments{
+        Settings::Keys::uberhar_optimize_generic_shaders,
+        Settings::Keys::uberhar_changed_state_only,
+        Settings::Keys::uberhar_reuse_contained_pass,
+        Settings::Keys::uberhar_typed_primitive_append,
+        Settings::Keys::uberhar_include_scissor,
+        Settings::Keys::uberhar_adaptive_cpu_workers,
+        Settings::Keys::uberhar_gpu_observer,
+        Settings::Keys::uberhar_frame_workload_census,
+        Settings::Keys::uberhar_static_dynamic_state,
+        Settings::Keys::uberhar_prepare_displayed_eye_only,
+        Settings::Keys::uberhar_early_right_eye,
+    };
+    if (std::ranges::find(experiments, key) != experiments.end()) return key;
+    if (key == Settings::Keys::disable_right_eye_render ||
+        key == Settings::Keys::delay_game_render_thread_us ||
         key == Settings::Keys::factor_3d) return key;
     return {};
 }
@@ -222,7 +248,10 @@ Type Config::ReadTestingValue(const std::string& group, const std::string& key,
             return preset == 1;
         }
     } else if constexpr (std::is_same_v<Type, bool>) {
-        return testing_config->GetBoolean(section, testing_key, key == Settings::Keys::filter_mode);
+        // CodexAstraLocal: New malformed booleans inherit the lower layer; preserve
+        // the original right-eye experiment's conservative malformed-value fallback.
+        return testing_config->GetBoolean(section, testing_key,
+            key == Settings::Keys::disable_right_eye_render ? false : fallback);
     } else if constexpr (std::is_integral_v<Type>) {
         const auto value = ReadTestingDecimal(*testing_config, section, testing_key);
         if (testing_key == "resolution") return value == 2 || value == 4 ? value : fallback;
@@ -368,6 +397,17 @@ void Config::ReadValues() {
     // CodexAstraLocal: Resolve title/global driver policy before renderer construction.
     ReadSetting("Renderer", Settings::values.turnip_pass_end_flush);
     ReadSetting("Renderer", Settings::values.uberhar_optimize_generic_shaders);
+    // CodexAstraLocal: Resolve explicit title values before constructing any .57 owner.
+    ReadSetting("Renderer", Settings::values.uberhar_changed_state_only);
+    ReadSetting("Renderer", Settings::values.uberhar_reuse_contained_pass);
+    ReadSetting("Renderer", Settings::values.uberhar_typed_primitive_append);
+    ReadSetting("Renderer", Settings::values.uberhar_include_scissor);
+    ReadSetting("Renderer", Settings::values.uberhar_adaptive_cpu_workers);
+    ReadSetting("Renderer", Settings::values.uberhar_gpu_observer);
+    ReadSetting("Renderer", Settings::values.uberhar_frame_workload_census);
+    ReadSetting("Renderer", Settings::values.uberhar_static_dynamic_state);
+    ReadSetting("Renderer", Settings::values.uberhar_prepare_displayed_eye_only);
+    ReadSetting("Renderer", Settings::values.uberhar_early_right_eye);
     ReadSetting("Renderer", Settings::values.uberhar_cpu_prefix_overlap);
     ReadSetting("Renderer", Settings::values.uberhar_parallel_texture_decode);
     // CodexAstraLocal: Freeze optional census before any worker owner is constructed.

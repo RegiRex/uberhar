@@ -14,6 +14,8 @@
 
 namespace Pica {
 struct OutputVertex;
+struct PrimitiveAssembler; // CodexAstraLocal: Owner-only typed append state.
+struct OrderedVertexView; // CodexAstraLocal: Immediate immutable range, never retained.
 class CpuDrawPacket; // CodexAstraLocal: Forward declaration avoids renderer/queue coupling.
 }
 
@@ -44,6 +46,11 @@ public:
 
     // CodexAstraLocal: Optional reversible CPU append only. Unknown/software
     // renderers refuse before dispatch; no GPU or guest-memory effect is allowed.
+    // CodexAstraLocal: One virtual dispatch per ordered range. Unknown backends
+    // retain the exact scalar handler; accelerated backends qualify direct packing.
+    virtual void AppendOrderedVertices(Pica::PrimitiveAssembler& assembler,
+                                       const Pica::OrderedVertexView& vertices);
+
     virtual bool BeginVertexAppend(u32, std::size_t&) { return false; }
     virtual void RollbackVertexAppend(std::size_t) noexcept { std::terminate(); }
 

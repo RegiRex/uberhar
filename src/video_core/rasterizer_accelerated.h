@@ -29,6 +29,8 @@ public:
 
     // CodexAstraLocal: Reserve a conservative append bound before worker
     // publication and restore only logical size on a later shader failure.
+    void AppendOrderedVertices(Pica::PrimitiveAssembler& assembler,
+                               const Pica::OrderedVertexView& vertices) override;
     bool BeginVertexAppend(u32 inputs, std::size_t& checkpoint) override;
     void RollbackVertexAppend(std::size_t checkpoint) noexcept override;
 

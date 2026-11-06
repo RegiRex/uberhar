@@ -168,7 +168,10 @@ public:
 
     /// Binds a fragment shader generated from PICA state
     void UseFragmentShader(const Pica::RegsInternal& regs, const Pica::Shader::UserConfig& user,
-                           bool preparing_ready_gpu = false);
+                           bool preparing_ready_gpu = false, u64 register_generation = 0);
+
+    // CodexAstraLocal TEST-ONLY LOG: Remove after pure preparation reuse is qualified.
+    u64 fragment_config_builds{}, fragment_config_reuses{};
 
     /// Gets the current program ID
     u64 GetProgramID() const {
@@ -371,6 +374,9 @@ private:
     const char* driver_cache_load{"not_attempted"};
     u64 cache_start_hits{}, cache_start_misses{}, cache_session{};
     std::optional<Pica::Shader::FSConfig> tev_family_config;
+    // CodexAstraLocal: Cache pure register decoding only, never readiness/resources.
+    std::optional<Pica::Shader::FSConfig> cached_fragment_config;
+    u64 cached_fragment_generation{};
     Pica::Shader::UserConfig tev_user{};
     bool tev_supported{};
     std::unordered_map<u64, std::unique_ptr<Shader>> tev_shaders;

@@ -123,12 +123,12 @@ static void ConcurrentPools() {
 // CodexAstraLocal: Feed stable same-work windows, not elapsed sleeps or clock
 // guesses. These values force accept/rollback independently of host scheduling.
 static void Adaptation() {
-    using Sample = AdaptiveParticipation::Sample;
+    using Sample = AdaptiveWorkWindow::Sample;
     const Sample base{1024,16,256,768,3,400000,200000,50000,0,false,false};
-    auto window = [](AdaptiveParticipation& policy, Sample value) {
+    auto window = [](AdaptiveWorkWindow& policy, Sample value) {
         for (unsigned i=0;i<8;++i) policy.Observe(value);
     };
-    AdaptiveParticipation cadence{3};
+    AdaptiveWorkWindow cadence{3};
     for (unsigned i=0;i<1024;++i) Need(!cadence.SelectSample(1,64), "tiny job sampled");
     // CodexAstraLocal: Alternating task shapes must avoid adaptive clocks while
     // retaining the full worker allowance; stable work still reaches trials.
@@ -144,7 +144,7 @@ static void Adaptation() {
         Need(cadence.SelectSample(4096,16) == (i%64==0), "sample cadence");
     }
     Need(cadence.GetStatistics().unstable_skipped==128, "avoided-sample accounting");
-    AdaptiveParticipation policy{3};
+    AdaptiveWorkWindow policy{3};
     for (unsigned i=0;i<7;++i) policy.Observe(base);
     Need(policy.Desired()==3, "unstable early trial");
     policy.Observe(base);
@@ -167,7 +167,7 @@ static void Adaptation() {
     window(policy,faster);
     Need(policy.Desired()==3, "useful faster participation not accepted");
     for (unsigned reason=0;reason<5;++reason) {
-        AdaptiveParticipation reject{3}; window(reject,base);
+        AdaptiveWorkWindow reject{3}; window(reject,base);
         auto invalid=lower;
         if (reason==0) invalid.denied=true;
         if (reason==1) invalid.failed=true;
@@ -177,12 +177,7 @@ static void Adaptation() {
         window(reject,invalid);
         Need(reject.Desired()==3, "incomparable trial not rolled back");
     }
-    AdaptiveParticipation changed{3}; window(changed,base);
-    changed.Limit(1);
-    Need(changed.Desired()==1, "registered progress capacity not applied");
-    changed.Limit(3);
-    Need(changed.Desired()==3, "released progress capacity not restored");
-    window(changed,base);
+    AdaptiveWorkWindow changed{3}; window(changed,base);
     Need(changed.Desired()==2, "shape control missing trial");
     changed.Prepare(2048,16);
     Need(changed.Desired()==3, "unsampled shape inherited trial cap");
@@ -204,6 +199,68 @@ static void Adaptation() {
     Need(flags==expected, "adaptive arithmetic altered FP status");
 }
 
+// CodexAstraLocal: Interleaved exact-shape/program cohorts must learn separately;
+// identical sizes never authorize cross-program reuse. These are deterministic
+// controller costs, not claims about host/device performance.
+static void CohortsAndBypass() {
+    using Identity = AdaptiveWorkIdentity;
+    AdaptiveParticipation policy{3};
+    const Identity a{11, 7, 1}, b{22, 8, 2}, c{33, 9, 3};
+    auto visit = [&](Identity identity, std::uint32_t count) {
+        policy.Prepare(count, 16, false, identity);
+        if (!policy.SelectSample(count, 16)) return;
+        const auto helpers = policy.Desired();
+        const auto owner = helpers == 3 ? count / 4 : count * 3 / 8;
+        policy.Observe({count, 16, owner, count - owner, helpers,
+            (helpers == 3 ? 400000U : 390000U) * std::uint64_t{count} / 1024,
+            owner * 800U, 50000, 0, false, false});
+    };
+    for (unsigned i = 0; i < 1031; ++i) { visit(a, 1024); visit(b, 2048); }
+    policy.Prepare(1024, 16, false, a);
+    Need(policy.Desired() == 2, "interleaved A history missing accepted limit");
+    policy.Prepare(2048, 16, false, b);
+    Need(policy.Desired() == 2, "interleaved B history missing accepted limit");
+    policy.Prepare(1024, 16, false, c);
+    Need(policy.Desired() == 3, "different program reused same-size trial");
+    policy.Prepare(1024, 16, true, a);
+    Need(policy.Desired() == 3, "different hook reused trial");
+    const auto learned = policy.GetStatistics();
+    Need(learned.samples == 32 && learned.trials == 2 && learned.accepted == 2 &&
+         learned.cohort_hits > 2000 && learned.cohort_misses == 4,
+         "cohort outcome accounting");
+    policy.Limit(1);
+    policy.Prepare(1024, 16, false, a);
+    Need(policy.Desired() == 1 && policy.GetStatistics().capacity_resets == 1,
+         "changed capacity retained earlier limit");
+    // CodexAstraLocal: Unique keys evict within fixed storage and preserve
+    // cumulative evidence; returning to an evicted shape starts statically.
+    for (unsigned i = 0; i < 100; ++i) policy.Prepare(1024, 16, false, {i + 100U, 7, 1});
+    Need(policy.GetStatistics().cohort_evictions != 0 &&
+         policy.GetStatistics().accepted == learned.accepted, "bounded eviction/accounting");
+    policy.Prepare(1024, 16);
+    Need(policy.Desired() == 1 && !policy.SelectSample(1024,16) &&
+         policy.GetStatistics().unknown_identity == 1, "unknown work trained history");
+
+    AdaptiveParticipation expired{3};
+    for (unsigned i = 0; i < 8193; ++i) expired.Prepare(1024, 16, false, a);
+    Need(expired.GetStatistics().cohort_expired == 1 && expired.Desired() == 3,
+         "periodic static requalification missing");
+
+    AuxiliaryBudget budget{2};
+    ParallelWork off{2, nullptr, budget, nullptr, false};
+    std::vector<unsigned> output(128);
+    for (unsigned run = 0; run < 80; ++run) {
+        off.Run(128, 16, [&](auto first, auto last) {
+            for (auto i = first; i < last; ++i) ++output[i];
+        }, false, a);
+    }
+    for (const auto value : output) Need(value == 80, "adaptive OFF changed work output");
+    const auto disabled = off.Scheduling();
+    Need(!disabled.enabled && disabled.samples == 0 && disabled.cohort_hits == 0 &&
+         disabled.cohort_misses == 0 && disabled.unknown_identity == 0 &&
+         off.CreatedWorkers() != 0, "adaptive OFF retained bookkeeping or removed pool");
+}
+
 // CodexAstraLocal: Removing diagnostic atomics must leave real admission,
 // nesting and reserved capacity intact; absent active/peak counts are labeled.
 static void WithoutCensus() {
@@ -219,7 +276,7 @@ static void WithoutCensus() {
 }
 
 int main() try {
-    ProgressAndNesting(); ConcurrentPools(); Adaptation(); WithoutCensus();
+    ProgressAndNesting(); ConcurrentPools(); Adaptation(); CohortsAndBypass(); WithoutCensus();
     std::cout << "shared budget PASS: execution, reserved progress, nesting, output, adaptive rollback\n";
     return 0;
 } catch (const std::exception& error) {

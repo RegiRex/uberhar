@@ -126,6 +126,9 @@ RendererVulkan::RendererVulkan(Core::System& system, Pica::PicaCore& pica_,
                                          update_queue,
                                          main_present_window.ImageCount()},
       present_heap{instance, scheduler.GetMasterSemaphore(), PRESENT_BINDINGS, 32} {
+    // CodexAstraLocal: Preparation control is launch-owned; the selected eye is
+    // resolved per frame so later user eye/layout changes refresh correctly.
+    prepare_displayed_eye_only = Settings::values.uberhar_prepare_displayed_eye_only.GetValue();
     CompileShaders();
     BuildLayouts();
     BuildPipelines();
@@ -163,10 +166,25 @@ RendererVulkan::~RendererVulkan() {
     device.destroyShaderModule(cursor_fragment_shader);
 }
 
-void RendererVulkan::PrepareRendertarget() {
+void RendererVulkan::PrepareRendertarget(bool force_both_eyes) {
     const auto& framebuffer_config = pica.regs.framebuffer_config;
     const auto& regs_lcd = pica.regs_lcd;
+    // CodexAstraLocal: Prune only an unconsumed top eye. Both active windows must
+    // be mono; screenshot preparation below uses its own complete consumer set.
+    prepared_mono_eye = static_cast<int>(Settings::values.mono_render_option.GetValue());
+    const auto is_mono = [](const Layout::FramebufferLayout& layout) {
+        return !layout.top_screen_enabled || layout.render_3d_mode == Settings::StereoRenderOption::Off;
+    };
+    const bool mono = is_mono(render_window.GetFramebufferLayout()) &&
+        (!secondaryWindowEnabled || !secondary_window || is_mono(secondary_window->GetFramebufferLayout()));
+    unused_presentation_eye = prepare_displayed_eye_only && mono && !force_both_eyes &&
+        (prepared_mono_eye == 0 || prepared_mono_eye == 1) ? 1 - prepared_mono_eye : -1;
     for (u32 i = 0; i < 3; i++) {
+        if (static_cast<int>(i) == unused_presentation_eye) {
+            ++presentation_omitted;
+            continue;
+        }
+        ++presentation_prepared;
         const u32 fb_id = i == 2 ? 1 : 0;
         const auto& framebuffer = framebuffer_config[fb_id];
         auto& texture = screen_infos[i].texture;
@@ -191,7 +209,12 @@ void RendererVulkan::PrepareDraw(Frame* frame, const Layout::FramebufferLayout& 
     const auto sampler = present_samplers[!Settings::values.filter_mode.GetValue()];
     const auto present_set = present_heap.Commit();
     for (u32 index = 0; index < screen_infos.size(); index++) {
-        update_queue.AddImageSampler(present_set, 0, index, screen_infos[index].image_view,
+        // CodexAstraLocal: Vulkan still binds three valid descriptors. Alias the
+        // unused slot to this frame's retained selected-eye view, never a stale
+        // unprepared texture. Existing cache ownership protects the actual view.
+        const u32 source = static_cast<int>(index) == unused_presentation_eye
+                               ? static_cast<u32>(prepared_mono_eye) : index;
+        update_queue.AddImageSampler(present_set, 0, index, screen_infos[source].image_view,
                                      sampler);
     }
 
@@ -918,7 +941,7 @@ void RendererVulkan::DrawTopScreen(const Layout::FramebufferLayout& layout,
                                                : Layout::DisplayOrientation::Portrait;
     switch (layout.render_3d_mode) {
     case Settings::StereoRenderOption::Off: {
-        const int eye = static_cast<int>(Settings::values.mono_render_option.GetValue());
+        const int eye = prepared_mono_eye;
         DrawSingleScreen(eye, top_screen_left, top_screen_top, top_screen_width, top_screen_height,
                          orientation);
         break;
@@ -1151,6 +1174,14 @@ void RendererVulkan::SwapBuffers() {
 
     const Layout::FramebufferLayout& layout = render_window.GetFramebufferLayout();
     PrepareRendertarget();
+    // CodexAstraLocal TEST-ONLY LOG: Remove after presentation pruning coverage
+    // is qualified; no per-draw logging and no added GPU synchronization.
+    const auto report_now = std::chrono::steady_clock::now();
+    if (report_now >= presentation_next_report) {
+        LOG_INFO(Render_Vulkan, "Uberhar eye preparation: enabled={} prepared={} omitted={} mono_eye={}",
+                 prepare_displayed_eye_only, presentation_prepared, presentation_omitted, prepared_mono_eye);
+        presentation_next_report = report_now + std::chrono::seconds{5};
+    }
     RenderScreenshot();
     isSecondaryWindow = false;
     RenderToWindow(main_present_window, layout, false);
@@ -1193,6 +1224,9 @@ void RendererVulkan::RenderScreenshot() {
     if (!settings.screenshot_requested.exchange(false)) {
         return;
     }
+    // CodexAstraLocal: A screenshot can arrive after ordinary preparation and
+    // request a different stereo layout. Prepare both before consuming that request.
+    if (prepare_displayed_eye_only) PrepareRendertarget(true);
 
     if (!TryRenderScreenshotWithHostMemory()) {
         RenderScreenshotWithStagingCopy();

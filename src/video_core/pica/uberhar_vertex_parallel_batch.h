@@ -12,6 +12,7 @@
 #include "common/uberhar_parallel_work.h"
 #include "common/scope_exit.h" // CodexAstraLocal: Roll back unpublished owner append on failure.
 #include "video_core/pica/uberhar_vertex_output.h"
+#include "video_core/pica/uberhar_vertex_view.h" // CodexAstraLocal: Typed owner append ranges.
 
 namespace Pica {
 
@@ -29,6 +30,7 @@ public:
         u64 owner_invocations{}, worker_invocations{}, chunks{};
         // CodexAstraLocal: Count useful completed prefixes, not requested workers.
         u64 prefix_chunks{}, prefix_inputs{}, prefix_ns{};
+        u64 typed_append_ranges{}, typed_append_inputs{}; // CodexAstraLocal: Actual route coverage.
         unsigned peak_threads{};
         // CodexAstraLocal: These totals cover only explicitly sampled draws.
         // Owner/worker invocation totals above continue to cover every job.
@@ -38,8 +40,9 @@ public:
     static constexpr u32 Grain = 64;
 
     explicit NativeParallelBatch(unsigned processors = Common::Uberhar::AvailableProcessors(),
-                                 void (*worker_start)() = nullptr)
-        : pool{processors, worker_start} {}
+                                 void (*worker_start)() = nullptr, bool adaptive = true)
+        : pool{processors, worker_start, Common::Uberhar::AuxiliaryBudget::Global(),
+               nullptr, adaptive} {}
 
     unsigned Available() const { return pool.Available(); }
     unsigned CreatedWorkers() const { return pool.CreatedWorkers(); }
@@ -74,7 +77,7 @@ public:
     template <typename VertexAt, typename Shade, typename Submit>
     NativeVertexCounts Run(u32 count, bool indexed, VertexAt&& vertex_at,
                            Shade&& shade, Submit&& submit, bool measure = false,
-                           bool overlap = true) {
+                           bool overlap = true, Common::Uberhar::AdaptiveWorkIdentity identity = {}) {
         assert(capacity != 0 || count == 0);
         VertexCacheIndex fifo;
         std::array<OutputVertex, VertexCacheIndex::Capacity> previous;
@@ -125,6 +128,25 @@ public:
             const auto get = [&](u32 offset) noexcept -> const OutputVertex& {
                 const u32 source = references[offset];
                 return source < capacity ? results[source] : previous[source - capacity];
+            };
+            // CodexAstraLocal: Preserve the FIFO split even when scratch vector
+            // capacity exceeds this draw's bounded chunk capacity.
+            const OrderedVertexView view{std::span<const u32>{references}.first(size),
+                std::span<const OutputVertex>{results}.first(capacity), previous};
+            const auto append_range = [&](u32 first, u32 count) {
+                if constexpr (requires { submit(view); submit.Typed(); }) {
+                    submit(view.Subspan(first, count));
+                    if (submit.Typed()) {
+                        ++work.typed_append_ranges;
+                        work.typed_append_inputs += count;
+                    }
+                } else if constexpr (requires { submit(count, get); }) {
+                    submit(count, [&](u32 offset) noexcept -> const OutputVertex& {
+                        return get(first + offset);
+                    });
+                } else {
+                    for (u32 offset = 0; offset < count; ++offset) submit(get(first + offset));
+                }
             };
             u32 submitted{};
             bool transaction = false;
@@ -177,14 +199,14 @@ public:
                                 submitted = done == groups ? size :
                                     invocations[done * Grain].index - static_cast<u32>(begin);
                                 if (submitted) {
-                                    submit(submitted, get);
+                                    append_range(0, submitted);
                                     ++work.prefix_chunks;
                                     work.prefix_inputs += submitted;
                                 }
-                            }, measure);
+                            }, measure, identity);
                     }
                 }
-                return pool.Run(misses, grain, shade_range, measure);
+                return pool.Run(misses, grain, shade_range, measure, identity);
             };
             completed = execute();
             const auto submit_start = measure ? Clock::now() : Clock::time_point{};
@@ -196,15 +218,7 @@ public:
             // CodexAstraLocal: One immutable result generation remains alive
             // through ordered submission. Qualified sinks consume a whole range;
             // ordinary callable sinks retain scalar delivery and ownership.
-            if constexpr (requires { submit(size, get); }) {
-                if (submitted < size)
-                    submit(size - submitted, [&](u32 offset) noexcept -> const OutputVertex& {
-                        return get(submitted + offset);
-                    });
-            } else {
-                for (u32 offset = 0; offset < size; ++offset)
-                    submit(get(offset));
-            }
+            if (submitted < size) append_range(submitted, size - submitted);
             if constexpr (reversible) {
                 if (transaction) { submit.Commit(); transaction = false; }
             }

@@ -1,0 +1,76 @@
+--- src/video_core/shader/shader_jit_a64_compiler.cpp
++++ src/video_core/shader/shader_jit_a64_compiler.cpp
+@@ -694,8 +694,6 @@
+     Compile_SwizzleSrc(instr, 1, instr.common.src1, SRC1);
+ 
+     // FRECPE can be pretty inaccurate
+-    // FRECPE(1.0f) = 0.99805f != 1.0f
+-    // FRECPE(SRC1.S4(), SRC1.S4());
+     // Just do an exact 1.0f / N
+     FDIV(SRC1.toS(), ONE.toS(), SRC1.toS());
+ 
+@@ -707,8 +705,6 @@
+     Compile_SwizzleSrc(instr, 1, instr.common.src1, SRC1);
+ 
+     // FRSQRTE can be pretty inaccurate
+-    // FRSQRTE(8.0f) = 0.35254f != 0.3535533845
+-    // FRSQRTE(SRC1.S4(), SRC1.S4());
+     // Just do an exact 1.0f / sqrt(N)
+     FSQRT(SRC1.toS(), SRC1.toS());
+     FDIV(SRC1.toS(), ONE.toS(), SRC1.toS());
+@@ -1111,19 +1107,14 @@
+     // f(x) computes approximately log2(x) / (x - 1).
+     // f(x) = c4 + x * (c3 + x * (c2 + x * (c1 + x * c0)).
+     oaknut::Label c0;
+-    // align(16);
+     l(c0);
+     dw(0x3d74552f);
+-
+-    // align(16);
+     oaknut::Label c14;
+     l(c14);
+     dw(0xbeee7397);
+     dw(0x3fbd96dd);
+     dw(0xc02153f6);
+     dw(0x4038d96c);
+-
+-    // align(16);
+     oaknut::Label negative_infinity_vector;
+     l(negative_infinity_vector);
+     dw(0xff800000);
+@@ -1137,8 +1128,6 @@
+     dw(0x7fc00000);
+ 
+     Label input_is_nan, input_is_zero, input_out_of_range;
+-
+-    // align(16);
+     l(input_out_of_range);
+     B(Cond::EQ, input_is_zero);
+     ADR(XSCRATCH0, default_qnan_vector);
+@@ -1149,8 +1138,6 @@
+     ADR(XSCRATCH0, negative_infinity_vector);
+     LDR(SRC1, XSCRATCH0);
+     RET();
+-
+-    // align(16);
+     l(subroutine);
+ 
+     // Here we handle edge cases: input in {NaN, 0, -Inf, Negative}.
+@@ -1213,8 +1200,6 @@
+     // This approximation first performs a range reduction into the range [-0.5, 0.5). A minmax
+     // polynomial which was fit for the function exp2(x) is then evaluated. We then restore the
+     // result into the appropriate range.
+-
+-    // align(16);
+     Label input_max;
+     l(input_max);
+     dw(0x43010000);
+@@ -1241,8 +1226,6 @@
+     dw(0x3f800016);
+ 
+     Label ret_label;
+-
+-    // align(16);
+     l(subroutine);
+ 
+     // Handle edge cases

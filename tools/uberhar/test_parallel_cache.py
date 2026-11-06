@@ -27,7 +27,12 @@ def main():
              root / 'src/video_core/pica/shader_setup.h',
              root / 'src/video_core/pica/shader_setup.cpp',
              root / 'src/video_core/pica/uberhar_parallel_vertex.h',
-             root / 'tools/uberhar/test_optional_fragment_worker.py']
+             root / 'tools/uberhar/test_optional_fragment_worker.py',
+             # CodexAstraLocal: Track the actual pool/controller constructor
+             # reached by the extracted launch setting in both requested modes.
+             root / 'src/video_core/pica/uberhar_vertex_parallel_batch.h',
+             root / 'src/common/uberhar_parallel_work.h',
+             root / 'src/common/uberhar_cpu_work_budget.h']
     def hashes():
         return {str(p.relative_to(root)): hashlib.sha256(p.read_bytes()).hexdigest() for p in paths}
     proof = {'author': 'CodexAstraLocal', 'sources_before': hashes(), 'variants': []}

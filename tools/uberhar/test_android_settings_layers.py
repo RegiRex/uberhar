@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """CodexAstraLocal: Execute Android's actual four setting layers against real INIReader."""
 import argparse
+import re
 from pathlib import Path
 import subprocess
 import tempfile
@@ -96,7 +97,7 @@ int main() {
     load("[Renderer]\nresolution_factor=1\n", normal_title, testing_global);
     assert(v.resolution_factor.GetValue() == 4 && v.resolution_factor.GetValue(true) == 2);
     assert(v.uberhar_test_mode.GetValue() == Settings::UberharTestMode::Native);
-    assert(!v.uberhar_cpu_vertex_only.GetValue() && v.use_hw_shader.GetValue());
+    assert(!v.uberhar_cpu_vertex_only.GetValue() && !v.use_hw_shader.GetValue());
     assert(!v.disable_right_eye_render.GetValue() && v.delay_game_render_thread_us.GetValue() == 0);
     assert(v.filter_mode.GetValue() && v.factor_3d.GetValue() == 0);
     assert(cfg.title_config->GetInteger("Renderer", "resolution_factor", 0) == 4);
@@ -110,7 +111,7 @@ int main() {
     assert(v.uberhar_test_mode.GetValue() == Settings::UberharTestMode::Automatic);
     assert(v.uberhar_cpu_vertex_only.GetValue() && !v.use_hw_shader.GetValue());
     assert(v.disable_right_eye_render.GetValue() && v.delay_game_render_thread_us.GetValue() == 200);
-    assert(!v.filter_mode.GetValue() && v.factor_3d.GetValue() == 1);
+    assert(v.filter_mode.GetValue() && v.factor_3d.GetValue() == 1);
 
     // CodexAstraLocal: Title master overrides global in both directions; disabled saved
     // values survive and become effective again on re-enable, without changing normal files.
@@ -138,9 +139,9 @@ int main() {
     assert(!v.filter_mode.GetValue() && v.factor_3d.GetValue() == 37);
     // CodexAstraLocal: Resetting one title key restores only its inheritance.
     load(custom, "", testing_global + title_section + "resolution=4\nfilter_mode=true\n");
-    assert(v.resolution_factor.GetValue() == 4 && v.filter_mode.GetValue());
+    assert(v.resolution_factor.GetValue() == 4 && !v.filter_mode.GetValue());
     load(custom, "", testing_global + title_section + "filter_mode=true\n");
-    assert(v.resolution_factor.GetValue() == 2 && v.filter_mode.GetValue());
+    assert(v.resolution_factor.GetValue() == 2 && !v.filter_mode.GetValue());
 
     // CodexAstraLocal: Explicit title Custom and non-Vulkan backends beat global modes.
     load("[Renderer]\nuberhar_test_mode=3\n", "[Renderer]\nuberhar_test_mode=0\n", testing_global);
@@ -163,10 +164,10 @@ int main() {
             const auto value = requested ? "true\n" : "false\n";
             load(std::string("[Renderer]\nuse_hw_shader=") + value + "shaders_accurate_mul=false\n",
                  "", testing);
-            assert(v.use_hw_shader.GetValue() == (requested && preset != 1));
+            assert(!v.use_hw_shader.GetValue());
             assert(!v.shaders_accurate_mul.GetValue());
             load("", "", testing + title_section + "use_hw_shader=" + value);
-            assert(v.use_hw_shader.GetValue() == (requested && preset != 1));
+            assert(!v.use_hw_shader.GetValue());
         }
     }
 
@@ -201,9 +202,9 @@ int main() {
          "use_hw_shader=false\ndisable_right_eye_render=false\ndelay_game_render_thread_us=0\n"
          "filter_mode=true\nfactor_3d=0\n");
     assert(testing_overlay_active && v.uberhar_test_mode.GetValue() == Settings::UberharTestMode::Automatic);
-    assert(!v.uberhar_cpu_vertex_only.GetValue() && v.use_hw_shader.GetValue());
+    assert(!v.uberhar_cpu_vertex_only.GetValue() && !v.use_hw_shader.GetValue());
     assert(v.disable_right_eye_render.GetValue() && v.delay_game_render_thread_us.GetValue() == 100);
-    assert(!v.filter_mode.GetValue() && v.factor_3d.GetValue() == 1);
+    assert(v.filter_mode.GetValue() && v.factor_3d.GetValue() == 1);
     assert(v.resolution_factor.GetValue() == 4);
     FileUtil::test_file += "resolution=2\n";
     cfg.ReadValues();
@@ -211,7 +212,7 @@ int main() {
     for (const auto* missing_or_broken : {"", "[broken"}) {
         FileUtil::test_file = missing_or_broken;
         cfg.ReadValues();
-        assert(v.resolution_factor.GetValue() == 2 && v.use_hw_shader.GetValue());
+        assert(v.resolution_factor.GetValue() == 2 && !v.use_hw_shader.GetValue());
         assert(v.disable_right_eye_render.GetValue() && v.delay_game_render_thread_us.GetValue() == 100);
     }
     cfg.runtime_reload = false;
@@ -255,15 +256,58 @@ int main() {
     assert(!testing_overlay_active && v.uberhar_test_mode.GetValue() == Settings::UberharTestMode::Custom);
     assert(v.resolution_factor.GetValue() == 3 && v.use_hw_shader.GetValue());
     assert(v.delay_game_render_thread_us.GetValue() == 250 && v.factor_3d.GetValue() == 37);
+    // CodexAstraLocal: Every new experiment must obey ordinary-title precedence,
+    // explicit title false, malformed inheritance, alpha gate and launch ownership.
+    Common::g_uberhar_alpha_testing = true;
+    for (const auto [key, setting] : std::array{
+        std::pair{Settings::Keys::uberhar_changed_state_only, &v.uberhar_changed_state_only},
+        std::pair{Settings::Keys::uberhar_reuse_contained_pass, &v.uberhar_reuse_contained_pass},
+        std::pair{Settings::Keys::uberhar_typed_primitive_append, &v.uberhar_typed_primitive_append},
+        std::pair{Settings::Keys::uberhar_include_scissor, &v.uberhar_include_scissor},
+        std::pair{Settings::Keys::uberhar_adaptive_cpu_workers, &v.uberhar_adaptive_cpu_workers},
+        std::pair{Settings::Keys::uberhar_gpu_observer, &v.uberhar_gpu_observer},
+        std::pair{Settings::Keys::uberhar_frame_workload_census, &v.uberhar_frame_workload_census},
+        std::pair{Settings::Keys::uberhar_static_dynamic_state, &v.uberhar_static_dynamic_state},
+        std::pair{Settings::Keys::uberhar_prepare_displayed_eye_only, &v.uberhar_prepare_displayed_eye_only},
+        std::pair{Settings::Keys::uberhar_early_right_eye, &v.uberhar_early_right_eye},
+        std::pair{Settings::Keys::uberhar_optimize_generic_shaders, &v.uberhar_optimize_generic_shaders},
+    }) {
+        const std::string ordinary_on = std::string("[Renderer]\n") + key + "=true\n";
+        const std::string ordinary_off = std::string("[Renderer]\n") + key + "=false\n";
+        const std::string global_on = std::string("[Testing]\nenabled=true\n") + key + "=true\n";
+        const std::string title_off = title_section + key + "=false\n";
+        load(ordinary_off, ordinary_off, global_on);
+        assert(!setting->GetValue() && setting->GetValue(true));
+        load(ordinary_on, ordinary_on, global_on + title_off);
+        assert(!setting->GetValue());
+        cfg.runtime_reload = true;
+        load(ordinary_on, ordinary_on, global_on + title_section + key + "=true\n");
+        assert(!setting->GetValue());
+        cfg.runtime_reload = false;
+        load(ordinary_off, ordinary_off, global_on + title_section + key + "=broken\n");
+        assert(!setting->GetValue());
+        Common::g_uberhar_alpha_testing = false;
+        load(ordinary_off, ordinary_off, global_on + title_section + key + "=true\n");
+        assert(!setting->GetValue());
+        Common::g_uberhar_alpha_testing = true;
+    }
     std::cout << "Android four setting layers, sparse master/preset/control overrides, profile defaults, "
                  "ordinary title priority, launch latch and live resolution: PASS\n";
 }
 '''
 with tempfile.TemporaryDirectory(prefix='uberhar-settings-') as tmp:
     path = Path(tmp)
+    # CodexAstraLocal: Generate current keys into this isolated fixture, avoiding stale build headers.
+    keys = list(dict.fromkeys(re.findall(r'"([A-Za-z_][A-Za-z_0-9]*)"',
+        (root / 'CMakeModules/GenerateSettingKeys.cmake').read_text())))
+    header = (root / 'src/common/setting_keys.h.in').read_text().replace(
+        '@SETTING_KEY_DEFINITIONS@', '\n'.join(f'DEFINE_KEY({key})' for key in keys)).replace(
+        '@SETTING_KEY_LIST@', ',\n'.join(f'"{key}"' for key in keys))
+    (path/'common').mkdir()
+    (path/'common/setting_keys.h').write_text(header)
     (path / 'fixture.cpp').write_text(prefix + source[start:end] + apply_effective + main)
     command = ['c++', '-std=c++20', '-O0', '-DFMT_HEADER_ONLY', '-DENABLE_VULKAN', '-Isrc',
-               '-Isrc/android/app/src/main', '-Ibuild/uberhar-profile',
+               '-Isrc/android/app/src/main', '-I'+str(path),
                '-Iexternals/fmt/include', '-Iexternals/boost', '-I'+str(inih/'cpp'),
                str(path/'fixture.cpp'), str(inih/'cpp/INIReader.cpp'), str(inih/'ini.c'),
                '-o', str(path/'fixture')]

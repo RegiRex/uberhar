@@ -1581,7 +1581,7 @@ void PipelineCache::UseTrivialGeometryShader() {
 
 void PipelineCache::UseFragmentShader(const Pica::RegsInternal& regs,
                                       const Pica::Shader::UserConfig& user,
-                                      bool preparing_ready_gpu) {
+                                      bool preparing_ready_gpu, u64 register_generation) {
     // CodexAstraLocal: A pure prepared entry is borrowed only within this draw;
     // unsupported/new draws cannot reuse a prior family or runtime plan.
     prepared_cpu_family = nullptr;
@@ -1593,7 +1593,17 @@ void PipelineCache::UseFragmentShader(const Pica::RegsInternal& regs,
     // generic family mutates its TEV fields below, so keep the original value
     // for exact specialization/recovery instead of repeating all light, texture
     // and combiner register decoding on the serial draw owner.
-    const FSConfig fragment_config{regs};
+    // CodexAstraLocal: Every call still resolves newly ready specializations and
+    // current resources; generation reuse skips only immutable register decoding.
+    if (!register_generation || !cached_fragment_config ||
+        cached_fragment_generation != register_generation) {
+        cached_fragment_config.emplace(regs);
+        cached_fragment_generation = register_generation;
+        ++fragment_config_builds;
+    } else {
+        ++fragment_config_reuses;
+    }
+    const FSConfig fragment_config = *cached_fragment_config;
 
     // AstraEH: Capture runtime controls before canonicalization. Lighting/procedural
     // structure and typed cube resources remain specialized; LUT controls/source slots are runtime.

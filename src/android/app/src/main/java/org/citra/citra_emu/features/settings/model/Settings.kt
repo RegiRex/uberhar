@@ -95,6 +95,8 @@ class Settings {
         get() = sections.isEmpty()
 
     fun loadSettings(view: SettingsActivityView? = null) {
+        // CodexAstraLocal: Launch and ordinary editors see migrated Filtering before reading layers.
+        if (TestingSettings.available) SettingsFile.migrateRetiredTestingSettings(gameId)
         // CodexAstraLocal: A previous title must never become the next editor's defaults.
         resetWorkingValues()
         sections = SettingsSectionMap()
