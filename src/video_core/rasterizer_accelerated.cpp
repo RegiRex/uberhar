@@ -9,6 +9,7 @@
 #include "core/memory.h"
 #include "video_core/pica/pica_core.h"
 #include "video_core/rasterizer_accelerated.h"
+#include "video_core/pica/uberhar_vertex_view.h" // CodexAstraLocal: Synchronous typed range.
 
 namespace VideoCore {
 
@@ -110,6 +111,26 @@ void RasterizerAccelerated::AddTriangle(const Pica::OutputVertex& v0, const Pica
     vertex_batch.emplace_back(v0, false);
     vertex_batch.emplace_back(v1, AreQuaternionsOpposite(v0.quat, v1.quat));
     vertex_batch.emplace_back(v2, AreQuaternionsOpposite(v0.quat, v2.quat));
+}
+
+// CodexAstraLocal: The generic backend keeps its original callback semantics.
+// No interface user needs to opt into the accelerated private-vector contract.
+void RasterizerInterface::AppendOrderedVertices(Pica::PrimitiveAssembler& assembler,
+                                               const Pica::OrderedVertexView& vertices) {
+    assembler.SubmitOrdered(vertices.Size(), vertices,
+        [this](const auto& a, const auto& b, const auto& c) { AddTriangle(a, b, c); });
+}
+
+// CodexAstraLocal: Keep primitive assembly and packing together so the compiler
+// sees the concrete sink. The qualified call removes virtual dispatch per
+// triangle; quaternion decisions, conversion order, vector growth and exception
+// behavior use the original AddTriangle body, including reversible append.
+void RasterizerAccelerated::AppendOrderedVertices(Pica::PrimitiveAssembler& assembler,
+                                                 const Pica::OrderedVertexView& vertices) {
+    assembler.SubmitOrderedTyped(vertices.Size(), vertices,
+        [this](const auto& a, const auto& b, const auto& c) {
+            RasterizerAccelerated::AddTriangle(a, b, c);
+        });
 }
 
 // CodexAstraLocal: Preserve all three original quaternion decisions and field

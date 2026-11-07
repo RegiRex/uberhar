@@ -37,6 +37,16 @@ struct AppendSink {
     bool BeginVertexAppend(u32, std::size_t&);
     void RollbackVertexAppend(std::size_t) noexcept;
     void AddTriangle(const OutputVertex&, const OutputVertex&, const OutputVertex&);
+    void AppendOrderedVertices(PrimitiveAssembler&, const OrderedVertexView&);
+};
+// CodexAstraLocal: Scheduling control wraps, rather than rewrites, the extracted
+// production range body. The callback releases a deliberately late shader job.
+struct NotifiedAppendSink : AppendSink {
+    std::function<void()> after_range;
+    void AppendOrderedVertices(PrimitiveAssembler& assembler, const OrderedVertexView& view) {
+        AppendSink::AppendOrderedVertices(assembler, view);
+        if (after_range) after_range();
+    }
 };
 #include "actual_append.inc"
 }
@@ -59,25 +69,28 @@ void Equal(const AppendSink& a,const AppendSink& b) {
 
 // CodexAstraLocal: One worker pauses after the first grain while the owner
 // finishes other grains. Early append releases it; timeout is a failing control.
-void Case(PipelineRegs::TriangleTopology topology, bool indexed, bool fail, bool later_chunk) {
+void Case(PipelineRegs::TriangleTopology topology, bool indexed, bool fail, bool later_chunk, bool typed) {
     PrimitiveAssembler actual{topology}, expected{topology}; Seed(actual); Seed(expected);
     // CodexAstraLocal: Match initial unused bytes before comparing complete
     // rollback images; independently constructed objects can have different padding.
     std::memcpy(&expected, &actual, sizeof(actual));
     actual.SetWinding(); expected.SetWinding();
-    AppendSink output, oracle;
+    VideoCore::NotifiedAppendSink output; AppendSink oracle;
     const u32 count=later_chunk?4608:512;
     const u32 failure_base=later_chunk?4096:0;
     std::mutex mutex;std::condition_variable cv;bool blocked{},released{};
     const auto owner=std::this_thread::get_id();
-    const PrimitiveAssembler::TriangleHandler triangle=[&](const auto& a,const auto& b,const auto& c) {
-        output.AddTriangle(a,b,c);
+    const auto notify = [&] {
         std::lock_guard lock{mutex};
         if(blocked&&!released) {
             // CodexAstraLocal: These speculative append flags must disappear
             // after a later shader failure, while the shader's flags survive.
             std::feraiseexcept(FE_INVALID); released=true;cv.notify_all();
         }
+    };
+    output.after_range = notify;
+    const PrimitiveAssembler::TriangleHandler triangle=[&](const auto& a,const auto& b,const auto& c) {
+        output.AddTriangle(a,b,c); notify();
     };
     const auto reference=[&](const auto& a,const auto& b,const auto& c){oracle.AddTriangle(a,b,c);};
     auto index=[&](u32 i){
@@ -87,7 +100,7 @@ void Case(PipelineRegs::TriangleTopology topology, bool indexed, bool fail, bool
         return indexed&&i%17==16?i-1:i;
     };
     NativeParallelBatch batch{2};Need(batch.Prepare(count),"prepare");
-    VertexAppendTransaction transaction{actual,output,triangle};
+    VertexAppendTransaction transaction{actual,output,triangle,typed};
     std::feclearexcept(FE_ALL_EXCEPT);
     bool threw{};
     try {
@@ -111,7 +124,10 @@ void Case(PipelineRegs::TriangleTopology topology, bool indexed, bool fail, bool
     if(fail) {
         Need((std::fetestexcept(FE_INVALID)&FE_INVALID)==0,"speculative append FP retained");
         Need(std::fetestexcept(FE_DIVBYZERO)!=0,"shader FP lost");
-    } else Need(batch.LastWork().prefix_inputs>0,"missing prefix accounting");
+    } else {
+        Need(batch.LastWork().prefix_inputs>0,"missing prefix accounting");
+        Need((batch.LastWork().typed_append_inputs != 0) == typed, "typed route accounting");
+    }
     for(u32 i=0;i<(fail?failure_base:count);++i) expected.SubmitVertex(Value(index(i)),reference);
     Equal(output,oracle);
     // CodexAstraLocal: A second ordinary batch exposes tail/winding restoration
@@ -179,10 +195,11 @@ void OverlapOff() {
 }
 int main() try {
     OwnerOnly(); OverlapOff(); unsigned cases{};
+    for(bool typed:{false,true})
     for(auto topology:{PipelineRegs::TriangleTopology::List,PipelineRegs::TriangleTopology::Strip,
                        PipelineRegs::TriangleTopology::Fan,PipelineRegs::TriangleTopology::Shader})
         for(bool indexed:{false,true})for(bool fail:{false,true})for(bool later:{false,true}){
-            Case(topology,indexed,fail,later);++cases;
+            Case(topology,indexed,fail,later,typed);++cases;
         }
     std::cout<<"PASS prefix cases="<<cases<<" owner-only rollback late-chunk reuse FP\n";
     return 0;

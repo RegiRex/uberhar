@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include <chrono> // CodexAstraLocal: Bounded presentation coverage report cadence.
+
 #include "common/common_types.h"
 #include "common/math_util.h"
 #include "video_core/renderer_base.h"
@@ -91,7 +93,7 @@ private:
     void ConfigureFramebufferTexture(TextureInfo& texture,
                                      const Pica::FramebufferConfig& framebuffer);
     void ConfigureRenderPipeline();
-    void PrepareRendertarget();
+    void PrepareRendertarget(bool force_both_eyes = false);
     void RenderScreenshot();
     void RenderScreenshotWithStagingCopy();
     bool TryRenderScreenshotWithHostMemory();
@@ -121,6 +123,13 @@ private:
 private:
     Memory::MemorySystem& memory;
     Pica::PicaCore& pica;
+    // CodexAstraLocal: Frame-resolved mono selection keeps both windows and
+    // descriptor aliases consistent; screenshots explicitly prepare both eyes.
+    bool prepare_displayed_eye_only{};
+    int prepared_mono_eye{};
+    int unused_presentation_eye{-1};
+    u64 presentation_prepared{}, presentation_omitted{};
+    std::chrono::steady_clock::time_point presentation_next_report{};
 
 #ifdef HAVE_LIBRETRO
     LibRetroVKInstance instance;

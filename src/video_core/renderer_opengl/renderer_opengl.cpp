@@ -898,8 +898,6 @@ void RendererOpenGL::TryPresent(int timeout_ms, bool is_secondary) {
     // INTEL workaround.
     // Normally we could just delete the draw fence here, but due to driver bugs, we can just delete
     // it on the emulation thread without too much penalty
-    // glDeleteSync(frame.render_sync);
-    // frame.render_sync = 0;
 
     glBindFramebuffer(GL_READ_FRAMEBUFFER, frame->present.handle);
     glBlitFramebuffer(0, 0, frame->width, frame->height, 0, 0, layout.width, layout.height,

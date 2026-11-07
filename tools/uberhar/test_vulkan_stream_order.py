@@ -66,6 +66,10 @@ def main():
         render_header=read(source_root/'src/video_core/renderer_vulkan/vk_render_manager.h')
         pipeline=read(source_root/'src/video_core/renderer_vulkan/vk_pipeline_cache.cpp')
         raster=read(source_root/'src/video_core/renderer_vulkan/vk_rasterizer.cpp')
+        # CodexAstraLocal: The unchanged Draw setup now checks actual storage
+        # texture kinds before pass reuse; adapt its enum, not its decision.
+        texture_regs=read(source_root/'src/video_core/pica/regs_texturing.h')
+        (output/'texture-types.inc').write_text(function(texture_regs,'enum TextureType : u32')+';\n')
         # CodexAstraLocal: Keep complete production bodies; adapters only provide
         # Vulkan signatures, scheduler endpoints and controlled backing storage.
         parts=[function(stream,'class StreamBuffer::Allocation final')+';']

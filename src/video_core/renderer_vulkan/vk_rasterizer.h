@@ -9,6 +9,7 @@
 #include "video_core/rasterizer_accelerated.h"
 // CodexAstraLocal: Keep the recovered optional output guard owned by the renderer.
 #include "video_core/renderer_vulkan/uberhar_gpu_output_policy.h"
+#include "video_core/renderer_vulkan/uberhar_eye_policy.h" // CodexAstraLocal: Separate opt-in eye policy.
 #include "video_core/renderer_vulkan/vk_compute_rect.h" // AstraEH: Bounded compute test path.
 // CodexAstraLocal: Independent Calculated runtime owners are retired.
 #include "video_core/renderer_vulkan/vk_descriptor_update_queue.h"
@@ -16,6 +17,7 @@
 #include "video_core/renderer_vulkan/vk_render_manager.h"
 #include "video_core/renderer_vulkan/vk_stream_buffer.h"
 #include "video_core/renderer_vulkan/vk_texture_runtime.h"
+#include "video_core/uberhar_frame_workload_census_log.h" // CodexAstraLocal: Bounded optional records.
 
 namespace Frontend {
 class EmuWindow;
@@ -190,6 +192,25 @@ private:
     u64 memory_diagnostic_frames{};
     std::chrono::steady_clock::time_point next_memory_snapshot{};
     bool ready_vertex_attempt{};
+    // CodexAstraLocal: Launch-owned experiment controls keep settings resolution
+    // out of the per-draw path. Counters are reported at the existing frame boundary.
+    bool include_scissor{};
+    bool early_right_eye{}, early_eye_hazard{};
+    VideoCore::FrameWorkloadCensusLog census_log;
+    u64 census_callback_index{};
+    void RecordWorkloadDraw(const VideoCore::FramebufferHelper<Traits>& helper,
+                            bool indexed, u32 count, VideoCore::FrameWorkloadCensus::Route route);
+    std::array<u64, static_cast<std::size_t>(UnusedEyePolicy::Decision::Count)> eye_decisions{};
+    u64 eye_draws_omitted{}, eye_cpu_vertices_retained{}, eye_gpu_vertices_omitted{};
+    std::array<std::pair<PAddr, u64>, 2> omitted_eye_ranges{};
+    // CodexAstraLocal: Observed later consumers invalidate the experiment for
+    // the session and emit an error; they cannot recover already omitted output.
+    void ObserveOmittedEyeRead(PAddr address, u64 size);
+    void ObserveEyeTextureReads();
+    void ReportWorkReduction(bool final);
+    bool TryOmitUnusedEye(bool accelerate, u32 cpu_vertices);
+    u64 narrowed_scissors{}, scissor_area_before{}, scissor_area_after{};
+    std::chrono::steady_clock::time_point next_work_report{};
     GraphicsPipeline* ready_vertex_pipeline{};
     // CodexAstraLocal: No capture allocation exists without a valid opt-in file.
     std::unique_ptr<VertexCapture::Session> vertex_capture;

@@ -68,7 +68,7 @@ int main() {
                   !values.uberhar_parallel_texture_decode.GetValue(),
               "preset erased isolated comparison controls");
         Check(values.graphics_api.GetValue() == GraphicsAPI::Vulkan, "profile must select Vulkan");
-        Check(values.use_hw_shader.GetValue() == (mode == UberharTestMode::Native),
+        Check(!values.use_hw_shader.GetValue(),
               "CPU-only Combo veto or independent Native hardware preference changed");
         Check(!values.use_shader_jit.GetValue() && !values.disable_spirv_optimizer.GetValue() &&
                   !values.shaders_accurate_mul.GetValue() && !values.use_disk_shader_cache.GetValue(),
@@ -123,7 +123,7 @@ int main() {
             values.uberhar_cpu_vertex_only = false;
             values.use_hw_shader = requested;
             ApplyUberharTestProfile();
-            Check(values.use_hw_shader.GetValue() == requested, "profile erased hardware choice");
+            Check(!values.use_hw_shader.GetValue(), "retired ordinary GPU route re-enabled in a profile");
         }
     }
     // CodexAstraLocal: Retirement preserves requested scale, guest CPU/timing and

@@ -2,7 +2,8 @@
 
 <!-- CodexAstraUlt-2: Architecture, limits and validation for the isolated 0.1.57 candidate. -->
 
-The `uberhar/precompiled-first` branch starts at `0723b003` (0.1.56-r2).
+The `uberhar/precompiled-first` branch started at `0723b003` (0.1.56-r2)
+and now incorporates main's 0.1.57 work-reduction changes at `d25afc00`.
 It prepares known Vulkan CPU-fragment pipelines before gameplay and selects ready
 specializations before asking for a generic shader. This is an implementation of
 observed-state preparation. It cannot enumerate every future draw of an arbitrary
@@ -64,6 +65,14 @@ Existing hardware-vertex selection keeps its stage/layout checks. The new record
 are collected only from actual cacheable CPU draws, including draws initially
 served by a generic shader. No hardware layout is relabeled as an observed CPU
 pipeline, and no draw is skipped to hide a compiler miss.
+
+<!-- CodexAstraUlt-2: Main's immutable configuration reuse must not freeze changing readiness or resource state. -->
+
+Main's register-generation reuse only avoids repeated immutable fragment-config
+construction. Every draw still checks ready pipelines, current resources and CPU
+transport requirements. The merged fixture includes pending-to-ready transitions
+without a register change and GPU-to-CPU retries. Recipe identity retains the full
+pipeline state for both dynamic-state and Turnip static-state execution modes.
 
 Native and full Combo use the new preparation path when their existing full-CPU
 fragment option and disk shader cache are enabled. Generic-only modes, an explicit
@@ -152,6 +161,17 @@ translation units compiled. The ready-CPU full/static and related Vulkan fixture
 are extended, but local execution is blocked by the unavailable pinned 6.9 MB
 `vulkan_structs.hpp` dependency. The workspace also lacks the complete Android
 toolchain. These are outstanding validation gates, not passing tests.
+
+<!-- CodexAstraUlt-2: Identify the earlier actual failure and scope of the repaired fixture evidence. -->
+
+The earlier shader job in run 41971435934 failed during compilation of the
+optional-cache-I/O fixture: its mock did not expose the newly called semantic-save
+endpoint. The mock now counts that forwarding call, including when the older
+optional cache is disabled; the repaired fixture passes against this merged source.
+It does not exercise the new semantic file's real I/O or replace the codec/import
+tests. Later shader-pixel checks were not reached in that earlier run. The old
+Android build passed but used main's package ID; neither result qualifies this
+new side-by-side build.
 
 The same-repository draft PR targets the existing gated workflow and checks the
 immutable candidate head. The comparison artifact has a distinct name and retains

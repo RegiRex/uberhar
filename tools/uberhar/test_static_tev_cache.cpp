@@ -361,11 +361,17 @@ void LazyTransportAndExactReuse() {
     // CodexAstraLocal: Specialized-only GPU preparation bypasses transport;
     // refusal followed by a CPU retry must reestablish it from current registers.
     PipelineCache retry;
-    retry.UseFragmentShader(regs, {}, true);
+    retry.UseFragmentShader(regs, {}, true, 70);
     Require(!retry.pending_tev_transport && retry.tev_transport_prepared == 0,
             "specialized GPU preparation has no generic obligation");
+    // CodexAstraUlt-2: A retry without a register write must still rebuild its
+    // draw-local transport obligation while reusing only decoded configuration.
+    retry.UseFragmentShader(regs, {}, false, 70);
+    Require(retry.pending_tev_transport && retry.fragment_config_builds == 1 &&
+                retry.fragment_config_reuses == 1,
+            "generation-cached CPU retry retains exact transport preparation");
     regs.texturing.fog_flip.Assign(0);
-    retry.UseFragmentShader(regs, {}, false);
+    retry.UseFragmentShader(regs, {}, false, 71);
     auto retry_info = Info();
     Require(retry.BindPipeline(retry_info, true), "GPU refusal CPU retry binds complete draw");
     retry.scheduler.WaitWorker();

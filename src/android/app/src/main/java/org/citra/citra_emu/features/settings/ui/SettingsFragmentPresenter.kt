@@ -2121,20 +2121,19 @@ class SettingsFragmentPresenter(private val fragmentView: SettingsFragmentView) 
                     BooleanSetting.CPU_JIT.defaultValue
                 )
             )
-            add(
-                SwitchSetting(
-                    BooleanSetting.HW_SHADER,
-                    R.string.hw_shaders,
-                    R.string.hw_shaders_description,
-                    BooleanSetting.HW_SHADER.key,
-                    BooleanSetting.HW_SHADER.defaultValue
-                ).apply {
-                    // CodexAstraLocal: CPU-only Combo vetoes GPU vertex execution in either editor.
-                    if (TestingSettings.hardwareShadersConflictsWithCpuVertices(settings)) {
-                        requireBooleanValue(this, false, R.string.uberhar_testing_hardware_cpu_only)
-                    }
-                }
-            )
+            // CodexAstraLocal: Retire the rejected Hardware Shader experiment from
+            // Native/Combo while retaining Custom/OpenGL preferences and capabilities.
+            if (TestingSettings.resolvedMode(settings) == UberharTestMode.CUSTOM) {
+                add(
+                    SwitchSetting(
+                        BooleanSetting.HW_SHADER,
+                        R.string.hw_shaders,
+                        R.string.hw_shaders_description,
+                        BooleanSetting.HW_SHADER.key,
+                        BooleanSetting.HW_SHADER.defaultValue
+                    )
+                )
+            }
             add(
                 SwitchSetting(
                     BooleanSetting.SHADER_JIT,

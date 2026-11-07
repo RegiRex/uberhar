@@ -16,6 +16,67 @@ GraphicsPipeline* QualifyAndBuild(PipelineCache& p, PipelineInfo info, const FSC
     return owner;
 }
 
+// CodexAstraUlt-2: Register generations cache decoding only. A full PSO that
+// completes between identical draws must be selected without another generic lookup.
+void RegisterGenerationKeepsReadinessLive() {
+    PipelineCache p;
+    Pica::RegsInternal regs{};
+    regs.lighting.disable.Assign(1);
+    regs.framebuffer.output_merger.alphablend_enable.Assign(1);
+    const FSConfig config{regs};
+    const auto layout = SoftwareLayout();
+    auto info = Info();
+    SeedModule(p, config);
+    for (unsigned frame = 0; frame < 4; ++frame) {
+        for (unsigned draw = 0; draw < 16; ++draw) DrawCpu(p, info, config);
+        Advance(p);
+    }
+    auto* pending = p.warming_ready_vertex;
+    Require(pending && !pending->IsDone() && p.ready_vertex_worker->tasks.size() == 1,
+            "register-generation control has a pending full pipeline");
+    PipelineCache::CpuFragmentToken token{};
+    p.UseFragmentShader(regs, {}, false, 37);
+    Require(p.BindPipeline(info, true, nullptr, true, nullptr, &layout, &token) && !token,
+            "pending full pipeline retains complete generic draw");
+    p.scheduler.Finish();
+    const auto generic_requests = p.generic_requests;
+    p.ready_vertex_worker->WaitForRequests();
+    p.UseFragmentShader(regs, {}, false, 37);
+    Require(p.BindPipeline(info, true, nullptr, true, nullptr, &layout, &token) && token &&
+                p.ready_cpu_bank->AllSlots()[token.slot].owner.get() == pending,
+            "unchanged register generation still discovers newly ready full pipeline");
+    p.CompleteReadyCpuDraw(token);
+    p.scheduler.Finish();
+    Require(p.fragment_config_builds == 1 && p.fragment_config_reuses == 1 &&
+                p.generic_requests == generic_requests && Probe::optional_waits == 0,
+            "generation reuse skips decoding but not exact readiness lookup");
+
+    // CodexAstraUlt-2: GPU refusal and changed user resources can occur without
+    // guest register writes; each call must reestablish its own transport/admission.
+    p.UseFragmentShader(regs, {}, true, 37);
+    Require(!p.pending_tev_transport, "same-generation GPU preparation omits CPU transport");
+    p.UseFragmentShader(regs, {}, false, 37);
+    Require(p.pending_tev_transport.has_value(),
+            "same-generation CPU retry restores original transport obligation");
+    UserConfig custom{};
+    custom.use_custom_normal.Assign(1);
+    p.UseFragmentShader(regs, custom, false, 37);
+    Require(!p.tev_supported && !p.virtual_fs_config && !p.pending_tev_transport,
+            "same-generation custom resources recheck fragment support");
+    p.UseFragmentShader(regs, {}, false, 37);
+    Require(p.tev_supported && p.virtual_fs_config && p.pending_tev_transport &&
+                !p.current_shaders[ProgramType::FS],
+            "same-generation native resources restore fresh draw identity");
+    regs.texturing.fog_flip.Assign(1);
+    p.UseFragmentShader(regs, {}, false, 38);
+    Require(p.fragment_config_builds == 2 && *p.virtual_fs_config == FSConfig{regs},
+            "new register generation rebuilds exact fragment configuration");
+    p.UseFragmentShader(regs, {}, false, 0);
+    p.UseFragmentShader(regs, {}, false, 0);
+    Require(p.fragment_config_builds == 4,
+            "unspecified generation conservatively decodes every call");
+}
+
 void RealSelectionAndTransport() {
     PipelineCache p;
     auto info = Info();
@@ -759,6 +820,7 @@ int main() {
         SharedLimitsAndAllocation();
         BindTransportAndModes(); KeyAndDynamicState();
         DirectFullModuleRouting();
+        RegisterGenerationKeepsReadinessLive();
         Require(Probe::optional_waits==0 && Probe::lifetime_errors==0,
                 "no optional waits or borrowed shader destruction");
         std::cout << "PASS checks=" << Probe::checks << " builds=" << Probe::pipeline_builds

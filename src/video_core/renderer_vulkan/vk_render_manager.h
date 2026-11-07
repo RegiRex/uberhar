@@ -50,10 +50,12 @@ public:
     ~RenderManager();
 
     /// Begins a new renderpass with the provided framebuffer as render target.
-    void BeginRendering(const Framebuffer* framebuffer, Common::Rectangle<u32> draw_rect);
+    void BeginRendering(const Framebuffer* framebuffer, Common::Rectangle<u32> draw_rect,
+                        bool reads_storage = false);
 
     /// Begins a new renderpass with the provided render state.
-    void BeginRendering(const RenderPass& new_pass, bool framebuffer_pass = false);
+    void BeginRendering(const RenderPass& new_pass, bool framebuffer_pass = false,
+                        bool allow_containment = false);
 
     /// Exits from any currently active renderpass instance
     void EndRendering(PassEndReason reason = PassEndReason::Explicit);
@@ -90,6 +92,9 @@ private:
     std::array<vk::Image, 2> images;
     std::array<vk::ImageAspectFlags, 2> aspects;
     bool shadow_rendering{};
+    // CodexAstraLocal: Eligibility belongs to the original active pass; even an
+    // exact-area shadow/storage draw revokes later contained-area reuse.
+    bool containment_eligible{};
     RenderPass pass{};
     u32 num_draws{};
     // CodexAstraLocal TEST-ONLY LOG: Fixed residency and per-frame sample budget
@@ -110,6 +115,11 @@ private:
         } attribution;
     };
     vk::UniqueQueryPool diagnostic_queries;
+    // CodexAstraLocal: Mechanism statistics are independent of query allocation.
+    bool reuse_contained_pass{};
+    u64 contained_pass_reuses{}, containment_refusals{};
+    u64 containment_submission_boundaries{}, mechanism_frames{};
+    std::chrono::steady_clock::time_point mechanism_next_report{};
     std::array<PassSample, 16> diagnostic_samples{};
     // CodexAstraLocal: Acquire/release covers host metadata explicitly; query
     // availability alone is not C++ synchronization. Slots retain GPU gating too.

@@ -46,6 +46,8 @@ def main():
     (output / 'result.json').write_text(json.dumps({
         'command': command, 'exit_code': result.returncode,
         'sha256': {str(p.relative_to(root)): hashlib.sha256(p.read_bytes()).hexdigest() for p in inputs},
+        # CodexAstraUlt-2: Keep the new dependency boundary explicit in retained evidence.
+        'precompile_dependency': 'Counted SavePrecompileRecipesAfterDrain endpoint; no precompile-manifest I/O coverage.',
         'boundary': 'Real stdio/filesystem FileUtil adapter; generated SCM constants and compiler output modeled; no Android SAF or Vulkan.'
     }, indent=2) + '\n')
     if result.returncode:
@@ -55,3 +57,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+

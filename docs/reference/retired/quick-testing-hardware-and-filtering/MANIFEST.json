@@ -1,0 +1,62 @@
+{
+  "author": "CodexAstraLocal",
+  "origin_commit": "0723b003d92d20df45778b046672c77739e78599",
+  "features": {
+    "hardware_shader_testing": {
+      "purpose": "Retire rejected quick override; keep Custom/OpenGL and Combo ready-GPU dependencies",
+      "restore": "Requires Testing resolver/UI/config keys and matching ordinary-profile policy; never remove CPU-only safety."
+    },
+    "linear_filter_quick_control": {
+      "purpose": "Retire quick duplicate only; ordinary Renderer.filter_mode remains",
+      "restore": "Restore UI/resolver only if explicitly authorized; migrated ordinary choices and inert metadata survive."
+    }
+  },
+  "files": [
+    "src/android/app/src/main/java/org/citra/citra_emu/features/settings/model/TestingSettings.kt",
+    "src/android/app/src/main/java/org/citra/citra_emu/features/settings/ui/TestingPanelController.kt",
+    "src/android/app/src/main/res/layout/panel_testing.xml",
+    "src/android/app/src/main/jni/config.cpp",
+    "src/common/uberhar_test_profile.h",
+    "src/android/app/src/main/jni/native.cpp",
+    "src/android/app/src/main/java/org/citra/citra_emu/NativeLibrary.kt"
+  ],
+  "license": "GPLv2-or-later; original copyright headers retained",
+  "scope": "Tracked historical reference under docs; never compiled or packaged. Full source snapshots preserve feature context.",
+  "snapshots": [
+    {
+      "source": "src/android/app/src/main/java/org/citra/citra_emu/features/settings/model/TestingSettings.kt",
+      "archive": "origin/src/android/app/src/main/java/org/citra/citra_emu/features/settings/model/TestingSettings.kt.txt",
+      "sha256": "7dd6a6d413d5e8ad5a00fbee10bacf4ff62ccb5103081460ffd85e144f9db583"
+    },
+    {
+      "source": "src/android/app/src/main/java/org/citra/citra_emu/features/settings/ui/TestingPanelController.kt",
+      "archive": "origin/src/android/app/src/main/java/org/citra/citra_emu/features/settings/ui/TestingPanelController.kt.txt",
+      "sha256": "cfd354a0881927ecb5cae47740a0499a07c4293453898d28226a7e1d878d3e69"
+    },
+    {
+      "source": "src/android/app/src/main/res/layout/panel_testing.xml",
+      "archive": "origin/src/android/app/src/main/res/layout/panel_testing.xml.txt",
+      "sha256": "f263a85d48919c0bb513439bf04e6f5031a5b50f579ad6917f2b763edd738d97"
+    },
+    {
+      "source": "src/android/app/src/main/jni/config.cpp",
+      "archive": "origin/src/android/app/src/main/jni/config.cpp.txt",
+      "sha256": "d492153c6386ad4e5cb657b8343ad49937be60c8553dbf7d1cb4d8aa03f31f40"
+    },
+    {
+      "source": "src/common/uberhar_test_profile.h",
+      "archive": "origin/src/common/uberhar_test_profile.h.txt",
+      "sha256": "a56732c49ff5ebad32d77fa0c155610ee11aafabd2f45e8013e1599ad3c8effb"
+    },
+    {
+      "source": "src/android/app/src/main/jni/native.cpp",
+      "archive": "origin/src/android/app/src/main/jni/native.cpp.txt",
+      "sha256": "8b7e1202cc0432a80498acd25aed8a19ac4cf286488057fe4ba2dcd75c9e4c60"
+    },
+    {
+      "source": "src/android/app/src/main/java/org/citra/citra_emu/NativeLibrary.kt",
+      "archive": "origin/src/android/app/src/main/java/org/citra/citra_emu/NativeLibrary.kt.txt",
+      "sha256": "921642c43cd1cde72ce72c94a1b94bd35aa2813b4d987ce8743f4faa9dc17d62"
+    }
+  ]
+}

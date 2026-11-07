@@ -1040,10 +1040,23 @@ jboolean Java_org_citra_citra_1emu_NativeLibrary_isAlphaTestingAvailable(
     return static_cast<jboolean>(Common::g_uberhar_alpha_testing);
 }
 
-// CodexAstraLocal: Running controls show effective launch permissions after the Combo CPU veto.
-jboolean Java_org_citra_citra_1emu_NativeLibrary_getEffectiveHardwareShaders(
-    [[maybe_unused]] JNIEnv* env, [[maybe_unused]] jobject obj) {
-    return static_cast<jboolean>(Settings::values.use_hw_shader.GetValue());
+// CodexAstraLocal: Launch-owned values are shown only for a matching running title.
+jboolean Java_org_citra_citra_1emu_NativeLibrary_getEffectiveTestingBoolean(
+    JNIEnv* env, [[maybe_unused]] jobject obj, jstring key) {
+    const auto name = GetJString(env, key);
+    if (name == Settings::Keys::uberhar_changed_state_only) return Settings::values.uberhar_changed_state_only.GetValue();
+    if (name == Settings::Keys::uberhar_reuse_contained_pass) return Settings::values.uberhar_reuse_contained_pass.GetValue();
+    if (name == Settings::Keys::uberhar_typed_primitive_append) return Settings::values.uberhar_typed_primitive_append.GetValue();
+    if (name == Settings::Keys::uberhar_include_scissor) return Settings::values.uberhar_include_scissor.GetValue();
+    if (name == Settings::Keys::uberhar_adaptive_cpu_workers) return Settings::values.uberhar_adaptive_cpu_workers.GetValue();
+    if (name == Settings::Keys::uberhar_gpu_observer) return Settings::values.uberhar_gpu_observer.GetValue();
+    if (name == Settings::Keys::uberhar_frame_workload_census) return Settings::values.uberhar_frame_workload_census.GetValue();
+    if (name == Settings::Keys::uberhar_static_dynamic_state) return Settings::values.uberhar_static_dynamic_state.GetValue();
+    if (name == Settings::Keys::uberhar_prepare_displayed_eye_only) return Settings::values.uberhar_prepare_displayed_eye_only.GetValue();
+    if (name == Settings::Keys::uberhar_early_right_eye) return Settings::values.uberhar_early_right_eye.GetValue();
+    if (name == Settings::Keys::uberhar_optimize_generic_shaders)
+        return Settings::values.uberhar_optimize_generic_shaders.GetValue();
+    return false;
 }
 
 jint Java_org_citra_citra_1emu_NativeLibrary_getEffectiveRenderThreadDelayUs(
@@ -1051,12 +1064,7 @@ jint Java_org_citra_citra_1emu_NativeLibrary_getEffectiveRenderThreadDelayUs(
     return static_cast<jint>(Settings::values.delay_game_render_thread_us.GetValue());
 }
 
-// CodexAstraLocal: Report immutable launch experiments during ordinary live resolution edits.
-jboolean Java_org_citra_citra_1emu_NativeLibrary_getEffectiveLinearFiltering(
-    [[maybe_unused]] JNIEnv* env, [[maybe_unused]] jobject obj) {
-    return static_cast<jboolean>(Settings::values.filter_mode.GetValue());
-}
-
+// CodexAstraLocal: Preserve the guest slider launch snapshot during resolution reloads.
 jint Java_org_citra_citra_1emu_NativeLibrary_getEffectiveStereoDepth(
     [[maybe_unused]] JNIEnv* env, [[maybe_unused]] jobject obj) {
     return static_cast<jint>(Settings::values.factor_3d.GetValue());

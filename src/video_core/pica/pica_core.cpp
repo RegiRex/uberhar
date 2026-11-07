@@ -158,7 +158,7 @@ struct PicaCore::ParallelVertexState {
     };
     NativeParallelBatch batch{Common::Uberhar::AvailableProcessors(), +[] {
         Common::SetCurrentThreadName("UberharVertex");
-    }};
+    }, Settings::values.uberhar_adaptive_cpu_workers.GetValue()};
     std::array<Program, 8> programs{};
     Program* current{};
     u64 revision{};
@@ -174,6 +174,8 @@ struct PicaCore::ParallelVertexState {
     // CodexAstraLocal TEST-ONLY LOG: Remove prefix evidence after target overlap
     // qualification; counts are completed append work, not extra shader work.
     u64 prefix_chunks{}, prefix_inputs{}, prefix_ns{};
+    // CodexAstraLocal TEST-ONLY LOG: Actual range-sink coverage, remove after qualification.
+    u64 typed_append_ranges{}, typed_append_inputs{};
     // CodexAstraLocal: One in 257 completed admitted draws measures phase wall
     // time. The prime stride avoids always sampling the same power-of-two slot;
     // these are sampled costs, never scaled into an asserted whole-run budget.
@@ -595,6 +597,19 @@ PicaCore::PicaCore(Memory::MemorySystem& memory_, std::shared_ptr<DebugContext> 
       // Remove after the internal Software reference is qualified.
       software_producer_diagnostics{
           Settings::GetWorkingGraphicsAPI() == Settings::GraphicsAPI::Software} {
+    // CodexAstraLocal: Freeze work-reduction controls for this guest session;
+    // workers never observe partially changed UI policy during a draw.
+    changed_state_only = Settings::IsUberharTestProfile(Settings::values.uberhar_test_mode.GetValue()) &&
+                         Settings::values.uberhar_changed_state_only.GetValue();
+    typed_primitive_append = Settings::values.uberhar_typed_primitive_append.GetValue();
+    if (Settings::values.uberhar_frame_workload_census.GetValue()) {
+        // CodexAstraLocal TEST-ONLY LOG: Optional census allocation failure must
+        // leave rendering available. Remove this witness with the census trial.
+        frame_census.reset(new (std::nothrow) VideoCore::FrameWorkloadCensus{true});
+        LOG_INFO(Render, "Uberhar frame census: requested=true effective={} allocation_failed={}",
+                 frame_census && frame_census->Enabled(),
+                 !frame_census || frame_census->AllocationFailed());
+    }
     // CodexAstraLocal Log Line: One immutable route label binds performance
     // comparisons to actual placement, without per-draw logging or live toggles.
     LOG_INFO(Render, "Uberhar: combo_cpu_vertices_only={} cpu_prefix_overlap={}",
@@ -826,6 +841,18 @@ void PicaCore::ReportVirtualVertices(const char* kind, std::chrono::steady_clock
             "trials={} accepted={} reverted={} unstable_skipped={} scope=sampled_pool_work_not_frames",
             kind, scheduling.desired, scheduling.samples, scheduling.rejected,
             scheduling.trials, scheduling.accepted, scheduling.reverted, scheduling.unstable_skipped);
+        // CodexAstraLocal TEST-ONLY LOG: Cohort retention and refusal reasons
+        // distinguish useful adaptive decisions from merely occupied workers.
+        // Remove after adaptive decisions and typed-append costs are qualified.
+        LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
+            "Uberhar adaptive cohorts {}: enabled={} hits={} misses={} evictions={} expired={} "
+            "unknown_identity={} capacity_resets={} reject=[{},{},{},{},{},{},{}] "
+            "typed_append_ranges={} typed_append_inputs={}", kind, scheduling.enabled,
+            scheduling.cohort_hits, scheduling.cohort_misses, scheduling.cohort_evictions,
+            scheduling.cohort_expired, scheduling.unknown_identity, scheduling.capacity_resets,
+            scheduling.reject_reasons[0], scheduling.reject_reasons[1], scheduling.reject_reasons[2],
+            scheduling.reject_reasons[3], scheduling.reject_reasons[4], scheduling.reject_reasons[5],
+            scheduling.reject_reasons[6], parallel.typed_append_ranges, parallel.typed_append_inputs);
         LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
             "Uberhar CPU parallel {}: schema=3 available={} created_workers={} peak_threads={} "
             "checks={} batches={} chunks={} owner_invocations={} worker_invocations={} "
@@ -1130,9 +1157,20 @@ void PicaCore::ProcessCmdList(PAddr list, u32 size, bool ignore_list) [[hot]] {
                     for (u32 i = 0; i < run; ++i) {
                         const u32 id = ids[i];
                         const u32 write_mask = ExpandBitsToBytes[masks[i]];
-                        regs.internal.reg_array[id] =
-                            (regs.internal.reg_array[id] & ~write_mask) | (values[i] & write_mask);
-                        dirty_regs.Set(id);
+                        // CodexAstraLocal: Preserve ordered masked writes and
+                        // timing, avoiding invalidation only for pure no-ops.
+                        const u32 old = regs.internal.reg_array[id];
+                        const u32 updated = (old & ~write_mask) | (values[i] & write_mask);
+                        regs.internal.reg_array[id] = updated;
+                        if (!changed_state_only || old != updated)
+                            dirty_regs.Set(id);
+                        if (old != updated) {
+                            ++changed_register_writes;
+                            if (id >= PICA_REG_INDEX(rasterizer) && id < PICA_REG_INDEX(pipeline))
+                                ++fragment_config_generation;
+                        } else {
+                            ++unchanged_register_writes;
+                        }
                     }
                     cmd_list.current_index = index;
 
@@ -1705,9 +1743,21 @@ void PicaCore::WriteInternalRegBatch(u32 id, const u32* values, u32 count, u32 m
     const u32 write_mask = ExpandBitsToBytes[mask];
     // Only write the last value to the register array.
     // Batch handlers should take this in mind.
-    regs.internal.reg_array[id] =
-        (regs.internal.reg_array[id] & ~write_mask) | (values[count - 1] & write_mask);
-    dirty_regs.Set(id);
+    // CodexAstraLocal: Repeated port/trigger writes retain their handlers even
+    // when the final register value matches; only pure-state dirtiness is elided.
+    const u32 old = regs.internal.reg_array[id];
+    const u32 updated = (old & ~write_mask) | (values[count - 1] & write_mask);
+    regs.internal.reg_array[id] = updated;
+    if (!changed_state_only || old != updated ||
+        reg_impl_flags_lut[id].NeedsSpecialHandling())
+        dirty_regs.Set(id);
+    if (old != updated) {
+        ++changed_register_writes;
+        if (id >= PICA_REG_INDEX(rasterizer) && id < PICA_REG_INDEX(pipeline))
+            ++fragment_config_generation;
+    } else {
+        ++unchanged_register_writes;
+    }
 
     if (reg_impl_flags_lut[id].SupportsBatch()) {
         // If the register supports batch then call the handler.
@@ -1759,11 +1809,22 @@ void PicaCore::WriteInternalRegSequential(u32 id, const u32* __restrict values, 
             // Verified in MSVC that vectorization is happening.
             u32* __restrict batch_dst = dst + offset;
             const u32* __restrict batch_src = values + offset;
+            // CodexAstraLocal: A reduction preserves vectorizable masked copies;
+            // skip the whole dirty range only when every pure value is unchanged.
+            u32 changed = 0;
             for (u32 i = 0; i < batch_count; ++i) {
-                batch_dst[i] = (batch_dst[i] & ~write_mask) | (batch_src[i] & write_mask);
+                const u32 old = batch_dst[i];
+                const u32 updated = (old & ~write_mask) | (batch_src[i] & write_mask);
+                changed += old != updated;
+                batch_dst[i] = updated;
             }
-
-            dirty_regs.SetRange(reg, batch_count);
+            if (!changed_state_only || changed)
+                dirty_regs.SetRange(reg, batch_count);
+            changed_register_writes += changed;
+            unchanged_register_writes += batch_count - changed;
+            if (changed && reg < PICA_REG_INDEX(pipeline) &&
+                reg + batch_count > PICA_REG_INDEX(rasterizer))
+                ++fragment_config_generation;
             offset += batch_count;
         }
         // Whatever register stopped the batch (if we didn't reach the end)
@@ -1804,7 +1865,19 @@ void PicaCore::WriteInternalReg(u32 id, u32 value, u32 mask, bool& stop_requeste
         HandleSpecialReg(id, value, stop_requested);
     }
 
-    dirty_regs.Set(id);
+    // CodexAstraLocal: Special handlers, debug events and delay accounting above
+    // always execute. Version only immutable fragment-register preparation.
+    const bool changed = old_value != regs.internal.reg_array[id];
+    if (!changed_state_only || changed ||
+        reg_impl_flags_lut[id].NeedsSpecialHandling())
+        dirty_regs.Set(id);
+    if (changed) {
+        ++changed_register_writes;
+        if (id >= PICA_REG_INDEX(rasterizer) && id < PICA_REG_INDEX(pipeline))
+            ++fragment_config_generation;
+    } else {
+        ++unchanged_register_writes;
+    }
 
     if (debug_context) [[unlikely]] {
         debug_context->OnEvent(DebugContext::Event::PicaCommandProcessed, &id);
@@ -2642,7 +2715,16 @@ void PicaCore::LoadVertices(bool is_indexed, std::chrono::steady_clock::time_poi
                 const bool measure_parallel = parallel.parallel_batches % 257 == 0;
                 // CodexAstraLocal: Keep early output private and reversible;
                 // the batch joins every borrower before GPU work or return.
-                VertexAppendTransaction append{primitive_assembler, *rasterizer, triangle};
+                VertexAppendTransaction append{primitive_assembler, *rasterizer, triangle,
+                                               typed_primitive_append};
+                // CodexAstraLocal: Reuse already established code identity; do
+                // not hash program bytes on the hot draw path. Exact work shape
+                // and admission are retained by the bounded adaptive cohort.
+                const Common::Uberhar::AdaptiveWorkIdentity adaptive_identity{
+                    parallel.current->program_hash, parallel.current->swizzle_hash,
+                    u64{vs_setup.entry_point} | (u64{regs.internal.vs.output_mask} << 16) |
+                    (u64{ParallelVertexBooleanUniforms(vs_setup.uniforms)} << 32) |
+                    (static_cast<u64>(contract) << 48)};
                 counts = parallel.batch.Run(pipeline.num_vertices, is_indexed, vertex_at,
                     [&](std::span<const NativeParallelBatch::Invocation> inputs,
                         std::span<OutputVertex> outputs) {
@@ -2652,8 +2734,10 @@ void PicaCore::LoadVertices(bool is_indexed, std::chrono::steady_clock::time_poi
                             context.Run(independent);
                             outputs[i] = plan.Convert(independent);
                         }
-                    }, append, measure_parallel, cpu_prefix_overlap);
+                    }, append, measure_parallel, cpu_prefix_overlap, adaptive_identity);
                 const auto& work = parallel.batch.LastWork();
+                parallel.typed_append_ranges += work.typed_append_ranges;
+                parallel.typed_append_inputs += work.typed_append_inputs;
                 ++parallel.parallel_batches;
                 parallel.owner_invocations += work.owner_invocations;
                 parallel.worker_invocations += work.worker_invocations;

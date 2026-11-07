@@ -159,6 +159,18 @@ void GPU::Execute(const Service::GSP::Command& command) {
         const auto process = impl->system.Kernel().GetCurrentProcess();
         impl->memory.CopyBlock(*process, command.dma_request.dest_address,
                                command.dma_request.source_address, command.dma_request.size);
+        // CodexAstraLocal TEST-ONLY LOG: Record executed guest DMA separately
+        // from GPU upload/DRAM traffic; remove after transfer-work attribution.
+        if (impl->pica.frame_census && impl->pica.frame_census->Enabled()) {
+            FrameWorkloadCensus::Transfer transfer{};
+            transfer.key.kind = FrameWorkloadCensus::TransferKind::Dma;
+            transfer.key.known = FrameWorkloadCensus::TransferKey::Addresses;
+            transfer.key.source_address = VirtualToPhysicalAddress(command.dma_request.source_address);
+            transfer.key.destination_address = VirtualToPhysicalAddress(command.dma_request.dest_address);
+            transfer.logical_bytes = command.dma_request.size;
+            transfer.logical_bytes_known = true;
+            impl->pica.frame_census->RecordTransfer(transfer);
+        }
 
         auto is_vram = [&](u32 addr) {
             return addr >= Memory::VRAM_VADDR && addr <= Memory::VRAM_VADDR_END;
@@ -330,7 +342,13 @@ void GPU::WriteReg(VAddr addr, u32 data) {
 
         ASSERT(addr % sizeof(u32) == 0);
         ASSERT(index < Pica::PicaCore::Regs::NUM_REGS);
+        // CodexAstraLocal: GSP direct/masked MMIO writes bypass the PICA parser.
+        // Invalidate pure fragment preparation here too, before any trigger can draw.
+        const u32 old = impl->pica.regs.reg_array[index];
         impl->pica.regs.reg_array[index] = data;
+        if (old != data && index >= GPU_REG_INDEX(internal.rasterizer) &&
+            index < GPU_REG_INDEX(internal.pipeline))
+            ++impl->pica.fragment_config_generation;
 
         // Handle registers that trigger GPU actions
         switch (index) {
@@ -407,6 +425,7 @@ void GPU::SubmitCmdList(u32 index) {
     // Forward command list processing to the PICA core.
     const PAddr addr = config.GetPhysicalAddress(index);
     const u32 size = config.GetSize(index);
+    ++impl->pica.command_lists_submitted;
     impl->pica.ProcessCmdList(addr, size,
                               !right_eye_disabler->ShouldAllowCmdQueueTrigger(addr, size));
     config.trigger[index] = 0;
@@ -422,6 +441,19 @@ void GPU::MemoryFill(u32 index, u32 intr_index) {
     // Perform memory fill.
     if (!impl->rasterizer->AccelerateFill(config)) {
         impl->sw_blitter->MemoryFill(config);
+    }
+    // CodexAstraLocal TEST-ONLY LOG: Fill bytes describe the guest range, not
+    // physical memory bandwidth or driver traffic. No extra guest reads.
+    // Remove this hook with the census after workload attribution is qualified.
+    if (impl->pica.frame_census && impl->pica.frame_census->Enabled()) {
+        FrameWorkloadCensus::Transfer transfer{};
+        transfer.key.kind = FrameWorkloadCensus::TransferKind::Fill;
+        transfer.key.destination_address = config.GetStartAddress();
+        transfer.key.known = FrameWorkloadCensus::TransferKey::Addresses;
+        transfer.logical_bytes_known = config.GetEndAddress() >= config.GetStartAddress();
+        if (transfer.logical_bytes_known)
+            transfer.logical_bytes = config.GetEndAddress() - config.GetStartAddress();
+        impl->pica.frame_census->RecordTransfer(transfer);
     }
 
     // Treat fill as texture transfer from VRAM
@@ -460,6 +492,7 @@ void GPU::MemoryTransfer() {
     }
 
     u64 delay{};
+    bool transfer_executed = true; // CodexAstraLocal: Census counts actual executed operations.
     // Perform memory transfer
     if (config.is_texture_copy) {
         if (!impl->rasterizer->AccelerateTextureCopy(config)) {
@@ -474,12 +507,42 @@ void GPU::MemoryTransfer() {
             if (!impl->rasterizer->AccelerateDisplayTransfer(config)) {
                 impl->sw_blitter->DisplayTransfer(config);
             }
+        } else {
+            transfer_executed = false;
         }
         delay = DelayGenerator::CalculateDelayNanoseconds(
             DelayGenerator::GetCopyMode(config.IsInputVRAM(), config.IsOutputVRAM()), true,
             config.input_width * config.input_height * BytesPerPixel(config.input_format));
     }
 
+    // CodexAstraLocal TEST-ONLY LOG: Capture exact display-transfer lineage and
+    // scaling at execution, including software fallback, without a second operation.
+    // Remove this hook with the census after workload attribution is qualified.
+    if (transfer_executed && impl->pica.frame_census && impl->pica.frame_census->Enabled()) {
+        FrameWorkloadCensus::Transfer transfer{};
+        auto& key = transfer.key;
+        key.kind = config.is_texture_copy ? FrameWorkloadCensus::TransferKind::TextureCopy
+                                          : FrameWorkloadCensus::TransferKind::Display;
+        key.known = FrameWorkloadCensus::TransferKey::Addresses | FrameWorkloadCensus::TransferKey::Flags;
+        key.source_address = config.GetPhysicalInputAddress();
+        key.destination_address = config.GetPhysicalOutputAddress();
+        key.flags = config.flags;
+        if (!config.is_texture_copy) {
+            key.known |= FrameWorkloadCensus::TransferKey::InputExtent | FrameWorkloadCensus::TransferKey::OutputExtent |
+                         FrameWorkloadCensus::TransferKey::Formats | FrameWorkloadCensus::TransferKey::ScaleMode;
+            key.input_width = config.input_width.Value();
+            key.input_height = config.input_height.Value();
+            key.output_width = config.output_width.Value();
+            key.output_height = config.output_height.Value();
+            key.input_format = static_cast<u32>(config.input_format.Value());
+            key.output_format = static_cast<u32>(config.output_format.Value());
+            key.scale_mode = static_cast<u32>(config.scaling.Value());
+        }
+        transfer.logical_bytes_known = true;
+        transfer.logical_bytes = config.is_texture_copy ? (config.texture_copy.size & ~u32{15}) :
+            u64{config.input_width.Value()} * config.input_height.Value() * BytesPerPixel(config.input_format);
+        impl->pica.frame_census->RecordTransfer(transfer);
+    }
     // Complete transfer.
     config.trigger.Assign(0);
     impl->signal_interrupt(Service::GSP::InterruptId::PPF, delay);

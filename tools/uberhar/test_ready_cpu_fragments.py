@@ -259,6 +259,10 @@ def main() -> None:
             # fail at the no-generic-work assertion, not merely fail compilation.
             ('generic-before-ready','if (!select_ready_cpu(nullptr)) {','if (true) {',
              'ready full avoids generic creation and wait'),
+            # CodexAstraUlt-2: Cached decoding must not skip per-draw route state.
+            ('generation-skips-draw','++fragment_config_reuses;\n    }',
+             '++fragment_config_reuses;\n        return;\n    }',
+             'same-generation CPU retry restores original transport obligation'),
             ('wrong-selected-owner','pipeline = ready;','pipeline = generic;','ready full draws without generic dependency'),
             ('hash-only','ready->Key() != candidate.key || !ready->MatchesExecution(candidate.pipeline, owners)',
              'ready->Key() != candidate.key','hash collision cannot replace actual execution equality'),

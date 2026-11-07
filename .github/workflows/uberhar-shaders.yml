@@ -182,6 +182,8 @@ jobs:
       # classification and sampled GPU-attribution proofs without broad build uploads.
       # CodexAstraUlt-2: Retain preparation and driver-failure controls from the
       # single build_probe execution, including early compiler failures.
+      # CodexAstraUlt-2: Optional persistence compile failures must retain their
+      # actual diagnostics even when the fixture cannot write its result record.
       - name: Upload CPU coordination contract evidence
         if: always()
         uses: actions/upload-artifact@v7
@@ -194,6 +196,8 @@ jobs:
             build/uberhar-probe/precompile-stock-import/*.log
             build/uberhar-probe/pipeline-device-loss.log
             build/uberhar-probe/pipeline-device-loss/*.log
+            build/uberhar-probe/optional-cache-io/**/*.log
+            build/uberhar-probe/optional-cache-io/**/result.json
             build/uberhar-probe/file-compatibility-gate/*.log
             build/uberhar-probe/file-compatibility-gate/*.sha256
             build/uberhar-probe/installer-security/**/provenance.json

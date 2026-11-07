@@ -406,6 +406,9 @@ public:
   TevPushConstants tev_constants{};
   // CodexAstraLocal: Bind the production lazy transport owner in extracted route tests.
   std::optional<FSConfig> pending_tev_transport;
+  // CodexAstraLocal: Match the production pure register preparation cache.
+  std::optional<FSConfig> cached_fragment_config;
+  u64 cached_fragment_generation{}, fragment_config_builds{}, fragment_config_reuses{};
   DynamicTevPreparation dynamic_tev_preparation;
   ExactPushConstants<TevPushConstants> tev_push_constants;
   std::unordered_map<u64, std::unique_ptr<Shader>> tev_shaders;
@@ -480,7 +483,7 @@ public:
   unsigned driver_cache_saves{};
   void SaveDriverPipelineDiskCache() { ++driver_cache_saves; } // CodexAstraUlt-2: Startup persistence endpoint.
   void UseFragmentShader(const Pica::RegsInternal &, const UserConfig &,
-                         bool = false);
+                         bool = false, u64 = 0);
   void EnsureDynamicTevState(); // CodexAstraLocal: Extract the actual materialization body.
   // CodexAstraLocal: Descriptor allocation is a controlled boundary here: the
   // fixture supplies resolved handles and the extracted bind captures them.

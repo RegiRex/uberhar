@@ -1,0 +1,67 @@
+--- src/video_core/renderer_opengl/gl_rasterizer.cpp
++++ src/video_core/renderer_opengl/gl_rasterizer.cpp
+@@ -256,10 +256,8 @@
+ 
+ void RasterizerOpenGL::SyncDrawState() {
+     SyncDrawUniforms();
+-
+-    // SyncClipEnabled();
++    // CodexAstraLocal: Convert current guest cull/blend/depth/stencil state directly.
+     state.clip_distance[1] = regs.rasterizer.clip_enable != 0;
+-    // SyncCullMode();
+     state.cull.enabled = regs.rasterizer.cull_mode != Pica::RasterizerRegs::CullMode::KeepAll &&
+                          regs.rasterizer.cull_mode != Pica::RasterizerRegs::CullMode::KeepAll2;
+     if (state.cull.enabled) {
+@@ -270,9 +268,7 @@
+     // If the framebuffer is flipped, vertex shader flips vertex y, so invert culling
+     const bool is_flipped = regs.framebuffer.framebuffer.IsFlipped();
+     state.cull.mode = is_flipped && state.cull.enabled ? GL_FRONT : GL_BACK;
+-    // SyncBlendEnabled();
+     state.blend.enabled = (regs.framebuffer.output_merger.alphablend_enable == 1);
+-    // SyncBlendFuncs();
+     const bool has_minmax_factor = driver.HasBlendMinMaxFactor();
+     state.blend.rgb_equation = PicaToGL::BlendEquation(
+         regs.framebuffer.output_merger.alpha_blending.blend_equation_rgb, has_minmax_factor);
+@@ -303,14 +299,11 @@
+             state.blend.dst_a_func = GL_ZERO;
+         }
+     }
+-    // SyncBlendColor();
+     const auto blend_color = PicaToGL::ColorRGBA8(regs.framebuffer.output_merger.blend_const.raw);
+     state.blend.color.red = blend_color[0];
+     state.blend.color.green = blend_color[1];
+     state.blend.color.blue = blend_color[2];
+     state.blend.color.alpha = blend_color[3];
+-    // SyncLogicOp();
+-    // SyncColorWriteMask();
+     state.logic_op = PicaToGL::LogicOp(regs.framebuffer.output_merger.logic_op);
+     if (driver.IsOpenGLES() && !regs.framebuffer.output_merger.alphablend_enable &&
+         regs.framebuffer.output_merger.logic_op == Pica::FramebufferRegs::LogicOp::NoOp) {
+@@ -331,7 +324,6 @@
+         state.color_mask.alpha_enabled =
+             is_color_write_enabled(regs.framebuffer.output_merger.alpha_enable);
+     }
+-    // SyncStencilTest();
+     state.stencil.test_enabled =
+         regs.framebuffer.output_merger.stencil_test.enable &&
+         regs.framebuffer.framebuffer.depth_format == Pica::FramebufferRegs::DepthFormat::D24S8;
+@@ -345,19 +337,16 @@
+         PicaToGL::StencilOp(regs.framebuffer.output_merger.stencil_test.action_depth_fail);
+     state.stencil.action_depth_pass =
+         PicaToGL::StencilOp(regs.framebuffer.output_merger.stencil_test.action_depth_pass);
+-    // SyncDepthTest();
+     state.depth.test_enabled = regs.framebuffer.output_merger.depth_test_enable == 1 ||
+                                regs.framebuffer.output_merger.depth_write_enable == 1;
+     state.depth.test_func =
+         regs.framebuffer.output_merger.depth_test_enable == 1
+             ? PicaToGL::CompareFunc(regs.framebuffer.output_merger.depth_test_func)
+             : GL_ALWAYS;
+-    // SyncStencilWriteMask();
+     state.stencil.write_mask =
+         (regs.framebuffer.framebuffer.allow_depth_stencil_write != 0)
+             ? static_cast<GLuint>(regs.framebuffer.output_merger.stencil_test.write_mask)
+             : 0;
+-    // SyncDepthWriteMask();
+     state.depth.write_mask = (regs.framebuffer.framebuffer.allow_depth_stencil_write != 0 &&
+                               regs.framebuffer.output_merger.depth_write_enable)
+                                  ? GL_TRUE

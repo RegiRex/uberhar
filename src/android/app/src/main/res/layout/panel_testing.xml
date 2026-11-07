@@ -89,40 +89,12 @@
                 android:text="@string/uberhar_testing_right_eye_description"
                 android:textAppearance="?attr/textAppearanceBodySmall" />
 
-            <!-- CodexAstraLocal: Testing controls preserve the preset baseline until explicitly selected. -->
-            <com.google.android.material.materialswitch.MaterialSwitch
-                android:id="@+id/testing_hardware_shaders"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:minHeight="48dp"
-                android:text="@string/hw_shaders" />
-
-            <TextView
-                android:id="@+id/testing_hardware_description"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="@string/uberhar_testing_hardware_description"
-                android:textAppearance="?attr/textAppearanceBodySmall" />
-
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/testing_render_thread_delay"
                 style="?attr/materialButtonOutlinedStyle"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="@string/delay_render_thread" />
-
-            <com.google.android.material.materialswitch.MaterialSwitch
-                android:id="@+id/testing_linear_filtering"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:minHeight="48dp"
-                android:text="@string/linear_filtering" />
-
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="@string/uberhar_testing_linear_description"
-                android:textAppearance="?attr/textAppearanceBodySmall" />
 
             <TextView
                 android:layout_width="match_parent"
@@ -158,6 +130,12 @@
                 android:layout_height="wrap_content"
                 android:text="@string/uberhar_testing_stereo_description"
                 android:textAppearance="?attr/textAppearanceBodySmall" />
+            <!-- CodexAstraLocal: Catalog-driven launch experiments share the parent scroll. -->
+            <LinearLayout
+                android:id="@+id/testing_experiments"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical" />
         </LinearLayout>
         <!-- CodexAstraLocal: Title inheritance and driver choices stay available with Testing off. -->
         <com.google.android.material.button.MaterialButton

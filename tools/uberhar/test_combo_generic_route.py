@@ -141,6 +141,9 @@ struct PipelineCache {
     std::optional<FSConfig> tev_family_config, virtual_fs_config;
     // CodexAstraLocal: Match .46's draw-owned deferred transport obligation.
     std::optional<FSConfig> pending_tev_transport;
+    // CodexAstraLocal: Production pure-config generation cache; readiness stays live.
+    std::optional<FSConfig> cached_fragment_config;
+    u64 cached_fragment_generation{}, fragment_config_builds{}, fragment_config_reuses{};
     DynamicTevPreparation dynamic_tev_preparation;
     // CodexAstraLocal: UseFragmentShader must clear this borrowed previous-draw
     // pointer before either supported generic setup or mandatory recovery.
@@ -152,7 +155,7 @@ struct PipelineCache {
              tev_transport_bypassed_gpu{}, tev_transport_skipped{};
     bool PreferReadySpecializedFragment(const Pica::Shader::UserConfig&) const;
     bool ReadyGpuFragmentPreflight(const Pica::RegsInternal&, const Pica::Shader::UserConfig&);
-    void UseFragmentShader(const Pica::RegsInternal&, const Pica::Shader::UserConfig&, bool);
+    void UseFragmentShader(const Pica::RegsInternal&, const Pica::Shader::UserConfig&, bool, u64 = 0);
     void EnsureDynamicTevState();
 };
 '''
@@ -314,6 +317,18 @@ int main() try {
                   native.tev_constants == (supported ? regs.transport : 0) &&
                   disk.mandatory_calls == unsigned(!supported) && disk.optional_calls == 0,
                   "Native CPU generic/mandatory recovery changed");
+            // CodexAstraLocal: Reuse decoding while still entering mandatory
+            // recovery/selection, then rebuild when the owner's generation changes.
+            const auto before = native.fragment_config_builds;
+            native.UseFragmentShader(regs, user, false, 7);
+            native.UseFragmentShader(regs, user, false, 7);
+            Check(native.fragment_config_builds == before + 1 && native.fragment_config_reuses == 1,
+                  "same-generation fragment preparation was not reused");
+            ++regs.transport;
+            native.UseFragmentShader(regs, user, false, 8);
+            Check(native.fragment_config_builds == before + 2 &&
+                  native.cached_fragment_config->transport == regs.transport,
+                  "changed generation retained stale fragment preparation");
         }
     }
     std::puts("PASS: extracted Combo fragment gates, generic CPU retry, mandatory recovery, Native full-fragment ON/OFF and CPU-only admission");

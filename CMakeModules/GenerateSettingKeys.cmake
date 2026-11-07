@@ -56,6 +56,17 @@ foreach(KEY IN ITEMS
     "turnip_pass_end_flush"
     # CodexAstraLocal: Launch-only generic shader optimization tradeoff.
     "uberhar_optimize_generic_shaders"
+    # CodexAstraLocal: Independent .57 launch-owned work-reduction experiments.
+    "uberhar_changed_state_only"
+    "uberhar_reuse_contained_pass"
+    "uberhar_typed_primitive_append"
+    "uberhar_include_scissor"
+    "uberhar_adaptive_cpu_workers"
+    "uberhar_gpu_observer"
+    "uberhar_frame_workload_census"
+    "uberhar_static_dynamic_state"
+    "uberhar_prepare_displayed_eye_only"
+    "uberhar_early_right_eye"
     # AstraEH: One mutually exclusive experimental renderer profile.
     "uberhar_test_mode"
     "async_presentation"

@@ -1017,8 +1017,8 @@ void FragmentModule::DefineTexSampler(u32 texture_unit) {
             break;
         case Pica::TexturingRegs::TextureConfig::Shadow2D:
             ret_val = SampleShadow();
-            // case Pica::TexturingRegs::TextureConfig::ShadowCube:
-            // return "shadowTextureCube(texcoord0, texcoord0_w)";
+            // CodexAstraLocal: ShadowCube remains unsupported by this SPIR-V path;
+            // the default error branch below deliberately remains active.
             break;
         default:
             LOG_CRITICAL(Render, "Unhandled texture type {:x}",

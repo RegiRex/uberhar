@@ -10,8 +10,15 @@
 #include "video_core/pica/uberhar_parallel_vertex.h"
 #include "video_core/pica/uberhar_vertex_parallel_batch.h"
 
-// CodexAstraLocal: Only the optional worker name and logging sinks are adapted;
-// production ShaderSetup mutations, serialization and certificate code execute.
+// CodexAstraLocal: The launch setting is an explicit requested input. Keep the
+// production ParallelVertexState initializer intact so its ON/OFF value reaches
+// the actual NativeParallelBatch rather than a substituted cache constructor.
+namespace Settings {
+struct RequestedFlag { bool value{true}; bool GetValue() const { return value; } };
+inline struct { RequestedFlag uberhar_adaptive_cpu_workers; } values;
+}
+// CodexAstraLocal: Optional worker name and logging sinks are adapted alongside
+// that setting; production mutations, serialization and certificates execute.
 namespace Common {
 void SetCurrentThreadName(const char*) {}
 namespace Log {
@@ -86,6 +93,18 @@ void Compare(ParallelVertexState& cache, ShaderSetup& setup, u32 outputs,
 }
 
 int main() {
+    // CodexAstraLocal: Both requested modes must survive the exact production
+    // initializer; later preference edits cannot mutate an existing launch pool.
+    for (const bool requested : {false, true}) {
+        Settings::values.uberhar_adaptive_cpu_workers.value = requested;
+        auto configured = std::make_unique<ParallelVertexState>();
+        Need(configured->batch.Scheduling().enabled == requested,
+             "launch adaptive request did not reach production pool");
+        Settings::values.uberhar_adaptive_cpu_workers.value = !requested;
+        Need(configured->batch.Scheduling().enabled == requested,
+             "launch adaptive request changed after pool construction");
+    }
+    Settings::values.uberhar_adaptive_cpu_workers.value = true;
     ShaderSetup setup;
     auto cache = std::make_unique<ParallelVertexState>();
     ProgramCode safe{};

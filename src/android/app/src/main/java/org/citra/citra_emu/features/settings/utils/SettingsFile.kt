@@ -159,6 +159,61 @@ object SettingsFile {
     fun readDriverFile(): Wini = readAuxiliaryFile("drivers")
     fun saveDriverFile(writer: Wini): Boolean = saveAuxiliaryFile("drivers", writer)
 
+    // CodexAstraLocal: Retire only the two removed quick controls. Preserve their saved
+    // values as inert metadata; migrate active Filtering into ordinary settings only
+    // when that scope has no explicit ordinary choice. Never promote the rejected HW route.
+    fun migrateRetiredTestingSettings(titleId: String?): Boolean {
+        val file = readTestingFile()
+        val scopes = listOfNotNull("Testing", titleId?.let { "Testing.$it" })
+        val retired = listOf("use_hw_shader", "filter_mode")
+        if (scopes.none { section -> retired.any { file.get(section, it) != null } }) return true
+        fun enabled(section: String, fallback: Boolean): Boolean = when (file.get(section, "enabled")?.lowercase()) {
+            "true", "yes", "on", "1" -> true
+            "false", "no", "off", "0" -> false
+            else -> fallback
+        }
+        val globalEnabled = enabled("Testing", false)
+        for (section in scopes) {
+            val filter = file.get(section, "filter_mode")
+            val active = if (section == "Testing") globalEnabled else enabled(section, globalEnabled)
+            val parsedFilter = when (filter?.lowercase()) {
+                "true", "yes", "on", "1" -> true
+                "false", "no", "off", "0" -> false
+                else -> null
+            }
+            if (active && parsedFilter != null) {
+                val id = if (section == "Testing") null else titleId
+                try {
+                    val existing = if (id == null) getOptionalConfigFile(FILE_NAME_CONFIG, false)
+                        else getCustomGameSettingsFile(id, false)
+                    // CodexAstraLocal: Read errors are not empty files; fail before overwriting anything.
+                    val ordinary = if (existing == null) Wini() else
+                        CitraApplication.appContext.contentResolver.openInputStream(existing.uri)!!.use { Wini(it) }
+                    if (ordinary.get("Renderer", "filter_mode") == null) {
+                        val target = if (id == null) getOptionalConfigFile(FILE_NAME_CONFIG, true)
+                            else getCustomGameSettingsFile(id, true)
+                        if (target == null) throw IOException("Cannot create Filtering destination")
+                        ordinary.put("Renderer", "filter_mode", parsedFilter)
+                        CitraApplication.appContext.contentResolver.openOutputStream(target.uri, "wt")!!.use {
+                            ordinary.store(it)
+                        }
+                    }
+                } catch (e: Exception) {
+                    // CodexAstraLocal: A failed migration never erases the owner's legacy preference.
+                    Log.error("[SettingsFile] Cannot migrate retired Testing Filtering: ${e.message}")
+                    return false
+                }
+            }
+            for (key in retired) {
+                file.get(section, key)?.let { value ->
+                    file.put("Retired.056.$section", key, value)
+                    file[section]?.remove(key)
+                }
+            }
+        }
+        return saveTestingFile(file)
+    }
+
     private fun readAuxiliaryFile(name: String): Wini {
         // CodexAstraLocal: Home Options may be reopened after storage permission loss; show defaults safely.
         return try {

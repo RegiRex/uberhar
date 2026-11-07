@@ -4,6 +4,11 @@
 set -euo pipefail
 mkdir -p build/uberhar-probe
 python3 tools/uberhar/check_android_keys.py
+# CodexAstraLocal: Exercise actual pass-boundary rules and bounded workload
+# accounting before publication; neither fixture contacts a device.
+python3 tools/uberhar/test_work_reduction.py --mutants \
+  --output "$(mktemp -d build/uberhar-probe/work-reduction-XXXXXX)/run"
+python3 tools/uberhar/test_frame_workload_census.py --output build/uberhar-probe/frame-workload-census
 # CodexAstraLocal: Alpha UI/native eligibility and sampled worker identity are
 # executable release gates; neither performs device work or changes rendering.
 cmake -DTEST_OUTPUT="$PWD/build/uberhar-probe/alpha-version" -P tools/uberhar/test_alpha_testing_version.cmake

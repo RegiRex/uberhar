@@ -1,3 +1,62 @@
+<!-- CodexAstraLocal: .57 retires rejected quick experiments and exposes independently controlled work reductions. -->
+## .57 quick Testing and retirement
+
+Quick Testing remains alpha-only, scrolls with the settings list, and uses
+ordinary globals → explicit global Testing → ordinary title choices → explicit
+title Testing. A present false or zero is an override; equality never means reset.
+All new controls are launch-owned, and the running-title panel shows their native
+launch values. Global Options never redirects edits to a running title. Disabling
+Testing ignores its saved values without removing them; confirmed title reset
+removes only the owned Testing keys. Existing settings-screen initialization fixes
+and live resolution behavior remain intact.
+
+The quick panel adds **Optimize generic shaders** and these independent controls:
+
+| Control | Default | Persisted key |
+|---|---|---|
+| Reuse unchanged PICA state | ON | `uberhar_changed_state_only` |
+| Reuse contained render passes | ON | `uberhar_reuse_contained_pass` |
+| Typed primitive append | ON | `uberhar_typed_primitive_append` |
+| Narrow included scissor | ON | `uberhar_include_scissor` |
+| Adaptive CPU workers | ON | `uberhar_adaptive_cpu_workers` |
+| Detailed GPU pass timing | ON | `uberhar_gpu_observer` |
+| Frame workload census | OFF | `uberhar_frame_workload_census` |
+| V38 static state path | OFF | `uberhar_static_dynamic_state` |
+| Prepare displayed eye only | ON | `uberhar_prepare_displayed_eye_only` |
+| Early right-eye suppression | OFF | `uberhar_early_right_eye` |
+
+The backend owners define actual eligibility and refusal diagnostics. Early
+right-eye suppression is separate from the original Disable Right Eye Render and
+also requires that original request ON. Presentation preparation does not promise
+elimination of guest draws. Observer OFF controls only render-pass query/attribution observation; functional
+compute-selector timings remain policy inputs. Census OFF is separate; ordinary
+settings, frame and error logs remain. ADPF is not exposed without an implemented
+consumer. Turnip pass-end submission remains in Graphics, including saved OFF.
+
+Enable Hardware Shader is retired from Testing and from Native/Combo's ordinary
+GPU route. Custom retains its ordinary preference and GPU/OpenGL capability;
+Combo CPU Vertices OFF retains independent ready-GPU promotion. Old Testing
+`use_hw_shader` values are inert and never promoted into ordinary preferences.
+
+Linear Filtering is removed **only from quick Testing**. Its ordinary Graphics
+setting remains, default ON, with explicit per-game ON/OFF preserved. Before
+Android launch or settings load, an enabled old Testing `filter_mode` migrates to
+its matching ordinary Renderer scope only if that scope has no explicit value.
+Inactive old values are not activated. Both retired quick keys are retained under
+inert `Retired.056.Testing[.<title>]` metadata and removed from active Testing after
+successful persistence; failure retains the legacy data. Beta/full builds do not
+perform this alpha migration or apply stale Testing layers.
+
+Removed sections are [archived per feature](reference/retired/quick-testing-hardware-and-filtering/README.md)
+outside built/packaged source, with
+origin commit `0723b003d92d20df45778b046672c77739e78599`, original paths/copyright,
+GPLv2-or-later license, retirement reason and restoration dependencies. Native
+renderer internals are not deleted merely because the quick experiment retired.
+The [frame workload census guide](UBERHAR_FRAME_WORKLOAD_CENSUS.md) documents its
+bounded output, missing-data rules and integration/measurement limits.
+
+<!-- CodexAstraLocal: The retained .56 sections below document historical validation;
+     the .57 section above supersedes retired quick keys and Hardware Shader policy. -->
 # Android per-game settings and Testing controls
 
 <!-- CodexAstraLocal: Record the owner's approved scope and the implementation boundary without claiming an unbuilt feature is installed. -->

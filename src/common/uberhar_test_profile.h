@@ -71,11 +71,10 @@ inline void ApplyUberharTestProfile() {
     values.uberhar_hybrid_tev = true;
     values.uberhar_force_tev = !AllowsSpecializedFragments(mode);
     values.uberhar_cpu_vertex_bridge = false;
-    // CodexAstraLocal: Combo's explicit CPU-only placement excludes both GPU
-    // vertex routes. Otherwise respect the user's ordinary hardware preference.
-    if (UsesReadyGpuVertices(mode) && values.uberhar_cpu_vertex_only.GetValue()) {
-        values.use_hw_shader = false;
-    }
+    // CodexAstraLocal: Retire the rejected ordinary Hardware Shader experiment in
+    // Native/Combo. Custom saved preferences remain untouched, and Combo's separate
+    // ready-GPU promotion still follows UsesReadyGpuVertices and CPU-only admission.
+    values.use_hw_shader = false;
 }
 
 } // namespace Settings

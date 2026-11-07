@@ -97,9 +97,7 @@ void GraphicsTracingWidget::StartRecording() {
     copy(state.vs_program_binary, shader_binary);
     copy(state.vs_swizzle_data, swizzle_data);
     copy(state.vs_float_uniforms, vs_float_uniforms);
-    // copy(TODO: Not implemented, std::back_inserter(state.gs_program_binary));
-    // copy(TODO: Not implemented, std::back_inserter(state.gs_swizzle_data));
-    // copy(TODO: Not implemented, std::back_inserter(state.gs_float_uniforms));
+    // CodexAstraLocal: TODO: Capture geometry program, swizzles and uniforms in traces.
 
     context->recorder = std::make_shared<CiTrace::Recorder>(state);
 

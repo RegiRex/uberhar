@@ -1,7 +1,10 @@
 <!-- CodexAstraUlt-2: New owner-authorized branch implementation; local evidence is separate from hosted/device qualification. -->
 ## 0.1.57 — precompiled-first comparison
 
-Implemented on `uberhar/precompiled-first` from 0.1.56-r2 (`0723b003`).
+Implemented on `uberhar/precompiled-first`, initially from 0.1.56-r2 (`0723b003`),
+now merged with main 0.1.57 (`d25afc00`). The main work-reduction changes below
+are retained, including per-draw readiness and resource checks when immutable
+fragment configuration is reused.
 Known full CPU fragment/pipeline descriptions prepare before gameplay; compatible
 stock records can seed them without stock-cache mutation. Ready prepared/adaptive
 specializations are selected before generic creation/wait. Preparation retains a
@@ -18,6 +21,74 @@ No Thor speedup, visual correctness, crash fix or APK completion is claimed here
 The isolated comparison uses the existing signing/validation gates and cannot
 publish a regular release. All new purpose comments use `CodexAstraUlt-2`.
 See [architecture, limitations and test plan](UBERHAR_PRECOMPILATION.md).
+
+<!-- CodexAstraUlt-2: Separate packaging and fixture evidence from uncompleted hosted/device qualification. -->
+The comparison installs beside main as **Uberhar Precompiled** with package
+`org.uberhar.uberhar_emu.precompiled` and a separate data-folder marker. Main's
+folder is rejected even if it also contains the candidate marker. The earlier
+shader gate failed while compiling a fixture missing the new semantic-save
+endpoint; the repaired fixture passes locally against the current source. The
+merged routing regression covers unchanged-register readiness/resource updates,
+but its execution still requires the hosted Vulkan dependency. These results do
+not establish a completed APK or pixel correctness on the merged tree.
+
+## Incorporated main history
+
+<!-- CodexAstraUlt-2: Preserve main's recorded scope/evidence; its device authorization describes that release task, not this comparison handoff. -->
+The following main-branch notes are preserved as upstream history. Their local
+preflight results apply to main's tree, not automatically to this merged candidate.
+No device installation or gameplay testing is performed for this packaging task.
+
+<!-- CodexAstraLocal: Current .57 implementation supersedes older directions; local preflight passed, hosted and hardware gates remain distinct. -->
+## 0.1.57 — controlled work reduction and complete callback workload accounting
+
+The .57 working tree builds on .56-r2 and implements changed-only pure PICA state
+invalidation/fragment preparation, guarded compatible render-pass containment,
+typed ordered CPU primitive append, Include scissor narrowing and bounded adaptive
+worker histories. Pure-state reuse preserves side effects and resource/readiness
+checks. Pass reuse retains existing submission and hazard boundaries; CPU append
+preserves ordering and rollback. Adaptive OFF retains static workers while
+bypassing cohort bookkeeping; recurring exact workloads use a bounded history
+table with requalification rather than one constantly reset history.
+
+Independent quick Testing controls expose these mechanisms, Detailed GPU pass
+timing, the default-OFF frame workload census, a default-OFF Turnip static-state
+comparison, displayed-eye-only presentation preparation and a separate default-OFF
+early-right-eye experiment. GPU observer OFF disables the pass query/attribution
+observer; functional compute-selector timestamps and ordinary diagnostics remain.
+The census retains all-enqueue totals per callback with bounded target/texture/
+transfer descriptors and explicit overflow/delivery uncertainty. It does not claim
+per-game FPS, actual sampled mips, bandwidth or complete GPU time. Displayed-eye
+preparation preserves stereo/screenshot consumers; early draw exclusion remains
+experimental and is not proof that future consumers are absent.
+
+The Hardware Shader quick experiment is retired. Native/Combo fix ordinary
+hardware shaders OFF while Custom/OpenGL preferences and Combo's separate ready-GPU
+promotion remain. Linear Filtering leaves only quick Testing; ordinary filtering
+remains ON by default and active legacy choices migrate without replacing explicit
+ordinary preferences. Optimize generic shaders returns to quick Testing. All new
+controls retain alpha gating, per-title precedence, false/zero and launch ownership;
+the settings crash/scroll fixes and live resolution remain. ADPF is not included
+without a truthful CPU-work-duration and target contract.
+
+Confirmed obsolete sections and the expired .56-r2 publication mapping are archived
+by feature under `docs/reference/retired` with provenance/license/restoration notes.
+Version .57 uses its own immutable tag; prior release assets and existing gates
+remain intact. See [release scope](releases/0.1.57.md),
+[settings behavior](UBERHAR_PER_GAME_SETTINGS.md) and
+[census limits](UBERHAR_FRAME_WORKLOAD_CENSUS.md).
+
+**Local integrated preflight passed:** actual Android Kotlin/resources, 16 Android
+ARM64 production translation units, complete host probe, settings precedence,
+bounded census and production pass/eye invariants. Existing extracted test shells
+were updated for the new interfaces without removing their failure controls.
+Hosted shader/Android/signing/publication and root-operated hardware qualification
+remain separate gates. No measured speedup or .56 regression recovery is claimed yet.
+After gated release, the owner authorizes root to install with saves/data preserved
+and qualify Dark Moon/Xenoblade under matched Standard/background/driver/cache
+conditions, with scenes and low/high/all-core resources reported separately.
+
+---
 
 <!-- CodexAstraLocal: .56 candidate combines compatibility/controls with a narrow GPU-work reduction; hosted and hardware acceptance remain separate. -->
 ## 0.1.56 — depth ownership, GPU attribution and comparison controls

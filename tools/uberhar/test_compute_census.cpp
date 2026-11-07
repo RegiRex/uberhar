@@ -18,6 +18,7 @@
 #include "common/vector_math.h"
 #include "video_core/renderer_vulkan/uberhar_compute_rect.h"
 #include "video_core/renderer_vulkan/uberhar_compute_census.h"
+#include "video_core/uberhar_frame_workload_census.h" // CodexAstraLocal: Actual route enum at the new recording endpoint.
 #include "policy.inc"
 #include "video_core/pica/output_vertex.h"
 #include "video_core/shader_recovery_error.h"
@@ -183,6 +184,27 @@ struct Fixture {
     int instance{};
     unsigned graphics_fallthrough{}, sync_calls{}, nonempty_calls{};
     void SyncDrawState() { ++sync_calls; }
+    // CodexAstraLocal: This rectangle fixture leaves the independent eye
+    // experiment OFF. Keep its actual Draw calls visible, with invocation
+    // counts, rather than deleting the new prefix before extracting admission.
+    bool early_right_eye{}, early_eye_hazard{};
+    unsigned eye_texture_checks{}, eye_decision_checks{}, eye_read_checks{};
+    void ObserveEyeTextureReads() { ++eye_texture_checks; }
+    bool TryOmitUnusedEye(bool, u32) { ++eye_decision_checks; return false; }
+    void ObserveOmittedEyeRead(u64, u64) { ++eye_read_checks; }
+    // CodexAstraLocal: Record the new successful-compute enqueue notification;
+    // the separate frame census gate owns descriptor/histogram conservation.
+    unsigned workload_draws{};
+    u32 workload_vertices{};
+    bool workload_indexed{};
+    VideoCore::FrameWorkloadCensus::Route workload_route{};
+    void RecordWorkloadDraw(const FramebufferHelper&, bool indexed, u32 count,
+                            VideoCore::FrameWorkloadCensus::Route route) {
+        ++workload_draws;
+        workload_vertices = count;
+        workload_indexed = indexed;
+        workload_route = route;
+    }
     struct { unsigned ended{}; void EndRendering() { ++ended; } } renderpass_cache;
     void EmptyBatch() {
 #include "empty.inc"
@@ -292,6 +314,12 @@ void TestAdmission() {
         Check(drawn == !failure && f.owned.compute_draws == !failure && f.owned.native_draws == bool(failure), "format and geometry gates unchanged");
         Check(f.owned.considered == 1 && f.owned.state_census.Consume({0x180,0x1a2}).admitted_draws == 1, "mask zero does not claim geometry or format");
         Check(f.renderpass_cache.ended == !failure && f.owned.begins == !failure && f.owned.ends == !failure, "compute command boundaries unchanged");
+        Check(f.workload_draws == !failure && (failure ||
+                  (f.workload_vertices == 6 && !f.workload_indexed &&
+                   f.workload_route == VideoCore::FrameWorkloadCensus::Route::ComputeRectangle)),
+              "successful compute draw records its actual workload once");
+        Check(f.eye_texture_checks == 1 && f.eye_decision_checks == 1 && f.eye_read_checks == 0,
+              "disabled eye observer preserves rectangle admission");
     }
     for (bool absent : {false, true}) {
         Fixture f; f.regs = Registers(0); f.vertex_batch = Vertices(6);

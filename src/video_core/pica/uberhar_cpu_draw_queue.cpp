@@ -248,7 +248,10 @@ struct CpuDrawExecutor::Impl {
         try {
             pool = std::make_unique<Common::Uberhar::ParallelWork>(
                 std::max(1U, processors - 1), worker_start,
-                Common::Uberhar::AuxiliaryBudget::Global(), &*progress_lane);
+                Common::Uberhar::AuxiliaryBudget::Global(), &*progress_lane,
+                // CodexAstraLocal: A wave mixes unrelated programs and packet
+                // costs; no cheap stable identity means static admission only.
+                false);
             statistics.scheduling = pool->Scheduling();
             asynchronous = true;
             coordinator = std::thread{[this] { Loop(); }};

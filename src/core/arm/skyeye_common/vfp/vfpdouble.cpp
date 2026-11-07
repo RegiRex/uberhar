@@ -412,13 +412,11 @@ static u32 vfp_compare(ARMul_State* state, int dd, int signal_on_qnan, s64 m, u3
     }
 
     if (ret == 0) {
-        // printf("In %s, d=%lld, m =%lld\n ", __FUNCTION__, d, m);
         if (d == m || vfp_double_packed_abs(d | m) == 0) {
             /*
              * equal
              */
             ret |= FPSCR_ZFLAG | FPSCR_CFLAG;
-            // printf("In %s,1 ret=0x%x\n", __FUNCTION__, ret);
         } else if (vfp_double_packed_sign(d ^ m)) {
             /*
              * different signs

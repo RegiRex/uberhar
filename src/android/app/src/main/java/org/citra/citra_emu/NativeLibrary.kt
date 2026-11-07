@@ -221,9 +221,8 @@ object NativeLibrary {
 
     // CodexAstraLocal: UI availability shares native's release.beta.alpha gate and launch settings.
     external fun isAlphaTestingAvailable(): Boolean
-    external fun getEffectiveHardwareShaders(): Boolean
+    external fun getEffectiveTestingBoolean(key: String): Boolean
     external fun getEffectiveRenderThreadDelayUs(): Int
-    external fun getEffectiveLinearFiltering(): Boolean
     external fun getEffectiveStereoDepth(): Int
 
     /**

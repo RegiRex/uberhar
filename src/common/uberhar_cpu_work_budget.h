@@ -3,6 +3,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array> // CodexAstraLocal: Fixed owner-only cohort storage, never a hot-path allocation.
 #include <atomic>
 #include <cstdint>
 #include <thread>
@@ -162,7 +163,7 @@ private:
 // this integer-only controller; pacing and GPU/dependency waits are not inputs.
 // Comparable shape, owner cost and hook work gate each stable window. This is a
 // conservative local trial, not a measurement of available physical CPU power.
-class AdaptiveParticipation {
+class AdaptiveWorkWindow {
 public:
     struct Sample {
         std::uint32_t count{}, grain{}, owner_items{}, worker_items{};
@@ -170,7 +171,8 @@ public:
         std::uint64_t total_ns{}, owner_ns{}, join_ns{}, hook_ns{};
         bool denied{}, failed{};
     };
-    explicit AdaptiveParticipation(unsigned maximum) : maximum{maximum}, desired{maximum} {}
+    AdaptiveWorkWindow() = default;
+    explicit AdaptiveWorkWindow(unsigned maximum) : maximum{maximum}, desired{maximum} {}
     unsigned Desired() const { return desired; }
     // CodexAstraLocal: Snapshot only from the pool owner at its existing report
     // cadence. The counters make conservative non-admission distinguishable
@@ -182,17 +184,13 @@ public:
         // excluded from sampling, not the number of clock readings avoided;
         // remove after stable-shape admission is qualified on gameplay.
         std::uint64_t unstable_skipped{};
+        // CodexAstraLocal TEST-ONLY LOG: Infrequent sampled refusals are split
+        // into contention/failure/shape/size/owner/helper/cost causes; remove
+        // after cohort admission and rollback are qualified on gameplay.
+        std::array<std::uint64_t, 7> reject_reasons{};
     };
     Statistics GetStatistics() const {
-        return {desired, samples, rejected, trials, accepted, reverted, unstable_skipped};
-    }
-    // CodexAstraLocal: Registration can change the shared helper capacity after
-    // this pool was constructed. Compare trials only under one capacity bound.
-    void Limit(unsigned limit) {
-        if (maximum == limit) return;
-        Reset(); maximum = limit; desired = limit;
-        shape_count = shape_grain = 0;
-        stable_shapes = 0;
+        return {desired, samples, rejected, trials, accepted, reverted, unstable_skipped, reject_reasons};
     }
     // CodexAstraLocal: Check shape at every task boundary, without a clock. A
     // trial for one workload must not cap intervening unrelated jobs or survive
@@ -222,24 +220,27 @@ public:
     }
     void Observe(const Sample& sample) {
         ++samples;
-        if (sample.denied || sample.failed || !sample.grain || sample.count / sample.grain < 2 ||
-            sample.owner_items == 0 ||
-            sample.owner_items + std::uint64_t{sample.worker_items} != sample.count ||
-            sample.total_ns < 50'000 || sample.total_ns > 1'000'000'000 ||
-            sample.owner_ns < 5'000 || (sample.helpers && !sample.worker_items)) {
-            RejectWindow();
-            return;
+        if (sample.denied) { RejectWindow(0); return; }
+        if (sample.failed) { RejectWindow(1); return; }
+        if (!sample.grain || sample.count / sample.grain < 2 ||
+            sample.owner_items + std::uint64_t{sample.worker_items} != sample.count) {
+            RejectWindow(2); return;
         }
+        if (sample.total_ns < 50'000 || sample.total_ns > 1'000'000'000) {
+            RejectWindow(3); return;
+        }
+        if (sample.owner_items == 0 || sample.owner_ns < 5'000 ||
+            (sample.helpers && !sample.worker_items)) { RejectWindow(4); return; }
         const auto ceiling = std::min(maximum, sample.count / std::max(1U, sample.grain) - 1);
         if (shape_count != sample.count || shape_grain != sample.grain) {
             Prepare(sample.count, sample.grain, shape_hook);
         }
-        if (sample.helpers != desired) { RejectWindow(); return; }
+        if (sample.helpers != desired) { RejectWindow(5); return; }
         const auto cost = sample.owner_ns * 1024 / sample.owner_items;
         const bool hook = sample.hook_ns != 0;
         if (window.samples && (!Near(cost, window.cost / window.samples) ||
             hook != window.hook || (hook && !Near(sample.hook_ns, window.hook_ns / window.samples)))) {
-            RejectWindow();
+            RejectWindow(6);
             return;
         }
         window.hook = hook;
@@ -289,8 +290,9 @@ private:
     static bool Near(std::uint64_t a, std::uint64_t b) {
         return a && b && a * 4 >= b * 3 && b * 4 >= a * 3;
     }
-    void RejectWindow() {
+    void RejectWindow(unsigned reason) {
         ++rejected;
+        ++reject_reasons[reason];
         window = {};
         if (trial) { desired = prior; trial = false; baseline = {}; cooldown = 2; ++reverted; }
     }
@@ -299,9 +301,9 @@ private:
         if (trial) { desired = prior; trial = false; ++reverted; }
         baseline = {}; cooldown = 0; direction = -1;
     }
-    unsigned maximum;
-    // CodexAstraLocal: Eight consecutive same-shape tasks are a cheap evidence
-    // prerequisite; an accepted trial and the existing 1/64 cadence are unchanged.
+    unsigned maximum{};
+    // CodexAstraLocal: Eight recurring visits qualify this exact-key window;
+    // other cohorts no longer discard these visits. Timing stays sparse (1/64).
     static constexpr unsigned StableShapeThreshold = 8;
     unsigned stable_shapes{};
     unsigned desired{}, prior{}, cadence{}, cooldown{};
@@ -310,6 +312,147 @@ private:
     int direction{-1};
     bool trial{};
     std::uint64_t samples{}, rejected{}, trials{}, accepted{}, reverted{}, unstable_skipped{};
+    std::array<std::uint64_t, 7> reject_reasons{};
     Window window{}, baseline{};
 };
+
+// CodexAstraLocal: Callers supply an already available immutable work identity,
+// not a guest pointer or a newly calculated shader hash. Unknown/mixed work stays
+// on static admission. Equal-sized draws from different programs cannot share a
+// trial merely because their vertex counts happen to match.
+struct AdaptiveWorkIdentity {
+    std::uint64_t program{}, operands{}, contract{};
+    bool operator==(const AdaptiveWorkIdentity&) const = default;
+    explicit operator bool() const { return program || operands || contract; }
+};
+
+// CodexAstraLocal: A small two-way table preserves independent exact-shape
+// histories across interleaved draws. Only the joined owner touches it. Workers,
+// memory ownership, admission permits and the cheap serial path are unchanged.
+class AdaptiveParticipation {
+public:
+    using Sample = AdaptiveWorkWindow::Sample;
+    struct Statistics : AdaptiveWorkWindow::Statistics {
+        // CodexAstraLocal TEST-ONLY LOG: Owner-cadence admission attribution;
+        // remove after recurring gameplay cohorts justify retaining adaptation.
+        std::uint64_t cohort_hits{}, cohort_misses{}, cohort_evictions{}, cohort_expired{};
+        std::uint64_t unknown_identity{}, capacity_resets{};
+        bool enabled{true};
+    };
+    explicit AdaptiveParticipation(unsigned maximum) : maximum{maximum} {}
+    unsigned Desired() const { return current ? current->policy.Desired() : maximum; }
+    void Limit(unsigned limit) {
+        if (maximum == limit) return;
+        for (auto& entry : entries) Retire(entry);
+        current = nullptr;
+        maximum = limit;
+        ++capacity_resets;
+    }
+    void Prepare(std::uint32_t count, std::uint32_t grain, bool hook = false,
+                 AdaptiveWorkIdentity identity = {}) {
+        current = nullptr;
+        if (!identity) { ++unknown_identity; return; }
+        grain = std::max(1U, grain);
+        if (!maximum || count / grain < 2) return;
+        const Key key{identity, count, grain, hook};
+        // CodexAstraLocal: Two probes and integer mixing only. Full keys are
+        // compared after hashing, so a collision cannot mix execution histories.
+        const auto hash = identity.program ^ (identity.operands >> 17) ^
+            (identity.contract * 0x9e3779b97f4a7c15ULL) ^
+            (std::uint64_t{count} * 0x85ebca6bU) ^ (std::uint64_t{grain} << 11) ^ hook;
+        const auto set = static_cast<std::size_t>((hash ^ (hash >> 32)) & (Sets - 1)) * Ways;
+        const auto stamp = ++sequence;
+        Entry* replace = &entries[set];
+        for (unsigned way = 0; way < Ways; ++way) {
+            auto& entry = entries[set + way];
+            if (entry.valid && entry.key == key) {
+                ++cohort_hits;
+                // CodexAstraLocal: Periodic static requalification bounds a
+                // stale accepted cap under changed thermal/OS conditions. An
+                // inactive cohort also expires rather than reviving old trials.
+                if (stamp - entry.last > MaxAge || entry.visits >= RecheckVisits) {
+                    Retire(entry);
+                    ++cohort_expired;
+                    entry.key = key;
+                    entry.policy = AdaptiveWorkWindow{maximum};
+                    entry.valid = true;
+                }
+                current = &entry;
+                break;
+            }
+            if (!entry.valid || (replace->valid && entry.last < replace->last))
+                replace = &entry;
+        }
+        if (!current) {
+            ++cohort_misses;
+            if (replace->valid) { ++cohort_evictions; Retire(*replace); }
+            replace->key = key;
+            replace->policy = AdaptiveWorkWindow{maximum};
+            replace->valid = true;
+            current = replace;
+        }
+        current->last = stamp;
+        ++current->visits;
+        current->policy.Prepare(count, grain, hook);
+    }
+    bool SelectSample(std::uint32_t count, std::uint32_t grain) {
+        return current && current->policy.SelectSample(count, grain);
+    }
+    void Observe(const Sample& sample) {
+        if (current) current->policy.Observe(sample);
+    }
+    Statistics GetStatistics() const {
+        Statistics result;
+        static_cast<AdaptiveWorkWindow::Statistics&>(result) = retired;
+        for (const auto& entry : entries)
+            if (entry.valid) Add(result, entry.policy.GetStatistics());
+        result.desired = Desired();
+        result.cohort_hits = cohort_hits;
+        result.cohort_misses = cohort_misses;
+        result.cohort_evictions = cohort_evictions;
+        result.cohort_expired = cohort_expired;
+        result.unknown_identity = unknown_identity;
+        result.capacity_resets = capacity_resets;
+        return result;
+    }
+private:
+    static constexpr unsigned Sets = 16, Ways = 2;
+    static constexpr std::uint64_t MaxAge = 65536, RecheckVisits = 8192;
+    struct Key {
+        AdaptiveWorkIdentity identity;
+        std::uint32_t count{}, grain{};
+        bool hook{};
+        bool operator==(const Key&) const = default;
+    };
+    struct Entry {
+        Key key;
+        AdaptiveWorkWindow policy;
+        std::uint64_t last{}, visits{};
+        bool valid{};
+    };
+    static void Add(AdaptiveWorkWindow::Statistics& to,
+                    const AdaptiveWorkWindow::Statistics& from) {
+        to.samples += from.samples; to.rejected += from.rejected;
+        to.trials += from.trials; to.accepted += from.accepted;
+        to.reverted += from.reverted; to.unstable_skipped += from.unstable_skipped;
+        for (unsigned i = 0; i < to.reject_reasons.size(); ++i)
+            to.reject_reasons[i] += from.reject_reasons[i];
+    }
+    void Retire(Entry& entry) {
+        if (!entry.valid) return;
+        Add(retired, entry.policy.GetStatistics());
+        // CodexAstraLocal: Evicting a pending experiment restores static policy
+        // on the next lookup and is reported as a canceled trial, not a success.
+        const auto status = entry.policy.GetStatistics();
+        if (status.trials > status.accepted + status.reverted) ++retired.reverted;
+        entry = Entry{};
+    }
+    unsigned maximum;
+    std::array<Entry, Sets * Ways> entries{};
+    Entry* current{};
+    AdaptiveWorkWindow::Statistics retired{};
+    std::uint64_t sequence{}, cohort_hits{}, cohort_misses{}, cohort_evictions{};
+    std::uint64_t cohort_expired{}, unknown_identity{}, capacity_resets{};
+};
+
 } // namespace Common::Uberhar

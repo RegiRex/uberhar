@@ -1229,12 +1229,9 @@
     <string name="uberhar_testing_right_eye_override">Change Disable Right Eye Render in this game’s Testing controls after exiting the game.</string>
     <!-- CodexAstraLocal: Explain player-visible placement, scheduling and display comparisons. -->
     <!-- CodexAstraLocal: Hardware admission is available in global Options as well as title overrides. -->
-    <string name="uberhar_testing_hardware_description">Allow ordinary GPU vertex shaders. Default OFF. Combo can still use ready GPU vertex shaders when OFF. Changes apply next launch.</string>
-    <string name="uberhar_testing_hardware_cpu_only">CPU Vertices ON keeps Hardware Shaders OFF. Your saved Hardware Shaders choice is retained for other presets.</string>
     <string name="uberhar_testing_delay_description">Delay the game’s render-thread response by 0–16000 microseconds. Default 0; use 100 to compare the captured Azahar setting. Changes apply next launch.</string>
     <string name="uberhar_testing_delay_range">Enter a whole number from 0 to 16000.</string>
     <string name="uberhar_testing_delay_value">Render-thread delay: %1$d μs</string>
-    <string name="uberhar_testing_linear_description">Smooth the displayed image with Linear Filtering. Default ON; OFF uses nearest filtering. Changes apply next launch.</string>
     <string name="uberhar_testing_stereo_depth">Guest 3D slider</string>
     <string name="uberhar_testing_stereo_depth_0">0%</string>
     <string name="uberhar_testing_stereo_depth_1">1%</string>
@@ -1248,4 +1245,25 @@
     <!-- CodexAstraLocal: Generic optimizer is an explicit hardware experiment, not a silent default change. -->
     <string name="uberhar_optimize_generic_shaders">Optimize generic shaders</string>
     <string name="uberhar_optimize_generic_shaders_description">Optimize generic GPU programs to compare execution cost. May increase first-use compilation time. Full shader generation stays independent. Restart the game after changing.</string>
+    <!-- CodexAstraLocal: Plain quick-control labels expose each .57 experiment independently. -->
+    <string name="uberhar_changed_state_only">Reuse unchanged PICA state</string>
+    <string name="uberhar_changed_state_only_description">Avoid repeated state preparation when register values are unchanged. Restart the game after changing.</string>
+    <string name="uberhar_reuse_contained_pass">Reuse contained render passes</string>
+    <string name="uberhar_reuse_contained_pass_description">Reuse compatible render passes when the requested area fits safely. Restart the game after changing.</string>
+    <string name="uberhar_typed_primitive_append">Typed primitive append</string>
+    <string name="uberhar_typed_primitive_append_description">Use direct ordered primitive assembly for supported CPU vertex work. Restart the game after changing.</string>
+    <string name="uberhar_include_scissor">Narrow included scissor</string>
+    <string name="uberhar_include_scissor_description">Restrict included drawing areas while preserving guest clipping. Restart the game after changing.</string>
+    <string name="uberhar_adaptive_cpu_workers">Adaptive CPU workers</string>
+    <string name="uberhar_adaptive_cpu_workers_description">Adapt worker participation for recurring workloads. OFF keeps static workers and bypasses adaptive history. Restart the game after changing.</string>
+    <string name="uberhar_gpu_observer">Detailed GPU pass timing</string>
+    <string name="uberhar_gpu_observer_description">Collect sampled render-pass GPU timings and draw attribution. OFF disables this observer; rendering policy and ordinary diagnostics remain. Restart the game after changing.</string>
+    <string name="uberhar_frame_workload_census">Frame workload census</string>
+    <string name="uberhar_frame_workload_census_description">Collect bounded rendering workload details for frame comparisons. OFF bypasses this census. Restart the game after changing.</string>
+    <string name="uberhar_static_dynamic_state">V38 static state path</string>
+    <string name="uberhar_static_dynamic_state_description">Test a static alternative to extended dynamic state on V38. Border-color policy stays unchanged. Restart the game after changing.</string>
+    <string name="uberhar_prepare_displayed_eye_only">Prepare displayed eye only</string>
+    <string name="uberhar_prepare_displayed_eye_only_description">Avoid presentation preparation for an eye that will not be displayed. This does not remove guest drawing. Restart the game after changing.</string>
+    <string name="uberhar_early_right_eye">Early right-eye suppression</string>
+    <string name="uberhar_early_right_eye_description">Test guarded early suppression separately from the original heuristic. Also requires Disable Right Eye Render ON. Restart the game after changing.</string>
 </resources>

@@ -29,6 +29,7 @@ using u8 = std::uint8_t;
 using u32 = std::uint32_t;
 using u64 = std::uint64_t;
 using s32 = std::int32_t;
+using s64 = std::int64_t; // CodexAstraLocal: Production contained-area bounds use widened signed sums.
 // CodexAstraLocal: Match both existing fixture failures and the production
 // scheduler's typed conversion signature without executing a Vulkan driver.
 namespace VideoCore {
@@ -36,6 +37,13 @@ struct ShaderRecoveryError : std::runtime_error {
     ShaderRecoveryError() : std::runtime_error("modeled typed failure") {}
     explicit ShaderRecoveryError(const char* message) : std::runtime_error(message) {}
 };
+}
+// CodexAstraLocal: Extract the real texture-type values for the new storage-read
+// pass guard; the recording fixture keeps all texture inputs at ordinary 2D.
+namespace Pica {
+struct TexturingRegs { struct TextureConfig {
+#include "texture-types.inc"
+}; };
 }
 static unsigned checks{};
 
@@ -375,10 +383,15 @@ public:
     std::array<vk::Image, 2> images{};
     std::array<vk::ImageAspectFlags, 2> aspects{};
     bool shadow_rendering{};
+    // CodexAstraLocal: Keep containment OFF in the pre-existing stream-order
+    // oracle. Its actual guards remain compiled; test_work_reduction covers ON.
+    bool containment_eligible{}, reuse_contained_pass{};
+    u64 contained_pass_reuses{}, containment_refusals{}, containment_submission_boundaries{};
     RenderPass pass{};
     u32 num_draws{};
-    void BeginRendering(const Framebuffer*, Common::Rectangle<u32>);
-    void BeginRendering(const RenderPass&, bool framebuffer_pass = false);
+    void BeginRendering(const Framebuffer*, Common::Rectangle<u32>, bool reads_storage = false);
+    void BeginRendering(const RenderPass&, bool framebuffer_pass = false,
+                        bool allow_containment = false);
     void EndRendering(PassEndReason reason = PassEndReason::Explicit);
 };
 enum class BufferType : u32 { Upload, Download, Stream };
@@ -490,7 +503,15 @@ struct Raster {
         u32 GetColorBufferPhysicalAddress() const { return 0x1000; }
         u32 GetDepthBufferPhysicalAddress() const { return 0x2000; }
     };
-    struct { struct { DiagnosticTarget framebuffer; } framebuffer; } regs;
+    struct {
+        struct { DiagnosticTarget framebuffer; } framebuffer;
+        // CodexAstraLocal: Explicit ordinary-texture/no-shadow inputs let the
+        // unchanged production setup compute its real pass hazard argument.
+        struct { struct { struct {
+            auto Value() const { return Pica::TexturingRegs::TextureConfig::Texture2D; }
+        } type; } texture0; } texturing;
+        struct { struct { bool enable_shadow{}; } config0; } lighting;
+    } regs;
     struct { void* ready{}; } cpu_bridge;
     // CodexAstraLocal: Witness the real CPU-tail hook at its final tick. The
     // separate cached-buffer gate executes the three actual ring stamps/reads.

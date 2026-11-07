@@ -53,6 +53,17 @@ object SettingKeys {
     external fun turnip_pass_end_flush(): String
     // CodexAstraLocal: Generic-only optimizer; full shader frontend selection remains independent.
     external fun uberhar_optimize_generic_shaders(): String
+    // CodexAstraLocal: Match generated C++ keys for independently switchable .57 mechanisms.
+    external fun uberhar_changed_state_only(): String
+    external fun uberhar_reuse_contained_pass(): String
+    external fun uberhar_typed_primitive_append(): String
+    external fun uberhar_include_scissor(): String
+    external fun uberhar_adaptive_cpu_workers(): String
+    external fun uberhar_gpu_observer(): String
+    external fun uberhar_frame_workload_census(): String
+    external fun uberhar_static_dynamic_state(): String
+    external fun uberhar_prepare_displayed_eye_only(): String
+    external fun uberhar_early_right_eye(): String
 
     // AstraEH: Persist only the selected profile, not three conflicting booleans.
     external fun uberhar_test_mode(): String

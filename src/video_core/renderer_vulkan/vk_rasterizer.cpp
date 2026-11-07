@@ -16,6 +16,8 @@
 #include "core/loader/loader.h"
 #include "core/memory.h"
 #include "video_core/pica/pica_core.h"
+#include "video_core/gpu.h" // CodexAstraLocal: Honor original per-title eye compatibility.
+#include "video_core/right_eye_disabler.h"
 #include "video_core/pica/vertex_loader.h" // CodexAstraLocal: Authoritative capture input descriptors.
 #include "video_core/renderer_vulkan/renderer_vulkan.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
@@ -82,6 +84,12 @@ RasterizerVulkan::RasterizerVulkan(Memory::MemorySystem& memory, Pica::PicaCore&
       texture_lf_buffer{instance, scheduler, vk::BufferUsageFlagBits::eUniformTexelBuffer,
                         TextureBufferSize(instance)},
       async_shaders{Settings::values.async_shader_compilation.GetValue()} {
+    // CodexAstraLocal: Launch-owned controls keep worker and renderer policy
+    // fixed until the next game, independently of live UI preferences.
+    include_scissor = Settings::IsUberharTestProfile(Settings::values.uberhar_test_mode.GetValue()) &&
+                      Settings::values.uberhar_include_scissor.GetValue();
+    early_right_eye = Settings::IsUberharTestProfile(Settings::values.uberhar_test_mode.GetValue()) &&
+                      Settings::values.uberhar_early_right_eye.GetValue();
 
     // CodexAstraLocal: Preserve optional rectangle routing for supported Vulkan profiles.
     if (Settings::values.uberhar_test_mode.GetValue() != Settings::UberharTestMode::Custom) {
@@ -153,6 +161,14 @@ RasterizerVulkan::RasterizerVulkan(Memory::MemorySystem& memory, Pica::PicaCore&
 }
 
 RasterizerVulkan::~RasterizerVulkan() {
+    ReportWorkReduction(true);
+    // CodexAstraLocal TEST-ONLY LOG: Preserve the final incomplete callback
+    // window without inventing another presented frame. Remove with the census.
+    if (pica.frame_census && pica.frame_census->Enabled()) {
+        pica.frame_census->FinishFrame({++census_callback_index, pica.command_lists_submitted,
+            Common::UberharActivity::submissions.load(std::memory_order_relaxed), true, true, true},
+            census_log);
+    }
     // CodexAstraLocal TEST-ONLY LOG: Final actual-queue coverage for Hardware Shaders;
     // remove after the placement comparison, preserving normal draw ownership.
     try {
@@ -216,11 +232,47 @@ RasterizerVulkan::~RasterizerVulkan() {
                                scheduler.CurrentTick(), scheduler.GetMasterSemaphore()->KnownGpuTick());
 }
 
+// CodexAstraLocal TEST-ONLY LOG: Include short trials and final totals without
+// adding a GPU wait. Remove after the .57 controls are hardware-qualified.
+void RasterizerVulkan::ReportWorkReduction(bool final) {
+    LOG_INFO(Render_Vulkan,
+        "Uberhar work reduction: state_reuse={} unchanged_writes={} changed_writes={} "
+        "fragment_config_builds={} fragment_config_reuses={} include_scissor={} "
+        "narrowed_scissors={} scissor_area_before={} scissor_area_after={} area_is_bounds=true final={}",
+        pica.changed_state_only, pica.unchanged_register_writes, pica.changed_register_writes,
+        pipeline_cache.fragment_config_builds, pipeline_cache.fragment_config_reuses,
+        include_scissor, narrowed_scissors, scissor_area_before, scissor_area_after, final);
+    LOG_INFO(Render_Vulkan,
+        "Uberhar early eye: enabled={} hazard={} decisions=[{},{},{},{},{}] "
+        "draws_omitted={} cpu_vertices_retained={} gpu_vertices_omitted={} "
+        "scope=direct_right_scanout future_dependencies=experimental final={}",
+        early_right_eye, early_eye_hazard, eye_decisions[0], eye_decisions[1], eye_decisions[2],
+        eye_decisions[3], eye_decisions[4], eye_draws_omitted,
+        eye_cpu_vertices_retained, eye_gpu_vertices_omitted, final);
+}
+
 void RasterizerVulkan::TickFrame() {
     scheduler.WaitWorker();
     // CodexAstraLocal TEST-ONLY LOG: Reuse the ordinary owner frame boundary;
     // timestamp resolution never flushes or waits for unfinished GPU work.
     renderpass_cache.PollDiagnostics();
+    // CodexAstraLocal TEST-ONLY LOG: Finish on the existing drained owner
+    // boundary. Callback, command-list and game-submission identities are distinct.
+    // Remove this hook with the census after workload attribution is qualified.
+    if (pica.frame_census && pica.frame_census->Enabled()) {
+        pica.frame_census->FinishFrame({++census_callback_index, pica.command_lists_submitted,
+            Common::UberharActivity::submissions.load(std::memory_order_relaxed), true, true, false},
+            census_log);
+    }
+    // CodexAstraLocal TEST-ONLY LOG: Attribute work reduction independently of
+    // GPU timestamp instrumentation. Remove after .57 controls are qualified.
+    if ((memory_diagnostic_frames & 63) == 0) {
+        const auto now = std::chrono::steady_clock::now();
+        if (now >= next_work_report) {
+            ReportWorkReduction(false);
+            next_work_report = now + std::chrono::seconds{5};
+        }
+    }
     // CodexAstraLocal: Reuse only this existing drained command boundary; the
     // cache separately checks compiler release and actual GPU completion.
     pipeline_cache.RetireReadyCpuAfterWorkerDrain();
@@ -285,15 +337,12 @@ void RasterizerVulkan::LoadDefaultDiskResources(
 
 void RasterizerVulkan::SyncDrawState() {
     SyncDrawUniforms();
-
-    // SyncCullMode();
+    // CodexAstraLocal: Convert current guest cull/blend/depth/stencil state directly.
     pipeline_info.state.rasterization.cull_mode.Assign(regs.rasterizer.cull_mode);
     // If the framebuffer is flipped, request to also flip vulkan viewport
     const bool is_flipped = regs.framebuffer.framebuffer.IsFlipped();
     pipeline_info.state.rasterization.flip_viewport.Assign(is_flipped);
-    // SyncBlendEnabled();
     pipeline_info.state.blending.blend_enable = regs.framebuffer.output_merger.alphablend_enable;
-    // SyncBlendFuncs();
     pipeline_info.state.blending.color_blend_eq.Assign(
         regs.framebuffer.output_merger.alpha_blending.blend_equation_rgb);
     pipeline_info.state.blending.alpha_blend_eq.Assign(
@@ -306,18 +355,13 @@ void RasterizerVulkan::SyncDrawState() {
         regs.framebuffer.output_merger.alpha_blending.factor_source_a);
     pipeline_info.state.blending.dst_alpha_blend_factor.Assign(
         regs.framebuffer.output_merger.alpha_blending.factor_dest_a);
-    // SyncBlendColor();
     pipeline_info.dynamic_info.blend_color = regs.framebuffer.output_merger.blend_const.raw;
-    // SyncLogicOp();
-    // SyncColorWriteMask();
     pipeline_info.state.blending.logic_op = regs.framebuffer.output_merger.logic_op;
 
     const u32 color_mask = regs.framebuffer.framebuffer.allow_color_write != 0
                                ? (regs.framebuffer.output_merger.depth_color_mask >> 8) & 0xF
                                : 0;
     pipeline_info.state.blending.color_write_mask = color_mask;
-
-    // SyncStencilTest();
     const auto& stencil_test = regs.framebuffer.output_merger.stencil_test;
     const bool test_enable = stencil_test.enable && regs.framebuffer.framebuffer.depth_format ==
                                                         Pica::FramebufferRegs::DepthFormat::D24S8;
@@ -329,12 +373,10 @@ void RasterizerVulkan::SyncDrawState() {
     pipeline_info.state.depth_stencil.stencil_compare_op.Assign(stencil_test.func);
     pipeline_info.dynamic_info.stencil_reference = stencil_test.reference_value;
     pipeline_info.dynamic_info.stencil_compare_mask = stencil_test.input_mask;
-    // SyncStencilWriteMask();
     pipeline_info.dynamic_info.stencil_write_mask =
         (regs.framebuffer.framebuffer.allow_depth_stencil_write != 0)
             ? static_cast<u32>(regs.framebuffer.output_merger.stencil_test.write_mask)
             : 0;
-    // SyncDepthTest();
     const bool test_enabled = regs.framebuffer.output_merger.depth_test_enable == 1 ||
                               regs.framebuffer.output_merger.depth_write_enable == 1;
     const auto compare_op = regs.framebuffer.output_merger.depth_test_enable == 1
@@ -343,7 +385,6 @@ void RasterizerVulkan::SyncDrawState() {
 
     pipeline_info.state.depth_stencil.depth_test_enable.Assign(test_enabled);
     pipeline_info.state.depth_stencil.depth_compare_op.Assign(compare_op);
-    // SyncDepthWriteMask();
     const bool write_enable = (regs.framebuffer.framebuffer.allow_depth_stencil_write != 0 &&
                                regs.framebuffer.output_merger.depth_write_enable);
     pipeline_info.state.depth_stencil.depth_write_enable.Assign(write_enable);
@@ -967,12 +1008,207 @@ void RasterizerVulkan::DrawTriangles() {
     cpu_bridge = {};
 }
 
+// CodexAstraLocal: Later reads cannot restore an omitted image. Stop the
+// experimental route for this session and report the observed dependency, while
+// preserving the ordinary read/copy operation for diagnosis and future frames.
+void RasterizerVulkan::ObserveOmittedEyeRead(PAddr address, u64 size) {
+    if (!early_right_eye || early_eye_hazard || !size) return;
+    for (const auto& [start, length] : omitted_eye_ranges) {
+        if (length && u64{address} < u64{start} + length && u64{start} < u64{address} + size) {
+            early_eye_hazard = true;
+            LOG_ERROR(Render_Vulkan,
+                "Uberhar early eye dependency: read={:08X} bytes={} omitted={:08X} bytes={} "
+                "action=disable_experiment already_omitted_output_recovered=false",
+                address, size, start, length);
+            return;
+        }
+    }
+}
+
+// CodexAstraLocal TEST-ONLY LOG: Copy immutable descriptors only after a real
+// enqueue. OFF returns before conversions/table scans. Configured texture mips
+// are not measured sampled mips, and rectangle bounds are not fragment counts.
+// Remove this adapter with the census after workload attribution is qualified.
+void RasterizerVulkan::RecordWorkloadDraw(const VideoCore::FramebufferHelper<Traits>& helper,
+                                        bool indexed, u32 count,
+                                        VideoCore::FrameWorkloadCensus::Route route) {
+    if (!pica.frame_census || !pica.frame_census->Enabled()) return;
+    using Census = VideoCore::FrameWorkloadCensus;
+    Census::Draw draw{};
+    const auto& guest = regs.framebuffer.framebuffer;
+    const auto* fb = helper.Framebuffer();
+    auto& target = draw.target;
+    target.known = Census::Target::GuestColor | Census::Target::GuestDepth | Census::Target::GuestExtent |
+                   Census::Target::HostExtent | Census::Target::HostSamples | Census::Target::HostLayers;
+    target.color_address = guest.GetColorBufferPhysicalAddress();
+    target.depth_address = guest.GetDepthBufferPhysicalAddress();
+    target.guest_width = guest.GetWidth();
+    target.guest_height = guest.GetHeight();
+    target.guest_color_format = static_cast<u32>(guest.color_format.Value());
+    target.guest_depth_format = static_cast<u32>(guest.depth_format.Value());
+    target.host_width = fb->Extent().width;
+    target.host_height = fb->Extent().height;
+    // CodexAstraLocal: Current framebuffer creation and images explicitly use
+    // one layer/sample; if that backend contract changes, update this witness.
+    target.host_samples = 1;
+    target.host_layers = 1;
+    if (fb->color_id) {
+        target.known |= Census::Target::HostColorFormat;
+        target.host_color_format = static_cast<u32>(instance.GetTraits(fb->Format(SurfaceType::Color)).native);
+    }
+    if (fb->depth_id) {
+        target.known |= Census::Target::HostDepthFormat;
+        target.host_depth_format = static_cast<u32>(instance.GetTraits(fb->Format(SurfaceType::Depth)).native);
+    }
+    if (route != Census::Route::ComputeRectangle) {
+        target.known |= Census::Target::Viewport | Census::Target::Scissor | Census::Target::RenderArea;
+        const auto viewport = helper.Viewport();
+        target.viewport = {viewport.x, viewport.y, viewport.width, viewport.height};
+        const auto rect = [](const Common::Rectangle<u32>& value) {
+            return Census::Rect{static_cast<s32>(value.left), static_cast<s32>(value.bottom),
+                                static_cast<s32>(value.GetWidth()), static_cast<s32>(value.GetHeight())};
+        };
+        target.scissor = rect(pipeline_info.dynamic_info.scissor);
+        target.render_area = rect(helper.DrawRect());
+    }
+    const auto textures = regs.texturing.GetTextures();
+    for (u32 i = 0; i < textures.size(); ++i) {
+        if (!textures[i].enabled) continue;
+        const auto& texture = textures[i].config;
+        auto& out = draw.textures[i];
+        draw.texture_mask |= 1U << i;
+        out.known = Census::Texture::Address | Census::Texture::Extent | Census::Texture::Format |
+                    Census::Texture::MipRange | Census::Texture::Filters | Census::Texture::LodBias;
+        out.unit = i;
+        out.address = texture.GetPhysicalAddress();
+        out.width = texture.width.Value();
+        out.height = texture.height.Value();
+        out.format = static_cast<u32>(textures[i].format);
+        // CodexAstraLocal: Type bits exist only on texture unit zero; reserved
+        // bits on the other units are not evidence of a configured texture type.
+        if (i == 0) {
+            out.known |= Census::Texture::Type;
+            out.type = static_cast<u32>(texture.type.Value());
+        }
+        out.mip_min = texture.lod.min_level.Value();
+        out.mip_max = texture.lod.max_level.Value();
+        out.min_filter = texture.min_filter.Value();
+        out.mag_filter = texture.mag_filter.Value();
+        out.mip_filter = texture.mip_filter.Value();
+        out.lod_bias_raw = static_cast<u32>(texture.lod.bias.Value());
+    }
+    draw.route = route;
+    draw.submitted_vertices = count;
+    draw.indexed = indexed;
+    pica.frame_census->RecordDraw(draw);
+}
+
+// CodexAstraLocal: Inspect actual independently addressed cube faces, including
+// deferred draws. A conservative bound includes the mip chain, not just level0.
+void RasterizerVulkan::ObserveEyeTextureReads() {
+    if (!early_right_eye || early_eye_hazard) return;
+    const auto textures = regs.texturing.GetTextures();
+    for (u32 unit = 0; unit < textures.size(); ++unit) {
+        const auto& texture = textures[unit];
+        if (!texture.enabled) continue;
+        const u64 length = u64{texture.config.width.Value()} * texture.config.height.Value() * 8;
+        using Type = Pica::TexturingRegs::TextureConfig::TextureType;
+        if (unit == 0 && (texture.config.type == Type::TextureCube || texture.config.type == Type::ShadowCube)) {
+            for (u32 face = 0; face < 6; ++face) {
+                ObserveOmittedEyeRead(regs.texturing.GetCubePhysicalAddress(
+                    static_cast<Pica::TexturingRegs::CubeFace>(face)), length);
+            }
+        } else {
+            ObserveOmittedEyeRead(texture.config.GetPhysicalAddress(), length);
+        }
+    }
+}
+
+bool RasterizerVulkan::TryOmitUnusedEye(bool accelerate, u32 cpu_vertices) {
+    if (!early_right_eye || early_eye_hazard) return false;
+    const auto textures = regs.texturing.GetTextures();
+    const auto& scan = pica.regs.framebuffer_config[0];
+    const auto& fb = regs.framebuffer.framebuffer;
+    const auto& merger = regs.framebuffer.output_merger;
+    const PAddr right = scan.active_fb == 0 ? scan.address_right1 : scan.address_right2;
+    const bool writes_depth = fb.allow_depth_stencil_write != 0 &&
+        (merger.depth_write_enable || (merger.stencil_test.enable && merger.stencil_test.write_mask));
+    bool feedback = false;
+    // CodexAstraLocal: Cube/ShadowCube feedback has independent face addresses;
+    // keep that complex route outside the deliberately narrow suppression trial.
+    using TextureType = Pica::TexturingRegs::TextureConfig::TextureType;
+    feedback = textures[0].enabled && (textures[0].config.type == TextureType::TextureCube ||
+                                      textures[0].config.type == TextureType::ShadowCube);
+    const auto color = fb.GetColorBufferPhysicalAddress();
+    const u64 size = u64{fb.GetWidth()} * fb.GetHeight() * 4;
+    // CodexAstraLocal: Matching base addresses are insufficient when scanout
+    // shares a larger range with the left eye or uses a different representation.
+    // Refuse those ambiguous cases rather than treating them as saved work.
+    const u32 format = static_cast<u32>(fb.color_format.Value());
+    // CodexAstraLocal: PICA render-target and LCD scanout enums swap RGB565 and
+    // RGB5A1, so compare representations rather than equal raw enum values.
+    const u32 scan_format = format == 2 ? 3 : format == 3 ? 2 : format;
+    const bool matching_layout = format <= 4 &&
+        scan_format == static_cast<u32>(scan.color_format.Value()) &&
+        scan.stride == u64{fb.GetWidth()} * (format == 0 ? 4 : format == 1 ? 3 : 2);
+    for (const u32 left : {scan.address_left1, scan.address_left2}) {
+        feedback |= left && u64{left} < u64{color} + size && u64{color} < u64{left} + size;
+    }
+    for (const auto& texture : textures) {
+        const u64 start = texture.config.GetPhysicalAddress();
+        const u64 length = u64{texture.config.width.Value()} * texture.config.height.Value() * 4 * 6;
+        feedback |= texture.enabled && start < u64{color} + size && u64{color} < start + length;
+    }
+    const auto decision = UnusedEyePolicy::Classify({
+        color, right, fb.GetWidth(), fb.GetHeight(), scan.width.Value(), scan.height.Value(),
+        {scan.address_left1, scan.address_left2},
+        Settings::values.render_3d.GetValue() == Settings::StereoRenderOption::Off &&
+            static_cast<int>(Settings::values.mono_render_option.GetValue()) == 0,
+        matching_layout && Settings::values.disable_right_eye_render.GetValue() &&
+            Core::System::GetInstance().GPU().GetRightEyeDisabler().CompatibilityAllowsSuppression(),
+        writes_depth, regs.pipeline.use_gs != Pica::PipelineRegs::UseGS::No,
+        regs.framebuffer.IsShadowRendering() || regs.lighting.config0.enable_shadow, feedback});
+    ++eye_decisions[static_cast<std::size_t>(decision)];
+    if (decision != UnusedEyePolicy::Decision::Eligible) return false;
+    auto& pending = omitted_eye_ranges[scan.active_fb == 0 ? 0 : 1];
+    if (pending.second && pending != std::pair<PAddr, u64>{color, size}) {
+        // CodexAstraLocal TEST-ONLY LOG: Never forget a skipped range on buffer
+        // rotation; retire this trial instead. Remove with the eye experiment.
+        early_eye_hazard = true;
+        LOG_WARNING(Render_Vulkan, "Uberhar early eye dependency: reason=scanout_range_churn "
+                                  "action=disable_experiment already_omitted_output_recovered=false");
+        return false;
+    }
+    pending = {color, size};
+    ++eye_draws_omitted;
+    if (accelerate) eye_gpu_vertices_omitted += regs.pipeline.num_vertices;
+    else eye_cpu_vertices_retained += cpu_vertices;
+    return true;
+}
+
 // CodexAstraLocal: Supported draws accept CPU or ready graphics vertices after
 // retiring the independent original-input compute backend.
 bool RasterizerVulkan::Draw(bool accelerate, bool is_indexed,
                           const std::shared_ptr<Pica::CpuDrawPacket>& deferred) {
     MICROPROFILE_SCOPE(Vulkan_Drawing);
     SyncDrawState();
+    ObserveEyeTextureReads();
+    // CodexAstraLocal: Preserve PICA state, timing and CPU primitive assembly.
+    // The independent OFF-by-default experiment omits only rendering; deferred
+    // packets still resolve through the ordinary ownership/completion boundary.
+    if (!deferred && TryOmitUnusedEye(accelerate, static_cast<u32>(vertex_batch.size()))) {
+        vertex_batch.clear();
+        return true;
+    }
+    // CodexAstraLocal: A normal draw can consume old attachment contents through
+    // blend/logic/depth/stencil. Conservatively include both attachment ranges;
+    // this may retire a harmless trial but never silently forgets a dependency.
+    if (early_right_eye && !early_eye_hazard) {
+        const auto& fb = regs.framebuffer.framebuffer;
+        const u64 bytes = u64{fb.GetWidth()} * fb.GetHeight() * 4;
+        ObserveOmittedEyeRead(fb.GetColorBufferPhysicalAddress(), bytes);
+        ObserveOmittedEyeRead(fb.GetDepthBufferPhysicalAddress(), bytes);
+    }
 
     const bool shadow_rendering = regs.framebuffer.IsShadowRendering();
     const bool has_stencil = regs.framebuffer.HasStencil();
@@ -1053,6 +1289,8 @@ bool RasterizerVulkan::Draw(bool accelerate, bool is_indexed,
                     compute_rect->BeginSample(timing_slot);
                     compute_rect->Draw(surface, *compute_packet);
                     compute_rect->EndSample(timing_slot);
+                    RecordWorkloadDraw(fb_helper, false, static_cast<u32>(vertices.size()),
+                        VideoCore::FrameWorkloadCensus::Route::ComputeRectangle);
                     vertex_batch.clear();
                     return true;
                 }
@@ -1077,7 +1315,8 @@ bool RasterizerVulkan::Draw(bool accelerate, bool is_indexed,
     SyncUtilityTextures(framebuffer);
 
     // Sync and bind the shader
-    pipeline_cache.UseFragmentShader(regs, user_config, ready_vertex_attempt);
+    pipeline_cache.UseFragmentShader(regs, user_config, ready_vertex_attempt,
+        pica.changed_state_only ? pica.fragment_config_generation : 0);
 
     if (ready_vertex_attempt) {
         ready_vertex_pipeline = pipeline_cache.PrepareReadyGpuVertex(pipeline_info);
@@ -1136,6 +1375,21 @@ bool RasterizerVulkan::Draw(bool accelerate, bool is_indexed,
         viewport.y + viewport.height,
     };
     pipeline_info.dynamic_info.scissor = draw_rect;
+    // CodexAstraLocal: Include clipping uses the same transformed bounds as the
+    // fragment shader (+1 endpoints, flip and subrect origin). Keep shader clipping
+    // and original pass area. Exclude mode cannot be expressed by one rectangle.
+    if (include_scissor &&
+        regs.rasterizer.scissor_test.mode == Pica::RasterizerRegs::ScissorMode::Include) {
+        const s32 left = std::clamp<s32>(scissor_x1, draw_rect.left, draw_rect.right);
+        const s32 right = std::clamp<s32>(scissor_x2, left, draw_rect.right);
+        const s32 bottom = std::clamp<s32>(scissor_y1, draw_rect.bottom, draw_rect.top);
+        const s32 top = std::clamp<s32>(scissor_y2, bottom, draw_rect.top);
+        pipeline_info.dynamic_info.scissor = {static_cast<u32>(left), static_cast<u32>(top),
+                                             static_cast<u32>(right), static_cast<u32>(bottom)};
+        ++narrowed_scissors;
+        scissor_area_before += u64{draw_rect.GetWidth()} * draw_rect.GetHeight();
+        scissor_area_after += u64{static_cast<u32>(right - left)} * static_cast<u32>(top - bottom);
+    }
 
     // AstraEH: Prepare/bind the native pipeline before recording its timestamp.
     // This prevents an initial compilation stall being mistaken for slow GPU math.
@@ -1154,7 +1408,13 @@ bool RasterizerVulkan::Draw(bool accelerate, bool is_indexed,
                                     accelerate ? nullptr : &software_layout, &cpu_fragment_use);
         compute_rect->BeginSample(timing_slot);
     }
-    renderpass_cache.BeginRendering(framebuffer, draw_rect);
+    // CodexAstraLocal: Source shadow/storage hazards revoke containment even
+    // when the destination itself is an ordinary color attachment.
+    const auto texture_type = regs.texturing.texture0.type.Value();
+    const bool reads_storage = regs.lighting.config0.enable_shadow ||
+        texture_type == Pica::TexturingRegs::TextureConfig::Shadow2D ||
+        texture_type == Pica::TexturingRegs::TextureConfig::ShadowCube;
+    renderpass_cache.BeginRendering(framebuffer, draw_rect, reads_storage);
 
     // AstraPro: Sample synchronized state, not a preflight's stale dynamic info.
     // Only every 4096th completed preparation reads a clock, with a five-second
@@ -1249,6 +1509,13 @@ bool RasterizerVulkan::Draw(bool accelerate, bool is_indexed,
     // CPU retry's original framebuffer ownership; previously queued uploads are inert.
     if (!succeeded && ready_vertex_attempt)
         fb_helper.CancelInvalidation();
+    if (succeeded) {
+        using Route = VideoCore::FrameWorkloadCensus::Route;
+        RecordWorkloadDraw(fb_helper, accelerate && is_indexed,
+            accelerate ? regs.pipeline.num_vertices : vertex_count,
+            accelerate ? (ready_vertex_attempt ? Route::ReadyGpuVertex : Route::GpuVertex)
+                       : Route::CpuVertexUnclassified);
+    }
     vertex_batch.clear();
     return succeeded;
 }
@@ -1399,10 +1666,14 @@ void RasterizerVulkan::BindTextureCube(const Pica::TexturingRegs::FullTextureCon
 }
 
 void RasterizerVulkan::FlushAll() {
+    // CodexAstraLocal: A full guest-memory materialization can expose any
+    // omitted range. Report the hazard rather than silently calling it valid.
+    ObserveOmittedEyeRead(0, u64{1} << 32);
     res_cache.FlushAll();
 }
 
 void RasterizerVulkan::FlushRegion(PAddr addr, u32 size) {
+    ObserveOmittedEyeRead(addr, size);
     res_cache.FlushRegion(addr, size);
 }
 
@@ -1411,19 +1682,31 @@ void RasterizerVulkan::InvalidateRegion(PAddr addr, u32 size) {
 }
 
 void RasterizerVulkan::FlushAndInvalidateRegion(PAddr addr, u32 size) {
+    ObserveOmittedEyeRead(addr, size);
     res_cache.FlushRegion(addr, size);
     res_cache.InvalidateRegion(addr, size);
 }
 
 void RasterizerVulkan::ClearAll(bool flush) {
+    if (flush) ObserveOmittedEyeRead(0, u64{1} << 32);
     res_cache.ClearAll(flush);
 }
 
 bool RasterizerVulkan::AccelerateDisplayTransfer(const Pica::DisplayTransferConfig& config) {
+    ObserveOmittedEyeRead(config.GetPhysicalInputAddress(),
+                         u64{config.input_width.Value()} * config.input_height.Value() * 4);
     return res_cache.AccelerateDisplayTransfer(config);
 }
 
 bool RasterizerVulkan::AccelerateTextureCopy(const Pica::DisplayTransferConfig& config) {
+    // CodexAstraLocal: Source rows may be separated by gaps. Use u64 for the
+    // complete envelope so a final row beyond copy.size cannot evade detection.
+    const u64 bytes = config.texture_copy.size & ~u32{15};
+    const u64 width = u64{config.texture_copy.input_width.Value()} * 16;
+    const u64 gap = u64{config.texture_copy.input_gap.Value()} * 16;
+    const u64 rows = width ? (bytes + width - 1) / width : 0;
+    ObserveOmittedEyeRead(config.GetPhysicalInputAddress(),
+                         bytes + (rows > 1 ? (rows - 1) * gap : 0));
     return res_cache.AccelerateTextureCopy(config);
 }
 

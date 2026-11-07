@@ -113,6 +113,17 @@ void LogSettings() {
     log_setting("Renderer_TurnipPassEndFlush", values.turnip_pass_end_flush.GetValue());
     // CodexAstraLocal: Identify the real generic optimizer comparison in performance logs.
     log_setting("UBERHAR_OPTIMIZE_GENERIC_SHADERS", values.uberhar_optimize_generic_shaders.GetValue());
+    // CodexAstraLocal: Keep effective launch controls in the ordinary settings record.
+    log_setting("uberhar_changed_state_only", values.uberhar_changed_state_only.GetValue());
+    log_setting("uberhar_reuse_contained_pass", values.uberhar_reuse_contained_pass.GetValue());
+    log_setting("uberhar_typed_primitive_append", values.uberhar_typed_primitive_append.GetValue());
+    log_setting("uberhar_include_scissor", values.uberhar_include_scissor.GetValue());
+    log_setting("uberhar_adaptive_cpu_workers", values.uberhar_adaptive_cpu_workers.GetValue());
+    log_setting("uberhar_gpu_observer", values.uberhar_gpu_observer.GetValue());
+    log_setting("uberhar_frame_workload_census", values.uberhar_frame_workload_census.GetValue());
+    log_setting("uberhar_static_dynamic_state", values.uberhar_static_dynamic_state.GetValue());
+    log_setting("uberhar_prepare_displayed_eye_only", values.uberhar_prepare_displayed_eye_only.GetValue());
+    log_setting("uberhar_early_right_eye", values.uberhar_early_right_eye.GetValue());
     log_setting("UBERHAR_CPU_PREFIX_OVERLAP", values.uberhar_cpu_prefix_overlap.GetValue());
     log_setting("UBERHAR_PARALLEL_TEXTURE_DECODE", values.uberhar_parallel_texture_decode.GetValue());
 
@@ -251,6 +262,17 @@ void RestoreGlobalState(bool is_powered_on) {
     // CodexAstraLocal: Return title-specific driver experiments to global inheritance.
     values.turnip_pass_end_flush.SetGlobal(true);
     values.uberhar_optimize_generic_shaders.SetGlobal(true);
+    // CodexAstraLocal: Release every .57 title override alongside its renderer owner.
+    values.uberhar_changed_state_only.SetGlobal(true);
+    values.uberhar_reuse_contained_pass.SetGlobal(true);
+    values.uberhar_typed_primitive_append.SetGlobal(true);
+    values.uberhar_include_scissor.SetGlobal(true);
+    values.uberhar_adaptive_cpu_workers.SetGlobal(true);
+    values.uberhar_gpu_observer.SetGlobal(true);
+    values.uberhar_frame_workload_census.SetGlobal(true);
+    values.uberhar_static_dynamic_state.SetGlobal(true);
+    values.uberhar_prepare_displayed_eye_only.SetGlobal(true);
+    values.uberhar_early_right_eye.SetGlobal(true);
     values.uberhar_cpu_prefix_overlap.SetGlobal(true);
     values.uberhar_parallel_texture_decode.SetGlobal(true);
 

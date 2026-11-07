@@ -20,13 +20,16 @@ def main():
     # quaternion conversion and all 88 output bytes use the production bodies.
     for signature in ['bool RasterizerAccelerated::BeginVertexAppend(',
                       'void RasterizerAccelerated::RollbackVertexAppend(',
-                      'void RasterizerAccelerated::AddTriangle(']:
-        parts.append(function(text,signature).replace('RasterizerAccelerated::','AppendSink::',1))
+                      'void RasterizerAccelerated::AddTriangle(',
+                      'void RasterizerAccelerated::AppendOrderedVertices(']:
+        parts.append(function(text,signature).replace('RasterizerAccelerated::','AppendSink::'))
     (out/'actual_append.inc').write_text('\n'.join(parts))
     inputs=[source,Path(__file__).resolve(),Path(__file__).with_suffix('.cpp')]+[
         root/'src'/p for p in ['common/uberhar_parallel_work.h','common/uberhar_cpu_work_budget.h',
         'video_core/pica/uberhar_vertex_parallel_batch.h','video_core/pica/uberhar_vertex_append.h',
-        'video_core/pica/primitive_assembly.h','video_core/pica/primitive_assembly.cpp']]
+        'video_core/pica/primitive_assembly.h','video_core/pica/primitive_assembly.cpp',
+        'video_core/pica/uberhar_vertex_view.h','video_core/rasterizer_interface.h',
+        'video_core/rasterizer_accelerated.h']]
     proof={'author':'CodexAstraLocal','inputs':{str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in inputs},'runs':[]}
     try:
         for name,defines in [('native',[]),('condition-variable',['-DPREFIX_FORCE_CV'])]:

@@ -536,8 +536,13 @@ bool Instance::CreateDevice() {
                       "it is broken on Qualcomm drivers");
     const bool has_portability_subset = add_extension(VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME);
     const bool has_extended_dynamic_state =
-        add_extension(VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME, is_arm || is_qualcomm,
-                      "it is broken on Qualcomm and ARM drivers");
+        // CodexAstraLocal: Isolate the existing static-state fallback on Turnip.
+        // Disabling at feature negotiation keeps keys and emitted commands in
+        // agreement; border-color support and all other extensions stay intact.
+        add_extension(VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME,
+                      is_arm || is_qualcomm ||
+                          (is_turnip && Settings::values.uberhar_static_dynamic_state.GetValue()),
+                      "driver policy or Uberhar static-state experiment");
     const bool has_custom_border_color =
         add_extension(VK_EXT_CUSTOM_BORDER_COLOR_EXTENSION_NAME, is_qualcomm,
                       "it is broken on most Qualcomm driver versions");

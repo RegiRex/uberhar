@@ -345,6 +345,8 @@ public:
     [[nodiscard]] vk::Framebuffer Handle() const noexcept {
         return framebuffer;
     }
+    // CodexAstraLocal: Actual VkFramebuffer dimensions for opt-in work attribution.
+    [[nodiscard]] vk::Extent2D Extent() const noexcept { return {width, height}; }
 
     [[nodiscard]] std::array<vk::Image, 2> Images() const noexcept {
         return images;

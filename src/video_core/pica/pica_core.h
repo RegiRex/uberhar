@@ -22,6 +22,7 @@
 #include "video_core/pica/uberhar_vertex_plan_cache.h"
 #include "video_core/pica/uberhar_vertex_output.h" // AstraEH: Prepared native output and sparse samples.
 #include "video_core/pica/uberhar_vertex_timing.h" // CodexAstraLocal: Finite opt-in CPU chunks.
+#include "video_core/uberhar_frame_workload_census.h" // CodexAstraLocal: Owner-only optional census.
 
 // AstraPro: A shared typed admission query lets Vulkan recheck the real PICA
 // assembler/debugger state, rather than substituting assumed-safe booleans.
@@ -433,6 +434,17 @@ public:
     RegsLcd regs_lcd{};
     Regs regs{};
     DirtyRegs dirty_regs{};
+    // CodexAstraLocal: Owner-only version of fragment configuration inputs.
+    // It never caches texture contents, shader readiness or GPU resource state.
+    u64 fragment_config_generation{1};
+    u64 unchanged_register_writes{}, changed_register_writes{};
+    // CodexAstraLocal: Launch-owned hot-path control, resolved once by the owner.
+    bool changed_state_only{};
+    bool typed_primitive_append{};
+    // CodexAstraLocal TEST-ONLY LOG: No allocation when census is disabled;
+    // GSP transfers and Vulkan enqueues share the emulation owner. Remove after attribution.
+    std::unique_ptr<VideoCore::FrameWorkloadCensus> frame_census;
+    u64 command_lists_submitted{};
     GeometryShaderUnit gs_unit;
     ShaderSetup vs_setup;
     ShaderSetup gs_setup;
@@ -467,6 +479,7 @@ private:
         ar & cmd_list;
         if (Archive::is_loading::value) {
             dirty_regs.SetAllDirty();
+            ++fragment_config_generation;
         }
     }
 

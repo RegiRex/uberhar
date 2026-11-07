@@ -90,7 +90,7 @@ def main():
             if name == 'baseline':
                 require(run.returncode == 0 and run.stderr == b'', 'Assembly baseline failed')
                 result = json.loads(run.stdout)
-                require(result == {'cases': 504, 'partitions': 36, 'checks': 3636},
+                require(result == {'cases': 1008, 'partitions': 72, 'checks': 7272},
                         'Assembly fixture population changed')
                 record['result'] = result
             else:
@@ -119,8 +119,8 @@ def main():
         (output / 'provenance.json').write_text(json.dumps(proof, indent=2) + '\n')
         print('Proof: ' + str(output), flush=True)
     require(proof['sources_unchanged'], 'Assembly source changed during test')
-    print('PASS: 504 topology/tail/winding/throw cases, 36 persistent partitions, '
-          '3636 checks and two intended state defects', flush=True)
+    print('PASS: 1008 topology/tail/winding/throw cases, 72 persistent partitions, '
+          '7272 checks and two intended state defects', flush=True)
 
 
 if __name__ == '__main__':

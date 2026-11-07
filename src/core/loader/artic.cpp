@@ -188,10 +188,7 @@ ResultStatus Apploader_Artic::LoadExecImpl(std::shared_ptr<Kernel::Process>& pro
     codeset->DataSegment().size =
         exheader.codeset_info.data.num_max_pages * Memory::CITRA_PAGE_SIZE + bss_page_size;
 
-    // Apply patches now that the entire codeset (including .bss) has been allocated
-    // const ResultStatus patch_result = overlay_ncch->ApplyCodePatch(code);
-    // if (patch_result != ResultStatus::Success && patch_result != ResultStatus::ErrorNotUsed)
-    //    return patch_result;
+    // CodexAstraLocal: Artic currently loads this code without NCCH overlay patches.
 
     codeset->entrypoint = codeset->CodeSegment().addr;
     codeset->memory = std::move(code);

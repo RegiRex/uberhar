@@ -119,6 +119,10 @@ def main():
     profile = root / 'src/common/uberhar_test_profile.h'
     for path in (settings, profile):
         inputs[str(path)] = hashlib.sha256(path.read_bytes()).hexdigest()
+    # CodexAstraLocal: The new recording adapter consumes the production route
+    # enum; retain that included header in the fixture's source provenance.
+    workload = root / 'src/video_core/uberhar_frame_workload_census.h'
+    inputs[str(workload)] = hashlib.sha256(workload.read_bytes()).hexdigest()
     policy = 'namespace Settings {\n' + block(settings.read_text(), 'enum class UberharTestMode') + ';\n'
     policy += block(profile.read_text(), 'constexpr bool UsesAutomaticCompute(') + '\n'
     policy += block(profile.read_text(), 'constexpr bool AllowsComputeRendering(') + '\n'

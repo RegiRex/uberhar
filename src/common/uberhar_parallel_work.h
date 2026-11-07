@@ -198,10 +198,11 @@ public:
     explicit ParallelWork(unsigned processors = AvailableProcessors(),
                           void (*worker_start)() = nullptr,
                           AuxiliaryBudget& shared_budget = AuxiliaryBudget::Global(),
-                          AuxiliaryBudget::ProgressLane* progress = nullptr)
+                          AuxiliaryBudget::ProgressLane* progress = nullptr,
+                          bool adaptive = true)
         : available{std::max(1U, processors)}, worker_limit{available - 1},
           on_worker_start{worker_start}, budget{shared_budget}, progress_lane{progress},
-          participation{available - 1} {}
+          participation{available - 1}, adaptive_enabled{adaptive} {}
     ParallelWork(const ParallelWork&) = delete;
     ParallelWork& operator=(const ParallelWork&) = delete;
 
@@ -234,7 +235,11 @@ public:
     unsigned StartupFailures() const { return startup_failures; }
     // CodexAstraLocal: Owner-only reporting exposes whether sampled policy
     // actually changed participation, without logging per draw or per worker.
-    AdaptiveParticipation::Statistics Scheduling() const { return participation.GetStatistics(); }
+    AdaptiveParticipation::Statistics Scheduling() const {
+        auto result = participation.GetStatistics();
+        result.enabled = adaptive_enabled;
+        return result;
+    }
     // CodexAstraLocal: Report the immutable runtime choice at the existing
     // cadence; a compiled Linux target can still select CV after a denied probe.
     const char* WaitTransport() const {
@@ -248,36 +253,44 @@ public:
     // and other callers keep the same publication, owner-only and join contract.
     template <typename Function>
     Result Run(std::uint32_t count, std::uint32_t grain, Function&& function,
-               bool measure = false) {
+               bool measure = false, AdaptiveWorkIdentity identity = {}) {
         return RunImpl<false>(count, grain, std::forward<Function>(function),
-                              [] { return false; }, [] {}, measure);
+                              [] { return false; }, [] {}, measure, identity);
     }
 
     // CodexAstraLocal: Prepare only after actual workers exist and before any
     // borrowed job is published. A false result disables speculative append.
     template <typename Function, typename Prepare, typename Hook>
     Result RunWithOwnerHook(std::uint32_t count, std::uint32_t grain, Function&& function,
-                           Prepare&& prepare, Hook&& hook, bool measure = false) {
+                           Prepare&& prepare, Hook&& hook, bool measure = false,
+                           AdaptiveWorkIdentity identity = {}) {
         return RunImpl<true>(count, grain, std::forward<Function>(function),
-                             std::forward<Prepare>(prepare), std::forward<Hook>(hook), measure);
+                             std::forward<Prepare>(prepare), std::forward<Hook>(hook), measure, identity);
     }
 
 private:
     template <bool HasHook, typename Function, typename Prepare, typename Hook>
     Result RunImpl(std::uint32_t count, std::uint32_t grain, Function&& function,
-                   Prepare&& prepare, Hook&& hook, bool measure) {
+                   Prepare&& prepare, Hook&& hook, bool measure, AdaptiveWorkIdentity identity) {
         // CodexAstraLocal: A helper's nested job stays within its current token.
         // Owners never wait for capacity; denied auxiliaries leave ready grains
         // for the owner. Persistent slots remain asleep when admission shrinks.
         grain = std::max(1U, grain);
         const bool nested = AuxiliaryBudget::HasPermit();
         const unsigned helper_capacity = budget.HelperCapacity();
-        participation.Limit(std::min(available - 1, helper_capacity));
-        participation.Prepare(count, grain, HasHook);
         const unsigned requested = !nested && ParallelFloatEnvironment::AllowsParallel()
             ? std::min(available, std::max(1U, count / grain)) : 1U;
-        const unsigned wanted = std::min({requested - 1, participation.Desired(), helper_capacity});
-        const bool sample = requested > 1 && participation.SelectSample(count, grain);
+        unsigned wanted = std::min(requested - 1, helper_capacity);
+        bool sample = false;
+        // CodexAstraLocal: OFF and serial work bypass every cohort lookup,
+        // history mutation and adaptive clock. Static worker/permit admission
+        // remains unchanged. Unidentified mixed work never trains a fake cohort.
+        if (adaptive_enabled && requested > 1) {
+            participation.Limit(std::min(available - 1, helper_capacity));
+            participation.Prepare(count, grain, HasHook, identity);
+            wanted = std::min(wanted, participation.Desired());
+            sample = participation.SelectSample(count, grain);
+        }
         const bool timed = measure || sample;
         EnsureWorkers(wanted);
         const unsigned active = std::min(wanted, CreatedWorkers());
@@ -587,6 +600,7 @@ private:
     AuxiliaryBudget& budget;
     AuxiliaryBudget::ProgressLane* progress_lane;
     AdaptiveParticipation participation;
+    const bool adaptive_enabled; // CodexAstraLocal: Immutable launch experiment.
     unsigned startup_failures{};
     std::vector<std::unique_ptr<Worker>> workers;
     std::mutex mutex;

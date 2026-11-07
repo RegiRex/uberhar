@@ -1,0 +1,9 @@
+// Copyright 2026 Uberhar contributors
+// GPLv2 or later; reference-only excerpt, never a build source.
+// CodexAstraLocal: Former single-history callsite.
+        participation.Limit(std::min(available - 1, helper_capacity));
+        participation.Prepare(count, grain, HasHook);
+        const unsigned requested = !nested && ParallelFloatEnvironment::AllowsParallel()
+            ? std::min(available, std::max(1U, count / grain)) : 1U;
+        const unsigned wanted = std::min({requested - 1, participation.Desired(), helper_capacity});
+        const bool sample = requested > 1 && participation.SelectSample(count, grain);
