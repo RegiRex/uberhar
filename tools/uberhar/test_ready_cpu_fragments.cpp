@@ -331,10 +331,22 @@ void BindTransportAndModes() {
     Require(p.BindPipeline(i, true, nullptr, true, nullptr, &layout, &token),
             "control mode draws");
     p.scheduler.Finish();
-    Require(p.ready_cpu_requests == (mode==Settings::UberharTestMode::Native ? 1U : 0U) &&
+    // CodexAstraUlt-2: A cold Native draw probes before generic creation, then
+    // probes again for admission after generic success. Only the latter records
+    // one observation per tier; Custom enters neither optional path.
+    Require(p.ready_cpu_requests == (mode==Settings::UberharTestMode::Native ? 2U : 0U) &&
                 p.curr_disk_cache->ready_fragment_requests ==
-                    (mode==Settings::UberharTestMode::Native ? 1U : 0U),
-            "only Native control has independent full CPU demand");
+                    (mode==Settings::UberharTestMode::Native ? 2U : 0U) &&
+                p.curr_disk_cache->ready_fragment_lookup_only_misses ==
+                    (mode==Settings::UberharTestMode::Native ? 2U : 0U),
+            "only Native control probes full CPU readiness before and after generic");
+    Require(p.ready_cpu_bank->stats.observations ==
+                (mode==Settings::UberharTestMode::Native ? 2U : 0U) &&
+                p.ready_optional_attempts == 0 && p.ready_vertex_worker->scheduled == 0 &&
+                p.curr_disk_cache->ready_fragment_builds == 0 &&
+                p.curr_disk_cache->static_tev_attempts == 0 &&
+                p.generic_requests == 1 && p.virtual_generic_draws == 1 && !token,
+            "cold readiness probe does not double admission or bypass generic draw");
   }
   Settings::values.uberhar_test_mode.value =
       Settings::UberharTestMode::Automatic;
@@ -445,7 +457,10 @@ void BindTransportAndModes() {
     Require(p.BindPipeline(i, true, nullptr, true, nullptr, &layout, &token),
             "required generic failure accurate recovery");
     p.scheduler.Finish();
+    // CodexAstraUlt-2: A failed required generic never authorizes cold optional
+    // demand from the earlier read-only probe.
     Require(p.virtual_recovery_draws == 1 && p.ready_optional_attempts == 0 &&
+                p.ready_cpu_bank->stats.observations == 0 &&
                 p.ready_vertex_worker->tasks.empty() &&
                 p.skipped_draws == 0,
             "no optional admission or skipped recovery draw");
