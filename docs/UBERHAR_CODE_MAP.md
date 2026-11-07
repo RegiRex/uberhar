@@ -1,3 +1,22 @@
+<!-- CodexAstraUlt-2: Isolated .57 preparation architecture and validation entry points. -->
+## 0.1.57 precompiled-first comparison
+
+- `uberhar_precompile_recipes.h`: bounded semantic CPU descriptions, explicit
+  serialization, exact deduplication and generator/pipeline state validation.
+- `vk_shader_disk_cache`: read-only stock import, profile-specific semantic files,
+  indexed live observation, atomic persistence and synchronous startup compilation.
+- `uberhar_precompiled_cache.h`: prioritized resident owners, sequential excess
+  warming, cancellation, exact lookup and shared module capacity.
+- `vk_pipeline_cache`: startup integration, specialized-first selection, aggregate
+  admission accounting and drained title/profile/teardown boundaries.
+- `vk_graphics_pipeline`, `vk_scheduler`, `renderer_vulkan`: preserve device-loss
+  classification, latch startup cancellation and avoid waiting on a known lost device.
+- `test_precompile_recipes`, `test_precompiled_cache`, `test_precompile_stock_import`,
+  `test_pipeline_device_loss`: executable boundaries and deliberate-defect controls;
+  ready-CPU/optional-worker fixtures extend actual routing and combined budgets.
+- See [preparation architecture and limits](UBERHAR_PRECOMPILATION.md) and
+  [comparison release notes](releases/0.1.57.md). Driver work is deferred.
+
 <!-- CodexAstraLocal: .56 reduces redundant depth ownership work and identifies existing GPU samples. -->
 ## 0.1.56 depth ownership and GPU sample attribution
 

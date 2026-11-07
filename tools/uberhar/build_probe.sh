@@ -27,6 +27,14 @@ python3 tools/uberhar/test_optional_cache_io.py
 # compilation failure is a gate failure, never a successful negative control.
 # CodexAstraUlt: Execute the real queued compiler jobs with frozen optional/required inputs.
 python3 tools/uberhar/test_shader_compile_policy.py
+# CodexAstraUlt-2: Run the real recipe codec, prepared-owner policy, stock import
+# and terminal driver-error boundary once; preserve compiler/control diagnostics.
+python3 tools/uberhar/test_precompile_recipes.py --negative-controls 2>&1 | tee build/uberhar-probe/precompile-recipes.log
+python3 tools/uberhar/test_precompiled_cache.py 2>&1 | tee build/uberhar-probe/precompiled-cache.log
+python3 tools/uberhar/test_precompile_stock_import.py \
+  --output build/uberhar-probe/precompile-stock-import 2>&1 | tee build/uberhar-probe/precompile-stock-import.log
+python3 tools/uberhar/test_pipeline_device_loss.py \
+  --output build/uberhar-probe/pipeline-device-loss 2>&1 | tee build/uberhar-probe/pipeline-device-loss.log
 # CodexAstraLocal: Execute actual optional-worker completion/failure controls and
 # extracted CPU-fragment selection/binding, including deliberately broken routes.
 # GPU image/transport execution remains a separate mandatory shader-workflow gate.

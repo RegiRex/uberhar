@@ -159,6 +159,12 @@ bool GraphicsPipeline::Build(bool fail_on_compile_required) {
     };
     try {
         return BuildImpl(fail_on_compile_required);
+    } catch (const vk::SystemError& error) {
+        // CodexAstraUlt-2: Retain the driver's terminal device-loss category while
+        // still releasing every waiter through the existing failed completion.
+        device_lost.store(error.code().value() == static_cast<int>(vk::Result::eErrorDeviceLost),
+                          std::memory_order_release);
+        fail(error.what());
     } catch (const std::exception& error) {
         fail(error.what());
     } catch (...) {

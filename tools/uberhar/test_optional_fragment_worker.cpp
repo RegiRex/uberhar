@@ -192,6 +192,9 @@ struct Queue {
 // keep the original failure controls attached to that same queue instance.
 struct Parent {
     Instance instance; Profile profile{}; Queue shader_workers;
+    // CodexAstraUlt-2: Model prepared ownership while exercising the real shared cap.
+    std::size_t prepared_modules{};
+    std::size_t PreparedModuleCount() const { return prepared_modules; }
     Queue* ready_vertex_worker=&shader_workers;
     Shader* warming_ready_vertex{};
     bool allow_static_cpu_tev=true;
@@ -367,6 +370,24 @@ void DirectFailure(unsigned failure) {
 // CodexAstraLocal: Lookup-only must not silently warm demand. Module capacity is
 // shared and exact:128 retained objects, terminal failures included, no eviction.
 void LookupAndCapacity() {
+    // CodexAstraUlt-2: Sixty-four prepared modules leave exactly sixty-four
+    // optional owners, including failures; a new demand cannot exceed 128 total.
+    {
+        Fixture prepared;
+        prepared.parent.prepared_modules = 64;
+        for (unsigned n = 0; prepared.cache.ready_fragments.size() < 64; ++n) {
+            auto c = Config(1000 + n);
+            auto entry = std::make_unique<ShaderDiskCache::ReadyFragmentEntry>(
+                prepared.parent.instance,
+                ShaderDiskCache::ReadyFragmentKey{c, prepared.parent.profile});
+            entry->shader.MarkFailed();
+            prepared.cache.ready_fragments.emplace(c.Hash(), std::move(entry));
+        }
+        Demand(prepared, Config(999), 32);
+        Require(prepared.cache.ready_fragments.size() == 64 &&
+                    prepared.parent.shader_workers.accepted == 0,
+                "shared module128 cap includes prepared residents");
+    }
     // CodexAstraLocal: Renewal must not lower the inherited initial cold/warm
     // full-module envelope. Read the actual extracted production initializer.
     { Fixture f; Require(f.cache.full_module_credit.Credits() == ReadyFragmentPolicy::MaxModules,

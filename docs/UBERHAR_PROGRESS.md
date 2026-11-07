@@ -1,3 +1,44 @@
+<!-- CodexAstraUlt-2: New owner-authorized branch implementation; local evidence is separate from hosted/device qualification. -->
+## 0.1.57 — precompiled-first comparison
+
+Implemented on `uberhar/precompiled-first`, initially from 0.1.56-r2 (`0723b003`),
+now merged with main 0.1.57 (`d25afc00`). The main work-reduction changes below
+are retained, including per-draw readiness and resource checks when immutable
+fragment configuration is reused.
+Known full CPU fragment/pipeline descriptions prepare before gameplay; compatible
+stock records can seed them without stock-cache mutation. Ready prepared/adaptive
+specializations are selected before generic creation/wait. Preparation retains a
+bounded useful bank, attempts transient warming of excess known recipes, and saves
+completed startup cache work. Unknown states retain the complete fallback.
+
+Independent architecture/lifetime and cleanliness reviews accompany the executable
+codec, import, bank, terminal-device-loss, compiler-policy, cache-lifecycle and
+workflow checks. Production fragment generation and TEV-family checks pass locally.
+Full Vulkan fixture execution remains blocked by an unavailable oversized pinned
+header; complete shader-pixel and Android validation belongs to the hosted gates.
+No Thor speedup, visual correctness, crash fix or APK completion is claimed here.
+
+The isolated comparison uses the existing signing/validation gates and cannot
+publish a regular release. All new purpose comments use `CodexAstraUlt-2`.
+See [architecture, limitations and test plan](UBERHAR_PRECOMPILATION.md).
+
+<!-- CodexAstraUlt-2: Separate packaging and fixture evidence from uncompleted hosted/device qualification. -->
+The comparison installs beside main as **Uberhar Precompiled** with package
+`org.uberhar.uberhar_emu.precompiled` and a separate data-folder marker. Main's
+folder is rejected even if it also contains the candidate marker. The earlier
+shader gate failed while compiling a fixture missing the new semantic-save
+endpoint; the repaired fixture passes locally against the current source. The
+merged routing regression covers unchanged-register readiness/resource updates,
+but its execution still requires the hosted Vulkan dependency. These results do
+not establish a completed APK or pixel correctness on the merged tree.
+
+## Incorporated main history
+
+<!-- CodexAstraUlt-2: Preserve main's recorded scope/evidence; its device authorization describes that release task, not this comparison handoff. -->
+The following main-branch notes are preserved as upstream history. Their local
+preflight results apply to main's tree, not automatically to this merged candidate.
+No device installation or gameplay testing is performed for this packaging task.
+
 <!-- CodexAstraLocal: Current .57 implementation supersedes older directions; local preflight passed, hosted and hardware gates remain distinct. -->
 ## 0.1.57 — controlled work reduction and complete callback workload accounting
 

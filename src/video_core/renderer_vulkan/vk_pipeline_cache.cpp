@@ -208,6 +208,16 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
 
 // AstraEH: Every mutable profile update also invalidates pure preparation when needed.
 void PipelineCache::SetAccurateMul(bool accurate_mul) {
+    // CodexAstraUlt-2: A prepared bank cannot survive arithmetic-profile changes.
+    // Drain its last draw before releasing device objects or changing generation inputs.
+    if (profile.enable_accurate_mul != accurate_mul && (precompiled_cache || curr_disk_cache)) {
+        scheduler.Finish();
+        if (curr_disk_cache) curr_disk_cache->SavePrecompileRecipesAfterDrain();
+        bound_pipeline = nullptr;
+        current_shaders[ProgramType::FS] = nullptr;
+        shader_hashes[ProgramType::FS] = 0;
+        precompiled_cache.reset();
+    }
     profile.enable_accurate_mul = accurate_mul;
     tev_preparation.Configure(profile, instance.IsExtendedDynamicStateSupported());
 }
@@ -235,7 +245,8 @@ void PipelineCache::BuildLayout() {
 }
 
 PipelineCache::~PipelineCache() {
-    scheduler.WaitWorker();
+    // CodexAstraUlt-2: Prepared resident handles require GPU completion as well as command drain.
+    scheduler.Finish();
     pipeline_workers.WaitForRequests();
     shader_workers.WaitForRequests();
     // AstraEH: Fallback jobs also retain shader, layout and cache objects until completed.
@@ -252,6 +263,7 @@ PipelineCache::~PipelineCache() {
     // CodexAstraLocal: All queued users are drained before the CPU bank releases
     // its pipelines, and before automatic destruction of shared shader owners.
     if (ready_cpu_bank) ready_cpu_bank->ResetAfterDrain();
+    precompiled_cache.reset();
     ready_optional_attempts = 0;
 }
 
@@ -519,6 +531,55 @@ void PipelineCache::LoadDiskCache(const std::atomic_bool& stop_loading,
         disk_caches.emplace_back(std::make_shared<ShaderDiskCache>(*this, GetProgramID()));
 
     curr_disk_cache->Init(stop_loading, callback);
+    PrepareRecordedPipelines(stop_loading, callback);
+}
+
+// CodexAstraUlt-2: Startup replay owns its modules and pipeline descriptions;
+// it never borrows current draw state or spends gameplay's optional work credits.
+void PipelineCache::PrepareRecordedPipelines(const std::atomic_bool& stop_loading,
+                                            const VideoCore::DiskResourceLoadCallback& callback) {
+    if (!hybrid_tev || !allow_full_cpu_fragments || !curr_disk_cache || stop_loading ||
+        !Settings::values.use_disk_shader_cache.GetValue() || profile.has_fragment_shader_barycentric)
+        return;
+    const auto& recipes = curr_disk_cache->PreparedRecipes();
+    if (recipes.empty()) return;
+    try {
+        precompiled_cache = std::make_unique<PrecompiledCache>(
+            instance, renderpass_cache, trivial_vertex_shader, *driver_pipeline_cache, *pipeline_layout);
+        // CodexAstraUlt-2: Revisited title managers may retain optional modules;
+        // reserve both resident and transient startup modules from the same cap.
+        const auto existing_modules = curr_disk_cache->ExistingFullFragmentModules();
+        const auto available_modules = existing_modules < ReadyFragmentPolicy::MaxModules
+            ? ReadyFragmentPolicy::MaxModules - existing_modules : 0;
+        precompiled_cache->Prepare(recipes, stop_loading, callback,
+            [this](const FSConfig& config) { return curr_disk_cache->CompilePreparedFragment(config); },
+            available_modules);
+    } catch (const OptionalCompileError& error) {
+        // CodexAstraUlt-2: Device loss cannot recover by issuing a generic draw.
+        if (error.kind == OptionalCompileFailure::DeviceLost) {
+            scheduler.ReportDeviceLost();
+            throw VideoCore::ShaderRecoveryError{"Vulkan device lost during shader preparation"};
+        }
+        LOG_WARNING(Render_Vulkan, "Uberhar preparation stopped: {}", error.what());
+    } catch (const std::exception& error) {
+        LOG_WARNING(Render_Vulkan, "Uberhar preparation stopped: {}", error.what());
+    } catch (...) {
+        LOG_WARNING(Render_Vulkan, "Uberhar preparation stopped: unknown failure");
+    }
+    // CodexAstraUlt-2: Persist completed preparation once before gameplay;
+    // cancellation retains useful work without per-recipe writes or a GPU wait.
+    SaveDriverPipelineDiskCache();
+    curr_disk_cache->SavePrecompileRecipesAfterDrain();
+    if (precompiled_cache) {
+        const auto& stats = precompiled_cache->Stats();
+        // CodexAstraUlt-2: Distinguish drawable residents from transient driver warming.
+        LOG_INFO(Render_Vulkan,
+            "Uberhar startup pipelines: input={} eligible={} resident={} warmed_only={} "
+            "failed={} unattempted={} budget_deferred={} cancelled={} aborted={} reason={}",
+            stats.input, stats.eligible, stats.resident_ready, stats.warmed_only,
+            stats.failed, stats.unattempted, stats.budget_deferred, stats.cancelled, stats.aborted,
+            precompiled_cache->FailureReason());
+    }
 }
 
 void PipelineCache::SwitchDiskCache(u64 title_id, const std::atomic_bool& stop_loading,
@@ -555,6 +616,7 @@ void PipelineCache::SwitchDiskCache(u64 title_id, const std::atomic_bool& stop_l
     bool prev_applet = curr_disk_cache ? is_applet(curr_disk_cache->GetProgramID()) : false;
     bool new_applet = is_applet(disk_caches[new_pos]->GetProgramID());
     curr_disk_cache = disk_caches[new_pos];
+    PrepareRecordedPipelines(stop_loading, callback);
 
     if (prev_applet) {
         // If we came from an applet, clean up all other applets
@@ -642,83 +704,116 @@ bool PipelineCache::BindPipeline(PipelineInfo& info, bool wait_built,
     // or label it generic merely because the CPU fallback has a virtual config.
     const bool specialized_gpu = ready_gpu_vertex && virtual_fs_config &&
         PreferReadySpecializedFragment(tev_user);
+    // CodexAstraUlt-2: Record the actual eligible CPU recipe even when its first
+    // draw uses the generic route. Never infer a CPU recipe from a hardware draw.
+    const bool prepared_cpu_eligible = cpu_vertex_layout && !cpu_bridge && !ready_gpu_vertex &&
+        curr_disk_cache && virtual_fs_config && allow_full_cpu_fragments && tev_supported &&
+        !profile.has_fragment_shader_barycentric && tev_user.IsCacheable() &&
+        IsCpuFragmentLayout(info, *cpu_vertex_layout);
+    if (prepared_cpu_eligible)
+        curr_disk_cache->ObservePrecompileRecipe(*virtual_fs_config, info.state);
+    // CodexAstraUlt-2: Probe exact CPU full/static owners before creating or
+    // waiting for a generic rival. Selection retains the normal draw-use token.
+    const auto select_ready_cpu = [&](GraphicsPipeline* generic) {
+        // CodexAstraUlt-2: Prepared owners remain stable until full renderer drain;
+        // their selection needs no adaptive eviction token or generic dependency.
+        if (!generic && prepared_cpu_eligible && precompiled_cache) {
+            if (const auto ready = precompiled_cache->Lookup(*virtual_fs_config, info.state)) {
+                current_shaders[ProgramType::FS] = ready->fragment;
+                shader_hashes[ProgramType::FS] = ready->fragment_hash;
+                info.state.shader_ids[ProgramType::FS] = ready->fragment_hash;
+                pipeline = ready->pipeline;
+                specialized_cpu = true;
+                static_tev_cpu = false;
+                ++prepared_cpu_selected;
+                ++ready_cpu_full_selected;
+                ++ready_cpu_selected;
+                ++ready_cpu_selected_lighting[virtual_fs_config->lighting.enable.Value() != 0];
+                if (pending_tev_transport) ++tev_transport_bypassed_cpu;
+                return true;
+            }
+        }
+        if (!cpu_vertex_layout || !cpu_use || !ready_cpu_bank || !ready_vertex_worker ||
+            !allow_static_cpu_tev || cpu_bridge || ready_gpu_vertex) return false;
+        auto* ready = PrepareReadyCpuFragment(info, generic, *cpu_vertex_layout, cpu_use,
+                                              &static_tev_cpu);
+        if (!ready) return false;
+        pipeline = ready;
+        specialized_cpu = true;
+        if (static_tev_cpu) ++ready_cpu_static_selected;
+        else ++ready_cpu_full_selected;
+        ++ready_cpu_selected;
+        ++ready_cpu_selected_lighting[virtual_fs_config->lighting.enable.Value() != 0];
+        return true;
+    };
     if (specialized_gpu) {
         ++virtual_specialized_gpu_draws;
     } else if (virtual_fs_config) {
-        // AstraEH: Start only the requested generic pipeline, never a speculative rival.
-        // Until the ready bank is complete this wait is real, separately measured work.
-        // AstraPro: A promoted draw uses its hardware-VS pipeline, never a
-        // trivial-VS CPU pipeline with the hardware vertex-buffer layout.
-        // CodexAstraLocal: Hardware Shaders may enter the ordinary acceleration route
-        // without a ready token. Preserve its translated VS/GS and vertex input layout;
-        // only explicitly CPU-produced vertices may use the trivial VS fallback.
-        auto* generic = ready_gpu_vertex ? ready_gpu_vertex
-                                        : GetTevFallback(info, cpu_vertex_layout != nullptr);
-        if (generic && !generic->IsDone()) {
-            const auto activity_start = Common::UberharActivity::Capture();
-            const auto start = std::chrono::steady_clock::now();
-            generic->WaitDone();
-            const auto ns = static_cast<u64>(std::chrono::duration_cast<std::chrono::nanoseconds>(
-                                                 std::chrono::steady_clock::now() - start)
-                                                 .count());
-            ++virtual_waits;
-            virtual_wait_ns += ns;
-            virtual_max_wait_ns = std::max(virtual_max_wait_ns, ns);
-            const auto activity_end = Common::UberharActivity::Capture();
-            const auto phase = Common::UberharActivity::Between(activity_start, activity_end);
-            auto& bucket = phase_waits[static_cast<std::size_t>(phase)];
-            ++bucket.count;
-            bucket.ns += ns;
-            bucket.maximum = std::max(bucket.maximum, ns);
-            if (ns >= 16'666'667 && phase_wait_details < 64) {
-                ++phase_wait_details;
-                // AstraEH Log Line: First 64 significant waits; all waits retain phase totals.
-                LOG_INFO(Render_Vulkan,
-                         "Uberhar generic wait: session={} phase={} wait_ms={:.3f} "
-                         "reads={} requested_bytes={} submissions={} limit=64",
-                         activity_start.run, Common::UberharActivity::Name(phase), ns / 1e6,
-                         activity_end.reads - activity_start.reads,
-                         activity_end.bytes - activity_start.bytes,
-                         activity_end.presents - activity_start.presents);
-            }
-        }
-        if (generic && !generic->HasFailed()) {
-            pipeline = generic;
-            // CodexAstraLocal: Required cold compilation remains complete first.
-            // Keep legacy CPU bridges unchanged; only an explicit normal CPU draw
-            // can choose the separately keyed, already successful specialization.
-            if (cpu_vertex_layout && cpu_use && ready_cpu_bank && ready_vertex_worker && allow_static_cpu_tev &&
-                !cpu_bridge && !ready_gpu_vertex) {
-                if (auto* ready = PrepareReadyCpuFragment(info, generic, *cpu_vertex_layout, cpu_use, &static_tev_cpu)) {
-                    pipeline = ready;
-                    specialized_cpu = true;
-                    if (static_tev_cpu) ++ready_cpu_static_selected;
-                    else ++ready_cpu_full_selected;
-                    ++ready_cpu_selected;
-                    ++ready_cpu_selected_lighting[virtual_fs_config->lighting.enable.Value() != 0];
+        if (!select_ready_cpu(nullptr)) {
+            // AstraEH: Start only the requested generic pipeline, never a speculative rival.
+            // Until the ready bank is complete this wait is real, separately measured work.
+            // AstraPro: A promoted draw uses its hardware-VS pipeline, never a
+            // trivial-VS CPU pipeline with the hardware vertex-buffer layout.
+            // CodexAstraLocal: Hardware Shaders may enter the ordinary acceleration route
+            // without a ready token. Preserve its translated VS/GS and vertex input layout;
+            // only explicitly CPU-produced vertices may use the trivial VS fallback.
+            auto* generic = ready_gpu_vertex ? ready_gpu_vertex
+                                            : GetTevFallback(info, cpu_vertex_layout != nullptr);
+            if (generic && !generic->IsDone()) {
+                const auto activity_start = Common::UberharActivity::Capture();
+                const auto start = std::chrono::steady_clock::now();
+                generic->WaitDone();
+                const auto ns = static_cast<u64>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                                     std::chrono::steady_clock::now() - start)
+                                                     .count());
+                ++virtual_waits;
+                virtual_wait_ns += ns;
+                virtual_max_wait_ns = std::max(virtual_max_wait_ns, ns);
+                const auto activity_end = Common::UberharActivity::Capture();
+                const auto phase = Common::UberharActivity::Between(activity_start, activity_end);
+                auto& bucket = phase_waits[static_cast<std::size_t>(phase)];
+                ++bucket.count;
+                bucket.ns += ns;
+                bucket.maximum = std::max(bucket.maximum, ns);
+                if (ns >= 16'666'667 && phase_wait_details < 64) {
+                    ++phase_wait_details;
+                    // AstraEH Log Line: First 64 significant waits; all waits retain phase totals.
+                    LOG_INFO(Render_Vulkan,
+                             "Uberhar generic wait: session={} phase={} wait_ms={:.3f} "
+                             "reads={} requested_bytes={} submissions={} limit=64",
+                             activity_start.run, Common::UberharActivity::Name(phase), ns / 1e6,
+                             activity_end.reads - activity_start.reads,
+                             activity_end.bytes - activity_start.bytes,
+                             activity_end.presents - activity_start.presents);
                 }
             }
-            if (!specialized_cpu) {
-                virtual_generic = true;
-                ++virtual_generic_draws;
-                // CodexAstraLocal: Generic census and the eventual draw read
-                // the same current snapshot, including a CPU retry after GPU refusal.
-                EnsureDynamicTevState();
-                // AstraEH: Draw-weighted coverage only, not fragment/pixel-weighted savings.
-                ++tev_loop_histogram[(tev_constants.buffer_mask >> 8) & 7U];
-                ++tev_active_histogram[std::popcount((tev_constants.buffer_mask >> 16) & 63U)];
+            if (generic && !generic->HasFailed()) {
+                pipeline = generic;
+                // CodexAstraUlt-2 / CodexAstraLocal: On a cold miss, optional admission
+                // still follows successful required compilation. Bridges stay unchanged.
+                select_ready_cpu(generic);
+                if (!specialized_cpu) {
+                    virtual_generic = true;
+                    ++virtual_generic_draws;
+                    // CodexAstraLocal: Generic census and the eventual draw read
+                    // the same current snapshot, including a CPU retry after GPU refusal.
+                    EnsureDynamicTevState();
+                    // AstraEH: Draw-weighted coverage only, not fragment/pixel-weighted savings.
+                    ++tev_loop_histogram[(tev_constants.buffer_mask >> 8) & 7U];
+                    ++tev_active_histogram[std::popcount((tev_constants.buffer_mask >> 16) & 63U)];
+                }
+            } else {
+                // AstraEH: Recover before submission, so a failed/unsupported generic never drops a
+                // draw.
+                ++virtual_recovery_draws;
+                ++virtual_recovery_reasons[generic ? 8 : 9];
+                auto specialized = curr_disk_cache->UseFragmentShader(*virtual_fs_config, tev_user);
+                if (!specialized)
+                    throw VideoCore::ShaderRecoveryError{};
+                current_shaders[ProgramType::FS] = specialized->second;
+                shader_hashes[ProgramType::FS] = specialized->first;
+                info.state.shader_ids[ProgramType::FS] = specialized->first;
             }
-        } else {
-            // AstraEH: Recover before submission, so a failed/unsupported generic never drops a
-            // draw.
-            ++virtual_recovery_draws;
-            ++virtual_recovery_reasons[generic ? 8 : 9];
-            auto specialized = curr_disk_cache->UseFragmentShader(*virtual_fs_config, tev_user);
-            if (!specialized)
-                throw VideoCore::ShaderRecoveryError{};
-            current_shaders[ProgramType::FS] = specialized->second;
-            shader_hashes[ProgramType::FS] = specialized->first;
-            info.state.shader_ids[ProgramType::FS] = specialized->first;
         }
     } else if (Settings::values.uberhar_test_mode.GetValue() != Settings::UberharTestMode::Custom) {
         ++virtual_recovery_draws;
@@ -1102,9 +1197,23 @@ bool PipelineCache::ReadyGpuFragmentPreflight(const Pica::RegsInternal& regs,
     return false; // No uploads or framebuffer ownership changes occurred.
 }
 
-// CodexAstraLocal: Optional CPU fragment selection preserves the already-built
-// generic draw on every miss/error. Host shader owners and full execution state,
-// not guest/hash identity alone, admit the separate software-layout pipeline.
+// CodexAstraUlt-2: Preserve the real software layout and transformed CPU stages
+// for both adaptive and startup-prepared fragment selection.
+bool PipelineCache::IsCpuFragmentLayout(const PipelineInfo& info,
+                                       const VertexLayout& software_layout) const {
+    auto expected = info.state;
+    expected.vertex_layout = software_layout;
+    return current_shaders[ProgramType::VS] == &trivial_vertex_shader &&
+        !current_shaders[ProgramType::GS] && shader_hashes[ProgramType::VS] == 0 &&
+        shader_hashes[ProgramType::GS] == 0 && trivial_vertex_shader.IsDone() &&
+        !trivial_vertex_shader.HasFailed() && trivial_vertex_shader.Handle() &&
+        info.state.rasterization.topology.Value() == Pica::PipelineRegs::TriangleTopology::List &&
+        info.state.ExecutionEquals(expected, true);
+}
+
+// CodexAstraUlt-2 / CodexAstraLocal: Probe exact ready CPU fragments before any
+// required generic wait. Misses leave the original draw available for recovery;
+// host shader owners and full execution state admit the software-layout pipeline.
 GraphicsPipeline* PipelineCache::PrepareReadyCpuFragment(
     PipelineInfo& info, GraphicsPipeline* generic, const VertexLayout& software_layout,
     CpuFragmentToken* cpu_use, bool* partial_use) noexcept {
@@ -1113,17 +1222,9 @@ GraphicsPipeline* PipelineCache::PrepareReadyCpuFragment(
     if (partial_use) *partial_use = false;
     if (!ready_cpu_bank || !cpu_use || !partial_use || !ready_vertex_worker || !curr_disk_cache ||
         !virtual_fs_config || !tev_supported || profile.has_fragment_shader_barycentric ||
-        !allow_static_cpu_tev || !prepared_cpu_family || !tev_user.IsCacheable() ||
-        !generic || !generic->IsDone() || generic->HasFailed() || !generic->Handle()) return nullptr;
+        !allow_static_cpu_tev || !tev_family_config || !tev_user.IsCacheable()) return nullptr;
     ++ready_cpu_requests;
-    auto expected = info.state;
-    expected.vertex_layout = software_layout;
-    if (current_shaders[ProgramType::VS] != &trivial_vertex_shader ||
-        current_shaders[ProgramType::GS] || shader_hashes[ProgramType::VS] != 0 ||
-        shader_hashes[ProgramType::GS] != 0 || !trivial_vertex_shader.IsDone() ||
-        trivial_vertex_shader.HasFailed() || !trivial_vertex_shader.Handle() ||
-        info.state.rasterization.topology.Value() != Pica::PipelineRegs::TriangleTopology::List ||
-        !info.state.ExecutionEquals(expected, true)) {
+    if (!IsCpuFragmentLayout(info, software_layout)) {
         ++ready_cpu_mismatches;
         return nullptr;
     }
@@ -1176,9 +1277,9 @@ GraphicsPipeline* PipelineCache::PrepareReadyCpuFragment(
             *partial_use = candidate.partial;
             return candidate.ready;
         };
-        // CodexAstraLocal: This branch already requires the exact CPU layout,
-        // trivial VS and a complete generic draw. Native's force_tev still guards
-        // other routes; full fragments here do not authorize GPU guest vertices.
+        // CodexAstraUlt-2 / CodexAstraLocal: This branch requires the exact CPU
+        // layout and trivial VS, independently of generic readiness. Native's
+        // force_tev still guards other routes; full fragments cannot admit GPU VS.
         const bool allow_full = allow_full_cpu_fragments && tev_user.IsCacheable();
         Candidate full{false, allow_full
             ? curr_disk_cache->UseReadyFragmentShader(*virtual_fs_config, tev_user, false)
@@ -1190,13 +1291,16 @@ GraphicsPipeline* PipelineCache::PrepareReadyCpuFragment(
             if (pending_tev_transport) ++tev_transport_bypassed_cpu;
             return select(full);
         }
-        // CodexAstraLocal: The canonical family already belongs to this draw.
-        // Materialize its original transport before keying the static plan;
-        // this does not repeat the family census or borrow a prior draw's plan.
+        // CodexAstraUlt-2 / CodexAstraLocal: Before generic preparation, own this
+        // draw's canonical family locally. Never borrow a previous draw's family;
+        // a full-ready hit above avoids both family and transport preparation.
+        const auto owned_family = prepared_cpu_family ? std::optional<FSConfig>{}
+            : std::optional{GLSL::MakeDynamicTevFamilyConfig(*tev_family_config, profile)};
+        const auto& cpu_family = prepared_cpu_family ? *prepared_cpu_family : *owned_family;
         EnsureDynamicTevState();
         const auto plan = GLSL::MakeStaticTevPlan(tev_constants);
         Candidate partial{true, curr_disk_cache->UseStaticTevFragmentShader(
-            *prepared_cpu_family, plan, tev_user, false), current_shaders, info};
+            cpu_family, plan, tev_user, false), current_shaders, info};
         probe(partial);
 
         // CodexAstraLocal: Keep CPU-triggered full specialization progressing
@@ -1214,7 +1318,7 @@ GraphicsPipeline* PipelineCache::PrepareReadyCpuFragment(
             }
             try {
                 const CpuFragmentObservation observation{info.state,
-                    candidate.partial ? *prepared_cpu_family : *virtual_fs_config, profile,
+                    candidate.partial ? cpu_family : *virtual_fs_config, profile,
                     instance.IsExtendedDynamicStateSupported(),
                     candidate.partial ? std::optional{plan} : std::nullopt};
                 const u64 observed_hash = observation.Hash();
@@ -1222,14 +1326,14 @@ GraphicsPipeline* PipelineCache::PrepareReadyCpuFragment(
                 const bool pending =
                     (warming_ready_vertex && !warming_ready_vertex->IsDone()) ||
                     retiring_ready_gpu_active || curr_disk_cache->OptionalFragmentPending();
-                const bool capacity = ready_cpu_bank->CanCreate(ready_vertex_pipelines.size() + retiring_ready_gpu_active,
+                const bool capacity = ready_cpu_bank->CanCreate(ready_vertex_pipelines.size() + retiring_ready_gpu_active + PreparedPipelineCount(),
                     ready_optional_attempts, pending, observation);
                 if (!candidate.fragment) {
                     ++ready_cpu_dependencies;
                     if (qualified && capacity) {
                         if (candidate.partial)
                             curr_disk_cache->UseStaticTevFragmentShader(
-                                *prepared_cpu_family, plan, tev_user, true);
+                                cpu_family, plan, tev_user, true);
                         else
                             curr_disk_cache->UseReadyFragmentShader(*virtual_fs_config, tev_user, true);
                     }
@@ -1242,7 +1346,7 @@ GraphicsPipeline* PipelineCache::PrepareReadyCpuFragment(
                     return;
                 }
                 auto* slot = ready_cpu_bank->Reserve(observed_hash, observation,
-                    virtual_fs_config->lighting.enable.Value() != 0, ready_vertex_pipelines.size() + retiring_ready_gpu_active,
+                    virtual_fs_config->lighting.enable.Value() != 0, ready_vertex_pipelines.size() + retiring_ready_gpu_active + PreparedPipelineCount(),
                     ready_optional_attempts, pending);
                 if (!slot) { ++ready_cpu_deferred; return; }
                 // CodexAstraLocal: Both eight-owner partitions charge their own
@@ -1273,9 +1377,15 @@ GraphicsPipeline* PipelineCache::PrepareReadyCpuFragment(
         // partial admission can bridge first. Each unsuccessful/capped attempt
         // still lets the other tier advance in this same owner call.
         if (partial.ready) {
+            // CodexAstraUlt-2: A successful partial is itself a complete draw;
+            // keep full promotion progressing without constructing a generic rival.
             if (allow_full) advance(full);
             return select(partial);
         }
+        // CodexAstraUlt-2: A cold probe never creates optional work or waits.
+        // Admission resumes only after the caller has a successful generic draw.
+        if (!generic || !generic->IsDone() || generic->HasFailed() ||
+            !generic->Handle()) return nullptr;
         if (full.fragment) {
             if (allow_full) advance(full);
             advance(partial);
@@ -1306,7 +1416,7 @@ void PipelineCache::RetireReadyCpuAfterWorkerDrain() {
     const bool pending = (warming_ready_vertex && !warming_ready_vertex->IsDone()) ||
                          retiring_ready_gpu_active;
     ready_cpu_bank->FrameAfterDrain(scheduler.GetMasterSemaphore()->KnownGpuTick(),
-        ready_vertex_pipelines.size() + retiring_ready_gpu_active, ready_optional_attempts, pending, *ready_vertex_worker,
+        ready_vertex_pipelines.size() + retiring_ready_gpu_active + PreparedPipelineCount(), ready_optional_attempts, pending, *ready_vertex_worker,
         [this](GraphicsPipeline* owner) {
             if (bound_pipeline == owner) bound_pipeline = nullptr;
             if (warming_ready_vertex == owner) warming_ready_vertex = nullptr;
@@ -1322,7 +1432,7 @@ void PipelineCache::CompleteReadyGpuDraw(GraphicsPipeline* pipeline) {
 bool PipelineCache::OptionalGpuAdmissionAvailable() {
     // CodexAstraLocal: End-to-end viability precedes optional module work; ready
     // pipeline/module lookups do not depend on this new-work condition.
-    const auto resident = ready_vertex_pipelines.size() + ReadyCpuOwned() + retiring_ready_gpu_active;
+    const auto resident = ready_vertex_pipelines.size() + ReadyCpuOwned() + retiring_ready_gpu_active + PreparedPipelineCount();
     // CodexAstraLocal: Missing modules cannot reach the later PSO cap branch.
     // Retain real resident pressure here so safe retirement can admit unseen
     // shader demand after the bank fills; pending work alone is not pressure.
@@ -1465,7 +1575,7 @@ GraphicsPipeline* PipelineCache::PrepareReadyGpuVertex(const PipelineInfo& info)
         (warming_ready_vertex && !warming_ready_vertex->IsDone());
     if (!ready_cpu_bank || !ready_cpu_bank->ExternalWorkAvailable() ||
         !ReadyVertexPolicy::CanQueue(ready_vertex_pipelines.size() + ReadyCpuOwned() +
-                                    retiring_ready_gpu_active, pending || retiring_ready_gpu_active)) {
+                                    retiring_ready_gpu_active + PreparedPipelineCount(), pending || retiring_ready_gpu_active)) {
         ready_gpu_pressure = true;
         if (pending)
             ++ready_vertex_deferred;
@@ -2007,6 +2117,13 @@ void PipelineCache::ClearTevFallbacks() {
                                scheduler.GetMasterSemaphore()->KnownGpuTick());
     warming_ready_vertex = nullptr;
     if (curr_disk_cache) curr_disk_cache->SaveUsefulRecipesAfterDrain();
+    // CodexAstraUlt-2: The command/GPU and compiler drains above end every borrow
+    // before prepared pipelines release their own fragment modules.
+    bound_pipeline = nullptr;
+    current_shaders[ProgramType::FS] = nullptr;
+    shader_hashes[ProgramType::FS] = 0;
+    precompiled_cache.reset();
+    prepared_cpu_selected = 0;
     ready_vertex_pipelines.clear();
     // CodexAstraLocal: The scheduler/compiler drains above protect every borrowed
     // module owner; release CPU PSOs before disk-cache modules can be replaced.
@@ -2069,6 +2186,10 @@ void PipelineCache::ReportUberharStats(const char* kind) {
     const auto delivery = std::strcmp(kind, "progress") == 0
                               ? Common::Log::Delivery::Diagnostic
                               : Common::Log::Delivery::Reliable;
+    // CodexAstraUlt-2: Actual prepared draws, not cache-file hits, measure startup reuse.
+    LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
+        "Uberhar prepared CPU {}: selected={} resident_pipelines={} resident_modules={}",
+        kind, prepared_cpu_selected, PreparedPipelineCount(), PreparedModuleCount());
     // CodexAstraLocal TEST-ONLY LOG: Remove after descriptor reuse is qualified
     // on hardware; these are work counts, not CPU time or speedup estimates.
     LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
@@ -2230,7 +2351,7 @@ void PipelineCache::ReportUberharStats(const char* kind) {
             kind, ready_cpu_requests, ready_cpu_selected, ready_cpu_dependencies,
             ready_cpu_deferred, ready_cpu_capped, ready_cpu_mismatches, ready_cpu_failed_hits,
             ready_cpu_admission_failures, ReadyCpuOwned(),
-            ReadyCpuOwned() + ready_vertex_pipelines.size(),
+            ReadyCpuOwned() + ready_vertex_pipelines.size() + retiring_ready_gpu_active + PreparedPipelineCount(),
             ready_cpu_selected_lighting[0], ready_cpu_selected_lighting[1],
             ready_cpu_bank_lighting[0], ready_cpu_bank_lighting[1],
             ready_cpu_static_selected, ready_cpu_full_selected);

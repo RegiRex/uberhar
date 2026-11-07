@@ -78,6 +78,11 @@ struct ShaderDiskCache {
     std::string optional_directory;
     bool optional_persistent{true}, optional_quota_scanned{};
     u64 optional_disk_bytes{}, title_id{1};
+    // CodexAstraUlt-2: The extracted drain forwards complete recipes to a
+    // separate dependency. Count that handoff; this fixture does not simulate
+    // the new precompile manifest's file contents or claim its I/O coverage.
+    unsigned precompile_drains{};
+    void SavePrecompileRecipesAfterDrain() { ++precompile_drains; }
     std::atomic<u64> optional_disk_hits{}, optional_disk_misses{}, optional_disk_rejected{},
         optional_disk_writes{}, optional_disk_write_failures{}, optional_disk_quota_refusals{};
     explicit ShaderDiskCache(const fs::path& path, bool enabled=true)
@@ -186,7 +191,10 @@ int main(int argc, char** argv) try {
         Require(cache.LoadOrCompileOptional(identity,false,compile)==code && compiles==5,
                 "disabled cache changed rendering input");
         cache.warm_recipes[7]={7,100,false}; cache.SaveUsefulRecipesAfterDrain();
-        Require(fs::is_empty(disabled),"disabled cache wrote module or manifest");
+        // CodexAstraUlt-2: Optional persistence being disabled must not suppress
+        // the independent precompile drain, nor permit optional-cache writes.
+        Require(cache.precompile_drains==1,"disabled optional cache skipped precompile drain");
+        Require(fs::is_empty(disabled),"disabled optional cache wrote module or demand manifest");
     }
     // CodexAstraLocal: A sparse real file charges the actual filesystem metadata
     // quota without allocating or writing 512 MiB of test data.
@@ -213,6 +221,8 @@ int main(int argc, char** argv) try {
         cache.ready_fragments[9]=std::make_unique<ShaderDiskCache::Entry>();
         cache.ready_fragments[9]->shader={200,true};
         cache.SaveUsefulRecipesAfterDrain();
+        // CodexAstraUlt-2: An ordinary save also forwards the dependency once.
+        Require(cache.precompile_drains==1,"optional save did not forward precompile drain once");
     }
     {
         ShaderDiskCache reopened(root);reopened.LoadUsefulRecipes();
@@ -227,5 +237,6 @@ int main(int argc, char** argv) try {
     NoTemporary(root);
     Require(FileUtil::renames>=5,"atomic replacement path was not exercised");
     std::cout << "PASS: actual-file optional reopen, corrupt/colliding identity replacement, atomic failure, "
-                 "disabled writes, sparse quota refusal and useful recipe replay\n";
+                 "disabled writes, sparse quota refusal, useful recipe replay and counted precompile drain\n";
 } catch (const std::exception& e) { std::cerr<<e.what()<<'\n'; return 1; }
+

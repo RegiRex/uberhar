@@ -195,7 +195,10 @@ android {
         // AstraEH: A distinct application ID allows installation alongside Azahar.
         register("uberhar") {
             dimension = "version"
-            applicationId = "org.uberhar.uberhar_emu"
+            // CodexAstraUlt-2: This branch installs beside main Uberhar, with its
+            // own app sandbox and generated provider/permission authorities.
+            // Keep the Kotlin/JNI namespace above unchanged.
+            applicationId = "org.uberhar.uberhar_emu.precompiled"
             // AstraEH: Keep the display version exactly numeric; versionCode still increases by time.
             versionName = uberharVersion
         }

@@ -10,6 +10,7 @@
 #include "video_core/renderer_vulkan/uberhar_optional_failure_cache.h"
 #include <optional>
 #include <unordered_set>
+#include <unordered_map> // CodexAstraUlt-2: Index bounded semantic recipes without a draw-time linear scan.
 #include <tsl/robin_map.h>
 
 #include "common/common_types.h"
@@ -18,6 +19,7 @@
 #include "video_core/pica/shader_setup.h"
 #include "video_core/rasterizer_interface.h"
 #include "video_core/renderer_vulkan/vk_graphics_pipeline.h"
+#include "video_core/renderer_vulkan/uberhar_precompile_recipes.h" // CodexAstraUlt-2: Owned startup inputs.
 #include "video_core/renderer_vulkan/uberhar_fragment_policy.h"
 #include "video_core/renderer_vulkan/uberhar_static_tev_policy.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
@@ -68,6 +70,16 @@ public:
     void ReclaimOptionalAfterDrain(u64 frame);
     void RecordOptionalSelection(const Shader* shader);
     void SaveUsefulRecipesAfterDrain();
+    // CodexAstraUlt-2: Startup compiles complete known descriptions on the loading
+    // thread; live observation records exact CPU state without disk I/O or work submission.
+    const std::vector<Precompile::Recipe>& PreparedRecipes() const { return precompile_recipes; }
+    // CodexAstraUlt-2: Revisited title managers can retain live optional modules;
+    // startup must reserve its transient compiler slot from the remaining budget.
+    std::size_t ExistingFullFragmentModules() const { return ready_fragments.size(); }
+    std::unique_ptr<Shader> CompilePreparedFragment(const Pica::Shader::FSConfig& config);
+    void ObservePrecompileRecipe(const Pica::Shader::FSConfig& config,
+                                const StaticPipelineInfo& pipeline);
+    void SavePrecompileRecipesAfterDrain();
     GraphicsPipeline* GetPipeline(const PipelineInfo& info);
     // AstraEH: Read renderer-owned cache sizes and foreground VS translation costs.
     void ReportUberharStats(const char* kind) const;
@@ -81,7 +93,20 @@ public:
     u64 CaptureVertexSourceHash(const Shader* shader) const noexcept;
 
 private:
+    // CodexAstraUlt-2: Semantic records have an independent namespace and survive
+    // compiler revisions only when the complete configuration ABI still matches.
+    Precompile::Identity PrecompileIdentity() const;
+    void LoadPrecompileRecipes(const std::atomic_bool& stop_loading);
+    std::vector<Precompile::Recipe> ImportCompatibleRecipes(
+        const std::atomic_bool* stop_loading = nullptr);
+    std::vector<Precompile::Recipe> precompile_recipes;
+    std::unordered_multimap<u64, std::size_t> precompile_index;
+    Pica::Shader::Profile precompile_profile{};
+    Precompile::Identity precompile_identity{};
+    bool precompile_enabled{}, precompile_dirty{}, precompile_recording_failed{};
     // CodexAstraLocal: Optional disk I/O stays on the serial compiler lane.
+    // CodexAstraUlt-2: Startup also uses this path synchronously while gameplay
+    // and optional jobs are drained; the two callers never access it concurrently.
     std::vector<u32> LoadOrCompileOptional(std::span<const u32> identity, bool partial,
                                          const std::function<std::vector<u32>()>& compile);
     void LoadUsefulRecipes();

@@ -48,6 +48,21 @@ jobs:
         # CodexAstraLocal: The settings-layer fixture uses the same INI parser as Android.
         # CodexAstraLocal: Compatibility fixtures use pinned real crypto/seekable code.
         run: git submodule update --init --depth 1 externals/fmt externals/xxHash externals/boost externals/nihstro externals/vulkan-headers externals/microprofile externals/xbyak externals/libretro-common/libretro-common externals/glslang externals/catch2 externals/inih/inih externals/cryptopp externals/zstd
+      # CodexAstraUlt-2: Retain the pinned public dependency and its licenses so
+      # isolated review workspaces can execute the complete Vulkan routing fixtures.
+      # This optional transfer must not alter the existing compiler/test gates.
+      - name: Retain pinned Vulkan fixture header
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: uberhar-vulkan-fixture-header-${{ github.run_number }}-${{ github.run_attempt }}
+          path: |
+            externals/vulkan-headers/include/vulkan/vulkan_structs.hpp
+            externals/vulkan-headers/LICENSE.md
+            externals/vulkan-headers/LICENSES/Apache-2.0.txt
+            externals/vulkan-headers/LICENSES/MIT.txt
+          if-no-files-found: error
+          retention-days: 14
       - name: Install validation tools
         # CodexAstraLocal: The cached-buffer lifetime gate submits real Vulkan
         # draws through an explicitly selected software ICD and real fences.
@@ -180,12 +195,24 @@ jobs:
       # CodexAstraLocal: Preserve proof-cache extraction and compiler failures.
       # CodexAstraLocal: Preserve all six file checks, dependency failures, alpha
       # classification and sampled GPU-attribution proofs without broad build uploads.
+      # CodexAstraUlt-2: Retain preparation and driver-failure controls from the
+      # single build_probe execution, including early compiler failures.
+      # CodexAstraUlt-2: Optional persistence compile failures must retain their
+      # actual diagnostics even when the fixture cannot write its result record.
       - name: Upload CPU coordination contract evidence
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: uberhar-host-coordination-proof-${{ github.run_number }}
           path: |
+            build/uberhar-probe/precompile-recipes.log
+            build/uberhar-probe/precompiled-cache.log
+            build/uberhar-probe/precompile-stock-import.log
+            build/uberhar-probe/precompile-stock-import/*.log
+            build/uberhar-probe/pipeline-device-loss.log
+            build/uberhar-probe/pipeline-device-loss/*.log
+            build/uberhar-probe/optional-cache-io/**/*.log
+            build/uberhar-probe/optional-cache-io/**/result.json
             build/uberhar-probe/file-compatibility-gate/*.log
             build/uberhar-probe/file-compatibility-gate/*.sha256
             build/uberhar-probe/installer-security/**/provenance.json

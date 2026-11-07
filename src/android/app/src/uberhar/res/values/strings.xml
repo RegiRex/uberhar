@@ -1,7 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- AstraEH: Beta milestone branding; preserve the existing package and data-folder guidance. -->
-    <string name="app_name" translatable="false">Uberhar Beta</string>
-    <string name="select_citra_user_folder">Select a separate Uberhar data folder</string>
-    <string name="select_citra_user_folder_description">Create an empty folder named Uberhar for this experimental build. Your Azahar data folder must stay separate.</string>
+    <!-- CodexAstraUlt-2: Distinguish the parallel installation and its data from main Uberhar and Azahar. -->
+    <string name="app_name" translatable="false">Uberhar Precompiled</string>
+    <string name="select_citra_user_folder">Select an Uberhar Precompiled data folder</string>
+    <string name="select_citra_user_folder_description">Create an empty folder named Uberhar Precompiled for this comparison app. Keep your main Uberhar and Azahar data folders separate.</string>
+    <!-- CodexAstraUlt-2: Explain why a main-app folder cannot be selected for this comparison. -->
+    <string name="uberhar_separate_folder_title">Use a separate folder for Uberhar Precompiled</string>
+    <string name="uberhar_separate_folder_description">Create an empty folder, or select a folder already initialized by Uberhar Precompiled. Your main Uberhar and Azahar data folders must stay separate. Copy any saves you want to test after setup.</string>
 </resources>

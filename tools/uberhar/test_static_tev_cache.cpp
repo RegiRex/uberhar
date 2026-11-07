@@ -32,6 +32,13 @@ GraphicsPipeline* Warm(PipelineCache& p, bool partial, const FSConfig& config = 
 void PromotionAndPriority() {
     PipelineCache p;
     auto* partial=Warm(p,true);
+    // CodexAstraUlt-2: Remove the formerly required generic after draining its
+    // use. Pending full work must still leave the ready partial immediately usable.
+    Advance(p);
+    p.tev_pipelines.clear();
+    p.generic_mode=3;
+    const auto generic_requests=p.generic_requests;
+    const auto required_waits=Probe::required_waits;
     p.allow_full_cpu_fragments=true;
     bool pending_full_selected_partial=false;
     for(unsigned frame=0;frame<14;++frame) {
@@ -52,6 +59,8 @@ void PromotionAndPriority() {
     Require(bool(token) && p.ready_cpu_bank->AllSlots()[token.slot].owner.get()!=partial &&
             p.ready_cpu_full_selected==before+1, "exact ready full wins priority");
     Require(Probe::optional_waits==0, "promotion adds no optional wait");
+    Require(p.generic_requests==generic_requests && Probe::required_waits==required_waits,
+            "ready partial promotes full without generic construction or wait");
 }
 
 // CodexAstraLocal: Start with both modules absent so the partial tier actually
@@ -352,11 +361,17 @@ void LazyTransportAndExactReuse() {
     // CodexAstraLocal: Specialized-only GPU preparation bypasses transport;
     // refusal followed by a CPU retry must reestablish it from current registers.
     PipelineCache retry;
-    retry.UseFragmentShader(regs, {}, true);
+    retry.UseFragmentShader(regs, {}, true, 70);
     Require(!retry.pending_tev_transport && retry.tev_transport_prepared == 0,
             "specialized GPU preparation has no generic obligation");
+    // CodexAstraUlt-2: A retry without a register write must still rebuild its
+    // draw-local transport obligation while reusing only decoded configuration.
+    retry.UseFragmentShader(regs, {}, false, 70);
+    Require(retry.pending_tev_transport && retry.fragment_config_builds == 1 &&
+                retry.fragment_config_reuses == 1,
+            "generation-cached CPU retry retains exact transport preparation");
     regs.texturing.fog_flip.Assign(0);
-    retry.UseFragmentShader(regs, {}, false);
+    retry.UseFragmentShader(regs, {}, false, 71);
     auto retry_info = Info();
     Require(retry.BindPipeline(retry_info, true), "GPU refusal CPU retry binds complete draw");
     retry.scheduler.WaitWorker();

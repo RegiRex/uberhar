@@ -16,6 +16,67 @@ GraphicsPipeline* QualifyAndBuild(PipelineCache& p, PipelineInfo info, const FSC
     return owner;
 }
 
+// CodexAstraUlt-2: Register generations cache decoding only. A full PSO that
+// completes between identical draws must be selected without another generic lookup.
+void RegisterGenerationKeepsReadinessLive() {
+    PipelineCache p;
+    Pica::RegsInternal regs{};
+    regs.lighting.disable.Assign(1);
+    regs.framebuffer.output_merger.alphablend_enable.Assign(1);
+    const FSConfig config{regs};
+    const auto layout = SoftwareLayout();
+    auto info = Info();
+    SeedModule(p, config);
+    for (unsigned frame = 0; frame < 4; ++frame) {
+        for (unsigned draw = 0; draw < 16; ++draw) DrawCpu(p, info, config);
+        Advance(p);
+    }
+    auto* pending = p.warming_ready_vertex;
+    Require(pending && !pending->IsDone() && p.ready_vertex_worker->tasks.size() == 1,
+            "register-generation control has a pending full pipeline");
+    PipelineCache::CpuFragmentToken token{};
+    p.UseFragmentShader(regs, {}, false, 37);
+    Require(p.BindPipeline(info, true, nullptr, true, nullptr, &layout, &token) && !token,
+            "pending full pipeline retains complete generic draw");
+    p.scheduler.Finish();
+    const auto generic_requests = p.generic_requests;
+    p.ready_vertex_worker->WaitForRequests();
+    p.UseFragmentShader(regs, {}, false, 37);
+    Require(p.BindPipeline(info, true, nullptr, true, nullptr, &layout, &token) && token &&
+                p.ready_cpu_bank->AllSlots()[token.slot].owner.get() == pending,
+            "unchanged register generation still discovers newly ready full pipeline");
+    p.CompleteReadyCpuDraw(token);
+    p.scheduler.Finish();
+    Require(p.fragment_config_builds == 1 && p.fragment_config_reuses == 1 &&
+                p.generic_requests == generic_requests && Probe::optional_waits == 0,
+            "generation reuse skips decoding but not exact readiness lookup");
+
+    // CodexAstraUlt-2: GPU refusal and changed user resources can occur without
+    // guest register writes; each call must reestablish its own transport/admission.
+    p.UseFragmentShader(regs, {}, true, 37);
+    Require(!p.pending_tev_transport, "same-generation GPU preparation omits CPU transport");
+    p.UseFragmentShader(regs, {}, false, 37);
+    Require(p.pending_tev_transport.has_value(),
+            "same-generation CPU retry restores original transport obligation");
+    UserConfig custom{};
+    custom.use_custom_normal.Assign(1);
+    p.UseFragmentShader(regs, custom, false, 37);
+    Require(!p.tev_supported && !p.virtual_fs_config && !p.pending_tev_transport,
+            "same-generation custom resources recheck fragment support");
+    p.UseFragmentShader(regs, {}, false, 37);
+    Require(p.tev_supported && p.virtual_fs_config && p.pending_tev_transport &&
+                !p.current_shaders[ProgramType::FS],
+            "same-generation native resources restore fresh draw identity");
+    regs.texturing.fog_flip.Assign(1);
+    p.UseFragmentShader(regs, {}, false, 38);
+    Require(p.fragment_config_builds == 2 && *p.virtual_fs_config == FSConfig{regs},
+            "new register generation rebuilds exact fragment configuration");
+    p.UseFragmentShader(regs, {}, false, 0);
+    p.UseFragmentShader(regs, {}, false, 0);
+    Require(p.fragment_config_builds == 4,
+            "unspecified generation conservatively decodes every call");
+}
+
 void RealSelectionAndTransport() {
     PipelineCache p;
     auto info = Info();
@@ -270,10 +331,22 @@ void BindTransportAndModes() {
     Require(p.BindPipeline(i, true, nullptr, true, nullptr, &layout, &token),
             "control mode draws");
     p.scheduler.Finish();
-    Require(p.ready_cpu_requests == (mode==Settings::UberharTestMode::Native ? 1U : 0U) &&
+    // CodexAstraUlt-2: A cold Native draw probes before generic creation, then
+    // probes again for admission after generic success. Only the latter records
+    // one observation per tier; Custom enters neither optional path.
+    Require(p.ready_cpu_requests == (mode==Settings::UberharTestMode::Native ? 2U : 0U) &&
                 p.curr_disk_cache->ready_fragment_requests ==
-                    (mode==Settings::UberharTestMode::Native ? 1U : 0U),
-            "only Native control has independent full CPU demand");
+                    (mode==Settings::UberharTestMode::Native ? 2U : 0U) &&
+                p.curr_disk_cache->ready_fragment_lookup_only_misses ==
+                    (mode==Settings::UberharTestMode::Native ? 2U : 0U),
+            "only Native control probes full CPU readiness before and after generic");
+    Require(p.ready_cpu_bank->stats.observations ==
+                (mode==Settings::UberharTestMode::Native ? 2U : 0U) &&
+                p.ready_optional_attempts == 0 && p.ready_vertex_worker->scheduled == 0 &&
+                p.curr_disk_cache->ready_fragment_builds == 0 &&
+                p.curr_disk_cache->static_tev_attempts == 0 &&
+                p.generic_requests == 1 && p.virtual_generic_draws == 1 && !token,
+            "cold readiness probe does not double admission or bypass generic draw");
   }
   Settings::values.uberhar_test_mode.value =
       Settings::UberharTestMode::Automatic;
@@ -384,7 +457,11 @@ void BindTransportAndModes() {
     Require(p.BindPipeline(i, true, nullptr, true, nullptr, &layout, &token),
             "required generic failure accurate recovery");
     p.scheduler.Finish();
-    Require(p.virtual_recovery_draws == 1 && p.ready_cpu_requests == 0 &&
+    // CodexAstraUlt-2: A failed required generic never authorizes cold optional
+    // demand from the earlier read-only probe.
+    Require(p.virtual_recovery_draws == 1 && p.ready_optional_attempts == 0 &&
+                p.ready_cpu_bank->stats.observations == 0 &&
+                p.ready_vertex_worker->tasks.empty() &&
                 p.skipped_draws == 0,
             "no optional admission or skipped recovery draw");
   }
@@ -408,7 +485,8 @@ void BindTransportAndModes() {
     Require(p.BindPipeline(i, true, nullptr, true, nullptr, &layout, &token),
             "required cold generic completes");
     p.scheduler.Finish();
-    Require(Probe::required_waits == n + 1 && p.ready_cpu_requests == 1,
+    Require(Probe::required_waits == n + 1 && p.ready_cpu_requests == 2 &&
+                p.ready_optional_attempts == 0,
             "only required generic waited before optional demand");
   }
 }
@@ -627,13 +705,137 @@ void OrdinaryHardwareVertexFallback() {
             "CPU bind selects CPU-layout generic pipeline");
 }
 
+// CodexAstraUlt-2: Execute actual selection with absent, pending, failed and
+// unavailable generic pipelines. An exact ready full owner must bypass all four.
+void ReadyFullBeforeGeneric() {
+    PipelineCache p;
+    const auto config = Config();
+    auto info = Info();
+    auto* full = QualifyAndBuild(p, info, config);
+    Advance(p);
+    for (int mode : {0, 1, 2, 3}) {
+        p.tev_pipelines.clear();
+        p.generic_mode = mode;
+        if (mode == 1 || mode == 2) {
+            p.Fresh(config);
+            auto* generic = p.GetTevFallback(info, true);
+            Require(generic && (mode == 1 ? !generic->IsDone() : generic->HasFailed()),
+                    "generic pending or failure control is active");
+        }
+        const auto requests = p.generic_requests;
+        const auto waits = Probe::required_waits;
+        const auto token = DrawCpu(p, info, config);
+        Advance(p);
+        Require(token && p.ready_cpu_bank->AllSlots()[token.slot].owner.get() == full &&
+                    p.scheduler.completed.back().pipeline == full->Handle(),
+                "ready full draws without generic dependency");
+        Require(p.generic_requests == requests && Probe::required_waits == waits,
+                "ready full avoids generic creation and wait");
+    }
+    auto layout = SoftwareLayout();
+    PipelineCache::CpuFragmentToken token{};
+    bool partial{};
+    p.Fresh(config);
+    const auto scheduled = p.ready_vertex_worker->scheduled;
+    Require(p.PrepareReadyCpuFragment(info, nullptr, layout, &token, &partial) == full &&
+                token && !partial && p.ready_vertex_worker->scheduled == scheduled,
+            "probe-only full selection requires no generic or compiler work");
+    p.Fresh(config);
+    token = {};
+    auto wrong = info;
+    wrong.state.vertex_layout.bindings[0].byte_count.Assign(96);
+    Require(!p.PrepareReadyCpuFragment(wrong, nullptr, layout, &token, &partial) && !token,
+            "early ready probe preserves exact CPU layout eligibility");
+    p.Fresh(config);
+    full->MarkFailed();
+    Require(!p.PrepareReadyCpuFragment(info, nullptr, layout, &token, &partial) &&
+                !token && !p.current_shaders[ProgramType::FS] &&
+                p.ready_vertex_worker->scheduled == scheduled,
+            "failed early owner leaves draw identity and compiler unchanged");
+}
+
+// CodexAstraUlt-2: Exercise production resident lookup and binding with no
+// adaptive token, then prove prepared ownership participates in the shared cap
+// and is drained/invalidated on an arithmetic-profile change.
+void PreparedResidentRouting() {
+    PipelineCache p;
+    auto info = Info();
+    const auto config = Config();
+    p.curr_disk_cache->precompile_enabled = true;
+    p.curr_disk_cache->precompile_profile = p.profile;
+    p.curr_disk_cache->precompile_recipes.push_back({config, info.state, 3});
+    const std::atomic_bool stop{false};
+    p.PrepareRecordedPipelines(stop, {});
+    Require(p.precompiled_cache != nullptr, "production startup prepares known recipes");
+    const auto prepared = p.precompiled_cache->Lookup(config, info.state);
+    Require(prepared && p.PreparedPipelineCount() == 1 && p.PreparedModuleCount() == 1,
+            "actual prepared bank owns usable pipeline and fragment");
+    Require(p.driver_cache_saves == 1 && p.curr_disk_cache->precompile_saves == 1,
+            "startup persists completed work before gameplay");
+    p.curr_disk_cache->precompile_recipes.clear();
+    p.generic_mode = 3;
+    const auto token = DrawCpu(p, info, config);
+    Advance(p);
+    Require(!token && p.prepared_cpu_selected == 1 && p.ready_optional_attempts == 0 &&
+                p.generic_requests == 0 &&
+                p.scheduler.completed.back().pipeline == prepared->pipeline->Handle(),
+            "prepared CPU draw bypasses generic and adaptive token");
+    Require(p.curr_disk_cache->precompile_recipes.size() == 1 &&
+                p.curr_disk_cache->precompile_recipes[0].uses == 1,
+            "actual eligible CPU draw records one semantic recipe");
+    const std::array<Shader*, 3> gpu_stages{&p.other_shader, &p.generic_shader, nullptr};
+    for (unsigned n = 0; n < 255; ++n)
+        p.ready_vertex_pipelines.emplace(20000 + n, std::make_unique<GraphicsPipeline>(
+            p.instance, p.renderpass_cache, info, *p.driver_pipeline_cache,
+            *p.pipeline_layout, gpu_stages, p.ready_vertex_worker.get()));
+    p.virtual_fs_config.reset();
+    p.current_shaders = gpu_stages;
+    p.shader_hashes = {99, 88, 0};
+    const auto scheduled = p.ready_vertex_worker->scheduled;
+    Require(!p.PrepareReadyGpuVertex(info) && p.ready_vertex_worker->scheduled == scheduled &&
+                p.ready_optional_attempts == 0,
+            "combined physical cap includes prepared resident");
+    p.SetAccurateMul(true);
+    Require(!p.precompiled_cache && !p.current_shaders[ProgramType::FS] &&
+                p.PreparedModuleCount() == 0 && p.curr_disk_cache->precompile_saves == 2,
+            "profile change drains prepared owners and saves old manifest");
+}
+
+// CodexAstraUlt-2: A lost device cannot enter normal generic recovery after the
+// synchronous preparation compiler reports the terminal failure.
+void PreparedDeviceLoss() {
+  for (bool pipeline_failure : {false, true}) {
+    PipelineCache p;
+    p.curr_disk_cache->precompile_enabled = true;
+    p.curr_disk_cache->precompile_profile = p.profile;
+    p.curr_disk_cache->precompile_recipes.push_back({Config(), Info().state, 1});
+    const std::atomic_bool stop{false};
+    Probe::compiler_failure = pipeline_failure ? 0 : 5;
+    Probe::build_failure = pipeline_failure ? 5 : 0;
+    bool lost{};
+    try { p.PrepareRecordedPipelines(stop, {}); }
+    catch (const VideoCore::ShaderRecoveryError&) {
+        lost = p.scheduler.device_lost;
+    }
+    Probe::compiler_failure = 0;
+    Probe::build_failure = 0;
+    Require(lost && p.generic_requests == 0 && p.PreparedPipelineCount() == 0 &&
+                p.driver_cache_saves == 0 && p.curr_disk_cache->precompile_saves == 0,
+            "startup device loss propagates before any generic recovery");
+  }
+}
+
 int main() {
     try {
         OrdinaryHardwareVertexFallback();
+        ReadyFullBeforeGeneric();
+        PreparedResidentRouting();
+        PreparedDeviceLoss();
         RealSelectionAndTransport(); ActualBankReuse(); FailuresProfilesAndModes();
         SharedLimitsAndAllocation();
         BindTransportAndModes(); KeyAndDynamicState();
         DirectFullModuleRouting();
+        RegisterGenerationKeepsReadinessLive();
         Require(Probe::optional_waits==0 && Probe::lifetime_errors==0,
                 "no optional waits or borrowed shader destruction");
         std::cout << "PASS checks=" << Probe::checks << " builds=" << Probe::pipeline_builds

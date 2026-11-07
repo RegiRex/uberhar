@@ -35,6 +35,8 @@
 #include "video_core/renderer_vulkan/uberhar_shader_compile_policy.h"
 #include "video_core/renderer_vulkan/uberhar_wait_diagnostics.h"
 #include "video_core/renderer_vulkan/vk_shader_util.h" // CodexAstraLocal: Actual typed compile failures.
+#include "video_core/rasterizer_interface.h" // CodexAstraUlt-2: Real preparation callback stages.
+#include "video_core/renderer_vulkan/uberhar_precompile_recipes.h" // CodexAstraUlt-2: Real semantic eligibility.
 #include "video_core/shader/generator/glsl_fs_shader_gen.h"
 #define MICROPROFILE_SCOPE(...) ((void)0)
 using namespace Pica::Shader::Generator;
@@ -153,6 +155,7 @@ public:
   u64 Key() const noexcept { return forged_key.value_or(ActualKey()); }
   bool MatchesExecution(const PipelineInfo &, const std::array<u64, 3> &) const;
   bool HasFailed() const { return failed; }
+  bool DeviceLost() const { return failure == 5; } // CodexAstraUlt-2: Typed pipeline loss endpoint.
   void MarkFailed() {
     failed = true;
     MarkDone();
@@ -169,7 +172,7 @@ public:
   }
   bool Build() {
     ++Probe::pipeline_builds;
-    if (failure == 1)
+    if (failure == 1 || failure == 5)
       return false;
     if (failure == 2)
       throw std::runtime_error("driver");
@@ -223,6 +226,9 @@ std::vector<u32> CompileGLSL(const std::string &s, vk::ShaderStageFlagBits,
 vk::ShaderModule CompileOptionalSPV(const std::vector<u32> &, vk::Device) {
   if (Probe::compiler_failure == 4)
     return {};
+  // CodexAstraUlt-2: Device loss must cross the startup recovery boundary.
+  if (Probe::compiler_failure == 5)
+    throw OptionalCompileError(OptionalCompileFailure::DeviceLost, "device lost control");
   return vk::ShaderModule{
       reinterpret_cast<VkShaderModule>(++Probe::next_handle)};
 }
@@ -302,6 +308,8 @@ enum class StateFlags {
 };
 DECLARE_ENUM_FLAG_OPERATORS(StateFlags)
 struct Scheduler {
+  bool device_lost{}; // CodexAstraUlt-2: Record startup's terminal scheduler handoff.
+  void ReportDeviceLost() { device_lost = true; }
   StateFlags state{};
   CommandsState current{};
   std::vector<CommandsState> completed;
@@ -330,6 +338,8 @@ struct Scheduler {
 // CodexAstraLocal: Exact production observation-key declaration.
 #include "cpu_fragment_key.inc"
 
+// CodexAstraUlt-2: Use the production prepared bank with controlled driver objects.
+#include "precompiled_cache.inc"
 class ShaderDiskCache;
 class PipelineCache {
 public:
@@ -354,6 +364,14 @@ public:
   u64 optional_frame{}, ready_gpu_retirements{};
 #include "gpu_failure_state.inc"
   std::unique_ptr<ReadyCpuBank> ready_cpu_bank=std::make_unique<ReadyCpuBank>();
+  std::unique_ptr<PrecompiledCache> precompiled_cache;
+  u64 prepared_cpu_selected{};
+  std::size_t PreparedModuleCount() const {
+    return precompiled_cache ? precompiled_cache->ResidentModuleCount() : 0;
+  }
+  std::size_t PreparedPipelineCount() const {
+    return precompiled_cache ? precompiled_cache->ResidentPipelineCount() : 0;
+  }
   using CpuFragmentToken=ReadyCpuBank::Token;
   std::size_t ready_optional_attempts{};
   std::size_t ReadyCpuOwned()const{return ready_cpu_bank?ready_cpu_bank->Owned():0;}
@@ -403,6 +421,7 @@ public:
   std::array<std::unordered_set<u64>, 16> tev_candidate_keys;
   struct Preparation {
     void Reset() {}
+    void Configure(const Profile&, bool) {} // CodexAstraUlt-2: Profile invalidation endpoint only.
   } tev_preparation;
   u64 tev_prepare_hit_samples{}, tev_prepare_miss_samples{},
       tev_prepare_hit_ns{}, tev_prepare_miss_ns{};
@@ -440,6 +459,7 @@ public:
                                                         std::chrono::hours(1);
   u64 current_program_id = 1, cache_session = 1;
   int generic_mode{};
+  u64 generic_requests{}; // CodexAstraUlt-2: Detect generic work behind an exact ready hit.
   PipelineCache();
   ~PipelineCache();
   bool BindPipeline(PipelineInfo &, bool = false, GraphicsPipeline * = nullptr,
@@ -457,6 +477,11 @@ public:
   bool ReadyVertexShaders() const;
   bool ReadyGpuFragmentPreflight(const Pica::RegsInternal&, const UserConfig&);
   bool PreferReadySpecializedFragment(const UserConfig &) const;
+  bool IsCpuFragmentLayout(const PipelineInfo&, const VertexLayout&) const;
+  void SetAccurateMul(bool);
+  void PrepareRecordedPipelines(const std::atomic_bool&, const VideoCore::DiskResourceLoadCallback&);
+  unsigned driver_cache_saves{};
+  void SaveDriverPipelineDiskCache() { ++driver_cache_saves; } // CodexAstraUlt-2: Startup persistence endpoint.
   void UseFragmentShader(const Pica::RegsInternal &, const UserConfig &,
                          bool = false, u64 = 0);
   void EnsureDynamicTevState(); // CodexAstraLocal: Extract the actual materialization body.
@@ -473,6 +498,7 @@ public:
     // CodexAstraLocal: Legacy payload tests explicitly own their constants; a
     // fixture reset cannot retain a prior production draw's pending obligation.
     pending_tev_transport.reset();
+    prepared_cpu_family = nullptr; // CodexAstraUlt-2: Match production's new-draw borrow reset.
     virtual_fs_config = config;
     tev_family_config = config;
     owned_family = GLSL::MakeDynamicTevFamilyConfig(config, profile);
@@ -487,6 +513,7 @@ public:
 class ShaderDiskCache {
 public:
   PipelineCache &parent;
+#include "precompile_members.inc"
 #include "fragment_members.inc"
 #include "optional_state.inc"
   // CodexAstraLocal: Disk and module-reclamation endpoints are isolated from
@@ -499,6 +526,12 @@ public:
   void RecordOptionalSelection(const Shader*) {}
   void ReportOptionalFailure(const char*, const char*, unsigned) noexcept;
   void SaveUsefulRecipesAfterDrain() {}
+  unsigned precompile_saves{};
+  void SavePrecompileRecipesAfterDrain() { ++precompile_saves; }
+  void ObservePrecompileRecipe(const FSConfig&, const StaticPipelineInfo&);
+  const std::vector<Precompile::Recipe>& PreparedRecipes() const { return precompile_recipes; }
+  std::size_t ExistingFullFragmentModules() const { return ready_fragments.size(); }
+  std::unique_ptr<Shader> CompilePreparedFragment(const FSConfig&);
   explicit ShaderDiskCache(PipelineCache &p) : parent(p) {}
   std::optional<std::pair<u64, Shader *const>>
   UseReadyFragmentShader(const FSConfig &, const UserConfig &, bool = true);
@@ -549,6 +582,7 @@ PipelineCache::~PipelineCache() {
   curr_disk_cache.reset();
 }
 GraphicsPipeline *PipelineCache::GetTevFallback(const PipelineInfo &i, bool cpu_vertex) {
+  ++generic_requests;
   prepared_cpu_family = owned_family ? &*owned_family : nullptr;
   if (generic_mode == 3)
     return nullptr;
