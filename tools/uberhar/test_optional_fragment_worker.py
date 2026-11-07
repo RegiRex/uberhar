@@ -224,10 +224,13 @@ def main():
         case.update(binary_sha256=sha(binary), run_returncode=result.returncode,
                     stdout=result.stdout, stderr=result.stderr)
         if expected == 'pass':
+            # CodexAstraUlt-2: The prepared-module capacity assertion runs once in
+            # both complete corpora, adding one check; typed-only skips that case.
+            # Keep exact counts and output framing so omitted checks still fail.
             passed = result.returncode == 0 and re.fullmatch(
                 (r'PASS checks=33 actual_thread_worker=true gpu_execution=false\n' if args.case == 'typed' else
-                 r'PASS checks=673 actual_thread_worker=true gpu_execution=false\n' if args.static_tev else
-                 r'PASS checks=611 actual_thread_worker=true gpu_execution=false\n'), result.stdout) is not None
+                 r'PASS checks=674 actual_thread_worker=true gpu_execution=false\n' if args.static_tev else
+                 r'PASS checks=612 actual_thread_worker=true gpu_execution=false\n'), result.stdout) is not None
         elif expected == 'abort':
             passed = result.returncode == -signal.SIGABRT
         else:
@@ -245,3 +248,4 @@ def main():
 
 if __name__ == '__main__':
     raise SystemExit(main())
+
