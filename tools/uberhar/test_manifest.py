@@ -4,7 +4,7 @@
 import unittest
 import xml.etree.ElementTree as ET
 
-from validate_manifest import ANDROID, PACKAGE, validate
+from validate_manifest import ANDROID, PACKAGE, PRECOMPILED_PACKAGE, validate
 
 
 class ManifestValidationTest(unittest.TestCase):
@@ -30,6 +30,72 @@ class ManifestValidationTest(unittest.TestCase):
 
     def test_standalone_release_is_accepted(self):
         self.assertEqual(validate(self.root, "0.0.2"), [])
+
+    # CodexAstraUlt-2: Exercise both installed-app identities through the real
+    # validator, including AndroidX's generated permission and startup provider.
+    def manifest_for_package(self, package):
+        root = ET.fromstring(ET.tostring(self.root, encoding="unicode").replace(PACKAGE, package))
+        permission = package + ".DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
+        ET.SubElement(root, "permission", {ANDROID + "name": permission,
+                                           ANDROID + "protectionLevel": "signature"})
+        ET.SubElement(root, "uses-permission", {ANDROID + "name": permission})
+        ET.SubElement(root.find("application"), "provider", {
+            ANDROID + "name": "androidx.startup.InitializationProvider",
+            ANDROID + "authorities": package + ".androidx-startup",
+            ANDROID + "exported": "false",
+        })
+        return root
+
+    def test_main_and_comparison_require_their_own_identity(self):
+        for package, other in [(PACKAGE, PRECOMPILED_PACKAGE), (PRECOMPILED_PACKAGE, PACKAGE)]:
+            with self.subTest(package=package):
+                root = self.manifest_for_package(package)
+                self.assertEqual(validate(root, "0.0.2", expected_package=package),
+                                 [package + ".DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"])
+                with self.assertRaisesRegex(ValueError, "Unexpected package"):
+                    validate(root, "0.0.2", expected_package=other)
+        with self.assertRaisesRegex(ValueError, "Unreviewed package"):
+            validate(self.root, "0.0.2", expected_package="unreviewed.app")
+
+    def test_cross_app_authorities_and_permissions_are_rejected(self):
+        # CodexAstraUlt-2: The nested candidate ID must not bypass a naive main
+        # prefix check; reject collisions in either installation direction.
+        for package, other in [(PACKAGE, PRECOMPILED_PACKAGE), (PRECOMPILED_PACKAGE, PACKAGE)]:
+            for fault in ["export", "startup", "mixed_authorities", "custom_permission", "requested_permission"]:
+                with self.subTest(package=package, fault=fault):
+                    root = self.manifest_for_package(package)
+                    providers = root.find("application").findall("provider")
+                    expected = "authority"
+                    if fault == "export":
+                        providers[0].set(ANDROID + "authorities", other + ".logexports")
+                    elif fault == "startup":
+                        providers[1].set(ANDROID + "authorities", other + ".androidx-startup")
+                    elif fault == "mixed_authorities":
+                        providers[1].set(ANDROID + "authorities",
+                                         package + ".own;" + other + ".foreign")
+                    elif fault == "custom_permission":
+                        root.find("permission").set(ANDROID + "name", other + ".PRIVATE")
+                        expected = "custom permission"
+                    else:
+                        root.find("uses-permission").set(ANDROID + "name",
+                            other + ".DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION")
+                        expected = "Unreviewed permissions"
+                    with self.assertRaisesRegex(ValueError, expected):
+                        validate(root, "0.0.2", expected_package=package)
+
+    def test_comparison_keeps_normal_installation_restrictions(self):
+        # CodexAstraUlt-2: A separate package is not permission to loosen release
+        # flags, shared-UID isolation or the approved platform permission set.
+        for fault in ["testOnly", "debuggable", "sharedUserId", "permission"]:
+            root = self.manifest_for_package(PRECOMPILED_PACKAGE)
+            if fault == "sharedUserId":
+                root.set(ANDROID + fault, PACKAGE)
+            elif fault == "permission":
+                ET.SubElement(root, "uses-permission", {ANDROID + "name": "android.permission.READ_CONTACTS"})
+            else:
+                root.find("application").set(ANDROID + fault, "true")
+            with self.subTest(fault=fault), self.assertRaises(ValueError):
+                validate(root, "0.0.2", expected_package=PRECOMPILED_PACKAGE)
 
     # CodexAstraLocal: Current packaging requires profiling without allowing a
     # debuggable build; historical manifests still use the original contract.
@@ -116,3 +182,4 @@ class ManifestValidationTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

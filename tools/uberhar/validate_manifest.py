@@ -7,20 +7,23 @@ import xml.etree.ElementTree as ET
 
 ANDROID = "{http://schemas.android.com/apk/res/android}"
 PACKAGE = "org.uberhar.uberhar_emu"
+# CodexAstraUlt-2: Select a reviewed identity explicitly; historical main APK
+# validation keeps its original default while the comparison installs separately.
+PRECOMPILED_PACKAGE = "org.uberhar.uberhar_emu.precompiled"
+PACKAGES = {PACKAGE, PRECOMPILED_PACKAGE}
 # AstraEH: Preserve the permissions already present in the pinned app and AndroidX dependencies.
 # This gate catches accidental additions; runtime permission grants still belong to the user.
-PERMISSIONS = {
+PLATFORM_PERMISSIONS = {
     "android.permission.ACCESS_NETWORK_STATE", "android.permission.INTERNET",
     "android.permission.CAMERA", "android.permission.RECORD_AUDIO",
     "android.permission.POST_NOTIFICATIONS", "android.permission.MANAGE_EXTERNAL_STORAGE",
     "android.permission.WRITE_EXTERNAL_STORAGE", "android.permission.READ_EXTERNAL_STORAGE",
     "android.permission.WAKE_LOCK", "android.permission.RECEIVE_BOOT_COMPLETED",
     "android.permission.FOREGROUND_SERVICE",
-    PACKAGE + ".DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION",
 }
 
 
-def validate(root, version, *, require_shell_profiling=False):
+def validate(root, version, *, require_shell_profiling=False, expected_package=PACKAGE):
     def require(condition, message):
         if not condition:
             raise ValueError(message)
@@ -28,8 +31,21 @@ def validate(root, version, *, require_shell_profiling=False):
     def enabled(element, name, default=False):
         return element.get(ANDROID + name, str(default).lower()) not in {"false", "0"}
 
+    # CodexAstraUlt-2: Longest known namespace wins because the comparison ID
+    # extends main's ID. A main APK must not claim the comparison's authorities.
+    require(expected_package in PACKAGES, "Unreviewed package identity")
+    package_roots = sorted(PACKAGES, key=len, reverse=True)
+
+    def owned_name(name):
+        owner = next((p for p in package_roots if name.startswith(p + ".")), None)
+        return owner == expected_package
+
+    permissions = PLATFORM_PERMISSIONS | {
+        expected_package + ".DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
+    }
+
     # AstraEH: A standalone, separately named package avoids split-install and shared-UID conflicts.
-    require(root.get("package") == PACKAGE, "Unexpected package identity")
+    require(root.get("package") == expected_package, "Unexpected package identity")
     require(root.get(ANDROID + "versionName") == version, "Version does not match UBERHAR_VERSION")
     require(not root.get(ANDROID + "sharedUserId"), "Shared Android user IDs are not allowed")
     require(not root.get("split"), "Expected a standalone APK, not a split APK")
@@ -64,21 +80,21 @@ def validate(root, version, *, require_shell_profiling=False):
     # AstraEH: Provider authorities and custom permissions must not collide with Azahar/other apps.
     for provider in app.findall("provider"):
         authorities = provider.get(ANDROID + "authorities", "").split(";")
-        require(all(a.startswith(PACKAGE + ".") for a in authorities), "Foreign provider authority")
+        require(all(owned_name(a) for a in authorities), "Foreign provider authority")
     # AstraEH: The export provider must stay private and grant access only through selected URIs.
     export = next((p for p in app.findall("provider") if p.get(ANDROID + "name") ==
                    "org.citra.citra_emu.utils.LogFileProvider"), None)
     require(export is not None, "Missing log export provider")
-    require(export.get(ANDROID + "authorities") == PACKAGE + ".logexports", "Wrong export authority")
+    require(export.get(ANDROID + "authorities") == expected_package + ".logexports", "Wrong export authority")
     require(export.get(ANDROID + "exported") == "false", "Log export provider is publicly exported")
     require(enabled(export, "grantUriPermissions"), "Log export provider cannot share selected files")
     require(any(m.get(ANDROID + "name") == "android.support.FILE_PROVIDER_PATHS" and
                 m.get(ANDROID + "resource") for m in export.findall("meta-data")),
             "Missing log export path metadata")
     for permission in root.findall("permission"):
-        require(permission.get(ANDROID + "name", "").startswith(PACKAGE + "."), "Foreign custom permission")
+        require(owned_name(permission.get(ANDROID + "name", "")), "Foreign custom permission")
     requested = {p.get(ANDROID + "name") for p in root if p.tag.startswith("uses-permission")}
-    require(not (requested - PERMISSIONS), f"Unreviewed permissions: {requested - PERMISSIONS}")
+    require(not (requested - permissions), f"Unreviewed permissions: {requested - permissions}")
     for library in app.findall("uses-library"):
         require(not enabled(library, "required", True), "APK depends on a required external Java library")
     return sorted(requested)
@@ -91,10 +107,14 @@ if __name__ == "__main__":
     parser.add_argument("manifest", type=Path)
     parser.add_argument("version")
     parser.add_argument("--require-shell-profiling", action="store_true")
+    # CodexAstraUlt-2: CI binds every identity/authority/permission check to the
+    # same intended app, instead of accepting either package opportunistically.
+    parser.add_argument("--package", choices=sorted(PACKAGES), default=PACKAGE)
     args = parser.parse_args()
     try:
         permissions = validate(ET.parse(args.manifest).getroot(), args.version,
-                               require_shell_profiling=args.require_shell_profiling)
+                               require_shell_profiling=args.require_shell_profiling,
+                               expected_package=args.package)
     except (ValueError, ET.ParseError) as error:
         raise SystemExit(str(error))
     print("PASS: standalone non-test-only release APK; identity, SDK, entry point and authorities checked")
@@ -102,3 +122,4 @@ if __name__ == "__main__":
     if args.require_shell_profiling:
         print("PASS: optimized release enables explicit system-shell profiling")
     print("\n".join(permissions))
+

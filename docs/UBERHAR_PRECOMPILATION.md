@@ -8,6 +8,28 @@ specializations before asking for a generic shader. This is an implementation of
 observed-state preparation. It cannot enumerate every future draw of an arbitrary
 3DS game, and it does not establish a performance improvement on the AYN Thor.
 
+## Installing beside main Uberhar
+
+<!-- CodexAstraUlt-2: The rebuilt comparison has its own Android identity and data-folder marker. -->
+
+The rebuilt comparison installs as **Uberhar Precompiled**, with Android package
+`org.uberhar.uberhar_emu.precompiled`. Main Uberhar keeps
+`org.uberhar.uberhar_emu`; the comparison no longer updates or replaces that app.
+Kotlin/JNI class names and the approved signing certificate remain unchanged.
+Private preferences, internal files, driver installations and URI grants belong to
+separate Android app sandboxes. There is no automatic migration from main Uberhar.
+
+Select an empty **Uberhar Precompiled** data folder during setup. The comparison
+uses `uberhar-precompiled-data.txt` and rejects folders containing the main
+`uberhar-data.txt` marker, even if a candidate marker was copied into them. Copy selected saves after initializing the
+new folder if desired; sharing a game-file directory does not require sharing the
+emulator data folder. Keep main's saves, configuration and shader caches separate.
+
+The earlier 0.1.57 artifact from run 41971435934 used main Uberhar's package ID.
+Use the rebuilt artifact linked from the branch's latest build, rather than that
+older download, for a parallel installation. Both have numeric version 0.1.57;
+the APK's package identity and source revision distinguish them.
+
 ## What happens before gameplay
 
 1. Load the title's driver cache using the existing device/driver identity checks.

@@ -332,10 +332,11 @@ jobs:
           APK="$(find artifacts -name '*.apk' -print -quit)"
           "$ANDROID_SDK_ROOT/build-tools/35.0.0/aapt" dump badging "$APK" > artifacts/package.txt
           validation_gate='package identity'
-          grep "package: name='org.uberhar.uberhar_emu'" artifacts/package.txt
-          # AstraEH: Verify beta launcher branding without changing the install identity.
+          # CodexAstraUlt-2: This branch must coexist with main Uberhar; validate
+          # the final APK identity and matching launcher name before uploading it.
+          grep -F "package: name='org.uberhar.uberhar_emu.precompiled'" artifacts/package.txt
           validation_gate='launcher label'
-          grep -F "application-label:'Uberhar Beta'" artifacts/package.txt
+          grep -F "application-label:'Uberhar Precompiled'" artifacts/package.txt
           # AstraEH: Signatures can verify even when Android refuses normal installation.
           # aapt emits this marker only for test-only apps; reject before publishing.
           if grep -q '^testOnly=' artifacts/package.txt; then
@@ -351,6 +352,7 @@ jobs:
           # CodexAstraLocal: Require explicit shell profiling in the optimized
           # Uberhar flavor so the next single-run CPU observation can use symbols.
           python3 tools/uberhar/validate_manifest.py artifacts/AndroidManifest.xml "$UBERHAR_VERSION" \
+            --package org.uberhar.uberhar_emu.precompiled \
             --require-shell-profiling > artifacts/install-validation.txt
           validation_gate='APK alignment'
           "$ANDROID_SDK_ROOT/build-tools/35.0.0/zipalign" -c -P 16 -v 4 "$APK" > artifacts/alignment.txt
@@ -382,8 +384,9 @@ jobs:
 
       - uses: actions/upload-artifact@v7
         with:
-          # CodexAstraLocal: Distinguish the experiment download without changing
-          # numeric app version, package identity, signing or ordinary releases.
+          # CodexAstraLocal: Distinguish the experiment download.
+          # CodexAstraUlt-2: Numeric version and signing stay stable; this branch
+          # now uses a separate install identity from ordinary Uberhar releases.
           # CodexAstraUlt-2: Keep the isolated candidate visibly distinct from
           # ordinary releases and the retained historical CPU comparison.
           name: uberhar-${{ steps.version.outputs.value }}${{ (github.head_ref == 'uberhar/precompiled-first' || github.ref == 'refs/heads/uberhar/precompiled-first') && '-precompiled-first-comparison' || (github.head_ref == 'uberhar/cpu-only-048-comparison' || github.ref == 'refs/heads/uberhar/cpu-only-048-comparison') && '-cpu-only-comparison' || '' }}-arm64

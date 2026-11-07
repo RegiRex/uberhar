@@ -45,14 +45,16 @@ class CitraDirectoryHelper(
                     path,
                     takeFlags
                 )
-                // AstraEH: Isolate experimental saves/config/cache from a populated Azahar folder.
-                // An existing Uberhar marker permits reusing this app's own directory.
+                // CodexAstraUlt-2: The separately installed candidate must select
+                // its own data folder before native logs/configuration are initialized.
                 if (BuildConfig.FLAVOR == "uberhar" && path != previous) {
                     val directory = DocumentFile.fromTreeUri(fragmentActivity, path)
-                    val marker = directory?.findFile("uberhar-data.txt")
-                    val isEmpty = directory?.listFiles()?.isEmpty() == true
-                    if (directory == null || (marker == null && !isEmpty) ||
-                        (marker == null && directory.createFile("text/plain", "uberhar-data.txt") == null)
+                    if (directory == null ||
+                        !prepareUberharDirectory(
+                            markerExists = { directory.findFile(it) != null },
+                            isEmpty = { directory.listFiles().isEmpty() },
+                            createMarker = { directory.createFile("text/plain", it) != null }
+                        )
                     ) {
                         MaterialAlertDialogBuilder(fragmentActivity)
                             .setTitle(R.string.uberhar_separate_folder_title)
@@ -94,6 +96,20 @@ class CitraDirectoryHelper(
     }
 
     companion object {
+        // CodexAstraUlt-2: Keep the actual selection transaction testable without
+        // Android storage. A main marker always wins, even beside a copied
+        // candidate marker; rejected folders receive no new marker or data writes.
+        internal fun prepareUberharDirectory(
+            markerExists: (String) -> Boolean,
+            isEmpty: () -> Boolean,
+            createMarker: (String) -> Boolean
+        ): Boolean {
+            if (markerExists("uberhar-data.txt")) return false
+            val candidateMarker = "uberhar-precompiled-data.txt"
+            if (markerExists(candidateMarker)) return true
+            return isEmpty() && createMarker(candidateMarker)
+        }
+
         fun initializeCitraDirectory(path: Uri) {
             PermissionsHandler.setCitraDirectory(path.toString())
             DirectoryInitialization.resetCitraDirectoryState()
