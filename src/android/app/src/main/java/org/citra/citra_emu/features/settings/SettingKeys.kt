@@ -61,9 +61,16 @@ object SettingKeys {
     external fun uberhar_adaptive_cpu_workers(): String
     external fun uberhar_gpu_observer(): String
     external fun uberhar_frame_workload_census(): String
-    external fun uberhar_static_dynamic_state(): String
     external fun uberhar_prepare_displayed_eye_only(): String
     external fun uberhar_early_right_eye(): String
+    external fun uberhar_fast_vertex_conversion(): String
+    external fun uberhar_vertex_memo(): String
+    external fun uberhar_worker_cpu_upload(): String
+    external fun uberhar_cpu_clip_reject(): String
+    external fun uberhar_full_pipeline_bank_16(): String
+    external fun uberhar_prune_spirv(): String
+    external fun uberhar_indexed_cpu_output(): String
+    external fun uberhar_mono_guest_3d(): String
 
     // AstraEH: Persist only the selected profile, not three conflicting booleans.
     external fun uberhar_test_mode(): String

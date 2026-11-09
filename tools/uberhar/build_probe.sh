@@ -4,6 +4,23 @@
 set -euo pipefail
 mkdir -p build/uberhar-probe
 python3 tools/uberhar/check_android_keys.py
+# CodexAstraLocal: Each .58 contract has one focused executable gate. These
+# preserve existing shader/image/publication checks and never access a device.
+c++ -std=c++20 -O2 -Isrc tools/uberhar/test_mono_guest.cpp -o build/uberhar-probe/test-mono-guest
+build/uberhar-probe/test-mono-guest
+c++ -std=c++20 -O2 -Isrc tools/uberhar/test_cpu_clip_reject.cpp -o build/uberhar-probe/test-cpu-clip-reject
+build/uberhar-probe/test-cpu-clip-reject
+c++ -std=c++20 -O2 -pthread -Isrc tools/uberhar/test_owned_vertex_upload.cpp -o build/uberhar-probe/test-owned-vertex-upload
+build/uberhar-probe/test-owned-vertex-upload
+c++ -std=c++20 -O2 -pthread -DFMT_HEADER_ONLY -Isrc -Iexternals/fmt/include -Iexternals/boost \
+  tools/uberhar/test_vertex_memo.cpp -o build/uberhar-probe/test-vertex-memo
+build/uberhar-probe/test-vertex-memo
+python3 tools/uberhar/device_testing/test_frame_telemetry_retention.py
+python3 tools/uberhar/test_indexed_cpu_output.py --output build/uberhar-probe/indexed-cpu-output
+cmake -S tools/uberhar/spirv_pruning -B build/uberhar-probe/spirv-pruning-build -DCMAKE_BUILD_TYPE=Release
+cmake --build build/uberhar-probe/spirv-pruning-build --parallel 2
+python3 tools/uberhar/test_spirv_pruning.py --output build/uberhar-probe/spirv-pruning-result \
+  --sirit-library build/uberhar-probe/spirv-pruning-build/sirit/libsirit.a
 # CodexAstraLocal: Exercise actual pass-boundary rules and bounded workload
 # accounting before publication; neither fixture contacts a device.
 python3 tools/uberhar/test_work_reduction.py --mutants \
@@ -265,6 +282,12 @@ timeout 30s build/uberhar-probe/test-vertex-interpreter
 c++ -std=c++20 -O2 -Isrc tools/uberhar/test_frame_diagnostics.cpp \
   -o build/uberhar-probe/test-frame-diagnostics
 build/uberhar-probe/test-frame-diagnostics
+
+# CodexAstraLocal: Exact one-second sections preserve legacy totals and bounded delivery.
+c++ -std=c++20 -O2 -pthread -DFMT_HEADER_ONLY -Isrc -Iexternals/fmt/include \
+  tools/uberhar/test_frame_telemetry.cpp -o build/uberhar-probe/test-frame-telemetry
+build/uberhar-probe/test-frame-telemetry > build/uberhar-probe/frame-telemetry.jsonl
+python3 -c 'import json; from pathlib import Path; rows=[json.loads(x) for x in Path("build/uberhar-probe/frame-telemetry.jsonl").read_text().splitlines()]; assert len(rows)==2 and rows[1]["kind"]=="final"'
 
 # AstraEH: Phase evidence never hides a gameplay stall or treats streaming as confirmed loading.
 c++ -std=c++20 -O2 -pthread -Isrc tools/uberhar/test_activity.cpp \

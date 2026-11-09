@@ -14,9 +14,11 @@
 #include <fmt/format.h>
 #include "common/file_util.h"
 #include "common/logging/log.h" // AstraEH: Bounded run/frame diagnostics.
+#include "common/logging/backend.h" // CodexAstraLocal: Cap-independent compact evidence.
 #include "common/scm_rev.h" // AstraEH: Identify the exact build in each run snapshot.
 #include "common/settings.h"
 #include "common/uberhar_test_profile.h" // CodexAstraUlt: Report effective route capabilities.
+#include "common/uberhar_tuning_sample.h" // CodexAstraLocal: Independent scene trial evidence.
 #include "core/core_timing.h"
 #include "core/perf_stats.h"
 #include "video_core/gpu.h"
@@ -32,6 +34,81 @@ constexpr double FRAME_LENGTH = 1.0 / SCREEN_REFRESH_RATE;
 constexpr std::size_t IgnoreFrames = 5;
 
 namespace Core {
+
+// CodexAstraLocal: Bind recommendations to the actual launch configuration.
+// Candidate flags are carried separately; quality, driver and mode never drift
+// silently between baseline and trial. No persistent preference is changed here.
+static std::string TuningContext() {
+    std::ostringstream context;
+    context.precision(17);
+    context << "tuner_schema=1;build=" << Common::g_scm_rev << ';';
+    const auto add = [&](const char* name, auto value) {
+        context << name << '=' << static_cast<double>(value) << ';';
+    };
+    add("uberhar_test_mode", Settings::values.uberhar_test_mode.GetValue());
+    add("graphics_api", Settings::values.graphics_api.GetValue());
+    add("resolution_factor", Settings::values.resolution_factor.GetValue());
+    add("cpu_clock_percentage", Settings::values.cpu_clock_percentage.GetValue());
+    add("is_new_3ds", Settings::values.is_new_3ds.GetValue());
+    add("turnip_pass_end_flush", Settings::values.turnip_pass_end_flush.GetValue());
+    add("deterministic_async_operations", Settings::values.deterministic_async_operations.GetValue());
+    add("use_cpu_jit", Settings::values.use_cpu_jit.GetValue());
+    add("use_shader_jit", Settings::values.use_shader_jit.GetValue());
+    add("use_hw_shader", Settings::values.use_hw_shader.GetValue());
+    add("uberhar_cpu_vertex_only", Settings::values.uberhar_cpu_vertex_only.GetValue());
+    add("uberhar_hybrid_tev", Settings::values.uberhar_hybrid_tev.GetValue());
+    add("uberhar_force_tev", Settings::values.uberhar_force_tev.GetValue());
+    add("uberhar_cpu_vertex_bridge", Settings::values.uberhar_cpu_vertex_bridge.GetValue());
+    add("uberhar_native_full_fragments", Settings::values.uberhar_native_full_fragments.GetValue());
+    add("uberhar_optimize_generic_shaders", Settings::values.uberhar_optimize_generic_shaders.GetValue());
+    add("uberhar_gpu_observer", Settings::values.uberhar_gpu_observer.GetValue());
+    add("uberhar_frame_workload_census", Settings::values.uberhar_frame_workload_census.GetValue());
+    add("uberhar_early_right_eye", Settings::values.uberhar_early_right_eye.GetValue());
+    add("uberhar_mono_guest_3d", Settings::values.uberhar_mono_guest_3d.GetValue());
+    add("uberhar_indexed_cpu_output", Settings::values.uberhar_indexed_cpu_output.GetValue());
+    add("uberhar_full_pipeline_bank_16", Settings::values.uberhar_full_pipeline_bank_16.GetValue());
+    add("uberhar_prune_spirv", Settings::values.uberhar_prune_spirv.GetValue());
+    add("uberhar_fast_vertex_conversion", Settings::values.uberhar_fast_vertex_conversion.GetValue());
+    add("uberhar_vertex_memo", Settings::values.uberhar_vertex_memo.GetValue());
+    add("uberhar_worker_cpu_upload", Settings::values.uberhar_worker_cpu_upload.GetValue());
+    add("uberhar_cpu_clip_reject", Settings::values.uberhar_cpu_clip_reject.GetValue());
+    add("uberhar_cpu_prefix_overlap", Settings::values.uberhar_cpu_prefix_overlap.GetValue());
+    add("uberhar_parallel_texture_decode", Settings::values.uberhar_parallel_texture_decode.GetValue());
+    add("uberhar_cpu_execution_census", Settings::values.uberhar_cpu_execution_census.GetValue());
+    add("use_disk_shader_cache", Settings::values.use_disk_shader_cache.GetValue());
+    add("frame_limit", Settings::values.frame_limit.GetValue());
+    add("turbo_limit", Settings::values.turbo_limit.GetValue());
+    add("async_shader_compilation", Settings::values.async_shader_compilation.GetValue());
+    add("async_presentation", Settings::values.async_presentation.GetValue());
+    add("use_vsync", Settings::values.use_vsync.GetValue());
+    add("shaders_accurate_mul", Settings::values.shaders_accurate_mul.GetValue());
+    add("spirv_shader_gen", Settings::values.spirv_shader_gen.GetValue());
+    add("disable_spirv_optimizer", Settings::values.disable_spirv_optimizer.GetValue());
+    add("texture_filter", Settings::values.texture_filter.GetValue());
+    add("texture_sampling", Settings::values.texture_sampling.GetValue());
+    add("filter_mode", Settings::values.filter_mode.GetValue());
+    add("custom_textures", Settings::values.custom_textures.GetValue());
+    add("preload_textures", Settings::values.preload_textures.GetValue());
+    add("use_skip_duplicate_frames", Settings::values.use_skip_duplicate_frames.GetValue());
+    add("delay_game_render_thread_us", Settings::values.delay_game_render_thread_us.GetValue());
+    add("simulate_3ds_gpu_timings", Settings::values.simulate_3ds_gpu_timings.GetValue());
+    add("disable_right_eye_render", Settings::values.disable_right_eye_render.GetValue());
+    add("factor_3d", Settings::values.factor_3d.GetValue());
+    add("render_3d", Settings::values.render_3d.GetValue());
+    add("swap_screen", Settings::values.swap_screen.GetValue());
+    add("layout_option", Settings::values.layout_option.GetValue());
+    return context.str();
+}
+
+static u32 TuningFeatures() {
+    const auto& v = Settings::values;
+    return (u32{v.uberhar_changed_state_only.GetValue()} << 0) |
+           (u32{v.uberhar_reuse_contained_pass.GetValue()} << 1) |
+           (u32{v.uberhar_typed_primitive_append.GetValue()} << 2) |
+           (u32{v.uberhar_include_scissor.GetValue()} << 3) |
+           (u32{v.uberhar_adaptive_cpu_workers.GetValue()} << 4) |
+           (u32{v.uberhar_prepare_displayed_eye_only.GetValue()} << 5);
+}
 
 bool PerfStats::game_frames_updated = true;
 
@@ -56,13 +133,22 @@ PerfStats::PerfStats(u64 title_id) : uberhar_session{++uberhar_next_session}, ti
         Settings::values.use_disk_shader_cache.GetValue(), Settings::GetFrameLimit(),
         Settings::values.cpu_clock_percentage.GetValue());
     LogUberharSettings("start"); // AstraEH: Human-readable context after the run header.
+    Common::UberharTuningSample::Instance().BeginRun(
+        uberhar_session, fmt::format("{:016X}", title_id), TuningContext(), TuningFeatures(),
+        Settings::values.resolution_factor.GetValue(), Common::g_uberhar_alpha_testing &&
+        Settings::IsUberharTestProfile(Settings::values.uberhar_test_mode.GetValue()) &&
+        Settings::GetWorkingGraphicsAPI() == Settings::GraphicsAPI::Vulkan);
+    LogFrameTelemetryContext();
 }
 
 PerfStats::~PerfStats() {
+    // CodexAstraLocal: Completed scene evidence remains readable after a normal exit.
+    Common::UberharTuningSample::Instance().EndRun(uberhar_session);
     // AstraEH: Final completed-frame evidence survives even when CSV/overlay options are off.
     EndUberharPause();
     LogUberharSettings("final"); // AstraEH: Final settings survive incomplete change detail.
     LogUberharFrames("final_window", uberhar_frames.Window());
+    LogFrameTelemetry(Common::FrameTelemetry::Final, true);
     LogUberharFrames("totals", uberhar_frames.Total());
     // AstraEH: At most three summaries; a 400% request is distinct from achieved
     // guest speed, and changing the speed limit does not mix the normal/fast totals.
@@ -192,7 +278,8 @@ void PerfStats::BeginSystemFrame() {
     frame_begin = Clock::now();
 }
 
-void PerfStats::EndSystemFrame(std::chrono::microseconds guest_time) {
+void PerfStats::EndSystemFrame(std::chrono::microseconds guest_time, s64 guest_ticks,
+                              u32 effective_resolution) {
     std::scoped_lock lock{object_mutex};
 
     auto frame_end = Clock::now();
@@ -213,9 +300,26 @@ void PerfStats::EndSystemFrame(std::chrono::microseconds guest_time) {
     // AstraEH: One monotonic clock read per system frame; no dynamic storage or per-frame text.
     const auto now = std::chrono::steady_clock::now();
     const u64 now_ns = duration_cast<std::chrono::nanoseconds>(now - uberhar_start).count();
+    // CodexAstraLocal: Dormant tuner costs one relaxed flag read. During an opt-in
+    // trial, record real guest progress independently of resettable overlay stats.
+    auto& tuning = Common::UberharTuningSample::Instance();
+    if (tuning.Observing()) {
+        tuning.Observe(duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count(),
+                       guest_time.count(), uberhar_game_frames,
+                       Settings::values.resolution_factor.GetValue(), Settings::GetFrameLimit());
+    }
     const u64 work_ns =
         std::max<s64>(0, duration_cast<std::chrono::nanoseconds>(frame_time).count());
     const auto activity = Common::UberharActivity::Capture();
+    // CodexAstraLocal: Share the existing monotonic observation; ticks retain paired
+    // guest progress rather than inferring speed from nominal frame duration.
+    if (telemetry_observed_generation != telemetry_generation.load(std::memory_order_relaxed))
+        LogFrameTelemetryContext();
+    frame_telemetry.Observe({now_ns, uberhar_game_frames, guest_ticks}, work_ns,
+        {telemetry_observed_generation, telemetry_scene.load(std::memory_order_relaxed),
+         static_cast<u32>(Settings::values.uberhar_test_mode.GetValue()),
+         Settings::values.resolution_factor.GetValue(), effective_resolution, TuningFeatures(),
+         Settings::GetFrameLimit(), Settings::is_temporary_frame_limit});
     if (activity.token != uberhar_phase_token) {
         uberhar_phase_token = activity.token;
         if (++uberhar_phase_details <= 64) {
@@ -234,6 +338,7 @@ void PerfStats::EndSystemFrame(std::chrono::microseconds guest_time) {
     if (uberhar_frames.Window().wall_ns >= 5'000'000'000ULL) {
         LogUberharSettings("sample"); // AstraEH: No additional per-frame settings work.
         LogUberharFrames("window", uberhar_frames.Window());
+        LogFrameTelemetry(Common::FrameTelemetry::FiveSecondEnd);
         uberhar_frames.ResetWindow();
     }
 }
@@ -250,18 +355,63 @@ void PerfStats::EndGameFrame() {
 // AstraEH: Include completed work only. Explicit waits and the crossing frame are excluded.
 void PerfStats::BeginUberharPause(const char* reason) {
     std::scoped_lock lock{object_mutex};
+    Common::UberharTuningSample::Instance().Pause(); // CodexAstraLocal: No idle score pollution.
     if (uberhar_pause_start != std::chrono::steady_clock::time_point{})
         return;
     uberhar_pause_start = std::chrono::steady_clock::now();
     ++uberhar_pause_count;
+    // CodexAstraLocal: Timing boundaries remain truthful after the optional pause
+    // detail quota. One-second sections nest inside the same completed frame window.
+    LogUberharFrames("before_pause", uberhar_frames.Window());
+    LogFrameTelemetry(Common::FrameTelemetry::Pause);
+    uberhar_frames.ResetWindow();
+    frame_telemetry.Break(Common::FrameTelemetry::Pause);
     if (uberhar_pause_count <= 32) {
-        LogUberharFrames("before_pause", uberhar_frames.Window());
-        uberhar_frames.ResetWindow();
         // AstraEH Log Line: First 32 actual waits; totals retain every pause and its duration.
         LOG_INFO(Core, "Uberhar pause: session={} event=begin ordinal={} reason={}",
                  uberhar_session, uberhar_pause_count, reason);
     }
     uberhar_frames.BreakInterval();
+}
+
+void PerfStats::LogFrameTelemetryContext() {
+    Common::FrameTelemetry::Record record;
+    record.kind = Common::FrameTelemetry::Kind::Context;
+    record.run_ns = duration_cast<std::chrono::nanoseconds>(uberhar_start.time_since_epoch()).count();
+    record.session = uberhar_session;
+    record.title = title_id;
+    record.sequence = ++telemetry_sequence;
+    record.context_generation = telemetry_generation.load(std::memory_order_relaxed);
+    record.anchor_monotonic_ns = duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+    record.wall_clock_ns = duration_cast<std::chrono::nanoseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+    // CodexAstraLocal TEST-ONLY LOG: Resolved numeric context is serialized only
+    // at launch/application boundaries. Remove with the compact telemetry feature.
+    const auto text = TuningContext() + "feature_mask=" + std::to_string(TuningFeatures()) +
+                      ";context_scope=resolved_values_not_backend_activation;";
+    const auto length = std::min(text.size(), record.context_text.size() - 1);
+    std::copy_n(text.data(), length, record.context_text.data());
+    record.text_truncated = length != text.size();
+    telemetry_observed_generation = record.context_generation;
+    if (!Common::Log::SubmitFrameTelemetry(record)) ++telemetry_submit_failures;
+}
+
+void PerfStats::LogFrameTelemetry(u32 reason, bool final) {
+    Common::FrameTelemetry::Record record;
+    record.kind = final ? Common::FrameTelemetry::Kind::Final : Common::FrameTelemetry::Kind::Window;
+    record.run_ns = duration_cast<std::chrono::nanoseconds>(uberhar_start.time_since_epoch()).count();
+    record.session = uberhar_session;
+    record.title = title_id;
+    record.sequence = ++telemetry_sequence;
+    record.context_generation = telemetry_observed_generation;
+    frame_telemetry.Finish(record, reason);
+    if (!Common::Log::SubmitFrameTelemetry(record)) ++telemetry_submit_failures;
+    // CodexAstraLocal TEST-ONLY LOG: Final enqueue is not a durability claim; the
+    // compact worker emits a separate written-and-flushed acknowledgment.
+    if (final) LOG_INFO(Core, "Uberhar frame telemetry final: session={} sequence={} "
+                       "submit_failures={} delivery=worker_ack_required",
+                       uberhar_session, telemetry_sequence, telemetry_submit_failures);
 }
 
 void PerfStats::EndUberharPause() {

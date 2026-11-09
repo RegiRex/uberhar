@@ -10,6 +10,7 @@
 
 #include "common/math_util.h"
 #include "video_core/renderer_vulkan/vk_common.h"
+#include "video_core/renderer_vulkan/uberhar_pass_union.h"
 
 namespace VideoCore {
 enum class PixelFormat : u32;
@@ -55,7 +56,7 @@ public:
 
     /// Begins a new renderpass with the provided render state.
     void BeginRendering(const RenderPass& new_pass, bool framebuffer_pass = false,
-                        bool allow_containment = false);
+                        bool allow_containment = false, vk::Extent2D framebuffer_extent = {});
 
     /// Exits from any currently active renderpass instance
     void EndRendering(PassEndReason reason = PassEndReason::Explicit);
@@ -95,7 +96,11 @@ private:
     // CodexAstraLocal: Eligibility belongs to the original active pass; even an
     // exact-area shadow/storage draw revokes later contained-area reuse.
     bool containment_eligible{};
+    vk::Extent2D pass_extent{};
     RenderPass pass{};
+    // CodexAstraLocal: Requested state stays distinct from an expanded active
+    // area, so containment cannot invent or erase a driver submission boundary.
+    RenderPass last_requested_pass{};
     u32 num_draws{};
     // CodexAstraLocal TEST-ONLY LOG: Fixed residency and per-frame sample budget
     // bound observer cost. A pending slot is reused only after GPU completion
@@ -119,6 +124,12 @@ private:
     bool reuse_contained_pass{};
     u64 contained_pass_reuses{}, containment_refusals{};
     u64 containment_submission_boundaries{}, mechanism_frames{};
+    // CodexAstraLocal TEST-ONLY LOG: Separate actual next-pass unions from later
+    // contained reuses; remove after pass-area/traffic qualification. No history
+    // survives an explicit resource, feedback, clear or submission boundary.
+    u64 union_candidates{}, union_incompatible{}, union_submission_refusals{};
+    std::array<u64, static_cast<std::size_t>(PassUnionPolicy::Decision::Count)> union_decisions{};
+    u64 union_requested_pixels{}, union_started_pixels{};
     std::chrono::steady_clock::time_point mechanism_next_report{};
     std::array<PassSample, 16> diagnostic_samples{};
     // CodexAstraLocal: Acquire/release covers host metadata explicitly; query

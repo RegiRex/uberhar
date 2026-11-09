@@ -27,19 +27,24 @@ struct CpuFragmentObservation {
             static_plan ? Common::ComputeStructHash64(*static_plan) : 0);
     }
 };
-// CodexAstraLocal: Preserve the inherited full-specialization allowance while
+// CodexAstraLocal: Preserve the inherited full-specialization allowance by default while
 // the additional partial tier has its own smaller renewable work budget. Retirement,
 // probation and admission use this same partition, including failed owners.
 struct CpuFragmentPartitions {
-    static constexpr std::size_t Slots = 8 + StaticTevPolicy::MaxPsoOwners,
+    // CodexAstraLocal: Storage never moves after a compiler captures a Slot*.
+    // Only the construction-frozen active prefix is scanned or admitted.
+    static constexpr std::size_t Slots = 16 + StaticTevPolicy::MaxPsoOwners,
                                  CpuAttempts = 64 + StaticTevPolicy::MaxPsoAttempts, Count = 2;
+    explicit constexpr CpuFragmentPartitions(bool expanded = false) : full_owners{expanded ? 16U : 8U} {}
     static std::size_t Index(const CpuFragmentObservation& key) { return key.static_plan ? 1 : 0; }
-    static constexpr std::size_t Owners(std::size_t partition) {
-        return partition ? StaticTevPolicy::MaxPsoOwners : 8;
+    constexpr std::size_t Owners(std::size_t partition) const {
+        return partition ? StaticTevPolicy::MaxPsoOwners : full_owners;
     }
     static constexpr std::size_t Attempts(std::size_t partition) {
         return partition ? StaticTevPolicy::MaxPsoAttempts : 64;
     }
+private:
+    const std::size_t full_owners;
 };
 using ReadyCpuBank = Vulkan::AdaptiveCpu::Cache<CpuFragmentObservation, GraphicsPipeline,
                                                CpuFragmentPartitions>;

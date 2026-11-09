@@ -71,9 +71,9 @@ struct PicaCore::DeferredVertexState {
     // grouped scheduling and preparation savings are hardware-qualified.
     u64 preparation_attempts{}, preparation_reuses{}, refused_path_samples{}, refused_path_ns{};
     u64 ready_prefix_packets{}, fallback_boundaries{};
-    explicit DeferredVertexState(unsigned processors)
+    explicit DeferredVertexState(unsigned processors, bool cost_seeds)
         : executor{processors, PacketLimit, 8 * 1024 * 1024,
-                   +[] { Common::SetCurrentThreadName("PICA draw pool"); }, true} {
+                   +[] { Common::SetCurrentThreadName("PICA draw pool"); }, true, cost_seeds} {
         // CodexAstraLocal TEST-ONLY LOG: Sparse preparation costs use the existing
         // report cadence; remove after this isolated CPU comparison is qualified.
         pending.reserve(PacketLimit);
@@ -158,7 +158,8 @@ struct PicaCore::ParallelVertexState {
     };
     NativeParallelBatch batch{Common::Uberhar::AvailableProcessors(), +[] {
         Common::SetCurrentThreadName("UberharVertex");
-    }, Settings::values.uberhar_adaptive_cpu_workers.GetValue()};
+    }, Settings::values.uberhar_adaptive_cpu_workers.GetValue(),
+       Settings::values.uberhar_vertex_memo.GetValue()};
     std::array<Program, 8> programs{};
     Program* current{};
     u64 revision{};
@@ -171,6 +172,8 @@ struct PicaCore::ParallelVertexState {
     // ordered submission from independent background guest-memory writers.
     u64 submission_writes{};
     u64 owner_invocations{}, worker_invocations{}, chunks{};
+    // CodexAstraLocal TEST-ONLY LOG: Remove after exact memo reuse qualification.
+    u64 memo_checks{}, memo_hits{}, memo_collisions{};
     // CodexAstraLocal TEST-ONLY LOG: Remove prefix evidence after target overlap
     // qualification; counts are completed append work, not extra shader work.
     u64 prefix_chunks{}, prefix_inputs{}, prefix_ns{};
@@ -590,8 +593,14 @@ PicaCore::PicaCore(Memory::MemorySystem& memory_, std::shared_ptr<DebugContext> 
       // GPU vertices. Fragment/compute capabilities and worker ownership remain.
       cpu_vertex_only{Settings::UsesReadyGpuVertices(Settings::values.uberhar_test_mode.GetValue()) &&
                       Settings::values.uberhar_cpu_vertex_only.GetValue()},
-      // CodexAstraLocal: Changing overlap never changes worker admission or vertex inputs.
+      // CodexAstraLocal: Existing overlap preserves its vertex inputs; .58's
+      // extra costly-small admission additionally requires the adaptive toggle.
       cpu_prefix_overlap{Settings::values.uberhar_cpu_prefix_overlap.GetValue()},
+      cost_qualified_cpu_seeds{cpu_prefix_overlap &&
+                              Settings::values.uberhar_adaptive_cpu_workers.GetValue()},
+      fast_vertex_conversion{
+          Settings::IsUberharTestProfile(Settings::values.uberhar_test_mode.GetValue()) &&
+          Settings::values.uberhar_fast_vertex_conversion.GetValue()},
       // CodexAstraLocal TEST-ONLY LOG: Internal backend capability keeps producer
       // observation out of Native/Combo after retiring the Software model label.
       // Remove after the internal Software reference is qualified.
@@ -702,7 +711,7 @@ void PicaCore::ReportVirtualVertices(const char* kind, std::chrono::steady_clock
         // experiment is qualified. Reuse bounded progress/final reports.
         // Owner capture/submit wall is not total CPU work or GPU execution time.
         LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
-            "Uberhar deferred CPU draws {}: schema=2 completed={} inputs={} invocations={} "
+            "Uberhar deferred CPU draws {}: schema=3 completed={} inputs={} invocations={} "
             "hits={} queued={} worker_completed={} failed={} waves={} max_wave={} peak_threads={} "
             "coordinator_packets={} auxiliary_packets={} resident_packets={} resident_bytes={} "
             "capacity_drains={} boundaries={} capture_attempts={} refused={} work_refused={} "
@@ -710,11 +719,13 @@ void PicaCore::ReportVirtualVertices(const char* kind, std::chrono::steady_clock
             "deferred_topology_resets={} deferred_primitive_resets={} "
             "early_refused={} group_candidates={} seed_submitted={} group_submitted={} "
             "group_lost={} copy_refused={} grouped_waves={} work_grains={} "
+            "cost_seed_enabled={} cost_qualified_coordinator_seeds={} "
             "adaptive_helpers={} adaptive_samples={} adaptive_rejected={} adaptive_trials={} "
             "adaptive_accepted={} adaptive_reverted={} adaptive_unstable_skipped={} "
             "preparation_reuses={} refused_path_samples={} refused_path_ms={:.3f} "
             "ready_prefix_packets={} fallback_boundaries={} "
-            "scope=complete_list_or_shader_no_gs seed_min_misses=96 max_vertices=255 min_arithmetic=35 "
+            "scope=complete_list_or_shader_no_gs original_seed_min_misses=96 "
+            "cost_seed_min_misses=48 cost_seed_min_work=3360 max_vertices=255 min_arithmetic=35 "
             "group_policy=ready_seed_aggregate_work "
             "max_copy_bytes_per_miss=70 timing=owner_capture_submit_not_frame_time",
             kind, deferred.completed, deferred.inputs, deferred.invocations, deferred.hits,
@@ -727,7 +738,8 @@ void PicaCore::ReportVirtualVertices(const char* kind, std::chrono::steady_clock
             deferred.deferred_primitive_resets, statistics.early_refused,
             statistics.group_candidates, statistics.seed_submitted, statistics.group_submitted,
             statistics.group_lost, statistics.copy_refused, statistics.grouped_waves,
-            statistics.work_grains, statistics.scheduling.desired, statistics.scheduling.samples,
+            statistics.work_grains, statistics.cost_seed_enabled, statistics.cost_qualified_seeds,
+            statistics.scheduling.desired, statistics.scheduling.samples,
             statistics.scheduling.rejected, statistics.scheduling.trials,
             statistics.scheduling.accepted, statistics.scheduling.reverted,
             statistics.scheduling.unstable_skipped,
@@ -847,12 +859,23 @@ void PicaCore::ReportVirtualVertices(const char* kind, std::chrono::steady_clock
         LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
             "Uberhar adaptive cohorts {}: enabled={} hits={} misses={} evictions={} expired={} "
             "unknown_identity={} capacity_resets={} reject=[{},{},{},{},{},{},{}] "
+            "qualification_samples={} cooldown_skipped={} trial_expired={} backoffs={} "
             "typed_append_ranges={} typed_append_inputs={}", kind, scheduling.enabled,
             scheduling.cohort_hits, scheduling.cohort_misses, scheduling.cohort_evictions,
             scheduling.cohort_expired, scheduling.unknown_identity, scheduling.capacity_resets,
             scheduling.reject_reasons[0], scheduling.reject_reasons[1], scheduling.reject_reasons[2],
             scheduling.reject_reasons[3], scheduling.reject_reasons[4], scheduling.reject_reasons[5],
-            scheduling.reject_reasons[6], parallel.typed_append_ranges, parallel.typed_append_inputs);
+            scheduling.reject_reasons[6], scheduling.qualification_samples,
+            scheduling.cooldown_skipped, scheduling.trial_expired, scheduling.backoffs,
+            parallel.typed_append_ranges, parallel.typed_append_inputs);
+        // CodexAstraLocal TEST-ONLY LOG: Inclusive planning cost is in the existing
+        // phase report; this separates eliminated JIT work from ordinary FIFO hits.
+        // Remove after the chunk-local memo has been qualified on real games.
+        LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
+            "Uberhar vertex memo {}: requested={} checks={} reused_invocations={} collisions={} "
+            "scope=certified_draw_chunk immutable_inputs=true fifo_order_preserved=true",
+            kind, Settings::values.uberhar_vertex_memo.GetValue(), parallel.memo_checks,
+            parallel.memo_hits, parallel.memo_collisions);
         LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
             "Uberhar CPU parallel {}: schema=3 available={} created_workers={} peak_threads={} "
             "checks={} batches={} chunks={} owner_invocations={} worker_invocations={} "
@@ -926,8 +949,11 @@ void PicaCore::ReportVirtualVertices(const char* kind, std::chrono::steady_clock
     // CodexAstraUlt Log Line: Replace AstraPro's blocking progress enqueue; totals stay reliable.
     LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
              "Uberhar native plan {}: schema=1 hits={} builds={} capacity=1 "
-             "scope=pica_lifetime reuse=register_semantics_only",
-             kind, native_plan_cache.Hits(), native_plan_cache.Builds());
+             "scope=pica_lifetime reuse=register_semantics_only fast_conversion={} "
+             "fast_output_invocations={} shared_stride_invocations={} "
+             "transport_scope=synchronous_cpu_invocations",
+             kind, native_plan_cache.Hits(), native_plan_cache.Builds(), fast_vertex_conversion,
+             native_fast_output_invocations, native_shared_stride_invocations);
     virtual_window_start = now;
     virtual_last_ns = virtual_vertex_ns;
     virtual_last_inputs = virtual_vertex_inputs;
@@ -2201,7 +2227,8 @@ bool PicaCore::TryDeferredVertices(bool is_indexed,
     const auto mode = Settings::values.uberhar_test_mode.GetValue();
     const auto& pipeline = regs.internal.pipeline;
     // CodexAstraLocal: Independent whole draws retain the original >=96-miss
-    // policy unless they join an actual pending cost-qualified seeded group.
+    // policy with the control OFF. Opt-in expensive >=48-miss seeds must meet
+    // the same total work floor; all other smaller draws require a real group.
     // The executor rechecks that group under Submit's lock, so a vanished
     // opportunity stays synchronous without publishing or waiting to fill work.
     // Capture additionally checks actual FIFO misses, arithmetic and copy volume.
@@ -2228,7 +2255,7 @@ bool PicaCore::TryDeferredVertices(bool is_indexed,
     // CodexAstraLocal: Pure tiny streams retain their original cheap serial
     // route. The hint only rejects early; exact cost/seed ownership is rechecked
     // before capture and under Submit's lock, since a seed can start meanwhile.
-    if (pipeline.num_vertices < 96 &&
+    if (!CpuDrawWorkPolicy::PotentialSeed(pipeline.num_vertices, cost_qualified_cpu_seeds) &&
         (!deferred_vertices || !deferred_vertices->executor.HasPendingSeed()))
         return false;
     // CodexAstraLocal: Avoid an affinity syscall for every small draw. The pool
@@ -2245,7 +2272,8 @@ bool PicaCore::TryDeferredVertices(bool is_indexed,
     try {
         if (!deferred_vertices) {
             try {
-                deferred_vertices = std::make_unique<DeferredVertexState>(deferred_processors);
+                deferred_vertices = std::make_unique<DeferredVertexState>(deferred_processors,
+                                                                         cost_qualified_cpu_seeds);
             } catch (const std::system_error&) {
                 // CodexAstraLocal: No task exists during thread startup failure;
                 // disable the optional route and retain ordinary synchronous work.
@@ -2319,6 +2347,7 @@ bool PicaCore::TryDeferredVertices(bool is_indexed,
         source.shader_lease = std::move(lease);
         source.shader = regs.internal.vs;
         source.rasterizer = regs.internal.rasterizer;
+        source.fast_conversion = fast_vertex_conversion;
         source.uniforms = vs_setup.uniforms;
         source.defaults = input_default_attributes;
         source.available_attributes = loader.GetNumTotalAttributes();
@@ -2446,7 +2475,8 @@ void PicaCore::LoadVertices(bool is_indexed, std::chrono::steady_clock::time_poi
     if (virtual_test && !debug_context && pipeline.use_gs == PipelineRegs::UseGS::No) {
         // AstraPro: Refresh on exact mapping changes; live inputs and uniforms
         // are still loaded and shaded for every FIFO miss in this draw.
-        const auto& plan = native_plan_cache.Get(regs.internal.vs, regs.internal.rasterizer);
+        const auto& plan = native_plan_cache.Get(regs.internal.vs, regs.internal.rasterizer,
+                                                 fast_vertex_conversion);
         if (plan.Supported()) {
             // AstraEH: A conservative index-domain bound avoids a second index scan.
             // Pin each guest span for this draw only; range uncertainty retains the
@@ -2470,7 +2500,7 @@ void PicaCore::LoadVertices(bool is_indexed, std::chrono::steady_clock::time_poi
                     },
                     // CodexAstraLocal: Whole recipes remain draw-local and are
                     // reselected after each range retry; empty draws avoid selection.
-                    pipeline.num_vertices != 0);
+                    pipeline.num_vertices != 0, fast_vertex_conversion);
             };
             auto input_result = prepare_input(maximum_vertex);
             bool rescued_input = false;
@@ -2736,6 +2766,9 @@ void PicaCore::LoadVertices(bool is_indexed, std::chrono::steady_clock::time_poi
                         }
                     }, append, measure_parallel, cpu_prefix_overlap, adaptive_identity);
                 const auto& work = parallel.batch.LastWork();
+                parallel.memo_checks += work.memo_checks;
+                parallel.memo_hits += work.memo_hits;
+                parallel.memo_collisions += work.memo_collisions;
                 parallel.typed_append_ranges += work.typed_append_ranges;
                 parallel.typed_append_inputs += work.typed_append_inputs;
                 ++parallel.parallel_batches;
@@ -2868,6 +2901,10 @@ void PicaCore::LoadVertices(bool is_indexed, std::chrono::steady_clock::time_poi
             ++native_vertex_batches;
             native_vertex_inputs += pipeline.num_vertices;
             native_vertex_conversions += counts.invocations;
+            if (plan.FastRecipe())
+                native_fast_output_invocations += counts.invocations;
+            if (input_plan.Ready() && input_plan.SharedStrideRecipe())
+                native_shared_stride_invocations += counts.invocations - escaped_input_vertices;
             native_vertex_reuses += counts.hits;
             virtual_vertex_invocations += counts.invocations;
             virtual_vertex_hits += counts.hits;

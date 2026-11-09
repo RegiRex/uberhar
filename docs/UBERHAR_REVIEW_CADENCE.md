@@ -1,3 +1,12 @@
+<!-- CodexAstraLocal: Record independent .58 integration/consumer review without inventing a whole-history audit. -->
+**Current scoped checkpoint: [0.1.58 integration review](UBERHAR_REVIEW_0.1.58.md).**
+The review covers CPU recipes/result ownership, packed transport, conservative
+clipping, pass boundaries, shader/cache identity, settings and compact telemetry.
+It reconciles prior proposals against existing implementations. This does not
+claim a new audit of every inherited line or advance hardware qualification.
+
+---
+
 <!-- CodexAstraLocal: Record the regression-triggered .52 interaction review without resetting the historical full-code audit scope. -->
 **Current checkpoint: [0.1.52 scoped integration review](UBERHAR_REVIEW_0.1.52.md).**
 Independent review covers scene-change shader replacement, fragments, image work,

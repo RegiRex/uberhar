@@ -13,6 +13,7 @@
 #include "common/bit_field.h"
 #include "common/common_types.h"
 #include "common/thread.h"
+#include "common/uberhar_frame_telemetry.h"
 #include "core/uberhar_frame_diagnostics.h" // AstraEH: Overlay-independent frame evidence.
 
 namespace Core {
@@ -69,7 +70,7 @@ public:
         double time_swap;
         // Walltime in seconds of the vblank interval spent in other operations
         double time_remaining;
-        /// Ratio of walltime / emulated time elapsed
+        /// Ratio of emulated time / walltime elapsed
         double emulation_speed;
         /// Artic base bytes per second
         double artic_transmitted = 0;
@@ -86,8 +87,14 @@ public:
     void StartSwap();
     void EndSwap();
     void BeginSystemFrame();
-    void EndSystemFrame(std::chrono::microseconds guest_time);
+    void EndSystemFrame(std::chrono::microseconds guest_time, s64 guest_ticks,
+                        u32 effective_resolution);
     void EndGameFrame();
+
+    // CodexAstraLocal: Actual settings application and explicit scene markers break
+    // homogeneous sections. No preferences are changed; scene zero means unknown.
+    void NotifyTelemetryContextChanged() { telemetry_generation.fetch_add(1, std::memory_order_relaxed); }
+    void SetTelemetryScene(u64 scene) { telemetry_scene.store(scene, std::memory_order_relaxed); }
 
     // AstraEH: Call on the core loop around an actual pause or modal core-error wait.
     void BeginUberharPause(const char* reason);
@@ -134,6 +141,11 @@ private:
     void LogUberharFrames(const char* kind, const UberharFrameDiagnostics::Counters& data) const;
     // AstraEH: Sample at startup, five-second boundaries, resume and final shutdown.
     void LogUberharSettings(const char* event);
+    void LogFrameTelemetry(u32 reason, bool final = false);
+    void LogFrameTelemetryContext();
+    Common::FrameTelemetry::Accumulator frame_telemetry;
+    std::atomic<u64> telemetry_generation{1}, telemetry_scene{};
+    u64 telemetry_observed_generation{}, telemetry_sequence{}, telemetry_submit_failures{};
     std::string uberhar_settings;
     u64 uberhar_settings_changes{};
     UberharFrameDiagnostics uberhar_frames;

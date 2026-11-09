@@ -163,12 +163,21 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
             ready_vertex_worker = std::make_unique<Common::ThreadWorker>(1, "Uberhar optional");
     }
     // CodexAstraLocal: Optional metadata failure leaves complete generic draws.
-    // Native and full Combo retain eight full owners/64 initial credits and both
-    // can add eight partial owners/16 initial credits. Other modes omit the CPU bank.
+    // Native/full Combo select 8 or 16 full residents once, plus eight partial
+    // owners. Initial 64/16 work credits and every owner lifetime guard are unchanged.
     if (ready_vertex_worker && allow_static_cpu_tev) {
-        try { ready_cpu_bank = std::make_unique<ReadyCpuBank>(); }
+        try {
+            ready_cpu_bank = std::make_unique<ReadyCpuBank>(CpuFragmentPartitions{
+                Settings::values.uberhar_full_pipeline_bank_16.GetValue()});
+        }
         catch (...) { ++ready_cpu_admission_failures; }
     }
+    // CodexAstraLocal TEST-ONLY LOG: Report the frozen capacity, not a later UI
+    // preference. This is a resident owner bound, not bytes or compiler concurrency.
+    if (ready_cpu_bank) LOG_INFO(Render_Vulkan,
+        "Uberhar CPU pipeline capacity: full={} partial={} total={} "
+        "initial_full_credit=64 initial_partial_credit=16 shared_credit=256 launch_owned=true",
+        ready_cpu_bank->Capacity(0), ready_cpu_bank->Capacity(1), ready_cpu_bank->Capacity());
     scheduler.RegisterOnDispatch([this] { update_queue.Flush(); });
     profile = Pica::Shader::Profile{
         .enable_accurate_mul = false,
@@ -183,6 +192,10 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
         .has_logic_op = !instance.NeedsLogicOpEmulation(),
         .vk_disable_spirv_optimizer = Settings::values.disable_spirv_optimizer.GetValue(),
         .vk_use_spirv_generator = Settings::values.spirv_shader_gen.GetValue(),
+        // CodexAstraLocal: Workers consume the immutable profile; a later UI
+        // setting edit cannot change this launch's generated or cached modules.
+        .vk_prune_tev = Settings::IsUberharTestProfile(Settings::values.uberhar_test_mode.GetValue()) &&
+                       Settings::values.uberhar_prune_spirv.GetValue(),
         .is_vulkan = true,
     };
 
@@ -1561,6 +1574,12 @@ void PipelineCache::UseTrivialVertexShader() {
     shader_hashes[ProgramType::VS] = 0;
 }
 
+bool PipelineCache::UsesTrivialVertexPipeline() const {
+    return current_shaders[ProgramType::VS] == &trivial_vertex_shader &&
+           current_shaders[ProgramType::GS] == nullptr &&
+           shader_hashes[ProgramType::VS] == 0 && shader_hashes[ProgramType::GS] == 0;
+}
+
 bool PipelineCache::UseFixedGeometryShader(const Pica::RegsInternal& regs) {
     // CodexAstraLocal: Native's CPU-FS lane leaves inherited GS admission unchanged.
     auto res = curr_disk_cache->UseFixedGeometryShader(regs, allow_ready_gpu_vertices);
@@ -2186,9 +2205,9 @@ void PipelineCache::ReportUberharStats(const char* kind) {
                 "owned={} max_owned={} cpu_attempts={} combined_attempts={} "
                 "observations={} probation={} collisions={} retirements={} destroyed={} failed_keys={} "
                 "queue_failures={} exhausted={} stale_tokens={} disabled={} "
-                "max_cpu=16 initial_cpu_credit=80 initial_shared_credit=256 "
+                "max_cpu={} initial_cpu_credit=80 initial_shared_credit=256 "
                 "full_owned={} partial_owned={} full_attempts={} partial_attempts={} "
-                "max_full=8 max_partial=8 initial_full_credit=64 initial_partial_credit=16 renewable=true "
+                "max_full={} max_partial={} initial_full_credit=64 initial_partial_credit=16 renewable=true "
                 "partial_generator=static_tev_runtime_lighting",
                 kind, ready_cpu_bank->Swap(), ownership[0], ownership[1], ownership[2],
                 ownership[3], ownership[4], ownership[5], ownership[6], ReadyCpuOwned(),
@@ -2196,8 +2215,10 @@ void PipelineCache::ReportUberharStats(const char* kind) {
                 adaptation.observations, adaptation.probation, adaptation.collisions, adaptation.retirements,
                 adaptation.destroyed, adaptation.failed_keys, adaptation.queue_failures,
                 adaptation.exhausted, adaptation.stale_tokens, ready_cpu_bank->Disabled(),
+                ready_cpu_bank->Capacity(),
                 ready_cpu_bank->Owned(0), ready_cpu_bank->Owned(1),
-                ready_cpu_bank->Attempts(0), ready_cpu_bank->Attempts(1));
+                ready_cpu_bank->Attempts(0), ready_cpu_bank->Attempts(1),
+                ready_cpu_bank->Capacity(0), ready_cpu_bank->Capacity(1));
             // CodexAstraLocal Log Line: Final-only, the most recent 80 attempted keys,
             // including failed/retired owners. The observation hash is a bucket,
             // not actor identity or a replacement for exact key equality.
@@ -2224,12 +2245,13 @@ void PipelineCache::ReportUberharStats(const char* kind) {
         LOG_INFO_WITH_DELIVERY(Render_Vulkan, delivery,
             "Uberhar ready CPU fragments {}: schema=1 requests={} selected={} dependencies={} "
             "deferred={} capped={} mismatches={} failed_hits={} admission_failures={} "
-            "pipelines={} max_cpu_pipelines=16 combined_pipelines={} max_combined_pipelines=256 "
+            "pipelines={} max_cpu_pipelines={} combined_pipelines={} max_combined_pipelines=256 "
             "selected_unlit={} selected_lit={} bank_unlit={} bank_lit={} "
             "static_tev_selected={} full_specialized_selected={} weighting=draws",
             kind, ready_cpu_requests, ready_cpu_selected, ready_cpu_dependencies,
             ready_cpu_deferred, ready_cpu_capped, ready_cpu_mismatches, ready_cpu_failed_hits,
             ready_cpu_admission_failures, ReadyCpuOwned(),
+            ready_cpu_bank ? ready_cpu_bank->Capacity() : 0,
             ReadyCpuOwned() + ready_vertex_pipelines.size(),
             ready_cpu_selected_lighting[0], ready_cpu_selected_lighting[1],
             ready_cpu_bank_lighting[0], ready_cpu_bank_lighting[1],

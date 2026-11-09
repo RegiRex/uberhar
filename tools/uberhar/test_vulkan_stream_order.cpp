@@ -23,9 +23,12 @@
 #include <type_traits>
 #include <utility>
 #include <vector>
+#include "video_core/renderer_vulkan/uberhar_pass_union.h"
+#include "video_core/uberhar_owned_vertex_upload.h"
 #include "common/uberhar_sampled_duration.h" // CodexAstraLocal: Real sparse timer, no changed ordering.
 
 using u8 = std::uint8_t;
+using u16 = std::uint16_t;
 using u32 = std::uint32_t;
 using u64 = std::uint64_t;
 using s32 = std::int32_t;
@@ -41,6 +44,7 @@ struct ShaderRecoveryError : std::runtime_error {
 // CodexAstraLocal: Extract the real texture-type values for the new storage-read
 // pass guard; the recording fixture keeps all texture inputs at ordinary 2D.
 namespace Pica {
+struct PipelineRegs { enum class UseGS { No, Yes }; enum class TriangleTopology { List, Strip }; };
 struct TexturingRegs { struct TextureConfig {
 #include "texture-types.inc"
 }; };
@@ -131,6 +135,7 @@ enum class ImageLayout : u32 { eGeneral };
 enum class DependencyFlagBits : u32 { eByRegion };
 enum class SubpassContents : u32 { eInline };
 enum class PipelineBindPoint : u32 { eGraphics };
+enum class IndexType : u32 { eUint16 };
 enum class CommandBufferUsageFlagBits : u32 { eOneTimeSubmit = 1 };
 
 template <class T> requires std::is_enum_v<T>
@@ -223,6 +228,10 @@ struct CommandBuffer {
         d->vertex_offset = offset;
         d->Event(id, "bind-vertices");
     }
+    // CodexAstraLocal: Indexed byte reconstruction has its own actual uploader
+    // fixture. This ordering population keeps that control OFF explicitly.
+    void bindIndexBuffer(Buffer, u64, IndexType) { Require(false, "unexpected indexed branch"); }
+    void drawIndexed(u32, u32, u32, s32, u32) { Require(false, "unexpected indexed draw"); }
     void draw(u32 n, u32, u32, u32) {
         auto& state = d->states[id];
         const auto expected = d->expected.at(d->draws.size());
@@ -338,6 +347,7 @@ public:
             if (queued->submit) AllocateWorkerCommandBuffers();
         }
     }
+    bool HasWorkerThread() const { return use_worker_thread; }
     void Flush(vk::Semaphore signal = nullptr, vk::Semaphore wait = nullptr);
     void Wait(u64);
     void DispatchWork();
@@ -354,6 +364,7 @@ struct Framebuffer {
     u64 handle{1};
     u64 Handle() const { return handle; }
     u64 RenderPass() const { return 2; }
+    vk::Extent2D Extent() const { return {32,32}; }
     std::array<u64, 2> Images() const { return {1, 2}; }
     std::array<u32, 2> Aspects() const { return {1, 2}; }
 };
@@ -387,11 +398,15 @@ public:
     // oracle. Its actual guards remain compiled; test_work_reduction covers ON.
     bool containment_eligible{}, reuse_contained_pass{};
     u64 contained_pass_reuses{}, containment_refusals{}, containment_submission_boundaries{};
-    RenderPass pass{};
+    RenderPass pass{}, last_requested_pass{};
+    vk::Extent2D pass_extent{};
+    u64 union_candidates{}, union_incompatible{}, union_submission_refusals{},
+        union_requested_pixels{}, union_started_pixels{};
+    std::array<u64, static_cast<std::size_t>(PassUnionPolicy::Decision::Count)> union_decisions{};
     u32 num_draws{};
     void BeginRendering(const Framebuffer*, Common::Rectangle<u32>, bool reads_storage = false);
     void BeginRendering(const RenderPass&, bool framebuffer_pass = false,
-                        bool allow_containment = false);
+                        bool allow_containment = false, vk::Extent2D framebuffer_extent = {});
     void EndRendering(PassEndReason reason = PassEndReason::Explicit);
 };
 enum class BufferType : u32 { Upload, Download, Stream };
@@ -428,6 +443,7 @@ public:
     void Commit(u32);
     bool CanDeferUpload() const noexcept;
     std::optional<DeferredMapping> MapDeferredUpload(u32,u64);
+    std::optional<DeferredMapping> SnapshotDeferredMapping(u32) const noexcept;
     std::optional<DeferredUpload> CommitDeferredUpload(const DeferredMapping&);
     void ReserveWatches(std::vector<Watch>&, std::size_t);
     void WaitPendingOperations(u64);
@@ -488,12 +504,25 @@ struct Packet {
     void Wait() const {}
     std::span<const u8> HardwareBytes() const { return bytes; }
 };
+using TriangleTopology = Pica::PipelineRegs::TriangleTopology;
 struct Raster {
     Scheduler& scheduler;
     RenderManager& renderpass_cache;
     StreamBuffer& stream_buffer;
     PipelineCache pipeline_cache;
     std::vector<HardwareVertex> vertex_batch;
+    // CodexAstraLocal: These independent optimization controls remain OFF in
+    // the inherited36-case ordering oracle; their complete production branches
+    // still compile. Dedicated indexed/owned fixtures exercise ON byte lifetime.
+    bool indexed_cpu_output_enabled{}, worker_cpu_upload_enabled{};
+    VideoCore::OwnedVertexUpload<HardwareVertex> owned_vertex_upload;
+    u64 worker_upload_attempts{}, worker_upload_owner_samples{}, worker_upload_owner_ns{};
+    struct CpuOutputUpload { u32 bytes{}, index_offset{}; bool indexed{}; };
+    CpuOutputUpload UploadCpuOutput(std::span<u8>, bool) {
+        Require(false, "unexpected indexed preparation"); return {};
+    }
+    bool vertex_capture{}, ready_vertex_attempt{};
+    std::optional<int> compute_packet;
     Framebuffer framebuffer;
     Common::Rectangle<u32> draw_rect{0, 32, 32, 0};
     u32 pipeline_info{}, software_layout{};
@@ -505,6 +534,8 @@ struct Raster {
     };
     struct {
         struct { DiagnosticTarget framebuffer; } framebuffer;
+        struct { Pica::PipelineRegs::UseGS use_gs{Pica::PipelineRegs::UseGS::No};
+            TriangleTopology triangle_topology{TriangleTopology::List}; } pipeline;
         // CodexAstraLocal: Explicit ordinary-texture/no-shadow inputs let the
         // unchanged production setup compute its real pass hazard argument.
         struct { struct { struct {
@@ -547,6 +578,7 @@ struct Raster {
             deferred->bytes.assign(first,first+count*88);vertex_batch.clear();
         }
         const bool accelerate = false;
+        bool indexed_cpu_draw = false;
         const auto* framebuffer = &this->framebuffer;
         const int timing_slot = sampled ? 0 : -1;
         ComputeQueries queries{scheduler};
@@ -585,10 +617,11 @@ int main(int argc, char** argv) {
         const int mutant = argc > 1 ? std::stoi(argv[1]) : 0;
         // CodexAstraLocal: Execute each intended defect on both independent routes.
         const int route = argc > 2 ? std::stoi(argv[2]) : 0;
-        unsigned cases{};
+        unsigned cases{}, legacy_checks{};
         // CodexAstraLocal: Keep all prior ordinary sample/owner combinations;
         // permanent-state deferred admission has no GPU sample query.
-        for (bool deferred : {false,true}) for (bool sampled : {false,true}) {
+        for (bool worker : {false,true}) for (bool deferred : {false,true}) for (bool sampled : {false,true}) {
+            if (worker && (deferred || mutant)) continue;
             if((route==1 && deferred) || (route==2 && !deferred) || (deferred && sampled)) continue;
             for (bool optional : {false, true}) {
                 for (const std::string name : {"no_wrap", "old_pending", "old_complete",
@@ -598,11 +631,12 @@ int main(int argc, char** argv) {
                     Scheduler scheduler(driver);
                     RenderManager manager{instance, scheduler};
                     scheduler.on_submit = [&] { manager.EndRendering(); };
-                    StreamBuffer buffer{instance, scheduler, 8192};
+                    StreamBuffer buffer{instance, scheduler, worker ? 524288U : 8192U};
                     Raster raster{scheduler, manager, buffer, PipelineCache{optional, scheduler}};
+                    raster.worker_cpu_upload_enabled = worker;
                     const bool wraps = name == "old_pending" || name == "old_complete" ||
                                        name == "current_wrap" || name == "wrap_and_mali";
-                    raster.Draw(wraps ? 90 : 3, false, mutant, deferred);
+                    raster.Draw(worker ? (wraps ? 5949U : 768U) : (wraps ? 90U : 3U), false, mutant, deferred);
                     raster.Draw(3, false, mutant, deferred);
                     if (name == "old_pending" || name == "old_complete") {
                         scheduler.Flush();
@@ -616,7 +650,7 @@ int main(int argc, char** argv) {
                         manager.num_draws = MinDrawsToFlush + 1;
                         raster.framebuffer.handle = 3;
                     }
-                    raster.Draw(3, sampled, mutant, deferred);
+                    raster.Draw(worker ? 768U : 3U, sampled, mutant, deferred);
                     Require(manager.pass.render_pass != 0 &&
                                 !scheduler.IsStateDirty(StateFlags::Pipeline), "final owner state ready");
                     scheduler.DispatchWork();
@@ -638,7 +672,12 @@ int main(int argc, char** argv) {
                                     driver.query_end_ticks[0] == driver.draw_ticks.back(),
                                 "sample stays on final draw tick");
                     }
-                    std::cout << "CASE " << name << " deferred=" << deferred << " sampled=" << sampled << " optional=" << optional
+                    if (worker) {
+                        const auto stats = raster.owned_vertex_upload.GetStatistics();
+                        Require(stats.acquired == 2 && stats.published == 2 && !stats.copy_failures,
+                                "two owned uploads published once before their draws");
+                    }
+                    std::cout << "CASE " << name << " worker=" << worker << " deferred=" << deferred << " sampled=" << sampled << " optional=" << optional
                               << " tick=" << scheduler.CurrentTick()
                               << " bytes=exact draws=3 selects=3 watch_tick=" << driver.draw_ticks.back()
                               << " last_cb=" << driver.draws.back().cb
@@ -647,10 +686,15 @@ int main(int argc, char** argv) {
                     // of command ordering; it is not runtime diagnostic output.
                     for (const auto& event : driver.events) std::cout << " EVENT " << event << '\n';
                     ++cases;
+                    if (!worker) legacy_checks = checks;
                 }
             }
         }
-        std::cout << "PASS cases=" << cases << " checks=" << checks << '\n';
+        // CodexAstraLocal: Keep the complete inherited ordering population while
+        // adding actual owned-upload branches with final tick/ring-wrap witnesses.
+        if (!mutant && !route) Require(legacy_checks == 1252, "original36 checks preserved");
+        std::cout << "PASS cases=" << cases << " checks=" << checks
+                  << " legacy_checks=" << legacy_checks << '\n';
     } catch (const std::exception& error) {
         std::cerr << "FAIL " << error.what() << '\n';
         return 1;

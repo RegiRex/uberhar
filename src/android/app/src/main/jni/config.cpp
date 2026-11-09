@@ -158,9 +158,16 @@ bool Config::KeepRunningValue(const std::string& key) const {
         Settings::Keys::uberhar_adaptive_cpu_workers,
         Settings::Keys::uberhar_gpu_observer,
         Settings::Keys::uberhar_frame_workload_census,
-        Settings::Keys::uberhar_static_dynamic_state,
         Settings::Keys::uberhar_prepare_displayed_eye_only,
         Settings::Keys::uberhar_early_right_eye,
+        Settings::Keys::uberhar_fast_vertex_conversion,
+        Settings::Keys::uberhar_vertex_memo,
+        Settings::Keys::uberhar_worker_cpu_upload,
+        Settings::Keys::uberhar_cpu_clip_reject,
+        Settings::Keys::uberhar_full_pipeline_bank_16,
+        Settings::Keys::uberhar_prune_spirv,
+        Settings::Keys::uberhar_indexed_cpu_output,
+        Settings::Keys::uberhar_mono_guest_3d,
         Settings::Keys::uberhar_hybrid_tev,
         Settings::Keys::uberhar_force_tev,
         Settings::Keys::uberhar_cpu_vertex_bridge,
@@ -204,9 +211,16 @@ std::string TestingKey(const std::string& key) {
         Settings::Keys::uberhar_adaptive_cpu_workers,
         Settings::Keys::uberhar_gpu_observer,
         Settings::Keys::uberhar_frame_workload_census,
-        Settings::Keys::uberhar_static_dynamic_state,
         Settings::Keys::uberhar_prepare_displayed_eye_only,
         Settings::Keys::uberhar_early_right_eye,
+        Settings::Keys::uberhar_fast_vertex_conversion,
+        Settings::Keys::uberhar_vertex_memo,
+        Settings::Keys::uberhar_worker_cpu_upload,
+        Settings::Keys::uberhar_cpu_clip_reject,
+        Settings::Keys::uberhar_full_pipeline_bank_16,
+        Settings::Keys::uberhar_prune_spirv,
+        Settings::Keys::uberhar_indexed_cpu_output,
+        Settings::Keys::uberhar_mono_guest_3d,
     };
     if (std::ranges::find(experiments, key) != experiments.end()) return key;
     if (key == Settings::Keys::disable_right_eye_render ||
@@ -405,9 +419,16 @@ void Config::ReadValues() {
     ReadSetting("Renderer", Settings::values.uberhar_adaptive_cpu_workers);
     ReadSetting("Renderer", Settings::values.uberhar_gpu_observer);
     ReadSetting("Renderer", Settings::values.uberhar_frame_workload_census);
-    ReadSetting("Renderer", Settings::values.uberhar_static_dynamic_state);
     ReadSetting("Renderer", Settings::values.uberhar_prepare_displayed_eye_only);
     ReadSetting("Renderer", Settings::values.uberhar_early_right_eye);
+    ReadSetting("Renderer", Settings::values.uberhar_fast_vertex_conversion);
+    ReadSetting("Renderer", Settings::values.uberhar_vertex_memo);
+    ReadSetting("Renderer", Settings::values.uberhar_worker_cpu_upload);
+    ReadSetting("Renderer", Settings::values.uberhar_cpu_clip_reject);
+    ReadSetting("Renderer", Settings::values.uberhar_full_pipeline_bank_16);
+    ReadSetting("Renderer", Settings::values.uberhar_prune_spirv);
+    ReadSetting("Renderer", Settings::values.uberhar_indexed_cpu_output);
+    ReadSetting("Renderer", Settings::values.uberhar_mono_guest_3d);
     ReadSetting("Renderer", Settings::values.uberhar_cpu_prefix_overlap);
     ReadSetting("Renderer", Settings::values.uberhar_parallel_texture_decode);
     // CodexAstraLocal: Freeze optional census before any worker owner is constructed.

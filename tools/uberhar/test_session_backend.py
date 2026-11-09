@@ -5,8 +5,11 @@ from pathlib import Path
 import signal  # CodexAstraUlt: Verify fatal subprocess signal termination, not a timeout.
 import subprocess
 import tempfile
+import os
 
 root = Path(__file__).resolve().parents[2]
+fmt_include = Path(os.environ.get('UBERHAR_FMT_INCLUDE', root / 'externals/fmt/include'))
+libretro_include = Path(os.environ.get('UBERHAR_LIBRETRO_INCLUDE', root / 'externals/libretro-common/libretro-common/include'))
 source = (root / 'src/common/logging/backend.cpp').read_text()
 start = source.index('class FileBackend final : public Backend {')
 end = source.index('\n};', start) + 3
@@ -54,6 +57,7 @@ prefix = r'''
 // CodexAstraUlt: Format the real production omission record with the pinned fmt headers.
 #define FMT_HEADER_ONLY
 #include <fmt/format.h>
+#include "common/logging/frame_telemetry.h" // CodexAstraLocal: Actual compact channel/formatter.
 namespace Common { void SetCurrentThreadName(const char*) {} }
 namespace fs = std::filesystem;
 namespace Common::Literals {
@@ -115,6 +119,12 @@ struct SilentBackend : Backend {
 worker_prefix = r'''
 struct Logger {
     FileBackend file_backend;
+    // CodexAstraLocal: Exercise the unchanged production compact worker/sink as well.
+    FrameTelemetryChannel frame_telemetry;
+    FrameTelemetryStatus telemetry_last_status{};
+    std::string telemetry_prefix;
+    std::unique_ptr<FileUtil::IOFile> telemetry_file;
+    u64 telemetry_bytes{}, telemetry_chunk{};
     SilentBackend debugger_backend;
     SilentBackend color_console_backend;
 #ifdef HAVE_LIBRETRO
@@ -137,9 +147,9 @@ struct Logger {
     std::jthread backend_thread;
 #ifdef HAVE_LIBRETRO
     Logger(const std::string& file, retro_log_printf_t callback = nullptr)
-        : file_backend{file, false}, libretro_backend{callback} {}
+        : file_backend{file, false}, telemetry_prefix{file + ".telemetry-"}, libretro_backend{callback} {}
 #else
-    Logger(const std::string& file) : file_backend{file, false} {}
+    Logger(const std::string& file) : file_backend{file, false}, telemetry_prefix{file + ".telemetry-"} {}
 #endif
 '''
 worker_suffix = '\n};\n'
@@ -219,6 +229,35 @@ int main(int argc, char** argv) {
     const auto capped=root/"capped.txt";
     std::ofstream(capped).close(); fs::resize_file(capped,100ULL*1024*1024);
     { FileBackend writer{capped.string(),false}; assert(!writer.Healthy()); }
+    {
+        // CodexAstraLocal: Ordinary 100MiB exhaustion cannot hide compact final data;
+        // exercise the actual existing worker shutdown path and its separate flush ack.
+        Logger logger{capped.string()};
+        Common::FrameTelemetry::Record final;
+        final.kind = Common::FrameTelemetry::Kind::Final;
+        assert(logger.frame_telemetry.Submit(final));
+        logger.StartBackendThread();
+        logger.StopBackendThread();
+        assert(logger.frame_telemetry.Status().final_written == 1);
+        const auto compact = read(capped.string() + ".telemetry-000000.jsonl");
+        assert(compact.find("\"kind\":\"final\"") != std::string::npos);
+        assert(compact.find("\"final_written_and_flushed\":1") != std::string::npos);
+        // Force the size boundary, without writing 16MiB of irrelevant fixture data.
+        logger.telemetry_bytes = 16 * 1024 * 1024;
+        assert(logger.frame_telemetry.Submit(final));
+        logger.DrainFrameTelemetry();
+        assert(fs::exists(capped.string() + ".telemetry-000001.jsonl"));
+        assert(read(capped.string() + ".telemetry-000000.jsonl") == compact);
+    }
+    {
+        Logger missing{(root/"absent"/"telemetry.txt").string()};
+        Common::FrameTelemetry::Record final;
+        final.kind = Common::FrameTelemetry::Kind::Final;
+        assert(missing.frame_telemetry.Submit(final));
+        missing.StartBackendThread(); missing.StopBackendThread();
+        assert(missing.frame_telemetry.Status().write_failures == 1);
+        assert(missing.frame_telemetry.Status().final_written == 0);
+    }
     // CodexAstraUlt: Omissions reach the actual file before a flush barrier is
     // acknowledged, even when the ordinary five-second report cadence is pending.
     const auto omitted = (root/"omissions.txt").string();
@@ -377,7 +416,7 @@ with tempfile.TemporaryDirectory(prefix='uberhar-session-backend-') as temporary
     cpp.write_text(prefix + production + worker_prefix + worker + fanout + worker_suffix + suffix)
     # CodexAstraUlt: Use only the repository's existing fmt dependency for the new reporter.
     subprocess.run(['c++', '-std=c++20', '-O2', '-I' + str(root / 'src'),
-                    '-I' + str(root / 'externals/fmt/include'), str(cpp),
+                    '-I' + str(fmt_include), str(cpp),
                     '-o', str(directory / 'test')], check=True)
     subprocess.run([str(directory / 'test'), str(directory / 'files')], check=True, timeout=15)
     # CodexAstraUlt: Compile platform variants independently of the host build flags.
@@ -385,8 +424,8 @@ with tempfile.TemporaryDirectory(prefix='uberhar-session-backend-') as temporary
     retro_cpp.write_text(prefix + libretro + production + worker_prefix + worker + fanout +
                         worker_suffix + libretro_suffix)
     subprocess.run(['c++', '-std=c++20', '-O2', '-DHAVE_LIBRETRO', '-I' + str(root / 'src'),
-                    '-I' + str(root / 'externals/fmt/include'),
-                    '-I' + str(root / 'externals/libretro-common/libretro-common/include'),
+                    '-I' + str(fmt_include),
+                    '-I' + str(libretro_include),
                     str(retro_cpp), '-o', str(directory / 'retro')], check=True)
     subprocess.run([str(directory / 'retro')], check=True, timeout=5)
     signal_cpp = directory / 'signal.cpp'

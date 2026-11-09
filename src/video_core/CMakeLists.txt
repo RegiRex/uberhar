@@ -18,6 +18,7 @@ add_library(video_core STATIC EXCLUDE_FROM_ALL
     rasterizer_accelerated.cpp
     rasterizer_accelerated.h
     rasterizer_interface.h
+    uberhar_cpu_clip_reject.h # CodexAstraLocal: Exact default-OFF postpacked X/Y rejection.
     renderer_base.cpp
     renderer_base.h
     # CodexAstraUlt-2: Shared compiler completion and terminal command-stream handoff.

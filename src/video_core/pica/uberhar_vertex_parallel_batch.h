@@ -28,6 +28,9 @@ public:
     };
     struct Work {
         u64 owner_invocations{}, worker_invocations{}, chunks{};
+        // CodexAstraLocal TEST-ONLY LOG: Exact extra reuse, never inherited FIFO hits.
+        // Retire after this independent-shader memo is hardware-qualified.
+        u64 memo_checks{}, memo_hits{}, memo_collisions{};
         // CodexAstraLocal: Count useful completed prefixes, not requested workers.
         u64 prefix_chunks{}, prefix_inputs{}, prefix_ns{};
         u64 typed_append_ranges{}, typed_append_inputs{}; // CodexAstraLocal: Actual route coverage.
@@ -40,9 +43,10 @@ public:
     static constexpr u32 Grain = 64;
 
     explicit NativeParallelBatch(unsigned processors = Common::Uberhar::AvailableProcessors(),
-                                 void (*worker_start)() = nullptr, bool adaptive = true)
+                                 void (*worker_start)() = nullptr, bool adaptive = true,
+                                 bool memoize = false)
         : pool{processors, worker_start, Common::Uberhar::AuxiliaryBudget::Global(),
-               nullptr, adaptive} {}
+               nullptr, adaptive}, memo_enabled{memoize} {}
 
     unsigned Available() const { return pool.Available(); }
     unsigned CreatedWorkers() const { return pool.CreatedWorkers(); }
@@ -96,6 +100,11 @@ public:
                 for (u32 slot = 0; slot < cache_sources.size(); ++slot)
                     cache_sources[slot] = capacity + slot;
             }
+            // CodexAstraLocal: Only the caller-certified independent immutable
+            // draw lane may enable this memo. Reset per chunk so borrowed result
+            // indices never escape their generation; original FIFO order survives.
+            const bool memo_active = memo_enabled && indexed && size >= 128;
+            if (memo_active) memo_valid.fill(false);
             u32 misses{};
             for (u32 offset = 0; offset < size; ++offset) {
                 const auto input = static_cast<u32>(begin + offset);
@@ -105,11 +114,28 @@ public:
                     references[offset] = cache_sources[slot];
                     ++counts.hits;
                 } else {
-                    invocations[misses] = {vertex, input};
-                    references[offset] = misses;
+                    u32 source = misses;
+                    bool reused = false;
+                    if (memo_active) {
+                        ++work.memo_checks;
+                        const u32 bucket = (vertex ^ (vertex >> 8)) & 255;
+                        reused = memo_valid[bucket] && memo_keys[bucket] == vertex;
+                        if (reused) {
+                            source = memo_sources[bucket];
+                            ++work.memo_hits;
+                        } else {
+                            work.memo_collisions += memo_valid[bucket];
+                            memo_valid[bucket] = true;
+                            memo_keys[bucket] = vertex;
+                            memo_sources[bucket] = source;
+                        }
+                    }
+                    references[offset] = source;
+                    // CodexAstraLocal: A memo hit is still a guest FIFO miss;
+                    // insert it normally and preserve the later eviction order.
                     if (indexed)
-                        cache_sources[fifo.Insert(static_cast<u16>(vertex))] = misses;
-                    ++misses;
+                        cache_sources[fifo.Insert(static_cast<u16>(vertex))] = source;
+                    if (!reused) invocations[misses++] = {vertex, input};
                 }
             }
             // CodexAstraLocal: The certificate permits a fresh draw-initial
@@ -254,6 +280,10 @@ public:
 
 private:
     Common::Uberhar::ParallelWork pool;
+    const bool memo_enabled;
+    // CodexAstraLocal: Fixed direct-map scratch; collisions lose only reuse.
+    std::array<bool, 256> memo_valid{};
+    std::array<u32, 256> memo_keys{}, memo_sources{};
     std::vector<Invocation> invocations;
     std::vector<OutputVertex> results;
     std::vector<u32> references;

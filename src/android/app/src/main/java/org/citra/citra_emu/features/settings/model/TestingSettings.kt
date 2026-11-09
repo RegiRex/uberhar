@@ -17,9 +17,16 @@ enum class TestingExperiment(val setting: BooleanSetting, val title: Int, val de
     UBERHAR_ADAPTIVE_CPU_WORKERS(BooleanSetting.UBERHAR_ADAPTIVE_CPU_WORKERS, R.string.uberhar_adaptive_cpu_workers, R.string.uberhar_adaptive_cpu_workers_description),
     UBERHAR_GPU_OBSERVER(BooleanSetting.UBERHAR_GPU_OBSERVER, R.string.uberhar_gpu_observer, R.string.uberhar_gpu_observer_description),
     UBERHAR_FRAME_WORKLOAD_CENSUS(BooleanSetting.UBERHAR_FRAME_WORKLOAD_CENSUS, R.string.uberhar_frame_workload_census, R.string.uberhar_frame_workload_census_description),
-    UBERHAR_STATIC_DYNAMIC_STATE(BooleanSetting.UBERHAR_STATIC_DYNAMIC_STATE, R.string.uberhar_static_dynamic_state, R.string.uberhar_static_dynamic_state_description),
     UBERHAR_PREPARE_DISPLAYED_EYE_ONLY(BooleanSetting.UBERHAR_PREPARE_DISPLAYED_EYE_ONLY, R.string.uberhar_prepare_displayed_eye_only, R.string.uberhar_prepare_displayed_eye_only_description),
     UBERHAR_EARLY_RIGHT_EYE(BooleanSetting.UBERHAR_EARLY_RIGHT_EYE, R.string.uberhar_early_right_eye, R.string.uberhar_early_right_eye_description),
+    UBERHAR_FAST_VERTEX_CONVERSION(BooleanSetting.UBERHAR_FAST_VERTEX_CONVERSION, R.string.uberhar_fast_vertex_conversion, R.string.uberhar_fast_vertex_conversion_description),
+    UBERHAR_VERTEX_MEMO(BooleanSetting.UBERHAR_VERTEX_MEMO, R.string.uberhar_vertex_memo, R.string.uberhar_vertex_memo_description),
+    UBERHAR_WORKER_CPU_UPLOAD(BooleanSetting.UBERHAR_WORKER_CPU_UPLOAD, R.string.uberhar_worker_cpu_upload, R.string.uberhar_worker_cpu_upload_description),
+    UBERHAR_CPU_CLIP_REJECT(BooleanSetting.UBERHAR_CPU_CLIP_REJECT, R.string.uberhar_cpu_clip_reject, R.string.uberhar_cpu_clip_reject_description),
+    UBERHAR_FULL_PIPELINE_BANK_16(BooleanSetting.UBERHAR_FULL_PIPELINE_BANK_16, R.string.uberhar_full_pipeline_bank_16, R.string.uberhar_full_pipeline_bank_16_description),
+    UBERHAR_PRUNE_SPIRV(BooleanSetting.UBERHAR_PRUNE_SPIRV, R.string.uberhar_prune_spirv, R.string.uberhar_prune_spirv_description),
+    UBERHAR_INDEXED_CPU_OUTPUT(BooleanSetting.UBERHAR_INDEXED_CPU_OUTPUT, R.string.uberhar_indexed_cpu_output, R.string.uberhar_indexed_cpu_output_description),
+    UBERHAR_MONO_GUEST_3D(BooleanSetting.UBERHAR_MONO_GUEST_3D, R.string.uberhar_mono_guest_3d, R.string.uberhar_mono_guest_3d_description),
     OPTIMIZE_GENERIC_SHADERS(BooleanSetting.UBERHAR_OPTIMIZE_GENERIC_SHADERS,
         R.string.uberhar_optimize_generic_shaders, R.string.uberhar_optimize_generic_shaders_description);
     val key get() = setting.key

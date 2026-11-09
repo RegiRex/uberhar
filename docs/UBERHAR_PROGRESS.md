@@ -1,3 +1,23 @@
+<!-- CodexAstraLocal: .58 source checkpoint; local contracts and publication/device gates are distinct. -->
+## 0.1.58 — reconciled CPU work reduction and diagnostic comparability
+
+Implementation is complete for the approved conversion, independent-result memo,
+indexed output, existing-worker upload, conservative invisible-triangle rejection,
+adaptive repair, bounded pass union, 8/16 full-pipeline bank and specialized SPIR-V
+pruning. A separate mono1% input experiment preserves normal depth/stereo. V38
+static-state forcing is archived and removed. Existing algorithms were reconciled
+before extending them; see the [full decisions](UBERHAR_DECISIONS_0.1.58.md).
+
+The advisory tuning workflow never applies or restores settings. Real one-second
+sections retain five-second compatibility and paired interval tails, with compact
+same-worker logging and explicit delivery quality. New controls default OFF and
+preserve per-title precedence. Code review and focused checks are recorded in the
+[.58 review](UBERHAR_REVIEW_0.1.58.md). This checkpoint does not establish hardware
+speed gains or publication success. Submit to the existing gated prerelease flow
+and stop; owner qualification follows in the next session.
+
+---
+
 <!-- CodexAstraLocal: Current .57 implementation supersedes older directions; local preflight passed, hosted and hardware gates remain distinct. -->
 ## 0.1.57 — controlled work reduction and complete callback workload accounting
 

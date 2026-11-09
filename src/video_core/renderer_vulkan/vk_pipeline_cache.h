@@ -159,6 +159,9 @@ public:
 
     /// Binds a passthrough vertex shader
     void UseTrivialVertexShader();
+    // CodexAstraLocal: Positive owner identity for exact CPU-output clipping;
+    // requested mode alone cannot authorize removing a host triangle.
+    bool UsesTrivialVertexPipeline() const;
 
     /// Binds a PICA decompiled geometry shader
     bool UseFixedGeometryShader(const Pica::RegsInternal& regs);

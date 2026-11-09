@@ -86,11 +86,12 @@ using Device = int;
 }
 // CodexAstraLocal: Name the tested fields explicitly; profile layout and unrelated
 // capability additions must not change the cases through aggregate positions.
-Profile MakeProfile(bool disable_optimizer, bool clip_planes, bool use_spirv = false) {
+Profile MakeProfile(bool disable_optimizer, bool clip_planes, bool use_spirv = false, bool prune = false) {
     Profile profile{};
     profile.vk_disable_spirv_optimizer = disable_optimizer;
     profile.has_clip_planes = clip_planes;
     profile.vk_use_spirv_generator = use_spirv;
+    profile.vk_prune_tev = prune;
     return profile;
 }
 // CodexAstraLocal: Model only the compatibility boundary used by this queued
@@ -129,7 +130,7 @@ struct CompilerRecord { vk::ShaderStageFlagBits stage; bool disabled; };
 std::vector<CompilerRecord> records;
 // CodexAstraLocal: Distinct endpoints expose effective selection and frozen
 // generator inputs; they cannot both silently model a GLSL frontend invocation.
-struct GeneratorRecord { bool direct, incompatible, requested; };
+struct GeneratorRecord { bool direct, incompatible, requested, pruned; };
 std::vector<GeneratorRecord> generators;
 bool global_disable_optimizer{}, fail_compile{}, observed_clip{};
 std::vector<unsigned> CompileGLSL(std::string_view, vk::ShaderStageFlagBits stage,
@@ -150,13 +151,13 @@ std::string GenerateFixedGeometryShader(int, ExtraFixedGSConfig extra) {
     observed_clip = extra.use_clip_planes; return "generated";
 }
 std::string GenerateFragmentShader(FSConfig fs, int, Profile profile) {
-    generators.push_back({false, fs.incompatible, profile.vk_use_spirv_generator != 0});
+    generators.push_back({false, fs.incompatible, profile.vk_use_spirv_generator != 0, profile.vk_prune_tev != 0});
     return "generated";
 }
 }
 namespace SPIRV {
 std::vector<u32> GenerateFragmentShader(FSConfig fs, Profile profile) {
-    generators.push_back({true, fs.incompatible, profile.vk_use_spirv_generator != 0});
+    generators.push_back({true, fs.incompatible, profile.vk_use_spirv_generator != 0, profile.vk_prune_tev != 0});
     return fail_compile ? std::vector<u32>{} : std::vector<u32>{2};
 }
 }
@@ -261,8 +262,9 @@ int main() try {
     for (bool incompatible : {false, true}) {
     for (bool change_options : {false, true}) {
     for (bool fail : {false, true}) {
+    for (bool prune : {false, true}) {
         Cache cache;
-        cache.parent.profile = MakeProfile(true, true, requested_spirv);
+        cache.parent.profile = MakeProfile(true, true, requested_spirv, prune);
         cache.fragment.key = {{incompatible}, cache.parent.profile};
         global_disable_optimizer = true;
         fail_compile = fail;
@@ -273,12 +275,12 @@ int main() try {
         Check(cache.parent.shader_workers.jobs.empty() &&
               cache.parent.optional_worker.jobs.size() == 1,
               "Production compiler job used the wrong worker lane");
-        if (change_options) cache.parent.profile = MakeProfile(false, false, !requested_spirv);
+        if (change_options) cache.parent.profile = MakeProfile(false, false, !requested_spirv, !prune);
         cache.parent.optional_worker.Drain();
         const bool direct = requested_spirv && !incompatible;
         Check(generators.size() == 1 && generators[0].direct == direct &&
               generators[0].incompatible == incompatible &&
-              generators[0].requested == requested_spirv,
+              generators[0].requested == requested_spirv && generators[0].pruned == prune,
               "Full fragment generator choice or compatibility snapshot changed");
         Check(direct ? records.empty() : records.size() == 1 && !records[0].disabled &&
               records[0].stage == vk::ShaderStageFlagBits::eFragment,
@@ -292,6 +294,7 @@ int main() try {
               cache.ready_fragment_glsl_builds == !direct,
               "Full fragment effective generator accounting changed");
         ++checks;
+    }
     }
     }
     }

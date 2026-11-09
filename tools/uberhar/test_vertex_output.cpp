@@ -63,6 +63,7 @@ u64 CheckPlans() {
                 map.map_w.Assign(static_cast<Semantic>(rng() & 31));
             }
             const NativeVertexPlan plan{shader, rasterizer};
+            const NativeVertexPlan fast{shader, rasterizer, true};
             Check(plan.Supported() == (std::popcount(mask) >= static_cast<int>(attributes)),
                   "Incomplete output transport was admitted");
             if (!plan.Supported())
@@ -78,6 +79,9 @@ u64 CheckPlans() {
                 unit.WriteOutput(shader, packed);
                 const OutputVertex reference{rasterizer, packed};
                 const auto actual = plan.Convert(unit);
+                const auto direct = fast.Convert(unit);
+                Check(std::memcmp(&reference, &direct, sizeof(direct)) == 0,
+                      "Direct/fallback output differs bitwise from inherited conversion");
                 Check(std::memcmp(&reference, &actual, sizeof(actual)) == 0,
                       "Prepared output differs bitwise from inherited conversion");
                 ++cases;
@@ -150,6 +154,8 @@ u64 CheckGroupedPlans() {
     u64 cases = 0;
     for (const auto& layout : layouts) {
         const NativeVertexPlan plan{layout.shader, layout.rasterizer};
+        const NativeVertexPlan fast{layout.shader, layout.rasterizer, true};
+        Check(!plan.FastRecipe(), "Default enabled direct output recipe");
         Check(plan.Supported(), "Structured grouped transport was rejected");
         ShaderUnit unit;
         for (u32 bank = 0; bank < 2; ++bank) {
@@ -171,11 +177,22 @@ u64 CheckGroupedPlans() {
             unit.WriteOutput(layout.shader, packed);
             const OutputVertex reference{layout.rasterizer, packed};
             const auto actual = plan.Convert(unit);
+            const auto direct = fast.Convert(unit);
+            Check(std::memcmp(&reference, &direct, sizeof(direct)) == 0,
+                  "Fixed-field output failed exceptional bits or padding");
             Check(std::memcmp(&reference, &actual, sizeof(actual)) == 0,
                   "Structured grouped/scalar/default output differs from inherited conversion");
             ++cases;
         }
     }
+    // CodexAstraLocal: Exact semantic fields qualify, scattered and partial
+    // fields fall back. Both guards must be tested, not inferred from equality.
+    for (u32 i : {0U, 1U, 2U, 6U, 7U})
+        Check(NativeVertexPlan{layouts[i].shader, layouts[i].rasterizer, true}.FastRecipe(),
+              "Expected direct fixed-field recipe missing");
+    for (u32 i : {3U, 4U, 5U, 8U})
+        Check(!NativeVertexPlan{layouts[i].shader, layouts[i].rasterizer, true}.FastRecipe(),
+              "Irregular semantic field admitted");
     ShaderRegs incomplete_shader{};
     incomplete_shader.output_mask.Assign(0x8000);
     RasterizerRegs incomplete_rasterizer{};

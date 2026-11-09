@@ -13,6 +13,7 @@
 #include <vector>
 #include "common/math_util.h"
 #include "video_core/renderer_vulkan/uberhar_eye_policy.h"
+#include "video_core/renderer_vulkan/uberhar_pass_union.h"
 
 namespace vk {
 using Framebuffer = u64;
@@ -114,10 +115,12 @@ struct Framebuffer {
     std::array<vk::Image, 2> images{11, 12};
     std::array<vk::ImageAspectFlags, 2> aspects{1, 2};
     bool shadow_rendering{};
+    vk::Extent2D extent{4096, 4096};
     auto Handle() const { return framebuffer; }
     auto RenderPass() const { return render_pass; }
     auto Images() const { return images; }
     auto Aspects() const { return aspects; }
+    auto Extent() const { return extent; }
 };
 // CodexAstraLocal: Keep only data consumed by extracted production methods.
 // Diagnostic endpoints count invocation but allocate no queries or GPU timings.
@@ -125,12 +128,17 @@ struct RenderManager {
     Instance instance;
     Scheduler scheduler;
     RenderPass pass{};
+    RenderPass last_requested_pass{};
+    vk::Extent2D pass_extent{};
     std::array<vk::Image, 2> images{};
     std::array<vk::ImageAspectFlags, 2> aspects{};
     bool shadow_rendering{}, containment_eligible{}, reuse_contained_pass{true};
     bool diagnostics_enabled{true};
     u32 num_draws{};
     u64 contained_pass_reuses{}, containment_refusals{}, containment_submission_boundaries{};
+    u64 union_candidates{}, union_incompatible{}, union_submission_refusals{};
+    std::array<u64, static_cast<std::size_t>(PassUnionPolicy::Decision::Count)> union_decisions{};
+    u64 union_requested_pixels{}, union_started_pixels{};
     u64 diagnostic_reuses{}, diagnostic_feedback_requests{}, diagnostic_flushes{};
     std::array<u64, static_cast<std::size_t>(PassEndReason::Count)> diagnostic_end_reasons{};
     struct Sample { PassEndReason end_reason{}; };
@@ -141,7 +149,7 @@ struct RenderManager {
     void EndDiagnosticPass() { ++diagnostic_ends; }
     bool ShouldFlushPass() const;
     void BeginRendering(const Framebuffer*, Common::Rectangle<u32>, bool = false);
-    void BeginRendering(const RenderPass&, bool = false, bool = false);
+    void BeginRendering(const RenderPass&, bool = false, bool = false, vk::Extent2D = {});
     void EndRendering(PassEndReason = PassEndReason::Explicit);
 };
 #include "actual_pass_methods.inc"
@@ -264,7 +272,7 @@ void PassChecks() {
         Require(m.contained_pass_reuses == 1 && m.scheduler.flushes == 0, "driver policy preserves no-flush path");
         m.instance.flush = true;
         m.BeginRendering(a, true, true);
-        Require(m.scheduler.flushes == 0, "exact reuse must retain legacy submission behavior");
+        Require(m.scheduler.flushes == 1, "raw request transition to expanded active area must retain submission boundary");
     }
     {
         RenderManager m;
@@ -323,10 +331,116 @@ void EyeChecks() {
         Require(Classify(in) == (invalid < 5 ? Decision::NotRight : Decision::Shape), "eye address/shape guard");
     }
 }
+
+// CodexAstraLocal: Exact production pass transitions must close A normally and
+// start the bounded union as B; only subsequent contained draws avoid endings.
+void UnionChecks() {
+    using namespace Vulkan;
+    const auto a = Area(0, 0, 100, 100), b = Area(100, 0, 100, 100);
+    const vk::Extent2D extent{400, 400};
+    for (bool vertical : {false, true}) {
+        RenderManager m;
+        Framebuffer fb;
+        const Common::Rectangle<u32> first{0, 100, 100, 0};
+        const Common::Rectangle<u32> next = vertical ? Common::Rectangle<u32>{0, 200, 100, 100}
+                                                     : Common::Rectangle<u32>{100, 100, 200, 0};
+        m.BeginRendering(&fb, first);
+        m.BeginRendering(&fb, next);
+        const auto united = vertical ? Area(0, 0, 100, 200) : Area(0, 0, 200, 100);
+        Require(m.pass == united, "next pass owns only a gap-free bounded union");
+        Require(m.union_decisions[0] == 1 && m.union_requested_pixels == 10000 &&
+                m.union_started_pixels == 20000, "union area counters are actual starts");
+        m.BeginRendering(&fb, first);
+        Require(m.contained_pass_reuses == 1 && m.pass == united, "later draw reuses union");
+        m.scheduler.Drain();
+        Require(m.scheduler.commands.ends == 1 && m.scheduler.commands.begins.size() == 2,
+                "union does not mutate or pretend to continue original active pass");
+        Require(m.scheduler.commands.begins[0].area == a.render_area &&
+                m.scheduler.commands.begins[1].area == united.render_area,
+                "queued original area immutable and next area is union");
+        Require(first == Common::Rectangle<u32>{0, 100, 100, 0}, "draw/invalidation bounds unmodified");
+    }
+    for (unsigned guard = 0; guard < 13; ++guard) {
+        RenderManager m;
+        auto old = a, next = b;
+        bool old_allowed = true, next_allowed = true, next_fb = true;
+        auto next_extent = extent;
+        switch (guard) {
+        case 0: m.reuse_contained_pass = false; break;
+        case 1: old_allowed = false; break;
+        case 2: next_allowed = false; break;
+        case 3: next_fb = false; break;
+        case 4: next.do_clear = 1; break;
+        case 5: old.do_clear = 1; break;
+        case 6: ++next.framebuffer; break;
+        case 7: ++next.render_pass; break;
+        case 8: ++next_extent.width; break;
+        case 9: ++next.render_area.offset.x; break; // a one-pixel gap
+        case 10: next.render_area.offset.y = 50; break; // missing corner
+        case 11: next.render_area.extent.width = 40; break; // >2x new area
+        case 12: next.render_area.extent.width = 350; break; // outside framebuffer
+        }
+        m.BeginRendering(old, true, old_allowed, extent);
+        m.BeginRendering(next, next_fb, next_allowed, next_extent);
+        m.scheduler.Drain();
+        Require(m.pass == next && m.union_decisions[0] == 0, "union refusal preserves requested new area");
+        Require(m.scheduler.commands.begins.size() == 2 && m.scheduler.commands.ends == 1,
+                "union refusal preserves real boundary");
+    }
+    {
+        RenderManager m;
+        m.instance.flush = true;
+        m.BeginRendering(a, true, true, extent);
+        m.num_draws = MinDrawsToFlush + 1;
+        m.BeginRendering(b, true, true, extent);
+        Require(m.pass == b && m.union_submission_refusals == 1 && m.scheduler.flushes == 1,
+                "due submission refuses union and retains original flush");
+    }
+    {
+        RenderManager m;
+        m.BeginRendering(a, true, true, extent);
+        m.BeginRendering(b, true, true, extent); // active union200, last request right100
+        const auto united = Area(0,0,200,100);
+        m.instance.flush = true;
+        m.num_draws = MinDrawsToFlush + 1;
+        m.BeginRendering(united, true, true, extent);
+        Require(m.scheduler.flushes == 1 && m.num_draws == 0 && m.pass == united,
+                "raw request transition to exact expanded area still flushes when due");
+    }
+    {
+        RenderManager m;
+        m.BeginRendering(a, true, true, extent);
+        m.BeginRendering(b, true, true, extent);
+        m.instance.flush = true;
+        m.num_draws = MinDrawsToFlush + 1;
+        m.BeginRendering(b, true, true, extent);
+        Require(m.scheduler.flushes == 0 && m.contained_pass_reuses == 1,
+                "repeated raw request inside union cannot invent a submission boundary");
+    }
+    for (auto reason : {PassEndReason::Explicit, PassEndReason::Submission, PassEndReason::Feedback}) {
+        RenderManager m;
+        m.BeginRendering(a, true, true, extent);
+        m.EndRendering(reason);
+        Require(m.pass_extent == vk::Extent2D{}, "boundary clears union extent proof");
+        m.BeginRendering(b, true, true, extent);
+        Require(m.pass == b && m.union_candidates == 0, "union cannot borrow prior resource history");
+    }
+    using namespace PassUnionPolicy;
+    Require(MakeUnion({0, 0, 100, 100}, {50, 0, 100, 100}, 200, 100).area == Rect{0, 0, 150, 100},
+            "overlap union has no artificial gap");
+    Require(MakeUnion({0, 0, 100, 100}, {0, 0, 200, 100}, 200, 100).decision == Decision::NoExpansion,
+            "no benefit is not counted as a union");
+    Require(MakeUnion({-1, 0, 100, 100}, {99, 0, 100, 100}, 200, 100).decision == Decision::Bounds,
+            "negative origin is never clamped into an invented area");
+    Require(MakeUnion({0, 0, ~u32{}, ~u32{}}, {0, 0, ~u32{}, ~u32{}}, ~u32{}, ~u32{}).decision ==
+                Decision::NoExpansion, "area arithmetic cannot overflow at maximum extents");
+    Require(MakeUnion({0, 0, 1, 1}, {0, 1, 1, 1}, 0, 0).decision == Decision::Empty,
+            "generic pass overload has no invented framebuffer extent proof");
+}
 }
 int main() {
     try {
-        PassChecks(); EyeChecks();
+        PassChecks(); EyeChecks(); UnionChecks();
         std::cout << "PASS production pass containment and early-eye policy: " << checks << " checks\n";
     } catch (const std::exception& error) {
         std::cerr << "FAIL after " << checks << " checks: " << error.what() << '\n';

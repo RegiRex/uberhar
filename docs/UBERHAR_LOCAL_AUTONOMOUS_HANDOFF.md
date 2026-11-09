@@ -1,4 +1,34 @@
-# Current handoff — 0.1.56; stop at prerelease submission
+# Current handoff — 0.1.58; stop after build submission
+
+<!-- CodexAstraLocal: November9 owner approved reconciliation, investigations and implementation; no hosted watching or device testing in this session. -->
+The .58 candidate reconciles the prior CPU/vertex/transport/shader proposals with
+existing implementations, adds independent default-OFF comparisons and repairs
+existing adaptive/pass behavior. Use the [decision ledger](UBERHAR_DECISIONS_0.1.58.md)
+and [release notes](releases/0.1.58.md). Source/host checks, hosted build publication
+and Thor qualification are separate states; never call a queued APK available.
+
+Preserve the owner's workflow: baseline is the primary comparison, selected
+optimum secondary; actual driver is independent from the settings optimum. Match
+renderer/resolution/legacy settings/diagnostics. Keep actual shortest/longest
+intervals separate from five-second Low/Overall/High averages; new one-second
+sections do not reconstruct historical data. See [telemetry](UBERHAR_FRAME_TELEMETRY.md).
+Do not silently restore any settings. Sonic FIVE/R25 compares first to R3, with
+FOUR/R18 retained for late-channel strength. Keep all-core tables and CPU7/GPU
+context at low/high windows. Follow live capture until explicitly stopped; no
+unrequested time/inactivity cutoff. Verify power profile and background conditions.
+
+Use finite complementary agents: architect independently reviews, engineers own
+specific paths, root integrates and exclusively operates the device. Agents
+announce automation/log handles and yield; completed agents stop. Run checks once
+unless changed source, a failure or a concrete unresolved concern justifies another.
+Prioritize actionable changed findings; explain tradeoffs as an expert colleague.
+No token-consuming hosted polling after this submission. No automatic install,
+gameplay, settings restoration or inherited sleep action. Save a checkpoint and
+actual source/submission receipt for the owner's next session.
+
+---
+
+# Historical handoff — 0.1.56; stop at prerelease submission
 
 <!-- CodexAstraLocal: October 28 owner approved the completed report, .56 build and host sleep afterward. -->
 The .56 candidate retains .55 behavior by default, adds current-format read-only

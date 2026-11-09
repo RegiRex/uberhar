@@ -1,3 +1,22 @@
+<!-- CodexAstraLocal: Map .58 logical changes to actual consumers; preserve older attribution below. -->
+## 0.1.58 additions and repairs
+
+- `pica/uberhar_vertex_input.h`, `uberhar_vertex_output.h`, `uberhar_vertex_plan_cache.h`: exact prepared conversion recipes; `pica_core.cpp` and immutable `uberhar_cpu_draw_queue` packets consume them. Packet packing uses bounded scratch under the same control.
+- `pica/uberhar_vertex_parallel_batch.h`: independent-chunk exact result memo with original FIFO insertion preserved.
+- `uberhar_indexed_cpu_output.h`, `uberhar_owned_vertex_upload.h`, `uberhar_cpu_clip_reject.h`: separate exact packed-output deduplication, owned recorder uploads and conservative clip compaction, consumed by accelerated/Vulkan upload paths.
+- `common/uberhar_cpu_work_budget.h`, CPU queue capture: adaptive cadence/cooldown/expiry and arithmetic-qualified coordinator seeds.
+- Vulkan `uberhar_pass_union.h` and render manager: bounded next-pass union with original requested transitions tracked separately.
+- Vulkan full-fragment cache/policy and `spv_fs_shader_gen`: full capacity8/16 and live specialized SPIR-V pruning with profile-specific cache identity.
+- `common/uberhar_mono_guest.h`, HID/shared page: independent effective mono1% guest input. Vulkan early-eye checks and LCD snapshots preserve existing title vetoes.
+- `common/uberhar_frame_telemetry.h`, logging adapter/backend, core performance statistics: real nested interval telemetry on the existing log writer; Android exporters retain compact chunks.
+- Android tuning engine/session/controller: advisory baseline-first comparison and selected-optimum deltas, with no preference mutation.
+- Settings registry/C++/JNI/Kotlin/resources: eight independent launch-owned alpha controls, full global/title inheritance; V38 override removed with a feature archive.
+
+Temporary diagnostics use `CodexAstraLocal TEST-ONLY LOG` comments and retirement
+conditions. Complete dispositions and limits: [decision ledger](UBERHAR_DECISIONS_0.1.58.md).
+
+---
+
 <!-- CodexAstraLocal: .56 reduces redundant depth ownership work and identifies existing GPU samples. -->
 ## 0.1.56 depth ownership and GPU sample attribution
 

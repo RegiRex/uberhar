@@ -11,6 +11,8 @@ import java.io.File
 import java.io.IOException
 import java.time.ZoneId
 import java.util.UUID
+import org.json.JSONObject
+import java.time.Instant
 
 // AstraEH: A concrete provider subclass avoids device-specific direct FileProvider issues.
 class LogFileProvider : FileProvider()
@@ -21,18 +23,19 @@ object LogExporter {
         val source: DocumentFile,
         val current: Boolean,
         val metadata: LogExportNames.Metadata,
-        val older: Boolean = false
+        val older: Boolean = false,
+        val telemetry: Boolean = false
     )
 
-    // AstraEH: Only the existing three text logs appear in-app. Crash evidence is saved
-    // directly under log/crashes for file access, never enumerated by this picker.
+    // CodexAstraLocal: Required compact telemetry chunks remain independently exportable
+    // even after the ordinary file cap; crash-only artifacts stay outside this picker.
     fun choices(context: Context): List<Choice> {
         val flushed = Log.flush()
         CrashSessionLogs.checkHealth()
         val directory = runCatching {
             DocumentFile.fromTreeUri(context, PermissionsHandler.citraDirectory)?.findFile("log")
         }.getOrNull()
-        return listOf("azahar_log.txt", "azahar_log.old.txt", "azahar_log.older.txt")
+        val ordinary = listOf("azahar_log.txt", "azahar_log.old.txt", "azahar_log.older.txt")
             .mapIndexedNotNull { index, name ->
                 if (index == 0 && !flushed) return@mapIndexedNotNull null
                 runCatching {
@@ -41,10 +44,19 @@ object LogExporter {
                     Choice(file, index == 0, metadata(context, file), older = index == 2)
                 }.getOrNull()
             }
+        val telemetry = if (!flushed) emptyList() else directory?.listFiles().orEmpty()
+            .filter { it.isFile && LogTelemetrySnapshot.accepts(it.name.orEmpty()) }
+            .sortedBy { it.name }.map { source ->
+                Choice(source, current = true, metadata = LogExportNames.Metadata(
+                    source.lastModified().takeIf { it > 0 }?.let {
+                        Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).toOffsetDateTime()
+                    }, listOf(source.name.orEmpty()), "Frame telemetry schema 1"), telemetry = true)
+            }
+        return ordinary + telemetry
     }
 
     fun filename(choice: Choice, style: LogExportNames.Style): String =
-        LogExportNames.filename(choice.metadata, style)
+        if (choice.telemetry) requireNotNull(choice.source.name) else LogExportNames.filename(choice.metadata, style)
 
     private fun metadata(context: Context, source: DocumentFile): LogExportNames.Metadata {
         val input = context.contentResolver.openInputStream(source.uri)
@@ -71,6 +83,17 @@ object LogExporter {
             val temporary = File(folder, "snapshot.txt")
             val input = context.contentResolver.openInputStream(choice.source.uri)
                 ?: throw IOException("Cannot read log")
+            if (choice.telemetry) {
+                val length = choice.source.length()
+                val proof = input.use { LogTelemetrySnapshot.copy(it, temporary, length) }
+                temporary.appendText(JSONObject().put("schema", 1).put("kind", "export_snapshot")
+                    .put("source", choice.source.name).put("source_bytes", proof.sourceBytes)
+                    .put("complete_bytes", proof.completeBytes).put("partial_tail_bytes", proof.partialTailBytes)
+                    .put("scope", "explicit export endpoint; source untouched").toString() + "\n")
+                val result = File(folder, filename(choice, style))
+                if (!temporary.renameTo(result)) throw IOException("Cannot name telemetry export")
+                return result
+            }
             input.use { source -> temporary.outputStream().use { source.copyTo(it) } }
             val info = temporary.bufferedReader().use {
                 LogExportNames.parse(

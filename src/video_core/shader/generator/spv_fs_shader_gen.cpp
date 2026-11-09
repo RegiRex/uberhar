@@ -17,11 +17,37 @@ using TextureType = TexturingRegs::TextureConfig::TextureType;
 
 constexpr u32 SPIRV_VERSION_1_3 = 0x00010300;
 
+// CodexAstraLocal: Both generated consumers remap stage-zero Previous in their
+// modifier functions, except a whole passthrough stage is skipped first. Keep
+// this original SPIR-V rule visible instead of inferring semantics from GetSource.
+static bool IsPassThroughTevStage(const TevStageConfig& stage) {
+    return stage.color_op == TevStageConfig::Operation::Replace &&
+           stage.alpha_op == TevStageConfig::Operation::Replace &&
+           stage.color_source1 == TevStageConfig::Source::Previous &&
+           stage.alpha_source1 == TevStageConfig::Source::Previous &&
+           stage.color_modifier1 == TevStageConfig::ColorModifier::SourceColor &&
+           stage.alpha_modifier1 == TevStageConfig::AlphaModifier::SourceAlpha &&
+           stage.GetColorMultiplier() == 1 && stage.GetAlphaMultiplier() == 1;
+}
+
 FragmentModule::FragmentModule(const FSConfig& config_, const Profile& profile_)
     : Sirit::Module{SPIRV_VERSION_1_3}, config{config_}, profile{profile_},
       use_fragment_shader_barycentric{profile.has_fragment_shader_barycentric &&
                                       config.lighting.enable} {
     config.ApplyProfile(profile_);
+    // CodexAstraLocal: A launch-owned OFF policy retains the original generator.
+    // No value-dependent simplification or derivative-divergent branch is added.
+    prune_tev = profile.is_vulkan && profile.vk_prune_tev;
+    if (prune_tev) {
+        std::array<TevStageConfig, NUM_TEV_STAGES> stages;
+        for (u32 i = 0; i < NUM_TEV_STAGES; ++i) stages[i] = config.texture.tev_stages[i];
+        if (IsPassThroughTevStage(stages[0])) {
+            stages[0].color_source3.Assign(TevStageConfig::Source::Previous);
+            stages[0].alpha_source3.Assign(TevStageConfig::Source::Previous);
+        }
+        tev_liveness = Pica::TevLiveness::Analyze(stages, config.texture.combiner_buffer_input & 15U,
+            config.texture.combiner_buffer_input >> 4, Pica::TevLiveness::Stage0Policy::GeneratedGlsl);
+    }
     DefineArithmeticTypes();
     DefineUniformStructs();
     DefineInterface();
@@ -52,7 +78,11 @@ void FragmentModule::Generate() {
     WriteScissor();
 
     // Write shader bytecode to emulate all enabled PICA lights
-    WriteLighting();
+    // CodexAstraLocal: Lighting, including shadow/bump reads, has no side effects.
+    // Keep it whenever either output has a path to final RGB or alpha.
+    if (!prune_tev || tev_liveness.Uses(TevStageConfig::Source::PrimaryFragmentColor) ||
+        tev_liveness.Uses(TevStageConfig::Source::SecondaryFragmentColor))
+        WriteLighting();
 
     combiner_buffer = ConstF32(0.f, 0.f, 0.f, 0.f);
     next_combiner_buffer = GetShaderDataMember(vec_ids.Get(4), ConstS32(26));
@@ -60,7 +90,8 @@ void FragmentModule::Generate() {
 
     // Write shader bytecode to emulate PICA TEV stages
     for (u32 index = 0; index < config.texture.tev_stages.size(); ++index) {
-        WriteTevStage(index);
+        if (prune_tev) WritePrunedTevStage(index);
+        else WriteTevStage(index);
     }
 
     WriteAlphaTestCondition(config.framebuffer.alpha_test_func);
@@ -639,18 +670,7 @@ void FragmentModule::WriteLighting() {
 void FragmentModule::WriteTevStage(s32 index) {
     const TexturingRegs::TevStageConfig stage = config.texture.tev_stages[index];
 
-    // Detects if a TEV stage is configured to be skipped (to avoid generating unnecessary code)
-    const auto is_passthrough_tev_stage = [](const TevStageConfig& stage) {
-        return (stage.color_op == TevStageConfig::Operation::Replace &&
-                stage.alpha_op == TevStageConfig::Operation::Replace &&
-                stage.color_source1 == TevStageConfig::Source::Previous &&
-                stage.alpha_source1 == TevStageConfig::Source::Previous &&
-                stage.color_modifier1 == TevStageConfig::ColorModifier::SourceColor &&
-                stage.alpha_modifier1 == TevStageConfig::AlphaModifier::SourceAlpha &&
-                stage.GetColorMultiplier() == 1 && stage.GetAlphaMultiplier() == 1);
-    };
-
-    if (!is_passthrough_tev_stage(stage)) {
+    if (!IsPassThroughTevStage(stage)) {
         color_results_1 = AppendColorModifier(stage.color_modifier1, stage.color_source1, index);
         color_results_2 = AppendColorModifier(stage.color_modifier2, stage.color_source2, index);
         color_results_3 = AppendColorModifier(stage.color_modifier3, stage.color_source3, index);
@@ -693,6 +713,64 @@ void FragmentModule::WriteTevStage(s32 index) {
         next_combiner_buffer =
             OpVectorShuffle(vec_ids.Get(4), next_combiner_buffer, combiner_output, 0, 1, 2, 7);
     }
+}
+
+// CodexAstraLocal: Use the existing modifier/combiner instructions unchanged.
+// Dead components keep their previous SSA value; backwards liveness proves they
+// cannot reach output, including delayed RGB/alpha combiner-buffer consumers.
+// Dot3_RGBA alpha still reads the rounded but unscaled RGB dot result.
+void FragmentModule::WritePrunedTevStage(s32 index) {
+    const TevStageConfig stage = config.texture.tev_stages[index];
+    const auto live = tev_liveness.stages[index];
+    if (!IsPassThroughTevStage(stage) && (live.rgb || live.alpha)) {
+        Id color_output{};
+        Id alpha_output{};
+        if (live.NeedsColor(stage.color_op)) {
+            const auto color_operand = [&](u32 operand) {
+                return AppendColorModifier(static_cast<TevStageConfig::ColorModifier>(
+                    (stage.modifiers_raw >> (4 * operand)) & 15U),
+                    static_cast<TevStageConfig::Source>((stage.sources_raw >> (4 * operand)) & 15U), index);
+            };
+            const auto operands = Pica::TevLiveness::OperandCount(stage.color_op);
+            color_results_1 = color_operand(0);
+            if (operands > 1) color_results_2 = color_operand(1);
+            if (operands > 2) color_results_3 = color_operand(2);
+            color_output = Byteround(AppendColorCombiner(stage.color_op), 3);
+        }
+        if (live.alpha) {
+            if (stage.color_op == TevStageConfig::Operation::Dot3_RGBA) {
+                alpha_output = OpCompositeExtract(f32_id, color_output, 0);
+            } else {
+                const auto alpha_operand = [&](u32 operand) {
+                    return AppendAlphaModifier(static_cast<TevStageConfig::AlphaModifier>(
+                        (stage.modifiers_raw >> (12 + 4 * operand)) & 7U),
+                        static_cast<TevStageConfig::Source>((stage.sources_raw >> (16 + 4 * operand)) & 15U), index);
+                };
+                const auto operands = Pica::TevLiveness::OperandCount(stage.alpha_op);
+                alpha_results_1 = alpha_operand(0);
+                if (operands > 1) alpha_results_2 = alpha_operand(1);
+                if (operands > 2) alpha_results_3 = alpha_operand(2);
+                alpha_output = Byteround(AppendAlphaCombiner(stage.alpha_op));
+            }
+            alpha_output = OpFMul(f32_id, alpha_output, ConstF32(static_cast<float>(stage.GetAlphaMultiplier())));
+            alpha_output = OpFClamp(f32_id, alpha_output, ConstF32(0.f), ConstF32(1.f));
+        } else {
+            alpha_output = OpCompositeExtract(f32_id, combiner_output, 3);
+        }
+        if (live.rgb) {
+            color_output = OpVectorTimesScalar(vec_ids.Get(3), color_output,
+                ConstF32(static_cast<float>(stage.GetColorMultiplier())));
+            color_output = OpFClamp(vec_ids.Get(3), color_output, ConstF32(0.f, 0.f, 0.f), ConstF32(1.f, 1.f, 1.f));
+        } else {
+            color_output = OpVectorShuffle(vec_ids.Get(3), combiner_output, combiner_output, 0, 1, 2);
+        }
+        combiner_output = OpCompositeConstruct(vec_ids.Get(4), color_output, alpha_output);
+    }
+    combiner_buffer = next_combiner_buffer;
+    if (live.rgb && config.TevStageUpdatesCombinerBufferColor(index))
+        next_combiner_buffer = OpVectorShuffle(vec_ids.Get(4), combiner_output, next_combiner_buffer, 0, 1, 2, 7);
+    if (live.alpha && config.TevStageUpdatesCombinerBufferAlpha(index))
+        next_combiner_buffer = OpVectorShuffle(vec_ids.Get(4), next_combiner_buffer, combiner_output, 0, 1, 2, 7);
 }
 
 using ProcTexClamp = TexturingRegs::ProcTexClamp;

@@ -165,6 +165,14 @@ void RenderManager::PollDiagnostics(bool final) noexcept {
                     "Uberhar pass reuse: enabled={} accepted={} refused={} submission_boundaries={} "
                     "gpu_timing_measured={} final={}", reuse_contained_pass, contained_pass_reuses,
                     containment_refusals, containment_submission_boundaries, bool(diagnostic_queries), final);
+                // CodexAstraLocal TEST-ONLY LOG: These are next-pass areas, not
+                // avoided draws or measured bandwidth. Remove after qualification.
+                LOG_INFO(Render_Vulkan,
+                    "Uberhar pass union: candidates={} incompatible={} submission_refused={} "
+                    "decisions=[{},{},{},{},{},{}] requested_pixels={} started_pixels={} final={}",
+                    union_candidates, union_incompatible, union_submission_refusals,
+                    union_decisions[0], union_decisions[1], union_decisions[2], union_decisions[3],
+                    union_decisions[4], union_decisions[5], union_requested_pixels, union_started_pixels, final);
                 mechanism_next_report = now + std::chrono::seconds{5};
             }
         } catch (...) {}
@@ -293,15 +301,22 @@ void RenderManager::BeginRendering(const Framebuffer* framebuffer,
         .do_clear = false,
     };
     // CodexAstraLocal: End the previous pass using its own attachment metadata before replacement.
-    BeginRendering(new_pass, true, !framebuffer->shadow_rendering && !reads_storage);
+    BeginRendering(new_pass, true, !framebuffer->shadow_rendering && !reads_storage,
+                   framebuffer->Extent());
     images = framebuffer->Images();
     aspects = framebuffer->Aspects();
     shadow_rendering = framebuffer->shadow_rendering;
 }
 
 void RenderManager::BeginRendering(const RenderPass& new_pass, bool framebuffer_pass,
-                                  bool allow_containment) {
-    if (pass == new_pass) [[likely]] {
+                                  bool allow_containment, vk::Extent2D framebuffer_extent) {
+    // CodexAstraLocal: The original driver flushed only on a requested state
+    // transition. A union may equal the new request even though the preceding
+    // request differed, or contain repeated identical requests; retain both cases.
+    const bool request_changed = pass.render_pass && !(last_requested_pass == new_pass);
+    const bool submission_due = request_changed && num_draws > MinDrawsToFlush && ShouldFlushPass();
+    last_requested_pass = new_pass;
+    if (pass == new_pass && !submission_due) [[likely]] {
         // CodexAstraLocal: Exact reuse must not erase a hazard introduced by
         // this draw; subsequent smaller draws cannot treat that pass as ordinary.
         containment_eligible &= allow_containment;
@@ -320,7 +335,6 @@ void RenderManager::BeginRendering(const RenderPass& new_pass, bool framebuffer_
     };
     // CodexAstraLocal: Retain an existing driver's submission opportunity at
     // would-be pass boundaries; merging must not starve the GPU command queue.
-    const bool submission_due = num_draws > MinDrawsToFlush && ShouldFlushPass();
     if (reuse_contained_pass && pass.render_pass && submission_due)
         ++containment_submission_boundaries;
     if (reuse_contained_pass && !submission_due && pass.render_pass && containment_eligible && allow_containment &&
@@ -333,10 +347,39 @@ void RenderManager::BeginRendering(const RenderPass& new_pass, bool framebuffer_
     }
     if (reuse_contained_pass && pass.render_pass) ++containment_refusals;
 
+    // CodexAstraLocal: Two neighboring ordinary areas may seed a bounded union
+    // for the NEXT pass. The original pass ends normally; no active area mutates,
+    // no guest draw is reordered and no history crosses another EndRendering.
+    RenderPass next_pass = new_pass;
+    if (reuse_contained_pass && pass.render_pass) {
+        ++union_candidates;
+        if (submission_due) {
+            ++union_submission_refusals;
+        } else if (!containment_eligible || !allow_containment || !framebuffer_pass ||
+                   pass.do_clear || new_pass.do_clear || pass.framebuffer != new_pass.framebuffer ||
+                   pass.render_pass != new_pass.render_pass || pass_extent != framebuffer_extent) {
+            ++union_incompatible;
+        } else {
+            const auto convert = [](const vk::Rect2D& area) {
+                return PassUnionPolicy::Rect{area.offset.x, area.offset.y, area.extent.width,
+                                             area.extent.height};
+            };
+            const auto result = PassUnionPolicy::MakeUnion(convert(pass.render_area),
+                convert(new_pass.render_area), framebuffer_extent.width, framebuffer_extent.height);
+            ++union_decisions[static_cast<std::size_t>(result.decision)];
+            if (result) {
+                next_pass.render_area = vk::Rect2D{{result.area.x, result.area.y},
+                                                   {result.area.width, result.area.height}};
+                union_requested_pixels += u64{new_pass.render_area.extent.width} * new_pass.render_area.extent.height;
+                union_started_pixels += u64{result.area.width} * result.area.height;
+            }
+        }
+    }
+
     // CodexAstraLocal: Classify the existing state-change boundary only.
     EndRendering(PassEndReason::PassChange);
-    BeginDiagnosticPass(new_pass, framebuffer_pass);
-    scheduler.Record([info = new_pass](vk::CommandBuffer cmdbuf) {
+    BeginDiagnosticPass(next_pass, framebuffer_pass);
+    scheduler.Record([info = next_pass](vk::CommandBuffer cmdbuf) {
         const vk::RenderPassBeginInfo renderpass_begin_info = {
             .renderPass = info.render_pass,
             .framebuffer = info.framebuffer,
@@ -347,7 +390,9 @@ void RenderManager::BeginRendering(const RenderPass& new_pass, bool framebuffer_
         cmdbuf.beginRenderPass(renderpass_begin_info, vk::SubpassContents::eInline);
     });
 
-    pass = new_pass;
+    pass = next_pass;
+    last_requested_pass = new_pass;
+    pass_extent = framebuffer_extent;
     containment_eligible = framebuffer_pass && allow_containment && !new_pass.do_clear;
 }
 
@@ -416,10 +461,12 @@ void RenderManager::EndRendering(PassEndReason reason) {
 
     // Reset state.
     pass.render_pass = VK_NULL_HANDLE;
+    last_requested_pass = {};
     images = {};
     aspects = {};
     shadow_rendering = false;
     containment_eligible = false;
+    pass_extent = {};
 
     // The Mali guide recommends flushing at the end of each major renderpass
     // Testing has shown this has a significant effect on rendering performance

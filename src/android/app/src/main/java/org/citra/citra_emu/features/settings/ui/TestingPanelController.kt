@@ -40,6 +40,7 @@ class TestingPanelController(
     )
     private val chips = mutableMapOf<Int, Chip>()
     private val experimentSwitches = mutableMapOf<TestingExperiment, MaterialSwitch>()
+    private val performanceTuning: PerformanceTuningController
 
     init {
         presets.forEach { (preset, label) ->
@@ -120,6 +121,7 @@ class TestingPanelController(
                     if (!EmulationActivity.isRunning()) {
                         TestingSettings.load(gameId)
                         if (!TestingSettings.useGlobalChoices()) showSaveFailure()
+                        else performanceTuning.manualChange("inheritance")
                         render()
                         onChanged()
                     }
@@ -129,8 +131,16 @@ class TestingPanelController(
         }
         binding.gameDriver.setOnClickListener {
             if (!EmulationActivity.isRunning()) {
-                GameDriverSettings.showPicker(context, lifecycleOwner, gameId) { render() }
+                GameDriverSettings.showPicker(context, lifecycleOwner, gameId) {
+                    performanceTuning.manualChange("driver")
+                    render()
+                }
             }
+        }
+        // CodexAstraLocal: Per-title tuning is advisory; it has no preference-write or launch API.
+        performanceTuning = PerformanceTuningController(binding.root, gameId) {
+            render()
+            onChanged()
         }
         render()
     }
@@ -144,10 +154,13 @@ class TestingPanelController(
         update()
         if (!TestingSettings.save(key)) {
             showSaveFailure()
-        } else if (running && liveResolution && editsRunningTitle()) {
-            // CodexAstraLocal: The native overlay freezes model/driver choices and reloads only resolution.
-            NativeLibrary.reloadSettings()
-            NativeLibrary.updateFramebuffer(NativeLibrary.isPortraitMode())
+        } else {
+            performanceTuning.manualChange(key)
+            if (running && liveResolution && editsRunningTitle()) {
+                // CodexAstraLocal: The native overlay freezes model/driver choices and reloads only resolution.
+                NativeLibrary.reloadSettings()
+                NativeLibrary.updateFramebuffer(NativeLibrary.isPortraitMode())
+            }
         }
         render()
         onChanged()
@@ -223,5 +236,6 @@ class TestingPanelController(
             R.string.uberhar_game_driver_selected, GameDriverSettings.selectionLabel(context, gameId)
         )
         rendering = false
+        performanceTuning.render()
     }
 }

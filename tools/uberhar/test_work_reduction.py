@@ -28,6 +28,7 @@ def main():
     source = root / 'src/video_core/renderer_vulkan/vk_render_manager.cpp'
     header = source.with_suffix('.h')
     eye = root / 'src/video_core/renderer_vulkan/uberhar_eye_policy.h'
+    union = root / 'src/video_core/renderer_vulkan/uberhar_pass_union.h'
     fixture = Path(__file__).with_suffix('.cpp')
     text, declarations = source.read_text(), header.read_text()
     enum = re.search(r'enum class PassEndReason[^;]+;', declarations)
@@ -41,7 +42,7 @@ def main():
         'void RenderManager::BeginRendering(const RenderPass& new_pass,',
         'void RenderManager::EndRendering(PassEndReason reason)',
     ])
-    inputs = [source, header, eye, fixture, Path(__file__).resolve(),
+    inputs = [source, header, eye, union, fixture, Path(__file__).resolve(),
               root / 'src/common/math_util.h', root / 'tools/uberhar/test_ready_cpu_fragments.py']
     hashes = {str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in inputs}
     proof = {'author': 'CodexAstraLocal', 'inputs': hashes, 'runs': [], 'status': 'running'}
@@ -51,20 +52,27 @@ def main():
 
     # CodexAstraLocal: Mutation controls establish that the fixture notices loss
     # of the claimed original-area, hazard, submission, and eye-side-effect guards.
-    variants = [('production', methods, eye.read_text(), False)]
+    variants = [('production', methods, eye.read_text(), union.read_text(), False)]
     if args.mutants:
         variants += [
             ('replace-active-area', replace_once(methods, '++contained_pass_reuses;',
-                                                '++contained_pass_reuses; pass = new_pass;'), eye.read_text(), True),
+                                                '++contained_pass_reuses; pass = new_pass;'), eye.read_text(), union.read_text(), True),
             ('drop-hazard-revocation', replace_once(methods, 'containment_eligible &= allow_containment;',
-                                                   '(void)allow_containment;'), eye.read_text(), True),
+                                                   '(void)allow_containment;'), eye.read_text(), union.read_text(), True),
             ('ignore-submission-budget', replace_once(methods, 'reuse_contained_pass && !submission_due &&',
-                                                       'reuse_contained_pass &&'), eye.read_text(), True),
+                                                       'reuse_contained_pass &&'), eye.read_text(), union.read_text(), True),
             ('ignore-eye-depth-write', methods, replace_once(eye.read_text(),
-                'in.writes_depth_stencil || in.geometry', 'in.geometry'), True),
+                'in.writes_depth_stencil || in.geometry', 'in.geometry'), union.read_text(), True),
+            ('ignore-union-area-budget', methods, eye.read_text(), replace_once(union.read_text(),
+                'if (after - before > before)', 'if (false)'), True),
+            ('ignore-union-framebuffer-bounds', methods, eye.read_text(), replace_once(union.read_text(),
+                'if (!inside(old) || !inside(next))', 'if (false && (!inside(old) || !inside(next)))'), True),
+            ('carry-union-through-boundary', replace_once(methods, 'pass.render_pass = VK_NULL_HANDLE;',
+                'if (reason == PassEndReason::PassChange) pass.render_pass = VK_NULL_HANDLE;'),
+                eye.read_text(), union.read_text(), True),
         ]
     try:
-        for name, body, eye_header, expect_failure in variants:
+        for name, body, eye_header, union_header, expect_failure in variants:
             directory = out / name
             directory.mkdir()
             (directory / 'actual_pass_types.inc').write_text(types)
@@ -72,6 +80,7 @@ def main():
             shadow = directory / 'video_core/renderer_vulkan/uberhar_eye_policy.h'
             shadow.parent.mkdir(parents=True)
             shadow.write_text(eye_header)
+            (shadow.parent / union.name).write_text(union_header)
             binary = directory / 'fixture'
             command = ['c++', '-std=c++20', '-O2', '-Wall', '-Wextra', '-Werror',
                        '-I' + str(directory), '-I' + str(root / 'src'), str(fixture), '-o', str(binary)]

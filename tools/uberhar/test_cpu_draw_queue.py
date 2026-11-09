@@ -61,8 +61,12 @@ def main():
     # CodexAstraLocal: Focus the lazy-start seed-fixture repair without repeating
     # unrelated controls. CI does not pass this flag and retains every check.
     parser.add_argument('--pending-seed-only', action='store_true')
+    # CodexAstraLocal: Bounded .58 opt-in admission check, without unrelated mutants.
+    parser.add_argument('--cost-seeds-only', action='store_true')
+    parser.add_argument('--fused-packing-only', action='store_true',
+                        help='CodexAstraLocal: affected exact packet/chunk packing only')
     args = parser.parse_args()
-    if args.pending_seed_only and (args.reset_only or args.groups_only or args.cpu_preparation_only):
+    if args.pending_seed_only and (args.reset_only or args.groups_only or args.cpu_preparation_only or args.cost_seeds_only):
         parser.error('--pending-seed-only cannot be combined with another focused check')
     root = args.root.resolve()
     source_root = (args.source_root or root / 'src').resolve()
@@ -78,7 +82,7 @@ def main():
                'common/uberhar_parallel_work.h', 'common/uberhar_cpu_work_budget.h']
     inputs = [Path(__file__).resolve(), fixture_source,
               root / 'tools/uberhar/test_parallel_vertex_observable_cases.h',
-              root / 'src/video_core/rasterizer_accelerated.cpp']
+              source_root / 'video_core/rasterizer_accelerated.cpp']
     for relative in logical:
         original = source_root / relative
         target = source / relative
@@ -128,7 +132,7 @@ struct ResetOwner {
     owner_path.write_text(owner)
     # CodexAstraLocal: Extract exact real writer/converter bodies. Only fixture
     # type visibility and the receiver name differ; no pixel/vertex oracle model.
-    renderer = (root / 'src/video_core/rasterizer_accelerated.cpp').read_text()
+    renderer = (source_root / 'video_core/rasterizer_accelerated.cpp').read_text()
     constructor = body(renderer, 'RasterizerAccelerated::HardwareVertex::HardwareVertex(')
     opposite = body(renderer, 'static bool AreQuaternionsOpposite(')
     append = body(renderer, 'void RasterizerAccelerated::AddTriangle(').replace(
@@ -171,7 +175,7 @@ inline struct { Setting uberhar_test_mode; } values;
         if not qemu:
             raise RuntimeError('QEMU A64 unavailable')
         prefix = [str(qemu)]
-    actual = [root / 'src' / relative for relative in (
+    actual = [source_root / relative for relative in (
         'video_core/pica/shader_unit.cpp', 'video_core/pica/shader_setup.cpp',
         'video_core/pica/primitive_assembly.cpp', 'video_core/shader/shader_jit.cpp',
         'video_core/shader/shader_jit_a64_compiler.cpp' if args.a64 else
@@ -199,7 +203,7 @@ inline struct { Setting uberhar_test_mode; } values;
     flags = [str(compiler), '-std=c++20', '-O2', '-DNDEBUG', '-DMICROPROFILE_ENABLED=0',
              '-DFMT_HEADER_ONLY', '-DXXH_INLINE_ALL', '-pthread']
     flags += ['--target=aarch64-linux-android29', '-static', '-static-libstdc++'] if args.a64 else ['-msse4.1', '-msse4.2']
-    for directory in (source, out / 'stubs', root / 'src', root / 'externals/fmt/include',
+    for directory in (source, out / 'stubs', source_root, root / 'externals/fmt/include',
                       root / 'externals/boost', root / 'externals/xxHash', root / 'externals/nihstro/include',
                       root / 'externals/microprofile', root / 'externals/json',
                       root / ('externals/oaknut/include' if args.a64 else 'externals/xbyak')):
@@ -243,9 +247,11 @@ inline struct { Setting uberhar_test_mode; } values;
             'last_pair = {converted[vertex_count - 2], converted[vertex_count - 1]};'),header,'normal','last pair differs'),
         ('forgot_boolean_key',change(instrumented,'effect.booleans == booleans','true'),header,
             'bounds','late external effect escaped proof'),
-        ('missing_arithmetic_floor',change(instrumented,'if (effect.minimum_arithmetic < 35)',
+        ('missing_arithmetic_floor',change(instrumented,'if (effect.minimum_arithmetic < CpuDrawWorkPolicy::MinimumArithmetic)',
             'if (effect.minimum_arithmetic < 0)'),header,'work','arithmetic floor boundary'),
-        ('input_count_as_misses',change(instrumented,'if (misses < 96)','if (source.count < 96)'),
+        ('input_count_as_misses',change(instrumented,
+            'CpuDrawWorkPolicy::IsSeed(misses, effect.minimum_arithmetic, impl->cost_seed_enabled)',
+            'CpuDrawWorkPolicy::IsSeed(source.count, effect.minimum_arithmetic, impl->cost_seed_enabled)'),
             header,'work','FIFO miss floor boundary'),
         ('missing_copy_floor',change(instrumented,'if (raw_size > u64(misses) * 70)',
             'if (raw_size > u64(misses) * 700)'),header,'work','raw copy floor accepted71'),
@@ -300,7 +306,11 @@ inline struct { Setting uberhar_test_mode; } values;
             '    impl->StartProgress();\n    impl->capture_at_capacity = false;\n    // CodexAstraLocal: Invalid shapes'),
          header, 'preparation', 'negative policy reserved progress'),
     ]
-    if args.pending_seed_only:
+    if args.fused_packing_only:
+        variants = [('positive', instrumented, header, 'fused-packing', None)]
+    elif args.cost_seeds_only:
+        variants = [('positive', instrumented, header, 'cost-seeds', None)]
+    elif args.pending_seed_only:
         variants = [('positive', instrumented, header, 'groups', None), grouped_variants[0]]
     elif args.cpu_preparation_only:
         variants = [('positive', instrumented, header, 'all', None)] + preparation_variants
@@ -328,7 +338,7 @@ inline struct { Setting uberhar_test_mode; } values;
             run(name+'-link',flags+[selected_fixture,queue,*common,*link_flags,'-o',binary])
             result = json.loads(run(name+'-run',[*prefix,binary,selected],0 if expected is None else 1).stdout)
             if expected is None:
-                minimum = 4 if args.reset_only else 9 if (args.groups_only or args.pending_seed_only) else (1024 if args.a64 else 512)
+                minimum = 10 if args.fused_packing_only else 3 if args.cost_seeds_only else 4 if args.reset_only else 9 if (args.groups_only or args.pending_seed_only) else (1024 if args.a64 else 512)
                 if result.get('passed') is not True or result.get('comparisons',0) < minimum:
                     raise RuntimeError('Incomplete positive population')
                 proof['result'] = result
@@ -337,7 +347,7 @@ inline struct { Setting uberhar_test_mode; } values;
             proof['variants'].append({'name':name,'source_sha256':sha(cpp),'header_sha256':sha(header_path),
                                       'binary_sha256':sha(binary),'result':result})
             print(name+': '+str(result),flush=True)
-        if not args.pending_seed_only:
+        if not args.pending_seed_only and not args.cost_seeds_only and not args.fused_packing_only:
             # CodexAstraLocal: Two targeted controls prove the new regression detects
             # a restored redundant drain and failure to retain the serialized tail.
             header_path.write_text(header)

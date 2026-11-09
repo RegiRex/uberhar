@@ -32,11 +32,13 @@ public:
 
     template <typename Describe, typename Map>
     Result Prepare(const ShaderRegs& shader, u32 available_attributes, PAddr base, u64 last_vertex,
-                   Describe&& describe, Map&& map, bool complete_recipe = false) {
+                   Describe&& describe, Map&& map, bool complete_recipe = false,
+                   bool fast_conversion = false) {
         // CodexAstraLocal: A retry or rejected mapping must never retain an
         // executor selected from a different prepared plan.
         recipe = nullptr;
         recipe_slot = 0;
+        shared_stride_recipe = false;
         count = 0;
         mapped_attributes = 0;
         ready = false;
@@ -75,7 +77,7 @@ public:
         // CodexAstraLocal: Select only after all original range/reader checks;
         // the caller disables this bounded work for empty draws.
         if (complete_recipe)
-            recipe = SelectRecipe();
+            recipe = SelectRecipe(fast_conversion);
         // AstraPro: Retain the validated bound for live-index checks after a retry.
         admitted_maximum = static_cast<u32>(last_vertex);
         ready = true;
@@ -90,6 +92,7 @@ public:
     // CodexAstraLocal: Slot zero is generic prepared transport; the other four
     // tags identify the current complete recipe for once-per-draw usage counts.
     u32 RecipeSlot() const { return recipe_slot; }
+    bool SharedStrideRecipe() const { return shared_stride_recipe; }
 
     // AstraEH: Caller only invokes after Ready, for indices <= the admitted bound.
     // Retain ascending writes (including aliases), live defaults, exact f24
@@ -186,30 +189,57 @@ private:
     }
     // CodexAstraLocal: Publish the tag only with its exact matching executor.
     // Early rejection and every retry retain the Prepare entry's generic tag.
-    Recipe SelectRecipe() {
+    // CodexAstraLocal: Equal validated strides share only numeric address
+    // arithmetic, never guest contents or mappings. Preserve ascending writes
+    // even when multiple attributes alias one input register.
+    template <class E>
+    static void ConvertSharedStrideElement(const Op& op, ShaderUnit& unit, std::size_t offset) {
+        Convert<typename E::T, E::N>(unit.input[op.reg], op.data + offset);
+    }
+    template <class... E>
+    static void LoadSharedStrideRecipe(const NativeVertexInputPlan& plan, ShaderUnit& unit,
+                                      u32 vertex) {
+        const std::size_t offset = static_cast<std::size_t>(plan.ops[0].stride) * vertex;
+        u32 index = 0;
+        (ConvertSharedStrideElement<E>(plan.ops[index++], unit, offset), ...);
+    }
+    template <class... E>
+    Recipe ChooseRecipe(bool fast_conversion) {
+        if (fast_conversion) {
+            bool same_stride = true;
+            for (u32 index = 1; index < count; ++index)
+                same_stride &= ops[index].stride == ops[0].stride;
+            if (same_stride) {
+                shared_stride_recipe = true;
+                return LoadSharedStrideRecipe<E...>;
+            }
+        }
+        return LoadRecipe<E...>;
+    }
+    Recipe SelectRecipe(bool fast_conversion) {
         switch (count) {
         case 2:
             if (MatchesRecipe<F3, F2>()) {
                 recipe_slot = 3;
-                return LoadRecipe<F3, F2>;
+                return ChooseRecipe<F3, F2>(fast_conversion);
             }
             break;
         case 4:
             if (MatchesRecipe<F3, B3, S2, U4>()) {
                 recipe_slot = 4;
-                return LoadRecipe<F3, B3, S2, U4>;
+                return ChooseRecipe<F3, B3, S2, U4>(fast_conversion);
             }
             break;
         case 5:
             if (MatchesRecipe<F3, B3, S2, S2, U4>()) {
                 recipe_slot = 1;
-                return LoadRecipe<F3, B3, S2, S2, U4>;
+                return ChooseRecipe<F3, B3, S2, S2, U4>(fast_conversion);
             }
             break;
         case 11:
             if (MatchesRecipe<S3, B4, S2, U2, S3, S4, S4, S4, S4, S4, S4>()) {
                 recipe_slot = 2;
-                return LoadRecipe<S3, B4, S2, U2, S3, S4, S4, S4, S4, S4, S4>;
+                return ChooseRecipe<S3, B4, S2, U2, S3, S4, S4, S4, S4, S4, S4>(fast_conversion);
             }
             break;
         }
@@ -223,5 +253,6 @@ private:
     bool ready{};
     // CodexAstraLocal: Reset with the same prepared ops, never a cross-draw key.
     u8 recipe_slot{};
+    bool shared_stride_recipe{};
 };
 } // namespace Pica

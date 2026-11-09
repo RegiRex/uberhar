@@ -91,6 +91,15 @@ int main() {
             ++checks;
         }
     }
+    // CodexAstraLocal: Launch policy belongs in the cached execution recipe even
+    // when every guest mapping word is unchanged; toggling back rebuilds too.
+    shader.output_mask.Assign(1); raster.vs_output_total.Assign(0);
+    cache.Get(shader, raster, false);
+    const auto before_policy = cache.Builds();
+    Check(cache.Get(shader, raster, true).FastRecipe(), "Fast policy not reflected in plan");
+    Check(cache.Builds() == before_policy + 1, "Policy change reused stale plan");
+    Check(!cache.Get(shader, raster, false).FastRecipe(), "Default policy retained fast plan");
+    Check(cache.Builds() == before_policy + 2, "Policy reset reused stale plan");
     std::printf("Native plan cache: %u checks; hits=%llu builds=%llu; exact live payloads preserved\n",
                 checks, (unsigned long long)cache.Hits(), (unsigned long long)cache.Builds());
 }

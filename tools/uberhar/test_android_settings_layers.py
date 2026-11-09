@@ -267,9 +267,16 @@ int main() {
         std::pair{Settings::Keys::uberhar_adaptive_cpu_workers, &v.uberhar_adaptive_cpu_workers},
         std::pair{Settings::Keys::uberhar_gpu_observer, &v.uberhar_gpu_observer},
         std::pair{Settings::Keys::uberhar_frame_workload_census, &v.uberhar_frame_workload_census},
-        std::pair{Settings::Keys::uberhar_static_dynamic_state, &v.uberhar_static_dynamic_state},
         std::pair{Settings::Keys::uberhar_prepare_displayed_eye_only, &v.uberhar_prepare_displayed_eye_only},
         std::pair{Settings::Keys::uberhar_early_right_eye, &v.uberhar_early_right_eye},
+        std::pair{Settings::Keys::uberhar_fast_vertex_conversion, &v.uberhar_fast_vertex_conversion},
+        std::pair{Settings::Keys::uberhar_vertex_memo, &v.uberhar_vertex_memo},
+        std::pair{Settings::Keys::uberhar_worker_cpu_upload, &v.uberhar_worker_cpu_upload},
+        std::pair{Settings::Keys::uberhar_cpu_clip_reject, &v.uberhar_cpu_clip_reject},
+        std::pair{Settings::Keys::uberhar_full_pipeline_bank_16, &v.uberhar_full_pipeline_bank_16},
+        std::pair{Settings::Keys::uberhar_prune_spirv, &v.uberhar_prune_spirv},
+        std::pair{Settings::Keys::uberhar_indexed_cpu_output, &v.uberhar_indexed_cpu_output},
+        std::pair{Settings::Keys::uberhar_mono_guest_3d, &v.uberhar_mono_guest_3d},
         std::pair{Settings::Keys::uberhar_optimize_generic_shaders, &v.uberhar_optimize_generic_shaders},
     }) {
         const std::string ordinary_on = std::string("[Renderer]\n") + key + "=true\n";

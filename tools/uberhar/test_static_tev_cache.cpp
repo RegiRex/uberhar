@@ -130,6 +130,34 @@ void PartitionPressure() {
         Require(p.ready_cpu_bank->stats.max_owned==16, "both bounded partitions include retirement");
     }
 }
+// CodexAstraLocal: Residency selection is construction-owned. Both variants
+// exercise actual reserve/retire/destroy accounting with unchanged work credits.
+void SelectableCapacity() {
+    for (bool expanded : {false, true}) {
+        PipelineCache p;
+        p.ready_cpu_bank = std::make_unique<ReadyCpuBank>(CpuFragmentPartitions{expanded});
+        const std::size_t full = expanded ? 16 : 8;
+        Require(p.ready_cpu_bank->Capacity(0) == full && p.ready_cpu_bank->Capacity(1) == 8 &&
+                p.ready_cpu_bank->Capacity() == full + 8 &&
+                p.ready_cpu_bank->AllSlots().size() == full + 8,
+                "frozen capacity matches active lookup span");
+        Require(p.ready_cpu_bank->TierCredits(0) == 64 && p.ready_cpu_bank->TierCredits(1) == 16 &&
+                p.ready_cpu_bank->WorkCredits() == 256, "residency expansion changed compile credits");
+        for (unsigned i = 0; i < full; ++i) Require(Spend(p, false, i), "fill selected full capacity");
+        for (unsigned i = 0; i < 8; ++i) Require(Spend(p, true, 100 + i), "fill unchanged partial capacity");
+        Require(p.ready_cpu_bank->Owned(0) == full && p.ready_cpu_bank->Owned(1) == 8 &&
+                p.ready_cpu_bank->stats.max_owned == full + 8,
+                "selected capacity counts all retained owners");
+        Require(Spend(p, false, 200) && p.ready_cpu_bank->Owned(0) == full &&
+                p.ready_cpu_bank->Owned(1) == 8 && p.ready_cpu_bank->stats.max_owned == full + 8,
+                "expanded replacement obeys physical and partition cap");
+        p.ready_cpu_bank->ResetAfterDrain();
+        Require(p.ready_cpu_bank->Owned() == 0 && p.ready_cpu_bank->Capacity(0) == full &&
+                p.ready_cpu_bank->AllSlots().size() == full + 8 &&
+                p.ready_cpu_bank->TierCredits(0) == 64,
+                "reset changed frozen capacity or lost initial credit");
+    }
+}
 void RenewableBudgetsKeepHits() {
     PipelineCache p;
     auto* full=Warm(p,false);
@@ -388,7 +416,7 @@ void LazyTransportAndExactReuse() {
 int main() {
     try {
         Probe::partial_tier=true;
-        PromotionAndPriority(); ColdBridge(); PartitionPressure(); RenewableBudgetsKeepHits();
+        PromotionAndPriority(); ColdBridge(); PartitionPressure(); SelectableCapacity(); RenewableBudgetsKeepHits();
         PartialTransportAndIdentity(); FourRouteBindings(); NativeAndFailureFallback();
         LazyTransportAndExactReuse();
         Require(Probe::optional_waits==0 && Probe::lifetime_errors==0,

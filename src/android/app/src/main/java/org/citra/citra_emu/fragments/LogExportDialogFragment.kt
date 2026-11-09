@@ -192,6 +192,7 @@ class LogExportDialogFragment : DialogFragment() {
                         getString(R.string.log_export_no_games)
                     }
                     val kind = when {
+                        choice.telemetry -> "Compact frame telemetry"
                         choice.current -> getString(R.string.log_export_current)
                         choice.older -> getString(R.string.log_export_older)
                         else -> getString(R.string.log_export_previous)

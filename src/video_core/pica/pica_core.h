@@ -507,6 +507,11 @@ private:
     const bool cpu_vertex_only;
     // CodexAstraLocal: Prefix comparison is frozen independently of CPU placement.
     const bool cpu_prefix_overlap;
+    // CodexAstraLocal: New coordinator admission is opt-in with adaptation and
+    // prefix overlap; their OFF controls preserve the original seed policy.
+    const bool cost_qualified_cpu_seeds;
+    // CodexAstraLocal: Opt-in transport policy is immutable for this PICA owner.
+    const bool fast_vertex_conversion;
     // CodexAstraLocal TEST-ONLY LOG: One candidate/attempt per constructed PICA
     // owner, including write failure. Remove with the producer diagnostic above.
     const bool software_producer_diagnostics;
@@ -552,6 +557,9 @@ private:
         native_rescued_vertices{}, native_index_escapes{};
     // AstraPro: Pure mapping reuse also accelerates CPU fallback inside Combo.
     NativeVertexPlanCache native_plan_cache;
+    // CodexAstraLocal TEST-ONLY LOG: Actual synchronous invocation coverage,
+    // updated once per completed draw; remove after transport qualification.
+    u64 native_fast_output_invocations{}, native_shared_stride_invocations{};
     NativeVertexSamples native_samples;
     // AstraEH: Host-only admission state; ordinary batches add no diagnostic clock reads.
     NativeVertexSampleBudget native_sample_budget;

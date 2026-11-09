@@ -15,12 +15,13 @@ namespace Pica {
 // bounds memory and avoids per-draw allocation in Native and CPU Combo recovery.
 class NativeVertexPlanCache {
 public:
-    const NativeVertexPlan& Get(const ShaderRegs& shader, const RasterizerRegs& rasterizer) {
-        const auto incoming = Capture(shader, rasterizer);
+    const NativeVertexPlan& Get(const ShaderRegs& shader, const RasterizerRegs& rasterizer,
+                               bool fast_conversion = false) {
+        const auto incoming = Capture(shader, rasterizer, fast_conversion);
         if (plan && key == incoming) {
             ++hits;
         } else {
-            plan.emplace(shader, rasterizer);
+            plan.emplace(shader, rasterizer, fast_conversion);
             key = incoming;
             ++builds;
         }
@@ -32,8 +33,9 @@ public:
     void Reset() { plan.reset(); }
 
 private:
-    using Key = std::array<u32, 12>;
-    static Key Capture(const ShaderRegs& shader, const RasterizerRegs& rasterizer) {
+    using Key = std::array<u32, 13>;
+    static Key Capture(const ShaderRegs& shader, const RasterizerRegs& rasterizer,
+                       bool fast_conversion) {
         Key result{};
         result[0] = shader.max_input_attribute_index.Value();
         result[1] = shader.input_attribute_to_register_map_low;
@@ -44,6 +46,8 @@ private:
         // words stay zero here; changing an active count includes newly read maps.
         for (u32 i = 0; i < result[4]; ++i)
             result[5 + i] = rasterizer.vs_output_attributes[i].raw;
+        // CodexAstraLocal: Execution policy is part of this pure plan's identity.
+        result[12] = fast_conversion;
         return result;
     }
     Key key{};

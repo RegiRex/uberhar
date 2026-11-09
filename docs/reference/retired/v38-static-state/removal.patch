@@ -1,0 +1,186 @@
+diff --git a/src/android/app/src/main/java/org/citra/citra_emu/features/settings/SettingKeys.kt b/src/android/app/src/main/java/org/citra/citra_emu/features/settings/SettingKeys.kt
+--- a/src/android/app/src/main/java/org/citra/citra_emu/features/settings/SettingKeys.kt
++++ b/src/android/app/src/main/java/org/citra/citra_emu/features/settings/SettingKeys.kt
+@@ -61,7 +61,6 @@
+     external fun uberhar_adaptive_cpu_workers(): String
+     external fun uberhar_gpu_observer(): String
+     external fun uberhar_frame_workload_census(): String
+-    external fun uberhar_static_dynamic_state(): String
+     external fun uberhar_prepare_displayed_eye_only(): String
+     external fun uberhar_early_right_eye(): String
+ 
+diff --git a/src/android/app/src/main/java/org/citra/citra_emu/features/settings/model/BooleanSetting.kt b/src/android/app/src/main/java/org/citra/citra_emu/features/settings/model/BooleanSetting.kt
+--- a/src/android/app/src/main/java/org/citra/citra_emu/features/settings/model/BooleanSetting.kt
++++ b/src/android/app/src/main/java/org/citra/citra_emu/features/settings/model/BooleanSetting.kt
+@@ -40,7 +40,6 @@
+     UBERHAR_ADAPTIVE_CPU_WORKERS(SettingKeys.uberhar_adaptive_cpu_workers(), Settings.SECTION_RENDERER, true),
+     UBERHAR_GPU_OBSERVER(SettingKeys.uberhar_gpu_observer(), Settings.SECTION_RENDERER, true),
+     UBERHAR_FRAME_WORKLOAD_CENSUS(SettingKeys.uberhar_frame_workload_census(), Settings.SECTION_RENDERER, false),
+-    UBERHAR_STATIC_DYNAMIC_STATE(SettingKeys.uberhar_static_dynamic_state(), Settings.SECTION_RENDERER, false),
+     UBERHAR_PREPARE_DISPLAYED_EYE_ONLY(SettingKeys.uberhar_prepare_displayed_eye_only(), Settings.SECTION_RENDERER, true),
+     UBERHAR_EARLY_RIGHT_EYE(SettingKeys.uberhar_early_right_eye(), Settings.SECTION_RENDERER, false),
+     DISABLE_SPIRV_OPTIMIZER(SettingKeys.disable_spirv_optimizer(), Settings.SECTION_RENDERER, true),
+@@ -199,7 +198,6 @@
+             UBERHAR_ADAPTIVE_CPU_WORKERS,
+             UBERHAR_GPU_OBSERVER,
+             UBERHAR_FRAME_WORKLOAD_CENSUS,
+-            UBERHAR_STATIC_DYNAMIC_STATE,
+             UBERHAR_PREPARE_DISPLAYED_EYE_ONLY,
+             UBERHAR_EARLY_RIGHT_EYE,
+             SPIRV_SHADER_GEN,
+diff --git a/src/android/app/src/main/java/org/citra/citra_emu/features/settings/model/TestingSettings.kt b/src/android/app/src/main/java/org/citra/citra_emu/features/settings/model/TestingSettings.kt
+--- a/src/android/app/src/main/java/org/citra/citra_emu/features/settings/model/TestingSettings.kt
++++ b/src/android/app/src/main/java/org/citra/citra_emu/features/settings/model/TestingSettings.kt
+@@ -17,7 +17,6 @@
+     UBERHAR_ADAPTIVE_CPU_WORKERS(BooleanSetting.UBERHAR_ADAPTIVE_CPU_WORKERS, R.string.uberhar_adaptive_cpu_workers, R.string.uberhar_adaptive_cpu_workers_description),
+     UBERHAR_GPU_OBSERVER(BooleanSetting.UBERHAR_GPU_OBSERVER, R.string.uberhar_gpu_observer, R.string.uberhar_gpu_observer_description),
+     UBERHAR_FRAME_WORKLOAD_CENSUS(BooleanSetting.UBERHAR_FRAME_WORKLOAD_CENSUS, R.string.uberhar_frame_workload_census, R.string.uberhar_frame_workload_census_description),
+-    UBERHAR_STATIC_DYNAMIC_STATE(BooleanSetting.UBERHAR_STATIC_DYNAMIC_STATE, R.string.uberhar_static_dynamic_state, R.string.uberhar_static_dynamic_state_description),
+     UBERHAR_PREPARE_DISPLAYED_EYE_ONLY(BooleanSetting.UBERHAR_PREPARE_DISPLAYED_EYE_ONLY, R.string.uberhar_prepare_displayed_eye_only, R.string.uberhar_prepare_displayed_eye_only_description),
+     UBERHAR_EARLY_RIGHT_EYE(BooleanSetting.UBERHAR_EARLY_RIGHT_EYE, R.string.uberhar_early_right_eye, R.string.uberhar_early_right_eye_description),
+     OPTIMIZE_GENERIC_SHADERS(BooleanSetting.UBERHAR_OPTIMIZE_GENERIC_SHADERS,
+diff --git a/src/android/app/src/main/jni/config.cpp b/src/android/app/src/main/jni/config.cpp
+--- a/src/android/app/src/main/jni/config.cpp
++++ b/src/android/app/src/main/jni/config.cpp
+@@ -158,7 +158,6 @@
+         Settings::Keys::uberhar_adaptive_cpu_workers,
+         Settings::Keys::uberhar_gpu_observer,
+         Settings::Keys::uberhar_frame_workload_census,
+-        Settings::Keys::uberhar_static_dynamic_state,
+         Settings::Keys::uberhar_prepare_displayed_eye_only,
+         Settings::Keys::uberhar_early_right_eye,
+         Settings::Keys::uberhar_hybrid_tev,
+@@ -204,7 +203,6 @@
+         Settings::Keys::uberhar_adaptive_cpu_workers,
+         Settings::Keys::uberhar_gpu_observer,
+         Settings::Keys::uberhar_frame_workload_census,
+-        Settings::Keys::uberhar_static_dynamic_state,
+         Settings::Keys::uberhar_prepare_displayed_eye_only,
+         Settings::Keys::uberhar_early_right_eye,
+     };
+@@ -405,7 +403,6 @@
+     ReadSetting("Renderer", Settings::values.uberhar_adaptive_cpu_workers);
+     ReadSetting("Renderer", Settings::values.uberhar_gpu_observer);
+     ReadSetting("Renderer", Settings::values.uberhar_frame_workload_census);
+-    ReadSetting("Renderer", Settings::values.uberhar_static_dynamic_state);
+     ReadSetting("Renderer", Settings::values.uberhar_prepare_displayed_eye_only);
+     ReadSetting("Renderer", Settings::values.uberhar_early_right_eye);
+     ReadSetting("Renderer", Settings::values.uberhar_cpu_prefix_overlap);
+diff --git a/src/android/app/src/main/jni/default_ini.h b/src/android/app/src/main/jni/default_ini.h
+--- a/src/android/app/src/main/jni/default_ini.h
++++ b/src/android/app/src/main/jni/default_ini.h
+@@ -178,10 +178,6 @@
+ # Default: false. Collect bounded rendering workload details for frame comparisons. OFF bypasses this census. Restart the game after changing.
+ )") DECLARE_KEY(uberhar_frame_workload_census) BOOST_HANA_STRING(R"(
+ 
+-# CodexAstraLocal: V38 static state path; launch-owned .57 comparison.
+-# Default: false. Test a static alternative to extended dynamic state on V38. Border-color policy stays unchanged. Restart the game after changing.
+-)") DECLARE_KEY(uberhar_static_dynamic_state) BOOST_HANA_STRING(R"(
+-
+ # CodexAstraLocal: Prepare displayed eye only; launch-owned .57 comparison.
+ # Default: true. Avoid presentation preparation for an eye that will not be displayed. This does not remove guest drawing. Restart the game after changing.
+ )") DECLARE_KEY(uberhar_prepare_displayed_eye_only) BOOST_HANA_STRING(R"(
+diff --git a/src/android/app/src/main/jni/native.cpp b/src/android/app/src/main/jni/native.cpp
+--- a/src/android/app/src/main/jni/native.cpp
++++ b/src/android/app/src/main/jni/native.cpp
+@@ -1067,7 +1067,6 @@
+     if (name == Settings::Keys::uberhar_adaptive_cpu_workers) return Settings::values.uberhar_adaptive_cpu_workers.GetValue();
+     if (name == Settings::Keys::uberhar_gpu_observer) return Settings::values.uberhar_gpu_observer.GetValue();
+     if (name == Settings::Keys::uberhar_frame_workload_census) return Settings::values.uberhar_frame_workload_census.GetValue();
+-    if (name == Settings::Keys::uberhar_static_dynamic_state) return Settings::values.uberhar_static_dynamic_state.GetValue();
+     if (name == Settings::Keys::uberhar_prepare_displayed_eye_only) return Settings::values.uberhar_prepare_displayed_eye_only.GetValue();
+     if (name == Settings::Keys::uberhar_early_right_eye) return Settings::values.uberhar_early_right_eye.GetValue();
+     if (name == Settings::Keys::uberhar_optimize_generic_shaders)
+diff --git a/src/android/app/src/main/res/values/strings.xml b/src/android/app/src/main/res/values/strings.xml
+--- a/src/android/app/src/main/res/values/strings.xml
++++ b/src/android/app/src/main/res/values/strings.xml
+@@ -1260,8 +1260,6 @@
+     <string name="uberhar_gpu_observer_description">Collect sampled render-pass GPU timings and draw attribution. OFF disables this observer; rendering policy and ordinary diagnostics remain. Restart the game after changing.</string>
+     <string name="uberhar_frame_workload_census">Frame workload census</string>
+     <string name="uberhar_frame_workload_census_description">Collect bounded rendering workload details for frame comparisons. OFF bypasses this census. Restart the game after changing.</string>
+-    <string name="uberhar_static_dynamic_state">V38 static state path</string>
+-    <string name="uberhar_static_dynamic_state_description">Test a static alternative to extended dynamic state on V38. Border-color policy stays unchanged. Restart the game after changing.</string>
+     <string name="uberhar_prepare_displayed_eye_only">Prepare displayed eye only</string>
+     <string name="uberhar_prepare_displayed_eye_only_description">Avoid presentation preparation for an eye that will not be displayed. This does not remove guest drawing. Restart the game after changing.</string>
+     <string name="uberhar_early_right_eye">Early right-eye suppression</string>
+diff --git a/src/common/settings.cpp b/src/common/settings.cpp
+--- a/src/common/settings.cpp
++++ b/src/common/settings.cpp
+@@ -121,7 +121,6 @@
+     log_setting("uberhar_adaptive_cpu_workers", values.uberhar_adaptive_cpu_workers.GetValue());
+     log_setting("uberhar_gpu_observer", values.uberhar_gpu_observer.GetValue());
+     log_setting("uberhar_frame_workload_census", values.uberhar_frame_workload_census.GetValue());
+-    log_setting("uberhar_static_dynamic_state", values.uberhar_static_dynamic_state.GetValue());
+     log_setting("uberhar_prepare_displayed_eye_only", values.uberhar_prepare_displayed_eye_only.GetValue());
+     log_setting("uberhar_early_right_eye", values.uberhar_early_right_eye.GetValue());
+     log_setting("UBERHAR_CPU_PREFIX_OVERLAP", values.uberhar_cpu_prefix_overlap.GetValue());
+@@ -270,7 +269,6 @@
+     values.uberhar_adaptive_cpu_workers.SetGlobal(true);
+     values.uberhar_gpu_observer.SetGlobal(true);
+     values.uberhar_frame_workload_census.SetGlobal(true);
+-    values.uberhar_static_dynamic_state.SetGlobal(true);
+     values.uberhar_prepare_displayed_eye_only.SetGlobal(true);
+     values.uberhar_early_right_eye.SetGlobal(true);
+     values.uberhar_cpu_prefix_overlap.SetGlobal(true);
+diff --git a/src/common/settings.h b/src/common/settings.h
+--- a/src/common/settings.h
++++ b/src/common/settings.h
+@@ -572,7 +572,6 @@
+     SwitchableSetting<bool> uberhar_adaptive_cpu_workers{true, Keys::uberhar_adaptive_cpu_workers};
+     SwitchableSetting<bool> uberhar_gpu_observer{true, Keys::uberhar_gpu_observer};
+     SwitchableSetting<bool> uberhar_frame_workload_census{false, Keys::uberhar_frame_workload_census};
+-    SwitchableSetting<bool> uberhar_static_dynamic_state{false, Keys::uberhar_static_dynamic_state};
+     SwitchableSetting<bool> uberhar_prepare_displayed_eye_only{true, Keys::uberhar_prepare_displayed_eye_only};
+     SwitchableSetting<bool> uberhar_early_right_eye{false, Keys::uberhar_early_right_eye};
+     SwitchableSetting<bool> uberhar_cpu_prefix_overlap{true, Keys::uberhar_cpu_prefix_overlap};
+diff --git a/src/core/perf_stats.cpp b/src/core/perf_stats.cpp
+--- a/src/core/perf_stats.cpp
++++ b/src/core/perf_stats.cpp
+@@ -62,7 +62,6 @@
+     add("uberhar_optimize_generic_shaders", Settings::values.uberhar_optimize_generic_shaders.GetValue());
+     add("uberhar_gpu_observer", Settings::values.uberhar_gpu_observer.GetValue());
+     add("uberhar_frame_workload_census", Settings::values.uberhar_frame_workload_census.GetValue());
+-    add("uberhar_static_dynamic_state", Settings::values.uberhar_static_dynamic_state.GetValue());
+     add("uberhar_early_right_eye", Settings::values.uberhar_early_right_eye.GetValue());
+     add("uberhar_cpu_prefix_overlap", Settings::values.uberhar_cpu_prefix_overlap.GetValue());
+     add("uberhar_parallel_texture_decode", Settings::values.uberhar_parallel_texture_decode.GetValue());
+diff --git a/src/video_core/renderer_vulkan/vk_instance.cpp b/src/video_core/renderer_vulkan/vk_instance.cpp
+--- a/src/video_core/renderer_vulkan/vk_instance.cpp
++++ b/src/video_core/renderer_vulkan/vk_instance.cpp
+@@ -539,9 +539,11 @@
+                       "it is broken on Qualcomm drivers");
+     const bool has_portability_subset = add_extension(VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME);
+     const bool has_extended_dynamic_state =
+-        // CodexAstraLocal: Isolate the existing static-state fallback on Turnip.
+-        // Disabling at feature negotiation keeps keys and emitted commands in
+-        // agreement; border-color support and all other extensions stay intact.
++        // CodexAstraLocal: Retire the regressive Turnip static-state experiment;
++        // preserve inherited driver exclusions and border-color policy.
++        add_extension(VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME,
++                      is_arm || is_qualcomm,
++                      "driver policy"); border-color support and all other extensions stay intact.
+         add_extension(VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME,
+                       is_arm || is_qualcomm ||
+                           (is_turnip && Settings::values.uberhar_static_dynamic_state.GetValue()),
+diff --git a/tools/uberhar/test_android_settings_layers.py b/tools/uberhar/test_android_settings_layers.py
+--- a/tools/uberhar/test_android_settings_layers.py
++++ b/tools/uberhar/test_android_settings_layers.py
+@@ -267,7 +267,6 @@
+         std::pair{Settings::Keys::uberhar_adaptive_cpu_workers, &v.uberhar_adaptive_cpu_workers},
+         std::pair{Settings::Keys::uberhar_gpu_observer, &v.uberhar_gpu_observer},
+         std::pair{Settings::Keys::uberhar_frame_workload_census, &v.uberhar_frame_workload_census},
+-        std::pair{Settings::Keys::uberhar_static_dynamic_state, &v.uberhar_static_dynamic_state},
+         std::pair{Settings::Keys::uberhar_prepare_displayed_eye_only, &v.uberhar_prepare_displayed_eye_only},
+         std::pair{Settings::Keys::uberhar_early_right_eye, &v.uberhar_early_right_eye},
+         std::pair{Settings::Keys::uberhar_optimize_generic_shaders, &v.uberhar_optimize_generic_shaders},
+diff --git a/CMakeModules/GenerateSettingKeys.cmake b/CMakeModules/GenerateSettingKeys.cmake
+--- a/CMakeModules/GenerateSettingKeys.cmake
++++ b/CMakeModules/GenerateSettingKeys.cmake
+@@ -64,7 +64,6 @@
+     "uberhar_adaptive_cpu_workers"
+     "uberhar_gpu_observer"
+     "uberhar_frame_workload_census"
+-    "uberhar_static_dynamic_state"
+     "uberhar_prepare_displayed_eye_only"
+     "uberhar_early_right_eye"
+     # AstraEH: One mutually exclusive experimental renderer profile.

@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstring>
 #include <type_traits>
+#include <utility>
 #include "video_core/pica/regs_rasterizer.h"
 #include "video_core/pica/regs_shader.h"
 #include "video_core/pica/shader_unit.h"
@@ -21,7 +22,8 @@ namespace Pica {
 // last write, and overflow semantics 24..31 remain outside OutputVertex.
 class NativeVertexPlan {
 public:
-    NativeVertexPlan(const ShaderRegs& shader, const RasterizerRegs& rasterizer) {
+    NativeVertexPlan(const ShaderRegs& shader, const RasterizerRegs& rasterizer,
+                     bool fast_conversion = false) {
         input_count = shader.max_input_attribute_index + 1;
         for (u32 attr = 0; attr < input_count; ++attr)
             input_registers[attr] = static_cast<u8>(shader.GetRegisterForAttribute(attr));
@@ -43,6 +45,25 @@ public:
                 if (destinations[comp] < sources.size())
                     sources[destinations[comp]] = static_cast<u8>(reg * 4 + comp);
             }
+        }
+        // CodexAstraLocal: Resolve aliases first, then recognize exact semantic
+        // fields. The opt-in direct recipe writes all 96 bytes, including both
+        // padding words, without a temporary fill/overwrite/copy buffer.
+        if (fast_conversion) {
+            fast_recipe = true;
+            for (u32 field = 0; field < FieldOffsets.size(); ++field) {
+                const u32 dest = FieldOffsets[field], length = FieldLengths[field];
+                const u8 source = sources[dest];
+                field_sources[field] = source;
+                for (u32 lane = 0; lane < length; ++lane) {
+                    const u32 expected = source == 64 ? 64 : source + lane;
+                    if (expected > 64 || (source != 64 && expected == 64) ||
+                        sources[dest + lane] != expected)
+                        fast_recipe = false;
+                }
+            }
+            if (fast_recipe)
+                return;
         }
         // CodexAstraLocal: Group only four final contiguous components from one
         // output register. Resolve duplicate semantics above before grouping;
@@ -66,6 +87,8 @@ public:
         return supported;
     }
 
+    bool FastRecipe() const { return fast_recipe; }
+
     // AstraEH: Preserve ascending-attribute overwrite order and untouched registers.
     void LoadInput(ShaderUnit& unit, const AttributeBuffer& input) const {
         for (u32 attr = 0; attr < input_count; ++attr)
@@ -83,21 +106,25 @@ public:
                       offsetof(Register, x) == 0 && offsetof(Register, y) == sizeof(f24) &&
                       offsetof(Register, z) == 2 * sizeof(f24) &&
                       offsetof(Register, w) == 3 * sizeof(f24));
-        std::array<f24, 24> slots;
-        slots.fill(f24::One());
-        // CodexAstraLocal: Copy complete register object bytes, preserving f24
-        // storage bits and both output banks. Color conversion remains below.
-        for (u32 i = 0; i < quad_count; ++i) {
-            const auto [dest, source] = quads[i];
-            std::memcpy(&slots[dest], &unit.output[unit.output_bank][source / 4],
-                        4 * sizeof(f24));
-        }
-        for (u32 i = 0; i < copy_count; ++i) {
-            const auto [dest, source] = copies[i];
-            slots[dest] = unit.output[unit.output_bank][source / 4][source % 4];
-        }
         OutputVertex vertex;
-        std::memcpy(&vertex, slots.data(), sizeof(vertex));
+        if (fast_recipe) {
+            CopyFields(vertex, unit, std::make_index_sequence<FieldOffsets.size()>{});
+        } else {
+            std::array<f24, 24> slots;
+            slots.fill(f24::One());
+            // CodexAstraLocal: Copy complete register object bytes, preserving f24
+            // storage bits and both output banks. Color conversion remains below.
+            for (u32 i = 0; i < quad_count; ++i) {
+                const auto [dest, source] = quads[i];
+                std::memcpy(&slots[dest], &unit.output[unit.output_bank][source / 4],
+                            4 * sizeof(f24));
+            }
+            for (u32 i = 0; i < copy_count; ++i) {
+                const auto [dest, source] = copies[i];
+                slots[dest] = unit.output[unit.output_bank][source / 4][source % 4];
+            }
+            std::memcpy(&vertex, slots.data(), sizeof(vertex));
+        }
         // AstraEH: Match inherited pre-interpolation abs/saturation, including NaN -> 1.
         for (u32 i = 0; i < 4; ++i) {
             const float c = std::fabs(vertex.color[i].ToFloat32());
@@ -107,6 +134,35 @@ public:
     }
 
 private:
+    // CodexAstraLocal: Fixed-size copies expose scalar/vector moves to the
+    // compiler. Copying representation bytes preserves exceptional floats and
+    // permits contiguous lanes across register boundaries without aliasing.
+    static constexpr std::array<u8, 10> FieldOffsets{0, 4, 8, 12, 14, 16, 17, 18, 21, 22};
+    static constexpr std::array<u8, 10> FieldLengths{4, 4, 4, 2, 2, 1, 1, 3, 1, 2};
+    template <std::size_t Field>
+    void CopyField(OutputVertex& vertex, const ShaderUnit& unit) const {
+        constexpr std::array<f24, 4> ones{f24::One(), f24::One(), f24::One(), f24::One()};
+        const u8 source = field_sources[Field];
+        const auto* bytes = source == 64 ? reinterpret_cast<const u8*>(ones.data()) :
+            reinterpret_cast<const u8*>(unit.output[unit.output_bank].data()) + source * sizeof(f24);
+        std::memcpy(reinterpret_cast<u8*>(&vertex) + FieldOffsets[Field] * sizeof(f24),
+                    bytes, FieldLengths[Field] * sizeof(f24));
+    }
+    template <std::size_t... Field>
+    void CopyFields(OutputVertex& vertex, const ShaderUnit& unit,
+                    std::index_sequence<Field...>) const {
+        static_assert(std::is_standard_layout_v<OutputVertex> &&
+            offsetof(OutputVertex, pos) == 0 && offsetof(OutputVertex, quat) == 4 * sizeof(f24) &&
+            offsetof(OutputVertex, color) == 8 * sizeof(f24) &&
+            offsetof(OutputVertex, tc0) == 12 * sizeof(f24) &&
+            offsetof(OutputVertex, tc1) == 14 * sizeof(f24) &&
+            offsetof(OutputVertex, tc0_w) == 16 * sizeof(f24) &&
+            offsetof(OutputVertex, view) == 18 * sizeof(f24) &&
+            offsetof(OutputVertex, tc2) == 22 * sizeof(f24) && sizeof(OutputVertex) == 24 * sizeof(f24));
+        (CopyField<Field>(vertex, unit), ...);
+    }
+    std::array<u8, 10> field_sources{};
+    bool fast_recipe{};
     struct Copy {
         u8 destination, source;
     };

@@ -3,9 +3,14 @@
 // Refer to the license.txt file included.
 
 #include "common/alignment.h"
+#include <chrono> // CodexAstraLocal: Sparse inclusive indexed-output preparation cost.
 #include <cstring> // CodexAstraLocal: Exact owned CPU vertex bytes, no live renderer access.
 #include <type_traits> // CodexAstraLocal: Rollback destroys only trivial owned vertices.
+#include "common/hash.h"
+#include "common/logging/log.h"
 #include "common/math_util.h"
+#include "common/settings.h"
+#include "common/uberhar_test_profile.h"
 #include "core/memory.h"
 #include "video_core/pica/pica_core.h"
 #include "video_core/rasterizer_accelerated.h"
@@ -79,7 +84,96 @@ RasterizerAccelerated::HardwareVertex::HardwareVertex(const Pica::OutputVertex& 
 }
 
 RasterizerAccelerated::RasterizerAccelerated(Memory::MemorySystem& memory_, Pica::PicaCore& pica_)
-    : memory{memory_}, pica{pica_}, regs{pica.regs.internal} {}
+    : memory{memory_}, pica{pica_}, regs{pica.regs.internal},
+      indexed_cpu_output_enabled{
+          Settings::IsUberharTestProfile(Settings::values.uberhar_test_mode.GetValue()) &&
+          Settings::values.uberhar_indexed_cpu_output.GetValue()},
+      worker_cpu_upload_enabled{
+          Settings::IsUberharTestProfile(Settings::values.uberhar_test_mode.GetValue()) &&
+          Settings::values.uberhar_worker_cpu_upload.GetValue()} {}
+
+// CodexAstraLocal: Packing is deliberately unchanged in this first lane. The
+// sampled interval includes scratch growth, prefix/full keying, exact comparison
+// and the actual accepted OR fallback copy; no rejected-search cost is hidden.
+RasterizerAccelerated::CpuOutputUpload RasterizerAccelerated::UploadCpuOutput(
+    std::span<u8> destination, bool eligible) {
+    static_assert(sizeof(HardwareVertex) == IndexedCpuOutput::Stride);
+    static_assert(std::is_trivially_copyable_v<HardwareVertex>);
+    const auto bytes = static_cast<u32>(vertex_batch.size() * sizeof(HardwareVertex));
+    ASSERT(destination.size() >= bytes);
+    if (!eligible) {
+        ++indexed_output_stats.ineligible;
+        std::memcpy(destination.data(), vertex_batch.data(), bytes);
+        return {bytes, 0, false};
+    }
+    auto& stats = indexed_output_stats;
+    const bool first_allocation = indexed_cpu_output.ScratchBytes() == 0 &&
+        vertex_batch.size() >= IndexedCpuOutput::MinVertices &&
+        vertex_batch.size() <= IndexedCpuOutput::MaxVertices;
+    const bool sample = (++stats.attempts & 63U) == 1 || first_allocation;
+    const auto start = sample ? std::chrono::steady_clock::now() :
+                               std::chrono::steady_clock::time_point{};
+    const std::span<const u8> source{reinterpret_cast<const u8*>(vertex_batch.data()), bytes};
+    const auto plan = indexed_cpu_output.Prepare(source, [](const void* data, std::size_t size) {
+        return Common::ComputeHash64(data, size);
+    });
+    if (plan) {
+        // Same source and reservation are still owned by this synchronous call.
+        const bool copied = indexed_cpu_output.Copy(source, destination);
+        ASSERT(copied);
+        (void)copied;
+    } else {
+        std::memcpy(destination.data(), source.data(), bytes);
+    }
+    if (sample) {
+        const auto ns = static_cast<u64>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now() - start).count());
+        if (plan) { ++stats.accepted_samples; stats.accepted_ns += ns; }
+        else { ++stats.refused_samples; stats.refused_ns += ns; }
+        stats.max_sample_ns = std::max(stats.max_sample_ns, ns);
+    }
+    ++stats.decisions[static_cast<std::size_t>(plan.decision)];
+    stats.hashed_vertices += plan.hashed_vertices;
+    stats.probes += plan.probes;
+    if (plan) {
+        stats.input_vertices += plan.input_vertices;
+        stats.unique_vertices += plan.unique_vertices;
+        stats.expanded_bytes += plan.expanded_bytes;
+        stats.uploaded_bytes += plan.upload_bytes;
+    }
+    return {plan ? plan.upload_bytes : bytes, plan ? plan.index_offset : 0, bool(plan)};
+}
+
+// CodexAstraLocal TEST-ONLY LOG: Called only by the existing sparse work-report
+// boundary and final teardown. Remove after the default-OFF experiment is
+// qualified. Counts are lifetime totals; timings include keying and upload copy,
+// but exclude original packing, stream reservation, GPU execution and joins.
+void RasterizerAccelerated::ReportIndexedCpuOutput(bool final) {
+    const auto& s = indexed_output_stats;
+    LOG_INFO(Render_Vulkan,
+        "Uberhar indexed CPU output: enabled={} attempts={} ineligible={} "
+        "decisions=[{},{},{},{},{},{},{},{}] input_vertices={} unique_vertices={} "
+        "expanded_bytes={} uploaded_bytes={} hashed_vertices={} probes={} scratch_bytes={} "
+        "accepted_samples={} accepted_key_copy_ns={} refused_samples={} refused_key_copy_ns={} "
+        "max_key_copy_ns={} scope=packed_complete_list upload_upper_bound_reserved=true final={}",
+        indexed_cpu_output_enabled, s.attempts, s.ineligible,
+        s.decisions[0], s.decisions[1], s.decisions[2], s.decisions[3],
+        s.decisions[4], s.decisions[5], s.decisions[6], s.decisions[7],
+        s.input_vertices, s.unique_vertices, s.expanded_bytes, s.uploaded_bytes,
+        s.hashed_vertices, s.probes, indexed_cpu_output.ScratchBytes(), s.accepted_samples,
+        s.accepted_ns, s.refused_samples, s.refused_ns, s.max_sample_ns, final);
+    const auto worker = owned_vertex_upload.GetStatistics();
+    // CodexAstraLocal TEST-ONLY LOG: Separate producer acquisition and recorder
+    // copy samples; neither is GPU time or proof of a net speedup. Remove after
+    // the default-OFF worker upload experiment is hardware-qualified.
+    LOG_INFO(Render_Vulkan,
+        "Uberhar worker CPU upload: enabled={} attempts={} acquired={} refused={} bytes={} "
+        "published={} copy_failures={} peak_resident_bytes={} owner_samples={} owner_ns={} "
+        "copy_samples={} copy_ns={} scope=ordinary_packed_coherent min_bytes=65536 final={}",
+        worker_cpu_upload_enabled, worker_upload_attempts, worker.acquired, worker.refused,
+        worker.bytes, worker.published, worker.copy_failures, worker.peak_resident_bytes,
+        worker_upload_owner_samples, worker_upload_owner_ns, worker.copy_samples, worker.copy_ns, final);
+}
 
 /**
  * This is a helper function to resolve an issue when interpolating opposite quaternions. See below

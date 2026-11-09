@@ -29,6 +29,7 @@
 #include "common/logging/backend.h"
 #include "common/logging/backend_access.h" // CodexAstraUlt: Signal-aware sink serialization.
 #include "common/logging/diagnostic_queue.h" // CodexAstraUlt: Explicit optional delivery policy.
+#include "common/logging/frame_telemetry.h" // CodexAstraLocal: Required compact timing channel.
 #include "common/logging/log.h"
 #include "common/logging/log_entry.h"
 #include "common/logging/text_formatter.h"
@@ -359,6 +360,13 @@ public:
         return instance && instance->file_backend.Healthy();
     }
 
+    static bool SubmitFrameTelemetry(const FrameTelemetry::Record& record) {
+        return instance && logging_initialized && instance->frame_telemetry.Submit(record);
+    }
+    static FrameTelemetryStatus GetFrameTelemetryStatus() {
+        return instance ? instance->frame_telemetry.Status() : FrameTelemetryStatus{};
+    }
+
     static void Stop() {
         instance->StopBackendThread();
     }
@@ -455,7 +463,10 @@ private:
         : filter{filter_}, file_backend{""}, libretro_backend{callback} {}
 #endif
     Impl(const std::string& file_backend_filename, const Filter& filter_, bool rotate)
-        : filter{filter_}, file_backend{file_backend_filename, rotate} {
+        : filter{filter_}, file_backend{file_backend_filename, rotate},
+          telemetry_prefix{fmt::format("{}.frames-{}-", file_backend_filename,
+              std::chrono::duration_cast<std::chrono::nanoseconds>(
+                  std::chrono::steady_clock::now().time_since_epoch()).count())} {
 #ifdef CITRA_LINUX_GCC_BACKTRACE
         int waker_pipefd[2];
         int done_printing_pipefd[2];
@@ -563,6 +574,7 @@ private:
                 ReportDiagnosticOmissions(static_cast<bool>(entry.flush_request));
                 // AstraEH: Barriers are control messages, never formatted as log lines.
                 if (entry.flush_request) {
+                    DrainFrameTelemetry();
                     ForEachBackend([](Backend& backend) { backend.Flush(); });
                     entry.flush_request->set_value();
                     return;
@@ -570,6 +582,7 @@ private:
                 ForEachBackend([&entry](Backend& backend) { backend.Write(entry); });
             };
             while (!stop_token.stop_requested()) {
+                DrainFrameTelemetry();
                 // AstraEH: A cancelled PopWait leaves its output untouched; clear the
                 // previous entry so shutdown cannot acknowledge a flush barrier twice.
                 entry = {};
@@ -596,7 +609,53 @@ private:
             }
             // CodexAstraUlt: Final accounting precedes the existing backend flush/close.
             ReportDiagnosticOmissions(true);
+            // CodexAstraLocal: Drain this finite queue independently of the ordinary
+            // logger's 100-entry shutdown quota; final records are flushed by the sink.
+            DrainFrameTelemetry();
         });
+    }
+
+    void DrainFrameTelemetry() {
+        frame_telemetry.Drain([this](const FrameTelemetry::Record& record) {
+            // CodexAstraLocal TEST-ONLY LOG: Size-rotated compact evidence is retained
+            // without a runtime cutoff or overwriting earlier chunks. Remove with
+            // frame telemetry; never route it through optional log admission.
+            if (telemetry_prefix.empty()) return false;
+            if (!telemetry_file || telemetry_bytes >= 16 * 1024 * 1024) {
+                if (telemetry_file && !telemetry_file->Flush()) return false;
+                telemetry_file = std::make_unique<FileUtil::IOFile>(
+                    fmt::format("{}{:06}.jsonl", telemetry_prefix, telemetry_chunk++), "a", _SH_DENYWR);
+                telemetry_bytes = telemetry_file->GetSize();
+                if (!telemetry_file->IsOpen()) { telemetry_file.reset(); return false; }
+            }
+            const auto text = FormatFrameTelemetry(record);
+            const auto written = telemetry_file->WriteString(text);
+            telemetry_bytes += written;
+            if (written != text.size() || !telemetry_file->Flush()) {
+                telemetry_file.reset();
+                return false;
+            }
+            return true;
+        });
+        const auto status = frame_telemetry.Status();
+        if (telemetry_file && (status.attempted != telemetry_last_status.attempted ||
+                              status.written != telemetry_last_status.written ||
+                              status.queue_drops != telemetry_last_status.queue_drops ||
+                              status.write_failures != telemetry_last_status.write_failures)) {
+            const auto quality = fmt::format(
+                "{{\"schema\":1,\"kind\":\"delivery\",\"attempted\":{},\"queued\":{},"
+                "\"written_and_flushed\":{},\"queue_drops\":{},\"write_failures\":{},"
+                "\"final_requested\":{},\"final_written_and_flushed\":{}}}\n",
+                status.attempted, status.queued, status.written, status.queue_drops,
+                status.write_failures, status.final_requested, status.final_written);
+            const auto written = telemetry_file->WriteString(quality);
+            telemetry_bytes += written;
+            if (written == quality.size() && telemetry_file->Flush()) telemetry_last_status = status;
+            else {
+                frame_telemetry.RecordSinkFailure();
+                telemetry_file.reset(); // No false acknowledgment on a failed quality write.
+            }
+        }
     }
 
     void StopBackendThread() {
@@ -675,6 +734,11 @@ private:
     DebuggerBackend debugger_backend{};
     ColorConsoleBackend color_console_backend{};
     FileBackend file_backend;
+    FrameTelemetryChannel frame_telemetry;
+    FrameTelemetryStatus telemetry_last_status{};
+    std::string telemetry_prefix;
+    std::unique_ptr<FileUtil::IOFile> telemetry_file;
+    u64 telemetry_bytes{}, telemetry_chunk{};
 #ifdef ANDROID
     LogcatBackend lc_backend{};
 #endif
@@ -710,6 +774,13 @@ void Initialize(std::string_view log_file, bool rotate) {
 
 bool FileHealthy() {
     return Impl::FileHealthy();
+}
+
+bool SubmitFrameTelemetry(const Common::FrameTelemetry::Record& record) {
+    return Impl::SubmitFrameTelemetry(record);
+}
+FrameTelemetryStatus GetFrameTelemetryStatus() {
+    return Impl::GetFrameTelemetryStatus();
 }
 
 void Start() {

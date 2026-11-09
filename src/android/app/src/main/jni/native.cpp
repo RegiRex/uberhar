@@ -6,6 +6,7 @@
 #include <codecvt>
 #include <thread>
 #include <dlfcn.h>
+#include <sys/stat.h> // CodexAstraLocal: Actual custom-library identity without per-frame hashing.
 #include "common/uberhar_activity.h" // AstraEH: Explicit loading and user phase boundaries.
 
 #include <android/api-level.h>
@@ -35,6 +36,7 @@
 #include "common/scm_rev.h"
 #include "common/scope_exit.h"
 #include "common/settings.h"
+#include "common/uberhar_tuning_sample.h" // CodexAstraLocal: Lifetime-safe opt-in measurement bridge.
 #include "common/string_util.h"
 #include "core/core.h"
 #include "core/frontend/applets/default_applets.h"
@@ -527,6 +529,20 @@ int InitializeGpuDriver(const std::string& hook_lib_dir, const std::string& cust
         return false;
     }
     vulkan_library = std::make_shared<Common::DynamicLibrary>(handle);
+    // CodexAstraLocal: Preserve actual fallback and immutable per-title archive
+    // directory identity. Size/mtime additionally detect replacing a global
+    // library in place; this metadata is not described as a cryptographic hash.
+    std::string tuning_library = "System";
+    if (custom_loaded) {
+        const std::string path = custom_driver_dir + "/" + custom_driver_name;
+        struct stat info{};
+        tuning_library = path;
+        if (stat(path.c_str(), &info) == 0) {
+            tuning_library += fmt::format(";size={};mtime={}:{}", info.st_size,
+                                         info.st_mtim.tv_sec, info.st_mtim.tv_nsec);
+        }
+    }
+    Common::UberharTuningSample::Instance().SetLibrary(std::move(tuning_library));
     LOG_INFO(Frontend, "GPU driver library: requested={} effective={} directory={}",
              custom_driver_name.empty() ? "System" : custom_driver_name,
              custom_loaded ? "Custom" : "System", custom_loaded ? custom_driver_dir : "system");
@@ -1051,9 +1067,16 @@ jboolean Java_org_citra_citra_1emu_NativeLibrary_getEffectiveTestingBoolean(
     if (name == Settings::Keys::uberhar_adaptive_cpu_workers) return Settings::values.uberhar_adaptive_cpu_workers.GetValue();
     if (name == Settings::Keys::uberhar_gpu_observer) return Settings::values.uberhar_gpu_observer.GetValue();
     if (name == Settings::Keys::uberhar_frame_workload_census) return Settings::values.uberhar_frame_workload_census.GetValue();
-    if (name == Settings::Keys::uberhar_static_dynamic_state) return Settings::values.uberhar_static_dynamic_state.GetValue();
     if (name == Settings::Keys::uberhar_prepare_displayed_eye_only) return Settings::values.uberhar_prepare_displayed_eye_only.GetValue();
     if (name == Settings::Keys::uberhar_early_right_eye) return Settings::values.uberhar_early_right_eye.GetValue();
+    if (name == Settings::Keys::uberhar_fast_vertex_conversion) return Settings::values.uberhar_fast_vertex_conversion.GetValue();
+    if (name == Settings::Keys::uberhar_vertex_memo) return Settings::values.uberhar_vertex_memo.GetValue();
+    if (name == Settings::Keys::uberhar_worker_cpu_upload) return Settings::values.uberhar_worker_cpu_upload.GetValue();
+    if (name == Settings::Keys::uberhar_cpu_clip_reject) return Settings::values.uberhar_cpu_clip_reject.GetValue();
+    if (name == Settings::Keys::uberhar_full_pipeline_bank_16) return Settings::values.uberhar_full_pipeline_bank_16.GetValue();
+    if (name == Settings::Keys::uberhar_prune_spirv) return Settings::values.uberhar_prune_spirv.GetValue();
+    if (name == Settings::Keys::uberhar_indexed_cpu_output) return Settings::values.uberhar_indexed_cpu_output.GetValue();
+    if (name == Settings::Keys::uberhar_mono_guest_3d) return Settings::values.uberhar_mono_guest_3d.GetValue();
     if (name == Settings::Keys::uberhar_optimize_generic_shaders)
         return Settings::values.uberhar_optimize_generic_shaders.GetValue();
     return false;
@@ -1234,6 +1257,55 @@ jdoubleArray Java_org_citra_citra_1emu_NativeLibrary_getPerfStats(JNIEnv* env,
     }
 
     return j_stats;
+}
+
+// CodexAstraLocal: The static recorder survives core teardown. UI reads cannot
+// race a freed PerfStats or consume the ordinary performance overlay's counters.
+jboolean Java_org_citra_citra_1emu_NativeLibrary_beginTuningSample(
+    [[maybe_unused]] JNIEnv* env, [[maybe_unused]] jobject obj, jint frames) {
+    return Common::g_uberhar_alpha_testing && frames > 0 &&
+           Common::UberharTuningSample::Instance().Begin(static_cast<u32>(frames));
+}
+
+void Java_org_citra_citra_1emu_NativeLibrary_cancelTuningSample(
+    [[maybe_unused]] JNIEnv* env, [[maybe_unused]] jobject obj) {
+    Common::UberharTuningSample::Instance().Cancel();
+}
+
+jstring Java_org_citra_citra_1emu_NativeLibrary_getTuningSample(
+    JNIEnv* env, [[maybe_unused]] jobject obj) {
+    const auto sample = Common::UberharTuningSample::Instance().Snapshot();
+    constexpr std::array names{"idle", "armed", "collecting", "complete", "invalid"};
+    constexpr std::array features{
+        "uberhar_changed_state_only", "uberhar_reuse_contained_pass",
+        "uberhar_typed_primitive_append", "uberhar_include_scissor",
+        "uberhar_adaptive_cpu_workers", "uberhar_prepare_displayed_eye_only"};
+    // CodexAstraLocal: Driver/device strings are external input; escape JSON
+    // rather than inserting them into a document interpreted by the tuning UI.
+    const auto quote = [](const std::string& value) {
+        std::string escaped = "\"";
+        for (unsigned char c : value) {
+            if (c == '\\' || c == '"') escaped += '\\';
+            if (c < 0x20) escaped += fmt::format("\\u{:04x}", c);
+            else escaped += static_cast<char>(c);
+        }
+        return escaped + '"';
+    };
+    std::string enabled;
+    for (std::size_t i = 0; i < features.size(); ++i) {
+        if ((sample.feature_mask & (1U << i)) == 0) continue;
+        if (!enabled.empty()) enabled += ',';
+        enabled += quote(features[i]);
+    }
+    const auto json = fmt::format(
+        R"({{"schema":1,"status":"{}","reason":{},"runId":{},"titleId":{},"context":{},"features":[{}],"targetFrames":{},"frames":{},"binGuestFrames":120,"binCount":{},"low":{},"mean":{},"high":{},"p95Ms":{},"p99Ms":{},"startNanos":{},"endNanos":{},"submissions":{},"limit":{},"pacingLimited":{},"paused":false}})",
+        names[static_cast<std::size_t>(sample.status)], quote(sample.reason),
+        quote(fmt::format("{}:{}", sample.run_id, sample.launch_ns)),
+        quote(sample.title_id), quote(sample.context), enabled, sample.target_frames, sample.frames,
+        sample.frames / Common::UberharTuningSample::BinFrames, sample.low, sample.mean, sample.high,
+        sample.p95_ms, sample.p99_ms, sample.start_ns, sample.end_ns, sample.submissions,
+        sample.limit, sample.pacing_limited);
+    return ToJString(env, json);
 }
 
 void Java_org_citra_citra_1emu_NativeLibrary_run__Ljava_lang_String_2(JNIEnv* env,

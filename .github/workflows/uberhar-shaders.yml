@@ -47,7 +47,7 @@ jobs:
         # Catch fixture with native tests without building the full guest core.
         # CodexAstraLocal: The settings-layer fixture uses the same INI parser as Android.
         # CodexAstraLocal: Compatibility fixtures use pinned real crypto/seekable code.
-        run: git submodule update --init --depth 1 externals/fmt externals/xxHash externals/boost externals/nihstro externals/vulkan-headers externals/microprofile externals/xbyak externals/libretro-common/libretro-common externals/glslang externals/catch2 externals/inih/inih externals/cryptopp externals/zstd
+        run: git submodule update --init --depth 1 externals/fmt externals/xxHash externals/boost externals/nihstro externals/vulkan-headers externals/microprofile externals/xbyak externals/libretro-common/libretro-common externals/glslang externals/catch2 externals/inih/inih externals/cryptopp externals/zstd externals/sirit/sirit externals/spirv-headers
       - name: Install validation tools
         # CodexAstraLocal: The cached-buffer lifetime gate submits real Vulkan
         # draws through an explicitly selected software ICD and real fences.
@@ -186,6 +186,11 @@ jobs:
         with:
           name: uberhar-host-coordination-proof-${{ github.run_number }}
           path: |
+            build/uberhar-probe/indexed-cpu-output/*.log
+            build/uberhar-probe/indexed-cpu-output/RESULT.json
+            build/uberhar-probe/spirv-pruning-result/*.log
+            build/uberhar-probe/spirv-pruning-result/RESULT.json
+            build/uberhar-probe/frame-telemetry.jsonl
             build/uberhar-probe/file-compatibility-gate/*.log
             build/uberhar-probe/file-compatibility-gate/*.sha256
             build/uberhar-probe/installer-security/**/provenance.json

@@ -10,6 +10,7 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <span> // CodexAstraLocal: Scan only the frozen active owner capacity.
 #include <type_traits>
 #include <utility>
 #include "video_core/renderer_vulkan/uberhar_compile_budget.h" // CodexAstraLocal: Renewable bounded work.
@@ -57,14 +58,23 @@ public:
             failed_keys{}, queue_failures{}, exhausted{}, stale_tokens{}, max_owned{};
     } stats;
 
-    Cache() = default;
+    // CodexAstraLocal: Capacity is selected once, before any asynchronous slot
+    // borrower exists. Attempt credits and compiler/command/GPU release do not
+    // depend on this residency choice; reset never resizes or changes it.
+    explicit Cache(Partitions selected = Partitions{}) : partitions{std::move(selected)},
+        active_slots{[this] {
+            std::size_t count{};
+            for (std::size_t tier = 0; tier < Partitions::Count; ++tier)
+                count += partitions.Owners(tier);
+            return std::min(count, Slots);
+        }()} {}
     Cache(const Cache&) = delete;
     Cache& operator=(const Cache&) = delete;
 
     // CodexAstraLocal: Ready-map lookup never exposes retired or destruction-queued
     // owners. Final full execution/owner equality is still checked by the caller.
     Slot* Find(u64 execution_hash) {
-        for (auto& slot : slots)
+        for (auto& slot : ActiveSlots())
             if (Active(slot.state) && slot.execution_hash == execution_hash && slot.owner)
                 return &slot;
         return nullptr;
@@ -140,7 +150,7 @@ public:
             ++stats.exhausted;
             return false;
         }
-        if (owned >= Slots || other_owned >= CombinedLimit - owned) {
+        if (owned >= active_slots || other_owned >= CombinedLimit - owned) {
             return false;
         }
         return !external_pending && !AnyJob() &&
@@ -153,7 +163,7 @@ public:
                    bool external_pending, const Key& key) {
         const auto partition = Partitions::Index(key);
         if (!DemandBudget(partition)) { ++stats.exhausted; return false; }
-        return Owned(partition) < Partitions::Owners(partition) &&
+        return Owned(partition) < partitions.Owners(partition) &&
                CanCreate(other_owned, combined_attempts, external_pending);
     }
 
@@ -166,7 +176,7 @@ public:
         const auto& seen = observations[ObservationIndex(hash, key)];
         if (!seen.key || seen.hash != hash || !(*seen.key == key) ||
             seen.last_swap != swap || !Qualified(seen)) return nullptr;
-        for (auto& slot : slots) {
+        for (auto& slot : ActiveSlots()) {
             if (slot.state != State::Empty) continue;
             if (slot.generation == std::numeric_limits<u64>::max()) {
                 disabled = true;
@@ -248,7 +258,7 @@ public:
         if (swap == std::numeric_limits<u64>::max()) { disabled = true; return; }
         ++swap;
         RefillWork(CompileBudget::NowMs());
-        for (auto& slot : slots) {
+        for (auto& slot : ActiveSlots()) {
             if (slot.state == State::DestroyQueued &&
                 slot.destroyed.load(std::memory_order_acquire) == slot.generation) {
                 slot.state = State::Empty;
@@ -268,14 +278,14 @@ public:
         // CodexAstraLocal: Retire only to make a physically necessary replacement
         // while creation tokens remain. One in-flight retirement prevents one miss
         // from emptying the bank before its first replacement can be admitted.
-        const bool pressure = owned == Slots || other_owned >= CombinedLimit - owned ||
+        const bool pressure = owned == active_slots || other_owned >= CombinedLimit - owned ||
                               PartitionPressure();
         bool retiring = false;
-        for (const auto& slot : slots)
+        for (const auto& slot : ActiveSlots())
             retiring |= slot.state == State::Retired || slot.state == State::DestroyQueued;
         if (pressure && shared_credit.Available() && AnyTierCredit() && !retiring && FreshDemand()) {
             Slot* oldest{};
-            for (auto& slot : slots) {
+            for (auto& slot : ActiveSlots()) {
                 if ((slot.state != State::Ready && slot.state != State::Failed) ||
                     !Released(slot) || !ReplacementDemand(slot, other_owned) ||
                     (slot.state != State::Failed &&
@@ -292,7 +302,7 @@ public:
             }
         }
         if (external_pending || AnyJob()) return;
-        for (auto& slot : slots) {
+        for (auto& slot : ActiveSlots()) {
             if (slot.state != State::Retired || !Released(slot) ||
                 known_gpu_tick < slot.last_use_tick) continue;
             slot.state = State::DestroyQueued;
@@ -315,7 +325,7 @@ public:
     // CodexAstraLocal: Only the inherited complete title/shutdown drains permit
     // unconditional teardown. Runtime capacity reuse never calls this method.
     void ResetAfterDrain() {
-        for (auto& slot : slots) {
+        for (auto& slot : ActiveSlots()) {
             slot.owner.reset();
             slot.observation.reset();
             slot.state = State::Empty;
@@ -352,6 +362,8 @@ public:
     u64 WorkRefilled() const { return shared_credit.Replenished(); }
     u64 TierCredits(std::size_t tier) const { return partition_credit[tier].Credits(); }
     std::size_t Owned() const { return owned; }
+    std::size_t Capacity() const { return active_slots; }
+    std::size_t Capacity(std::size_t partition) const { return partitions.Owners(partition); }
     std::size_t Attempts() const { return attempts; }
     // CodexAstraLocal: Reports and pressure checks use owner-thread counters,
     // never the unique_ptr concurrently released by the optional worker.
@@ -365,15 +377,17 @@ public:
     }
     u64 Swap() const { return swap; }
     bool Disabled() const { return disabled; }
-    const auto& AllSlots() const { return slots; }
+    auto AllSlots() const { return ActiveSlots(); }
     bool AnyJob() const {
-        for (const auto& slot : slots)
+        for (const auto& slot : ActiveSlots())
             if (slot.state == State::DestroyQueued ||
                 (slot.state == State::Building && !Released(slot))) return true;
         return false;
     }
 
 private:
+    std::span<Slot> ActiveSlots() { return {slots.data(), active_slots}; }
+    std::span<const Slot> ActiveSlots() const { return {slots.data(), active_slots}; }
     struct Observation {
         std::optional<Key> key;
         u64 hash{}, last_swap{};
@@ -409,7 +423,7 @@ private:
                 (Partitions::Count > 1 && !DemandBudget(Partitions::Index(*seen.key))) ||
                 Failed(seen.hash, *seen.key)) continue;
             bool resident = false;
-            for (const auto& slot : slots)
+            for (const auto& slot : ActiveSlots())
                 resident |= Active(slot.state) && slot.observation &&
                     slot.observation_hash == seen.hash && *slot.observation == *seen.key;
             if (!resident) return true;
@@ -429,7 +443,7 @@ private:
     bool PartitionPressure() const {
         if constexpr (Partitions::Count == 1) return false;
         for (std::size_t i = 0; i < Partitions::Count; ++i)
-            if (Owned(i) >= Partitions::Owners(i) && DemandBudget(i) && FreshDemand(i))
+            if (Owned(i) >= partitions.Owners(i) && DemandBudget(i) && FreshDemand(i))
                 return true;
         return false;
     }
@@ -437,7 +451,7 @@ private:
         if constexpr (Partitions::Count == 1) return true;
         const auto partition = Partitions::Index(*slot.observation);
         return DemandBudget(partition) && FreshDemand(partition) &&
-               (Owned(partition) >= Partitions::Owners(partition) ||
+               (Owned(partition) >= partitions.Owners(partition) ||
                 other_owned >= CombinedLimit - owned);
     }
     // CodexAstraLocal: Preserve startup burst capacity; subsequently admit at
@@ -450,6 +464,8 @@ private:
             return std::array{CompileBudget{Partitions::Attempts(0), 500},
                               CompileBudget{Partitions::Attempts(1), 1000}};
     }();
+    const Partitions partitions;
+    const std::size_t active_slots;
     std::array<Slot, Slots> slots;
     std::array<Observation, Observations * Partitions::Count> observations;
     std::array<Attempt, CpuAttempts> ledger;

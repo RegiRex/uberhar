@@ -9,6 +9,7 @@
 #include "common/math_util.h"
 #include "common/microprofile.h"
 #include "common/settings.h"
+#include "video_core/uberhar_cpu_clip_reject.h"
 #include "common/uberhar_activity.h" // CodexAstraUlt: Existing atomic run correlation.
 #include "common/uberhar_test_profile.h" // CodexAstraLocal: Capture only optional Combo routes.
 #include "common/scope_exit.h" // AstraPro: Clear speculative draw state on every exit.
@@ -90,6 +91,8 @@ RasterizerVulkan::RasterizerVulkan(Memory::MemorySystem& memory, Pica::PicaCore&
                       Settings::values.uberhar_include_scissor.GetValue();
     early_right_eye = Settings::IsUberharTestProfile(Settings::values.uberhar_test_mode.GetValue()) &&
                       Settings::values.uberhar_early_right_eye.GetValue();
+    cpu_clip_reject = Settings::IsUberharTestProfile(Settings::values.uberhar_test_mode.GetValue()) &&
+                      Settings::values.uberhar_cpu_clip_reject.GetValue();
 
     // CodexAstraLocal: Preserve optional rectangle routing for supported Vulkan profiles.
     if (Settings::values.uberhar_test_mode.GetValue() != Settings::UberharTestMode::Custom) {
@@ -235,20 +238,50 @@ RasterizerVulkan::~RasterizerVulkan() {
 // CodexAstraLocal TEST-ONLY LOG: Include short trials and final totals without
 // adding a GPU wait. Remove after the .57 controls are hardware-qualified.
 void RasterizerVulkan::ReportWorkReduction(bool final) {
+    // CodexAstraLocal: Include indexed-output costs in the existing bounded owner report.
+    ReportIndexedCpuOutput(final);
+    // CodexAstraLocal TEST-ONLY LOG: Retire with clip-rejection qualification.
+    // These bytes precede optional indexed transport; they are not measured GPU bandwidth.
+    LOG_INFO(Render_Vulkan, "Uberhar CPU clip rejection: enabled={} attempts={} eligible={} ineligible_batches={} "
+        "inspected_triangles={} rejected_triangles={} expanded_bytes_removed={} empty_batches={} "
+        "malformed={} decisions=[{},{},{},{},{},{}] samples={} inspection_compaction_ns={} "
+        "max_sample_ns={} scope=postpacked_no_guest_shader_or_packing_saved final={}",
+        cpu_clip_reject, clip_attempts, clip_eligible, clip_ineligible, clip_triangles, clip_rejected, clip_bytes,
+        clip_empty_batches, clip_malformed, clip_decisions[0], clip_decisions[1], clip_decisions[2],
+        clip_decisions[3], clip_decisions[4], clip_decisions[5], clip_samples, clip_sample_ns, clip_max_ns, final);
+    // CodexAstraLocal TEST-ONLY LOG: Join sparse actual LCD consumer identities
+    // with the existing transfer/target census. This is a point-in-time snapshot,
+    // not content-generation tracking or proof that offscreen output is unused.
+    // Remove when the independent eye producer/consumer investigation is complete.
+    if (pica.frame_census && pica.frame_census->Enabled()) {
+        for (u32 screen = 0; screen < 2; ++screen) {
+            const auto& scan = pica.regs.framebuffer_config[screen];
+            LOG_INFO(Render_Vulkan,
+                "Uberhar eye consumer snapshot: callback={} command_lists={} screen={} "
+                "active_slot={} left1={:#x} right1={:#x} left2={:#x} right2={:#x} "
+                "width={} height={} stride={} format={} content_generation=unknown "
+                "scope=current_snapshot omission_proof=false final={}",
+                census_callback_index, pica.command_lists_submitted, screen, scan.active_fb,
+                scan.address_left1, scan.address_right1, scan.address_left2, scan.address_right2,
+                scan.width.Value(), scan.height.Value(), scan.stride, scan.format, final);
+        }
+    }
     LOG_INFO(Render_Vulkan,
         "Uberhar work reduction: state_reuse={} unchanged_writes={} changed_writes={} "
         "fragment_config_builds={} fragment_config_reuses={} include_scissor={} "
-        "narrowed_scissors={} scissor_area_before={} scissor_area_after={} area_is_bounds=true final={}",
+        "narrowed_scissors={} scissor_area_before={} scissor_area_after={} "
+        "scissor_no_change={} scissor_empty={} scissor_saved_area={} area_is_bounds=true final={}",
         pica.changed_state_only, pica.unchanged_register_writes, pica.changed_register_writes,
         pipeline_cache.fragment_config_builds, pipeline_cache.fragment_config_reuses,
-        include_scissor, narrowed_scissors, scissor_area_before, scissor_area_after, final);
+        include_scissor, narrowed_scissors, scissor_area_before, scissor_area_after,
+        scissor_no_change, scissor_empty, scissor_area_before - scissor_area_after, final);
     LOG_INFO(Render_Vulkan,
         "Uberhar early eye: enabled={} hazard={} decisions=[{},{},{},{},{}] "
         "draws_omitted={} cpu_vertices_retained={} gpu_vertices_omitted={} "
-        "scope=direct_right_scanout future_dependencies=experimental final={}",
+        "cheap_gate_refusals={} scope=direct_right_scanout future_dependencies=experimental final={}",
         early_right_eye, early_eye_hazard, eye_decisions[0], eye_decisions[1], eye_decisions[2],
         eye_decisions[3], eye_decisions[4], eye_draws_omitted,
-        eye_cpu_vertices_retained, eye_gpu_vertices_omitted, final);
+        eye_cpu_vertices_retained, eye_gpu_vertices_omitted, eye_cheap_gate_refusals, final);
 }
 
 void RasterizerVulkan::TickFrame() {
@@ -1106,7 +1139,11 @@ void RasterizerVulkan::RecordWorkloadDraw(const VideoCore::FramebufferHelper<Tra
 // CodexAstraLocal: Inspect actual independently addressed cube faces, including
 // deferred draws. A conservative bound includes the mip chain, not just level0.
 void RasterizerVulkan::ObserveEyeTextureReads() {
-    if (!early_right_eye || early_eye_hazard) return;
+    // CodexAstraLocal: No omitted output means there is no dependency to inspect.
+    // Avoid descriptor/range scans on every ordinary draw while retaining the
+    // existing conservative hazard checks as soon as any range is omitted.
+    if (!early_right_eye || early_eye_hazard ||
+        (!omitted_eye_ranges[0].second && !omitted_eye_ranges[1].second)) return;
     const auto textures = regs.texturing.GetTextures();
     for (u32 unit = 0; unit < textures.size(); ++unit) {
         const auto& texture = textures[unit];
@@ -1126,13 +1163,37 @@ void RasterizerVulkan::ObserveEyeTextureReads() {
 
 bool RasterizerVulkan::TryOmitUnusedEye(bool accelerate, u32 cpu_vertices) {
     if (!early_right_eye || early_eye_hazard) return false;
-    const auto textures = regs.texturing.GetTextures();
+    // CodexAstraLocal: Reject disabled/unsupported titles before constructing
+    // texture descriptors. Dark Moon keeps its documented compatibility veto;
+    // offscreen address guesses cannot prove that a later left-eye read is safe.
+    if (Settings::values.render_3d.GetValue() != Settings::StereoRenderOption::Off ||
+        Settings::values.mono_render_option.GetValue() != Settings::MonoRenderOption::LeftEye ||
+        !Settings::values.disable_right_eye_render.GetValue() ||
+        !Core::System::GetInstance().GPU().GetRightEyeDisabler().CompatibilityAllowsSuppression()) {
+        ++eye_decisions[static_cast<std::size_t>(UnusedEyePolicy::Decision::Disabled)];
+        ++eye_cheap_gate_refusals;
+        return false;
+    }
     const auto& scan = pica.regs.framebuffer_config[0];
     const auto& fb = regs.framebuffer.framebuffer;
     const auto& merger = regs.framebuffer.output_merger;
     const PAddr right = scan.active_fb == 0 ? scan.address_right1 : scan.address_right2;
     const bool writes_depth = fb.allow_depth_stencil_write != 0 &&
         (merger.depth_write_enable || (merger.stencil_test.enable && merger.stencil_test.write_mask));
+    // CodexAstraLocal: Dedicated scanout identity and dimensions are cheap
+    // prerequisites. Keep all depth, feedback and format checks for candidates.
+    const auto candidate_color = fb.GetColorBufferPhysicalAddress();
+    const bool not_right = !candidate_color || !right || candidate_color != right ||
+        candidate_color == scan.address_left1 || candidate_color == scan.address_left2;
+    const bool wrong_shape = !fb.GetWidth() || !fb.GetHeight() ||
+        fb.GetWidth() != scan.width.Value() || fb.GetHeight() != scan.height.Value();
+    if (not_right || wrong_shape) {
+        const auto reason = not_right ? UnusedEyePolicy::Decision::NotRight : UnusedEyePolicy::Decision::Shape;
+        ++eye_decisions[static_cast<std::size_t>(reason)];
+        ++eye_cheap_gate_refusals;
+        return false;
+    }
+    const auto textures = regs.texturing.GetTextures();
     bool feedback = false;
     // CodexAstraLocal: Cube/ShadowCube feedback has independent face addresses;
     // keep that complex route outside the deliberately narrow suppression trial.
@@ -1298,6 +1359,46 @@ bool RasterizerVulkan::Draw(bool accelerate, bool is_indexed,
         }
         ++compute_rect->native_draws;
     }
+    // CodexAstraLocal: Compute eligibility and geometry inspection above retain
+    // their original input. Only the proven ordinary trivial-VS/no-GS path may
+    // compact already assembled/packed triangles before any upload reservation.
+    // Guest shader execution, assembler state and deferred/capture bytes are untouched.
+    if (cpu_clip_reject) {
+        ++clip_attempts;
+        const VideoCore::CpuClipReject::Guard guard{
+            true, true, !accelerate && pipeline_cache.UsesTrivialVertexPipeline(),
+            regs.pipeline.use_gs == Pica::PipelineRegs::UseGS::No,
+            pipeline_info.state.rasterization.topology.Value() == Pica::PipelineRegs::TriangleTopology::List,
+            !compute_packet, !vertex_capture && !ready_vertex_attempt, !deferred, !cpu_bridge.ready};
+        if (guard.Eligible()) {
+            const bool sample = (++clip_eligible & 63U) == 1;
+            const auto start = sample ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+            const auto result = VideoCore::CpuClipReject::Compact(std::span<HardwareVertex>{vertex_batch}, guard,
+                [](const HardwareVertex& vertex) noexcept {
+                    return VideoCore::CpuClipReject::Position{vertex.position[0], vertex.position[1],
+                                                             vertex.position[2], vertex.position[3]};
+                });
+            vertex_batch.resize(result.output_vertices);
+            if (sample) {
+                const auto ns = static_cast<u64>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    std::chrono::steady_clock::now() - start).count());
+                ++clip_samples; clip_sample_ns += ns; clip_max_ns = std::max(clip_max_ns, ns);
+            }
+            clip_triangles += result.inspected_triangles;
+            clip_rejected += result.rejected_triangles;
+            clip_bytes += result.avoided_upload_bytes;
+            clip_malformed += result.malformed;
+            for (std::size_t i = 0; i < clip_decisions.size(); ++i) clip_decisions[i] += result.decisions[i];
+            if (result.rejected_triangles && vertex_batch.empty()) {
+                ++clip_empty_batches;
+                // CodexAstraLocal: No fragment/compute draw authored this surface.
+                // Preserve existing alias contents instead of publishing false writes.
+                fb_helper.CancelInvalidation();
+                return true; // Never request a zero-byte Map for an empty batch.
+            }
+        } else ++clip_ineligible; // Draw admission is separate from per-triangle decisions.
+    }
+
     // Update scissor uniforms
     const auto [scissor_x1, scissor_y2, scissor_x2, scissor_y1] = fb_helper.Scissor();
     if (fs_data.scissor_x1 != scissor_x1 || fs_data.scissor_x2 != scissor_x2 ||
@@ -1355,6 +1456,7 @@ bool RasterizerVulkan::Draw(bool accelerate, bool is_indexed,
     // CodexAstraLocal: Deferred reservation carries no worker-visible mutable
     // stream fields. Map may flush; sealing remains after final pass/binding.
     std::optional<StreamBuffer::DeferredMapping> deferred_mapping;
+    std::optional<StreamBuffer::DeferredMapping> ordinary_worker_mapping;
     if (deferred) {
         deferred_mapping = stream_buffer.MapDeferredUpload(vertex_size, sizeof(HardwareVertex));
         if (!deferred_mapping)
@@ -1363,6 +1465,14 @@ bool RasterizerVulkan::Draw(bool accelerate, bool is_indexed,
         const auto [buffer, offset, _] = stream_buffer.Map(vertex_size, sizeof(HardwareVertex));
         vertex_data = buffer;
         vertex_offset = offset;
+        // CodexAstraLocal: Reuse the existing recorder, coherent allocation lease
+        // and single Map. Small draws, indexed-output comparison, borrowed/capture
+        // routes and geometry-dependent compute consumers stay synchronous.
+        if (worker_cpu_upload_enabled && !indexed_cpu_output_enabled && vertex_size >= 65536 &&
+            scheduler.HasWorkerThread() && !cpu_bridge.ready && !compute_packet && !vertex_capture &&
+            !ready_vertex_attempt && regs.pipeline.use_gs == Pica::PipelineRegs::UseGS::No &&
+            regs.pipeline.triangle_topology == TriangleTopology::List && vertex_count % 3 == 0)
+            ordinary_worker_mapping = stream_buffer.SnapshotDeferredMapping(vertex_size);
     }
 
     const auto draw_rect = fb_helper.DrawRect();
@@ -1384,11 +1494,21 @@ bool RasterizerVulkan::Draw(bool accelerate, bool is_indexed,
         const s32 right = std::clamp<s32>(scissor_x2, left, draw_rect.right);
         const s32 bottom = std::clamp<s32>(scissor_y1, draw_rect.bottom, draw_rect.top);
         const s32 top = std::clamp<s32>(scissor_y2, bottom, draw_rect.top);
-        pipeline_info.dynamic_info.scissor = {static_cast<u32>(left), static_cast<u32>(top),
-                                             static_cast<u32>(right), static_cast<u32>(bottom)};
-        ++narrowed_scissors;
-        scissor_area_before += u64{draw_rect.GetWidth()} * draw_rect.GetHeight();
-        scissor_area_after += u64{static_cast<u32>(right - left)} * static_cast<u32>(top - bottom);
+        // CodexAstraLocal TEST-ONLY LOG: Count actual bound reduction rather
+        // than treating entry to this branch as saved pixel work. Remove these
+        // aggregate counters after scissor benefit is hardware-qualified.
+        const u64 before = u64{draw_rect.GetWidth()} * draw_rect.GetHeight();
+        const u64 after = u64{static_cast<u32>(right - left)} * static_cast<u32>(top - bottom);
+        scissor_area_before += before;
+        scissor_area_after += after;
+        if (before == after) {
+            ++scissor_no_change;
+        } else {
+            pipeline_info.dynamic_info.scissor = {static_cast<u32>(left), static_cast<u32>(top),
+                                                 static_cast<u32>(right), static_cast<u32>(bottom)};
+            ++narrowed_scissors;
+            if (!after) ++scissor_empty;
+        }
     }
 
     // AstraEH: Prepare/bind the native pipeline before recording its timestamp.
@@ -1453,6 +1573,7 @@ bool RasterizerVulkan::Draw(bool accelerate, bool is_indexed,
 
     // Draw the vertex batch
     bool succeeded = true;
+    bool indexed_cpu_draw = false;
     if (accelerate) {
         succeeded = AccelerateDrawBatchInternal(is_indexed);
     } else {
@@ -1482,12 +1603,75 @@ bool RasterizerVulkan::Draw(bool accelerate, bool is_indexed,
                 cmdbuf.draw(vertex_count, 1, 0, 0);
             });
         } else {
-            std::memcpy(vertex_data, vertex_batch.data(), vertex_size);
-            stream_buffer.Commit(vertex_size);
-            scheduler.Record([this, offset = vertex_offset, vertex_count](vk::CommandBuffer cmdbuf) {
-                cmdbuf.bindVertexBuffers(0, stream_buffer.Handle(), offset);
-                cmdbuf.draw(vertex_count, 1, 0, 0);
-            });
+            // CodexAstraLocal: Preserve all expanded consumers. Only ordinary
+            // complete-list CPU output with the trivial VS/no GS can use exact
+            // packed-record reuse; a ready CPU-fragment token is known only now.
+            // The earlier single Map reserved the expanded upper bound. Unique
+            // vertices and aligned indices share it and commit at this final tick.
+            bool queued_worker_upload = false;
+            if (ordinary_worker_mapping) {
+                // CodexAstraLocal: Swapping transfers the already packed bytes;
+                // no ownership memcpy or unbounded replacement allocation occurs.
+                // A busy/full optional pool falls through without changing source.
+                const bool sample = (++worker_upload_attempts & 63U) == 1;
+                const auto owner_start = sample ? std::chrono::steady_clock::now() :
+                                                 std::chrono::steady_clock::time_point{};
+                auto lease = owned_vertex_upload.TryAcquire(vertex_batch);
+                if (sample) {
+                    ++worker_upload_owner_samples;
+                    worker_upload_owner_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(
+                        std::chrono::steady_clock::now() - owner_start).count();
+                }
+                if (lease) {
+                    auto upload = stream_buffer.CommitDeferredUpload(*ordinary_worker_mapping);
+                    if (!upload) throw VideoCore::ShaderRecoveryError{};
+                    scheduler.Record([upload = std::move(*upload), lease = std::move(lease),
+                                      vertex_count, sample](vk::CommandBuffer cmdbuf) {
+                        const auto start = sample ? std::chrono::steady_clock::now() :
+                                                    std::chrono::steady_clock::time_point{};
+                        const bool published = upload.Publish(lease.Bytes());
+                        const auto ns = sample ? static_cast<u64>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                            std::chrono::steady_clock::now() - start).count()) : 0;
+                        lease.Published(published, sample, ns);
+                        if (!published) throw VideoCore::ShaderRecoveryError{};
+                        cmdbuf.bindVertexBuffers(0, upload.Handle(), upload.Offset());
+                        cmdbuf.draw(vertex_count, 1, 0, 0);
+                    });
+                    queued_worker_upload = true;
+                }
+            }
+            if (!queued_worker_upload) {
+                CpuOutputUpload upload{vertex_size, 0, false};
+                if (indexed_cpu_output_enabled) {
+                    // CodexAstraLocal: cpu_fragment_use owns a graphics PSO with
+                    // this same trivial-VS/88-byte ABI, not a CPU pixel consumer.
+                    // Its normal post-enqueue lifetime stamp remains below.
+                    const bool eligible = !cpu_bridge.ready && !compute_packet &&
+                        !vertex_capture && !ready_vertex_attempt &&
+                        regs.pipeline.use_gs == Pica::PipelineRegs::UseGS::No &&
+                        regs.pipeline.triangle_topology == TriangleTopology::List;
+                    upload = UploadCpuOutput({vertex_data, vertex_size}, eligible);
+                } else {
+                    std::memcpy(vertex_data, vertex_batch.data(), vertex_size);
+                }
+                stream_buffer.Commit(upload.bytes);
+                indexed_cpu_draw = upload.indexed;
+                if (upload.indexed) {
+                    ASSERT((vertex_offset + upload.index_offset) % sizeof(u16) == 0);
+                    scheduler.Record([this, offset = vertex_offset,
+                                      index_offset = vertex_offset + upload.index_offset, vertex_count]
+                                     (vk::CommandBuffer cmdbuf) {
+                        cmdbuf.bindVertexBuffers(0, stream_buffer.Handle(), offset);
+                        cmdbuf.bindIndexBuffer(stream_buffer.Handle(), index_offset, vk::IndexType::eUint16);
+                        cmdbuf.drawIndexed(vertex_count, 1, 0, 0, 0);
+                    });
+                } else {
+                    scheduler.Record([this, offset = vertex_offset, vertex_count](vk::CommandBuffer cmdbuf) {
+                        cmdbuf.bindVertexBuffers(0, stream_buffer.Handle(), offset);
+                        cmdbuf.draw(vertex_count, 1, 0, 0);
+                    });
+                }
+            }
         }
         // CodexAstraLocal TEST-ONLY LOG: Both CPU upload paths reach one actual draw;
         // remove this association after the GPU-cost comparison is complete.
@@ -1511,7 +1695,7 @@ bool RasterizerVulkan::Draw(bool accelerate, bool is_indexed,
         fb_helper.CancelInvalidation();
     if (succeeded) {
         using Route = VideoCore::FrameWorkloadCensus::Route;
-        RecordWorkloadDraw(fb_helper, accelerate && is_indexed,
+        RecordWorkloadDraw(fb_helper, (accelerate && is_indexed) || indexed_cpu_draw,
             accelerate ? regs.pipeline.num_vertices : vertex_count,
             accelerate ? (ready_vertex_attempt ? Route::ReadyGpuVertex : Route::GpuVertex)
                        : Route::CpuVertexUnclassified);

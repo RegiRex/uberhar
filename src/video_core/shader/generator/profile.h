@@ -43,6 +43,8 @@ struct Profile {
 
     u8 vk_disable_spirv_optimizer{};
     u8 vk_use_spirv_generator{};
+    // CodexAstraLocal: Frozen generator policy, also part of disk/profile identity.
+    u8 vk_prune_tev{};
     std::array<VKFormatTraits, 16> vk_format_traits{};
 
     u8 is_vulkan{};

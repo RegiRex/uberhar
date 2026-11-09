@@ -10,6 +10,7 @@
 #endif
 #include "common/file_util.h"
 #include "common/settings.h"
+#include "common/uberhar_mono_guest.h"
 
 namespace Settings {
 
@@ -80,6 +81,18 @@ static bool configuring_global = true;
 bool is_temporary_frame_limit;
 double temporary_frame_limit;
 
+// CodexAstraLocal: Conservatively require the global stereo mode OFF, which
+// guarantees both Android presentation windows remain mono even if their display
+// selection changes. A requested right eye or any real slider depth bypasses it.
+float GetEffectiveGuest3DSlider() {
+    const auto mode = values.uberhar_test_mode.GetValue();
+    return Common::MonoGuest::Depth(values.uberhar_mono_guest_3d.GetValue(),
+        mode == UberharTestMode::Native || mode == UberharTestMode::Automatic,
+        values.render_3d.GetValue() == StereoRenderOption::Off &&
+            values.mono_render_option.GetValue() == MonoRenderOption::LeftEye,
+        values.factor_3d.GetValue());
+}
+
 void LogSettings() {
     const auto log_setting = [](std::string_view name, const auto& value) {
         LOG_INFO(Config, "{}: {}", name, value);
@@ -121,9 +134,23 @@ void LogSettings() {
     log_setting("uberhar_adaptive_cpu_workers", values.uberhar_adaptive_cpu_workers.GetValue());
     log_setting("uberhar_gpu_observer", values.uberhar_gpu_observer.GetValue());
     log_setting("uberhar_frame_workload_census", values.uberhar_frame_workload_census.GetValue());
-    log_setting("uberhar_static_dynamic_state", values.uberhar_static_dynamic_state.GetValue());
     log_setting("uberhar_prepare_displayed_eye_only", values.uberhar_prepare_displayed_eye_only.GetValue());
     log_setting("uberhar_early_right_eye", values.uberhar_early_right_eye.GetValue());
+    log_setting("uberhar_fast_vertex_conversion", values.uberhar_fast_vertex_conversion.GetValue());
+    log_setting("uberhar_vertex_memo", values.uberhar_vertex_memo.GetValue());
+    log_setting("uberhar_worker_cpu_upload", values.uberhar_worker_cpu_upload.GetValue());
+    log_setting("uberhar_cpu_clip_reject", values.uberhar_cpu_clip_reject.GetValue());
+    log_setting("uberhar_full_pipeline_bank_16", values.uberhar_full_pipeline_bank_16.GetValue());
+    log_setting("uberhar_prune_spirv", values.uberhar_prune_spirv.GetValue());
+    log_setting("uberhar_indexed_cpu_output", values.uberhar_indexed_cpu_output.GetValue());
+    log_setting("uberhar_mono_guest_3d", values.uberhar_mono_guest_3d.GetValue());
+    // CodexAstraLocal TEST-ONLY LOG: Distinguish requested depth from guest input;
+    // remove this comparison detail after mono guest-path qualification.
+    log_setting("Uberhar_GuestDepthConfigured", values.factor_3d.GetValue() / 100.0f);
+    log_setting("Uberhar_GuestDepthEffective", GetEffectiveGuest3DSlider());
+    log_setting("Uberhar_MonoGuestOverrideApplied", values.factor_3d.GetValue() == 0 &&
+        GetEffectiveGuest3DSlider() == 0.01f);
+
     log_setting("UBERHAR_CPU_PREFIX_OVERLAP", values.uberhar_cpu_prefix_overlap.GetValue());
     log_setting("UBERHAR_PARALLEL_TEXTURE_DECODE", values.uberhar_parallel_texture_decode.GetValue());
 
@@ -270,9 +297,16 @@ void RestoreGlobalState(bool is_powered_on) {
     values.uberhar_adaptive_cpu_workers.SetGlobal(true);
     values.uberhar_gpu_observer.SetGlobal(true);
     values.uberhar_frame_workload_census.SetGlobal(true);
-    values.uberhar_static_dynamic_state.SetGlobal(true);
     values.uberhar_prepare_displayed_eye_only.SetGlobal(true);
     values.uberhar_early_right_eye.SetGlobal(true);
+    values.uberhar_fast_vertex_conversion.SetGlobal(true);
+    values.uberhar_vertex_memo.SetGlobal(true);
+    values.uberhar_worker_cpu_upload.SetGlobal(true);
+    values.uberhar_cpu_clip_reject.SetGlobal(true);
+    values.uberhar_full_pipeline_bank_16.SetGlobal(true);
+    values.uberhar_prune_spirv.SetGlobal(true);
+    values.uberhar_indexed_cpu_output.SetGlobal(true);
+    values.uberhar_mono_guest_3d.SetGlobal(true);
     values.uberhar_cpu_prefix_overlap.SetGlobal(true);
     values.uberhar_parallel_texture_decode.SetGlobal(true);
 

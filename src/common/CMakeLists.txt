@@ -45,6 +45,7 @@ add_library(citra_common STATIC EXCLUDE_FROM_ALL
     literals.h
     logging/backend.cpp
     logging/backend.h
+    logging/frame_telemetry.h # CodexAstraLocal: Compact same-worker interval evidence.
     logging/uberhar_log_retention.h # AstraPro: Crash-history rotation and bounded flush policy.
     logging/filter.cpp
     logging/filter.h
@@ -100,6 +101,7 @@ add_library(citra_common STATIC EXCLUDE_FROM_ALL
     timer.cpp
     timer.h
     uberhar_parallel_work.h # CodexAstraLocal: Joined, affinity-sized CPU shader workers.
+    uberhar_frame_telemetry.h # CodexAstraLocal: Bounded one-second sections and exact extremes.
     uberhar_cpu_work_budget.h # CodexAstraLocal: Shared auxiliary admission and measured pool participation.
     unique_function.h
     vector_math.h

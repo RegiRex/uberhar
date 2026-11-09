@@ -52,7 +52,10 @@ std::vector<u32> OptionalProfileWords(const Profile& p) {
         p.has_logic_op, p.has_gl_ext_framebuffer_fetch, p.has_gl_arm_framebuffer_fetch,
         p.has_gl_nv_fragment_shader_interlock, p.has_gl_intel_fragment_shader_ordering,
         p.has_gl_nv_fragment_shader_barycentric, p.vk_disable_spirv_optimizer,
-        p.vk_use_spirv_generator, p.is_vulkan};
+        p.vk_use_spirv_generator, p.is_vulkan,
+        // CodexAstraLocal: A pruning-toggle change must not reuse the opposite
+        // optional SPIR-V binary or warm recipe, even within the same build.
+        p.vk_prune_tev};
     for (const auto& t : p.vk_format_traits) {
         const std::array<u32, 9> words{t.transfer_support, t.blit_support, t.attachment_support,
             t.storage_support, t.needs_conversion, t.needs_emulation, t.usage_flags,

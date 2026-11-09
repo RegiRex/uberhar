@@ -37,7 +37,7 @@ void Need(bool yes, const char* why) { ++checks; if (!yes) throw std::runtime_er
 // each normal wave has exactly sixteen independently retained output buffers.
 struct FlagRecord { const u8* output{}; Environment::Status status{}; };
 std::mutex flags_mutex;
-std::array<FlagRecord, 16> flags;
+std::array<FlagRecord, 64> flags;
 std::size_t flag_count{};
 void ObservedWriter(std::span<const OutputVertex> vertices, std::span<u8> output) noexcept {
     VideoCore::ActualWriter(vertices, output);
@@ -294,6 +294,38 @@ void Normal(const std::vector<CarryChallenge::Case>& programs) {
         Need(stats.completed == 16 && stats.submitted == 16 && stats.failed == 0, "completed population");
         Need(stats.coordinator_packets + stats.auxiliary_packets == 16, "packet role accounting");
         packets.clear(); Need(queue.GetStatistics().resident_packets == 0, "completed reference credit leaked");
+    }
+}
+
+// CodexAstraLocal: The optional chunked writer must reproduce the old scalar
+// result across chunk boundaries, repeated FIFO hits and released live inputs.
+// Its final flags are observed at the last writer call, not the first chunk.
+void FusedPacking(const std::vector<CarryChallenge::Case>& programs) {
+    for (u32 count : {96U, 99U, 192U, 255U, 4098U}) for (bool indexed : {false, true}) {
+        { std::lock_guard lock{flags_mutex}; flag_count = 0; }
+        Shader::JitEngine engine; ShaderSetup setup;
+        auto lease = Lease(engine, setup, programs[0]);
+        Live live{lease, programs[0], count, 7, indexed};
+        const auto original = Environment::Capture();
+        auto expected = Serial(live); original.Apply();
+        live.source.fast_conversion = true;
+        CpuDrawExecutor queue{1};
+        auto packet = queue.Capture(live.source, ObservedWriter);
+        Need(bool(packet), "fused capture refused");
+        live.Mutate();
+        Need(queue.Submit(packet), "fused publication refused");
+        const auto bytes = packet->HardwareBytes();
+        Need(bytes.size() == expected.hardware.size() &&
+            !std::memcmp(bytes.data(), expected.hardware.data(), bytes.size()), "fused hardware differs");
+        const auto joined = packet->CompletedResult();
+        Need(!std::memcmp(joined.last_pair.data(), expected.pair.data(), sizeof(joined.last_pair)),
+             "fused final pair differs");
+        Need(joined.counts.invocations == expected.counts.invocations && joined.counts.hits == expected.counts.hits,
+             "fused FIFO changed");
+        Need(ObservedFlags(bytes.data() + ((count - 1) / 96) * 96 * 88) == expected.flags,
+             "fused final FP flags differ");
+        ++comparisons;
+        original.Apply();
     }
 }
 
@@ -581,6 +613,55 @@ CarryChallenge::Case WorkProgram(u32 arithmetic) {
     b.Arithmetic(Op::MOV, Dst::MakeOutput(0), 15, Src::MakeTemporary(0));
     return b.Finish();
 }
+
+// CodexAstraLocal: Actual JIT/owned-packet/88-byte output verifies the opt-in
+// seed extension. The old policy and pending-group path remain separate.
+void CostQualifiedSeeds() {
+    using namespace CpuDrawWorkPolicy;
+    Need(!IsSeed(47, 1000, true) && !IsSeed(48, 69, true) && IsSeed(48, 70, true),
+         "cost seed work/miss threshold");
+    Need(!IsSeed(48, 1000, false) && IsSeed(96, 35, false) && !IsSeed(96, 34, true),
+         "cost seed OFF or arithmetic floor changed");
+    Shader::JitEngine engine; ShaderSetup setup;
+    const auto heavy = WorkProgram(140), light = WorkProgram(35);
+    const auto heavy_lease = Lease(engine, setup, heavy);
+    const auto light_lease = Lease(engine, setup, light);
+    for (bool enabled : {false, true}) {
+        CpuDrawExecutor queue{4, 64, 8 * 1024 * 1024, nullptr, false, enabled};
+        for (u32 count : {48U, 63U, 93U}) {
+            Live live{heavy_lease, heavy, count, 1, false};
+            Need(queue.AllowsShaderWork(heavy_lease, 0, count) == enabled,
+                 "cost seed early gate differs from toggle");
+            auto packet = queue.Capture(live.source, VideoCore::ActualWriter);
+            Need(bool(packet) == enabled, "cost seed exact capture disagrees");
+            if (!packet) continue;
+            const auto expected = Serial(live);
+            Need(queue.Submit(packet), "cost seed published as missing-group member");
+            live.Mutate(); queue.Drain();
+            const auto bytes = packet->HardwareBytes();
+            const auto completed = packet->CompletedResult();
+            Need(bytes.size() == expected.hardware.size() &&
+                 !std::memcmp(bytes.data(), expected.hardware.data(), bytes.size()) &&
+                 !std::memcmp(completed.last_pair.data(), expected.pair.data(), sizeof(completed.last_pair)) &&
+                 completed.counts.invocations == expected.counts.invocations &&
+                 completed.counts.hits == expected.counts.hits,
+                 "cost seed changed output, tail or FIFO");
+            ++comparisons;
+        }
+        Live light_draw{light_lease, light, 48, 1, false};
+        Need(!queue.AllowsShaderWork(light_lease, 0, 48) &&
+             !queue.Capture(light_draw.source, VideoCore::ActualWriter),
+             "small light packet admitted without a seed");
+        Live repeated{heavy_lease, heavy, 96, 1, true};
+        for (u32 i = 0; i < repeated.indices.size(); ++i) repeated.indices[i] = i % 24;
+        Need(!queue.Capture(repeated.source, VideoCore::ActualWriter),
+             "cost seed used input count instead of actual FIFO misses");
+        const auto stats = queue.GetStatistics();
+        Need(stats.cost_seed_enabled == enabled && stats.cost_qualified_seeds == (enabled ? 3U : 0U) &&
+             stats.group_submitted == 0 && stats.seed_submitted == (enabled ? 3U : 0U),
+             "cost seed publication accounting");
+    }
+}
 void Groups(const std::vector<CarryChallenge::Case>& programs) {
     Shader::JitEngine engine; ShaderSetup setup;
     const auto heavy = WorkProgram(140), floor = WorkProgram(35);
@@ -852,6 +933,7 @@ int main(int argc, char** argv) try {
     const auto original = Environment::Capture(); const auto programs = Programs();
     const std::string selected = argc > 1 ? argv[1] : "all";
     if (selected == "all" || selected == "normal") Normal(programs);
+    if (selected == "all" || selected == "fused-packing") FusedPacking(programs);
     if (selected == "all" || selected == "bounds") Boundaries(programs);
     if (selected == "all" || selected == "failures") Failures(programs);
     if (selected == "all" || selected == "work") WorkFloor(programs);
@@ -860,6 +942,7 @@ int main(int argc, char** argv) try {
     // CodexAstraLocal: CPU-only preparation regressions join the existing output
     // fixture; full CI still covers all inherited carry/group/terminal contracts.
     if (selected == "all" || selected == "preparation") PreparationReuse(programs);
+    if (selected == "all" || selected == "cost-seeds") CostQualifiedSeeds();
     original.Apply();
     std::cout << Json{{"passed", true}, {"checks", checks}, {"comparisons", comparisons},
         {"programs", programs.size()}, {"fp_modes", ModeCount},

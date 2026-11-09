@@ -572,9 +572,17 @@ struct Values {
     SwitchableSetting<bool> uberhar_adaptive_cpu_workers{true, Keys::uberhar_adaptive_cpu_workers};
     SwitchableSetting<bool> uberhar_gpu_observer{true, Keys::uberhar_gpu_observer};
     SwitchableSetting<bool> uberhar_frame_workload_census{false, Keys::uberhar_frame_workload_census};
-    SwitchableSetting<bool> uberhar_static_dynamic_state{false, Keys::uberhar_static_dynamic_state};
     SwitchableSetting<bool> uberhar_prepare_displayed_eye_only{true, Keys::uberhar_prepare_displayed_eye_only};
     SwitchableSetting<bool> uberhar_early_right_eye{false, Keys::uberhar_early_right_eye};
+    SwitchableSetting<bool> uberhar_fast_vertex_conversion{false, Keys::uberhar_fast_vertex_conversion};
+    SwitchableSetting<bool> uberhar_vertex_memo{false, Keys::uberhar_vertex_memo};
+    SwitchableSetting<bool> uberhar_worker_cpu_upload{false, Keys::uberhar_worker_cpu_upload};
+    SwitchableSetting<bool> uberhar_cpu_clip_reject{false, Keys::uberhar_cpu_clip_reject};
+    SwitchableSetting<bool> uberhar_full_pipeline_bank_16{false, Keys::uberhar_full_pipeline_bank_16};
+    SwitchableSetting<bool> uberhar_prune_spirv{false, Keys::uberhar_prune_spirv};
+    // CodexAstraLocal: Independent .58 experiments preserve baseline behavior when OFF.
+    SwitchableSetting<bool> uberhar_indexed_cpu_output{false, Keys::uberhar_indexed_cpu_output};
+    SwitchableSetting<bool> uberhar_mono_guest_3d{false, Keys::uberhar_mono_guest_3d};
     SwitchableSetting<bool> uberhar_cpu_prefix_overlap{true, Keys::uberhar_cpu_prefix_overlap};
     SwitchableSetting<bool> uberhar_parallel_texture_decode{true, Keys::uberhar_parallel_texture_decode};
     // CodexAstraLocal: Optional process-frozen execution census, off by default;
@@ -739,6 +747,9 @@ bool IsConfiguringGlobal();
 void SetConfiguringGlobal(bool is_global);
 
 float Volume();
+
+// CodexAstraLocal: Shared page and HID must expose the same effective guest input.
+float GetEffectiveGuest3DSlider();
 
 void LogSettings();
 

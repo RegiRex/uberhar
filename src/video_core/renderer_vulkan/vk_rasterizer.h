@@ -195,6 +195,12 @@ private:
     // CodexAstraLocal: Launch-owned experiment controls keep settings resolution
     // out of the per-draw path. Counters are reported at the existing frame boundary.
     bool include_scissor{};
+    // CodexAstraLocal: Launch-owned exact postpacked rejection. Timings sample
+    // inspection/compaction only; original guest execution/packing remains intact.
+    bool cpu_clip_reject{};
+    u64 clip_attempts{}, clip_eligible{}, clip_ineligible{}, clip_triangles{}, clip_rejected{}, clip_bytes{},
+        clip_empty_batches{}, clip_malformed{}, clip_samples{}, clip_sample_ns{}, clip_max_ns{};
+    std::array<u64, 6> clip_decisions{};
     bool early_right_eye{}, early_eye_hazard{};
     VideoCore::FrameWorkloadCensusLog census_log;
     u64 census_callback_index{};
@@ -209,7 +215,9 @@ private:
     void ObserveEyeTextureReads();
     void ReportWorkReduction(bool final);
     bool TryOmitUnusedEye(bool accelerate, u32 cpu_vertices);
+    // CodexAstraLocal TEST-ONLY LOG: Retire with scissor/eye experiment qualification.
     u64 narrowed_scissors{}, scissor_area_before{}, scissor_area_after{};
+    u64 scissor_no_change{}, scissor_empty{}, eye_cheap_gate_refusals{};
     std::chrono::steady_clock::time_point next_work_report{};
     GraphicsPipeline* ready_vertex_pipeline{};
     // CodexAstraLocal: No capture allocation exists without a valid opt-in file.

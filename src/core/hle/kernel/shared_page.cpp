@@ -85,7 +85,8 @@ Handler::Handler(Core::Timing& timing, u64 override_init_time) : timing(timing) 
                                              std::bind(&Handler::UpdateTimeCallback, this, _1, _2));
     timing.ScheduleEvent(0, update_time_event, 0, 0);
 
-    float slidestate = Settings::values.factor_3d.GetValue() / 100.0f;
+    // CodexAstraLocal: Startup must match subsequent HID updates of guest depth.
+    const float slidestate = Settings::GetEffectiveGuest3DSlider();
     shared_page.sliderstate_3d = static_cast<float_le>(slidestate);
 
     // TODO(PabloMK7)

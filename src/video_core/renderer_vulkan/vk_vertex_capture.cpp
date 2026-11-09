@@ -692,7 +692,9 @@ void WriteProfile(Writer& out, const Pica::Shader::Profile& profile) {
     PROFILE_FLAG(has_gl_ext_framebuffer_fetch); PROFILE_FLAG(has_gl_arm_framebuffer_fetch);
     PROFILE_FLAG(has_gl_nv_fragment_shader_interlock); PROFILE_FLAG(has_gl_intel_fragment_shader_ordering);
     PROFILE_FLAG(has_gl_nv_fragment_shader_barycentric); PROFILE_FLAG(vk_disable_spirv_optimizer);
-    PROFILE_FLAG(vk_use_spirv_generator); PROFILE_FLAG(is_vulkan);
+    PROFILE_FLAG(vk_use_spirv_generator);
+    // CodexAstraLocal: Captured compiler identity includes the specialized pruning comparison.
+    PROFILE_FLAG(vk_prune_tev); PROFILE_FLAG(is_vulkan);
 #undef PROFILE_FLAG
     out.Put("\"vk_format_traits\":[");
     bool first = true;

@@ -230,6 +230,12 @@ object NativeLibrary {
      */
     external fun getPerfStats(): DoubleArray
 
+    // CodexAstraLocal: Opt-in scene trials use non-destructive native evidence,
+    // fixed guest-frame windows and launch-owned effective configuration.
+    external fun beginTuningSample(guestFrames: Int): Boolean
+    external fun getTuningSample(): String
+    external fun cancelTuningSample()
+
     /**
      * Notifies the core emulation that the layout should be updated
      */

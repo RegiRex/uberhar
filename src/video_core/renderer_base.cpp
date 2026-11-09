@@ -44,7 +44,12 @@ void RendererBase::EndFrame() {
     current_frame++;
 
     // AstraEH: Supply guest time for overlay-independent emulation-speed windows.
-    system.perf_stats->EndSystemFrame(system.CoreTiming().GetGlobalTimeUs());
+    // CodexAstraLocal: One canonical guest tick endpoint supplies both legacy
+    // microseconds and exact short-interval progress; no nominal frame assumption.
+    const auto guest_ticks = system.CoreTiming().GetGlobalTicks();
+    system.perf_stats->EndSystemFrame(
+        std::chrono::microseconds{guest_ticks * 1000000 / BASE_CLOCK_RATE_ARM11},
+        guest_ticks, GetResolutionScaleFactor());
 
     render_window.PollEvents();
 

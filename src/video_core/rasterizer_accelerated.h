@@ -4,10 +4,13 @@
 
 #pragma once
 
+#include <array>
 #include "common/vector_math.h"
 #include "video_core/rasterizer_interface.h"
 #include "video_core/shader/generator/pica_fs_config.h"
 #include "video_core/shader/generator/shader_uniforms.h"
+#include "video_core/uberhar_indexed_cpu_output.h"
+#include "video_core/uberhar_owned_vertex_upload.h"
 
 namespace Memory {
 class MemorySystem;
@@ -79,11 +82,46 @@ protected:
     /// Retrieve the range and the size of the input vertex
     VertexArrayInfo AnalyzeVertexArray(bool is_indexed, u32 stride_alignment = 1);
 
+    // CodexAstraLocal: Ordinary Vulkan CPU output only; the expanded batch stays
+    // intact for every other consumer. OFF bypasses all keying and scratch work.
+    struct CpuOutputUpload {
+        u32 bytes;
+        u32 index_offset;
+        bool indexed;
+    };
+    CpuOutputUpload UploadCpuOutput(std::span<u8> destination, bool eligible);
+    void ReportIndexedCpuOutput(bool final);
+
 protected:
     Memory::MemorySystem& memory;
     Pica::PicaCore& pica;
     Pica::RegsInternal& regs;
     std::vector<HardwareVertex> vertex_batch;
+    const bool indexed_cpu_output_enabled;
+    const bool worker_cpu_upload_enabled;
+    OwnedVertexUpload<HardwareVertex> owned_vertex_upload;
+    u64 worker_upload_attempts{};
+    u64 worker_upload_owner_samples{}, worker_upload_owner_ns{};
+    IndexedCpuOutput indexed_cpu_output;
+    // CodexAstraLocal TEST-ONLY LOG: Bounded counters and one inclusive key/copy
+    // clock sample per 64 eligible uploads (plus first allocation). Remove after
+    // indexed-output ON/OFF qualification; never interpret bytes as GPU timings.
+    struct IndexedOutputStats {
+        u64 ineligible = 0;
+        u64 attempts = 0;
+        std::array<u64, static_cast<std::size_t>(IndexedCpuOutput::Decision::Count)> decisions{};
+        u64 input_vertices = 0;
+        u64 unique_vertices = 0;
+        u64 expanded_bytes = 0;
+        u64 uploaded_bytes = 0;
+        u64 hashed_vertices = 0;
+        u64 probes = 0;
+        u64 accepted_samples = 0;
+        u64 accepted_ns = 0;
+        u64 refused_samples = 0;
+        u64 refused_ns = 0;
+        u64 max_sample_ns = 0;
+    } indexed_output_stats;
     Pica::Shader::UserConfig user_config{};
     Pica::Shader::Generator::VSUniformData vs_data{};
     Pica::Shader::Generator::FSUniformData fs_data{};

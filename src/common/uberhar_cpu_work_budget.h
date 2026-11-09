@@ -188,9 +188,13 @@ public:
         // into contention/failure/shape/size/owner/helper/cost causes; remove
         // after cohort admission and rollback are qualified on gameplay.
         std::array<std::uint64_t, 7> reject_reasons{};
+        // CodexAstraLocal TEST-ONLY LOG: Qualification and bounded backoff are
+        // distinct from accepted scheduling changes; remove after qualification.
+        std::uint64_t qualification_samples{}, cooldown_skipped{}, trial_expired{}, backoffs{};
     };
     Statistics GetStatistics() const {
-        return {desired, samples, rejected, trials, accepted, reverted, unstable_skipped, reject_reasons};
+        return {desired, samples, rejected, trials, accepted, reverted, unstable_skipped,
+                reject_reasons, qualification_samples, cooldown_skipped, trial_expired, backoffs};
     }
     // CodexAstraLocal: Check shape at every task boundary, without a clock. A
     // trial for one workload must not cap intervening unrelated jobs or survive
@@ -202,6 +206,12 @@ public:
         // exists; this gates measurement only, never workers or explicit timing.
         if (shape_count == count && shape_grain == grain && shape_hook == hook) {
             stable_shapes = std::min(StableShapeThreshold, stable_shapes + 1);
+            // CodexAstraLocal: Never leave an unfinished sampled trial limiting
+            // unrelated future progress indefinitely. No clock is required.
+            if (trial && ++trial_visits >= TrialVisitLimit) {
+                ++trial_expired;
+                StaticBackoff();
+            }
             return;
         }
         Reset(); shape_count = count; shape_grain = grain; shape_hook = hook;
@@ -210,13 +220,17 @@ public:
     }
     bool SelectSample(std::uint32_t count, std::uint32_t grain) {
         // CodexAstraLocal: Tiny/serial-by-shape calls read no clocks and do not
-        // advance the sampling cadence. At most one eligible call in 64 samples.
+        // advance the sampling cadence. Initial same-work qualification gets
+        // one sample per 16 visits; settled/rejected cohorts retain 1/64.
         if (!maximum || count / std::max(1U, grain) < 2) return false;
+        if (backoff_visits) { --backoff_visits; ++cooldown_skipped; return false; }
         if (stable_shapes < StableShapeThreshold) {
             ++unstable_skipped;
             return false;
         }
-        return ++cadence % 64 == 0;
+        const bool selected = ++cadence % (qualifying ? 16 : 64) == 0;
+        qualification_samples += selected && qualifying;
+        return selected;
     }
     void Observe(const Sample& sample) {
         ++samples;
@@ -244,6 +258,7 @@ public:
             return;
         }
         window.hook = hook;
+        consecutive_rejected = 0;
         window.cost += cost;
         window.total_ns += sample.total_ns;
         window.join_ns += sample.join_ns;
@@ -267,6 +282,8 @@ public:
                 ++reverted;
             } else ++accepted;
             trial = false;
+            qualifying = false;
+            trial_visits = 0;
             baseline = {};
             cooldown = 2;
             return;
@@ -279,6 +296,7 @@ public:
         if (direction < 0 && desired) --desired;
         else if (direction > 0 && desired < ceiling) ++desired;
         trial = desired != prior;
+        trial_visits = 0;
         trials += trial;
     }
 private:
@@ -295,24 +313,47 @@ private:
         ++reject_reasons[reason];
         window = {};
         if (trial) { desired = prior; trial = false; baseline = {}; cooldown = 2; ++reverted; }
+        qualifying = false;
+        trial_visits = 0;
+        // CodexAstraLocal: Repeatedly ineligible work should not spend its next
+        // eight attempts on the same failed training window. Static execution
+        // continues during this finite cooldown; it is not a task retry loop.
+        if (++consecutive_rejected >= 8) StaticBackoff();
+    }
+    void StaticBackoff() {
+        if (trial) ++reverted;
+        trial = false; trial_visits = 0;
+        window = {}; baseline = {};
+        desired = std::min(maximum, shape_count / std::max(1U, shape_grain) > 0
+                                       ? shape_count / std::max(1U, shape_grain) - 1 : 0);
+        qualifying = false; cadence = 0; cooldown = 0; direction = -1;
+        consecutive_rejected = 0; backoff_visits = 256; ++backoffs;
     }
     void Reset() {
         window = {};
         if (trial) { desired = prior; trial = false; ++reverted; }
         baseline = {}; cooldown = 0; direction = -1;
+        qualifying = true; trial_visits = 0; consecutive_rejected = 0;
+        backoff_visits = 0; cadence = 0;
     }
     unsigned maximum{};
     // CodexAstraLocal: Eight recurring visits qualify this exact-key window;
     // other cohorts no longer discard these visits. Timing stays sparse (1/64).
     static constexpr unsigned StableShapeThreshold = 8;
+    // CodexAstraLocal: Settled trials need 8*64 visits; expiry must leave a
+    // complete sampled window possible, including any cadence alignment.
+    static constexpr unsigned TrialVisitLimit = 1024;
     unsigned stable_shapes{};
     unsigned desired{}, prior{}, cadence{}, cooldown{};
     std::uint32_t shape_count{}, shape_grain{};
     bool shape_hook{};
     int direction{-1};
     bool trial{};
+    bool qualifying{true};
+    unsigned trial_visits{}, consecutive_rejected{}, backoff_visits{};
     std::uint64_t samples{}, rejected{}, trials{}, accepted{}, reverted{}, unstable_skipped{};
     std::array<std::uint64_t, 7> reject_reasons{};
+    std::uint64_t qualification_samples{}, cooldown_skipped{}, trial_expired{}, backoffs{};
     Window window{}, baseline{};
 };
 
@@ -435,6 +476,9 @@ private:
         to.samples += from.samples; to.rejected += from.rejected;
         to.trials += from.trials; to.accepted += from.accepted;
         to.reverted += from.reverted; to.unstable_skipped += from.unstable_skipped;
+        to.qualification_samples += from.qualification_samples;
+        to.cooldown_skipped += from.cooldown_skipped;
+        to.trial_expired += from.trial_expired; to.backoffs += from.backoffs;
         for (unsigned i = 0; i < to.reject_reasons.size(); ++i)
             to.reject_reasons[i] += from.reject_reasons[i];
     }

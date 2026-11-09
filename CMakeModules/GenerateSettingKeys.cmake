@@ -64,9 +64,17 @@ foreach(KEY IN ITEMS
     "uberhar_adaptive_cpu_workers"
     "uberhar_gpu_observer"
     "uberhar_frame_workload_census"
-    "uberhar_static_dynamic_state"
     "uberhar_prepare_displayed_eye_only"
     "uberhar_early_right_eye"
+    "uberhar_fast_vertex_conversion"
+    "uberhar_vertex_memo"
+    "uberhar_worker_cpu_upload"
+    "uberhar_cpu_clip_reject"
+    # CodexAstraLocal: Register all independent .58 controls before JNI generation.
+    "uberhar_full_pipeline_bank_16"
+    "uberhar_prune_spirv"
+    "uberhar_indexed_cpu_output"
+    "uberhar_mono_guest_3d"
     # AstraEH: One mutually exclusive experimental renderer profile.
     "uberhar_test_mode"
     "async_presentation"

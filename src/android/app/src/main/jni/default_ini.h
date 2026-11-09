@@ -178,10 +178,6 @@ static const char* android_config_default_file_content = (BOOST_HANA_STRING(R"(
 # Default: false. Collect bounded rendering workload details for frame comparisons. OFF bypasses this census. Restart the game after changing.
 )") DECLARE_KEY(uberhar_frame_workload_census) BOOST_HANA_STRING(R"(
 
-# CodexAstraLocal: V38 static state path; launch-owned .57 comparison.
-# Default: false. Test a static alternative to extended dynamic state on V38. Border-color policy stays unchanged. Restart the game after changing.
-)") DECLARE_KEY(uberhar_static_dynamic_state) BOOST_HANA_STRING(R"(
-
 # CodexAstraLocal: Prepare displayed eye only; launch-owned .57 comparison.
 # Default: true. Avoid presentation preparation for an eye that will not be displayed. This does not remove guest drawing. Restart the game after changing.
 )") DECLARE_KEY(uberhar_prepare_displayed_eye_only) BOOST_HANA_STRING(R"(
@@ -189,6 +185,38 @@ static const char* android_config_default_file_content = (BOOST_HANA_STRING(R"(
 # CodexAstraLocal: Early right-eye suppression; launch-owned .57 comparison.
 # Default: false. Test guarded early suppression separately from the original heuristic. Also requires Disable Right Eye Render ON. Restart the game after changing.
 )") DECLARE_KEY(uberhar_early_right_eye) BOOST_HANA_STRING(R"(
+
+# CodexAstraLocal: Fast CPU vertex conversion; independent .58 control.
+# Use exact prepared input and output recipes to reduce CPU conversion work. Default false; restart game.
+)") DECLARE_KEY(uberhar_fast_vertex_conversion) BOOST_HANA_STRING(R"(
+
+# CodexAstraLocal: Reuse independent vertex results; independent .58 control.
+# Reuse exact indexed vertex results within a certified independent draw chunk while preserving the original FIFO order. Default false; restart game.
+)") DECLARE_KEY(uberhar_vertex_memo) BOOST_HANA_STRING(R"(
+
+# CodexAstraLocal: Worker CPU vertex upload; independent .58 control.
+# Copy eligible owned CPU vertex output on the existing recorder worker. Default false; restart game.
+)") DECLARE_KEY(uberhar_worker_cpu_upload) BOOST_HANA_STRING(R"(
+
+# CodexAstraLocal: Reject proven invisible CPU triangles; independent .58 control.
+# Reject only finite triangles wholly outside a shared horizontal or vertical clip plane after guest vertex execution. Default false; restart game.
+)") DECLARE_KEY(uberhar_cpu_clip_reject) BOOST_HANA_STRING(R"(
+
+# CodexAstraLocal: Full pipeline capacity: 8 / 16; independent .58 control.
+# OFF retains 8 full specialized pipeline entries; ON allows 16. The partial bank remains 8. Restart game.
+)") DECLARE_KEY(uberhar_full_pipeline_bank_16) BOOST_HANA_STRING(R"(
+
+# CodexAstraLocal: Prune unused specialized shader work; independent .58 control.
+# Remove proven dead TEV and lighting computations in specialized SPIR-V shaders. Default false; restart game.
+)") DECLARE_KEY(uberhar_prune_spirv) BOOST_HANA_STRING(R"(
+
+# CodexAstraLocal: Indexed CPU output; independent .58 test control.
+# Reuse byte-identical packed CPU vertices in ordinary Vulkan draws. Default false; restart game.
+)") DECLARE_KEY(uberhar_indexed_cpu_output) BOOST_HANA_STRING(R"(
+
+# CodexAstraLocal: Mono guest 1% path; independent .58 test control.
+# Use effective guest depth 1% only for mono-left with saved slider 0%. Does not remove second-eye drawing. Default false; restart game.
+)") DECLARE_KEY(uberhar_mono_guest_3d) BOOST_HANA_STRING(R"(
 
 # Whether to emit PICA fragment shader using SPIRV or GLSL (Vulkan only)
 # 0: GLSL, 1: SPIR-V (default)

@@ -5,12 +5,20 @@
 #pragma once
 
 #include <string_view>
+#include <cstdint>
 #include "common/logging/filter.h"
 #ifdef HAVE_LIBRETRO
 #include "libretro.h"
 #endif
 
+namespace Common::FrameTelemetry { struct Record; }
 namespace Common::Log {
+
+struct FrameTelemetryStatus;
+// CodexAstraLocal: Bounded required telemetry uses a separate, cap-independent
+// sink on the existing worker. False means explicit delivery failure, not a wait.
+bool SubmitFrameTelemetry(const Common::FrameTelemetry::Record& record);
+FrameTelemetryStatus GetFrameTelemetryStatus();
 
 class Filter;
 

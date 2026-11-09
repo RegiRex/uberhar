@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- CodexAstraLocal: Advisory tuning never changes a preference or launches a game. -->
+<resources>
+    <string name="tuning_title">Tune performance — advice only</string>
+    <string name="tuning_resume">Review performance tuning</string>
+    <string name="tuning_advisory">No settings are changed. This advice applies only to the measured scene and fixed profile.</string>
+    <string name="tuning_baseline">All six work controls OFF</string>
+    <string name="tuning_storage_error">The tuning journal could not be read or saved. Existing evidence is retained.</string>
+    <string name="tuning_next_profile">Suggest next manual profile</string>
+    <string name="tuning_view_profile">View suggested profile</string>
+    <string name="tuning_begin">Measure this scene</string>
+    <string name="tuning_collect">Collect finished measurement</string>
+    <string name="tuning_skip_retry">Skip optional retry</string>
+    <string name="tuning_recommend">Finish plan and review recommendation</string>
+    <string name="tuning_session_details">Session status: %1$s — details</string>
+    <string name="tuning_evidence">View measured evidence</string>
+    <string name="tuning_end">End advisory session</string>
+    <string name="tuning_end_description">Stop collecting evidence? Your current settings remain exactly as they are. No preference is applied or restored.</string>
+    <string name="tuning_invalid">Trial invalid. No recommendation may be adopted from it.</string>
+    <string name="tuning_collect_before_launch">Collect the result before launching another game. A new launch replaces the native measurement.</string>
+    <string name="tuning_next_step">Next measurement: %1$s</string>
+    <string name="tuning_results_ready">The selected plan is complete.</string>
+    <string name="tuning_close_first">Close the game normally before creating a tuning plan.</string>
+    <string name="tuning_enable_first">First enable Testing for this game and select Native or Combo manually. Tuning does not enable or change settings.</string>
+    <string name="tuning_scene_hint">Repeatable scene and exact start event</string>
+    <string name="tuning_conditions_hint">Cache intent, power profile and background conditions</string>
+    <string name="tuning_plan_description">Name a scene you can repeat. Keep driver, renderer, resolution, quality and speed limit fixed. Manually select every suggested profile and launch the game yourself. Samples use 1,200 guest frames; equal frames do not guarantee equal game content. Cache, power and background conditions are your confirmation, not automatically verified.</string>
+    <string name="tuning_scene_required">Enter a repeatable scene (up to 120 characters).</string>
+    <string name="tuning_conditions_required">Describe consistent conditions (up to 240 characters).</string>
+    <string name="tuning_choose">Choose one hypothesis; up to three initially</string>
+    <string name="tuning_review_plan">Review finite plan</string>
+    <string name="tuning_expand">Explicitly expand plan</string>
+    <string name="tuning_candidate_limit">Choose between 1 and %1$d hypotheses. Pairs remain independent of their singleton results.</string>
+    <string name="tuning_budget">%1$d selected hypotheses: normally %2$d manually launched scene measurements using baseline/candidate/baseline brackets. At most one optional retry per hypothesis and one final confirmation (up to %3$d measurements). No automatic launches or settings changes. Start with one hypothesis to keep testing short.</string>
+    <string name="tuning_start_plan">Save advisory plan</string>
+    <string name="tuning_on">ON</string>
+    <string name="tuning_off">OFF</string>
+    <string name="tuning_manual_profile">Step: %1$s\n\nManually set these six controls for this game, leaving everything else fixed:\n%2$s\n\nThen launch normally and reach the named scene. OK records the plan only; it changes no preference. The actual native profile must match before measurement.</string>
+    <string name="tuning_begin_description">Are you at the same start event for “%1$s”, with these conditions unchanged?\n%2$s\n\nUse the same stable uncapped or turbo limit (for example 400%%) before marking; a sample held at its speed cap cannot establish throughput headroom. The tuner never changes the limit. Resume the game after marking. Measurement stops automatically after 1,200 guest frames. A pause or context change during collection invalidates the sample.</string>
+    <string name="tuning_confirm_scene">Confirm same scene and conditions</string>
+    <string name="tuning_started">Measurement marked. Resume the game. After the guest-frame target, collect the result before the next launch. No settings were changed.</string>
+    <string name="tuning_collect_description">Confirm that the whole sample covered the intended “%1$s” scene with comparable conditions and visually correct output. Missing or corrupted graphics, new rendering errors, unexpected menus, loading, different attacks or background activity invalidate the trial and exclude a recommendation. Report any such problem instead of confirming.</string>
+    <string name="tuning_scene_changed">Scene, conditions or graphics problem</string>
+    <string name="tuning_recommendation">Potential improvement for this measured scene: %1$s. Review the evidence and choose settings manually. This is not a global optimum.</string>
+    <string name="tuning_no_winner">No qualified improvement established over %1$s. Your current preferences are unchanged.</string>
+    <string name="tuning_evidence_scope">Each sample has ten bins of 120 guest frames. Low/mean/high are measured throughput; p95/p99 are frame-time diagnostics. These are not five-second windows or statistical confidence guarantees. Conditions and scene identity are owner-confirmed.</string>
+    <string name="tuning_stale">Historical evidence only: settings, device, reboot or installed build changed, or the current context cannot be verified. No current recommendation is established.</string>
+    <string name="tuning_stale_status">historical — context changed or unavailable</string>
+    <string name="tuning_historical_recommendation">Historical measured profile: %1$s. Its context changed or cannot be verified, so this is not current advice. The evidence is preserved.</string>
+</resources>

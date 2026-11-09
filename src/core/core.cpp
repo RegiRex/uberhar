@@ -855,6 +855,9 @@ System::ResultStatus System::Reset() {
 }
 
 void System::ApplySettings() {
+    // CodexAstraLocal: A live settings change invalidates an interval that spans
+    // two contexts without doing logging or locking on the settings caller.
+    if (perf_stats) perf_stats->NotifyTelemetryContextChanged();
 #ifdef ENABLE_GDBSTUB
     if (override_gdb_port != -1) {
         GDBStub::SetServerPort(override_gdb_port);

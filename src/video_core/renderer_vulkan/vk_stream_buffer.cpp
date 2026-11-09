@@ -302,6 +302,15 @@ std::optional<StreamBuffer::DeferredUpload> StreamBuffer::CommitDeferredUpload(
     return upload;
 }
 
+// CodexAstraLocal: Only the current coherent reservation is sealable; every
+// subsequent Map/Commit invalidates the generation before any recorder can use it.
+std::optional<StreamBuffer::DeferredMapping> StreamBuffer::SnapshotDeferredMapping(u32 size) const noexcept {
+    if (!CanDeferUpload() || !size || size > mapped_size || offset > stream_buffer_size ||
+        size > stream_buffer_size - offset)
+        return std::nullopt;
+    return DeferredMapping{this, offset, size, mapping_generation};
+}
+
 bool StreamBuffer::CopyHostWrittenBytes(u64 read_offset,
                                        std::span<u8> destination) const noexcept {
     // CodexAstraLocal: Download memory has different visibility requirements;

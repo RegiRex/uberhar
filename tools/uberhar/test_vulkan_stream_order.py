@@ -12,6 +12,7 @@ import argparse
 import hashlib
 import importlib.util
 import json
+import re
 from pathlib import Path
 import subprocess
 import tempfile
@@ -54,6 +55,8 @@ def main():
         body=extractor.function(source,signature);proof['seams'][signature]=hashlib.sha256(body.encode()).hexdigest();return body
     try:
         read(Path(__file__).resolve())
+        read(source_root/'src/video_core/renderer_vulkan/uberhar_pass_union.h')
+        read(source_root/'src/video_core/uberhar_owned_vertex_upload.h')
         fixture=read(HERE/'test_vulkan_stream_order.cpp')
         stream=read(source_root/'src/video_core/renderer_vulkan/vk_stream_buffer.cpp')
         header=read(source_root/'src/video_core/renderer_vulkan/vk_stream_buffer.h')
@@ -78,6 +81,7 @@ def main():
             'std::tuple<u8*, u32, bool> StreamBuffer::Map(', 'void StreamBuffer::Commit(',
             'bool StreamBuffer::CanDeferUpload()',
             'std::optional<StreamBuffer::DeferredMapping> StreamBuffer::MapDeferredUpload(',
+            'std::optional<StreamBuffer::DeferredMapping> StreamBuffer::SnapshotDeferredMapping(',
             'std::optional<StreamBuffer::DeferredUpload> StreamBuffer::CommitDeferredUpload(',
             'void StreamBuffer::ReserveWatches(', 'void StreamBuffer::WaitPendingOperations(']:
             parts.append(function(stream,sig))
@@ -111,7 +115,8 @@ def main():
         for name,body in [('setup.inc',setup),('end-sample.inc',end_sample),
                           ('candidate-prepare.inc',prepare),('candidate-tail.inc',tail)]:
             (output/name).write_text(body+'\n')
-        need(prepare.count('MapDeferredUpload(')==1 and tail.count('CommitDeferredUpload(')==1,
+        need(prepare.count('MapDeferredUpload(')==1 and
+             prepare.count('SnapshotDeferredMapping(')==1 and tail.count('CommitDeferredUpload(')==2,
              'Deferred Map/seal population changed')
         need('MapDeferredUpload(' not in setup+tail and 'CommitDeferredUpload(' not in prepare,
              'Deferred reservation/seal moved out of required scopes')
@@ -129,8 +134,11 @@ def main():
 '''
         early_tail=replace(tail,'auto upload = stream_buffer.CommitDeferredUpload(*deferred_mapping);',
                            'auto upload = std::move(early_upload);')
+        # CodexAstraLocal: Preserve both newly compiled upload branches while
+        # moving only the ordinary copy/commit to the intentionally wrong tick.
         early_tail=replace(early_tail,
-            '            std::memcpy(vertex_data, vertex_batch.data(), vertex_size);\n            stream_buffer.Commit(vertex_size);\n','')
+            '                std::memcpy(vertex_data, vertex_batch.data(), vertex_size);\n','')
+        early_tail=replace(early_tail, '            stream_buffer.Commit(upload.bytes);\n', '')
         for name,body in [('late-prepare.inc',late_prepare),('late-tail.inc',late_tail),
                           ('early-prepare.inc',early_prepare),('early-tail.inc',early_tail)]:
             (output/name).write_text(body+'\n')
@@ -156,7 +164,7 @@ def main():
             if error:need(result.returncode==1 and result.stderr==error,'Unexpected defect result: '+name)
             # CodexAstraLocal: Each actual CPU draw also checks the new final-tick
             # cached-buffer hook; all original geometry/order cases are retained.
-            else:need(result.returncode==0 and result.stdout.endswith(b'PASS cases=36 checks=1252\n'),'Candidate population/result')
+            else:need(result.returncode==0 and re.fullmatch(rb'PASS cases=60 checks=[0-9]+ legacy_checks=1252',result.stdout.splitlines()[-1]),'Candidate population/result')
             print(name+': PASS',flush=True)
         proof['passed']=True
     finally:

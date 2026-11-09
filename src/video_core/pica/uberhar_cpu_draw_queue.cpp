@@ -22,7 +22,7 @@ namespace {
 using Environment = Common::Uberhar::ParallelFloatEnvironment;
 // CodexAstraLocal: Charge the prior smallest admitted draw once per grouped
 // packet. The proxy bounds expansion; it does not predict a device speedup.
-constexpr u64 GroupWorkUnit = 96 * 35;
+constexpr u64 GroupWorkUnit = CpuDrawWorkPolicy::WorkUnit;
 
 // CodexAstraLocal TEST-ONLY LOG: Sparse disjoint feature spans never count as
 // saved time or GPU execution; remove after CPU-only .48 qualification. No shared atomics.
@@ -93,10 +93,11 @@ struct CpuDrawPacket::Impl {
     std::array<OutputVertex, 2> last_pair;
     Environment environment;
     CpuDrawHardwareWriter writer{};
-    u32 first_vertex{}, vertex_count{};
-    bool indexed{};
+    u32 first_vertex{}, vertex_count{}, hardware_stride{};
+    bool indexed{}, fused_packing{};
     u64 guaranteed_work{};
     bool requires_group{};
+    bool cost_qualified_seed{}; // CodexAstraLocal: Publication evidence only.
     std::shared_ptr<Credit> credit;
     mutable std::mutex mutex;
     mutable std::condition_variable completion;
@@ -113,7 +114,11 @@ struct CpuDrawPacket::Impl {
             ShaderUnit unit;
             const auto context = lease.Bind(uniforms);
             NativeVertexSamples samples;
-            u32 out{};
+            u32 out{}, chunk_size{}, packed{};
+            // CodexAstraLocal: A 96-vertex scratch holds 32 complete triangles.
+            // The unchanged writer consumes each chunk while cache-hot; FIFO
+            // entries still own their OutputVertex values. OFF keeps one full
+            // converted array and the original one-call writer path.
             counts = RunNativeVertexBatch<false>(vertex_count, indexed,
                 [&](u32 index) { return vertices[index]; },
                 [&]<bool>(u32 vertex, u32) {
@@ -121,9 +126,23 @@ struct CpuDrawPacket::Impl {
                     context.Run(unit);
                     return output->Convert(unit);
                 },
-                [&](const OutputVertex& value) { converted[out++] = value; }, samples);
-            last_pair = {converted[vertex_count - 3], converted[vertex_count - 2]};
-            writer(converted, hardware);
+                [&](const OutputVertex& value) {
+                    if (!fused_packing) { converted[out++] = value; return; }
+                    converted[chunk_size++] = value;
+                    ++out;
+                    if (chunk_size == converted.size() || out == vertex_count) {
+                        last_pair = {converted[chunk_size - 3], converted[chunk_size - 2]};
+                        writer(std::span<const OutputVertex>{converted}.first(chunk_size),
+                               std::span<u8>{hardware}.subspan(u64(packed) * hardware_stride,
+                                                              u64(chunk_size) * hardware_stride));
+                        packed += chunk_size;
+                        chunk_size = 0;
+                    }
+                }, samples);
+            if (!fused_packing) {
+                last_pair = {converted[vertex_count - 3], converted[vertex_count - 2]};
+                writer(converted, hardware);
+            }
         } catch (...) {
             error = std::current_exception();
         }
@@ -197,6 +216,7 @@ struct CpuDrawExecutor::Impl {
     bool asynchronous{}, start_attempted{};
     const unsigned processors;
     const bool sampled_costs;
+    const bool cost_seed_enabled;
     const std::size_t max_packets, max_bytes;
     void (*worker_start)();
     std::shared_ptr<Budget> budget{std::make_shared<Budget>()};
@@ -225,8 +245,9 @@ struct CpuDrawExecutor::Impl {
     std::optional<Approval> approved_effect;
     u64 effect_generation{}, eligibility_calls{}, proof_calls{};
 
-    Impl(unsigned available, std::size_t packets, std::size_t bytes, void (*start)(), bool costs)
-        : processors{available}, sampled_costs{costs}, max_packets{packets},
+    Impl(unsigned available, std::size_t packets, std::size_t bytes, void (*start)(), bool costs,
+         bool cost_seed)
+        : processors{available}, sampled_costs{costs}, cost_seed_enabled{cost_seed}, max_packets{packets},
           max_bytes{bytes}, worker_start{start} {
         if (!max_packets || max_packets > std::numeric_limits<u32>::max() || !max_bytes)
             throw std::invalid_argument{"invalid CPU draw queue limits"};
@@ -336,8 +357,9 @@ struct CpuDrawExecutor::Impl {
         approved_effect.reset();
         bool accepted{}, work_refused{};
         if (effect && count && count <= 65535 && count % 3 == 0 && effect->accepted) {
-            accepted = effect->minimum_arithmetic >= 35 &&
-                (count >= 96 || CanJoinPending(u64(count) * effect->minimum_arithmetic));
+            accepted = effect->minimum_arithmetic >= CpuDrawWorkPolicy::MinimumArithmetic &&
+                (CpuDrawWorkPolicy::IsSeed(count, effect->minimum_arithmetic, cost_seed_enabled) ||
+                 CanJoinPending(u64(count) * effect->minimum_arithmetic));
             work_refused = !accepted;
         }
         if (accepted) {
@@ -447,8 +469,9 @@ struct CpuDrawExecutor::Impl {
 };
 
 CpuDrawExecutor::CpuDrawExecutor(unsigned processors, std::size_t packets, std::size_t bytes,
-                               void (*start)(), bool sampled_costs)
-    : impl{std::make_unique<Impl>(processors, packets, bytes, start, sampled_costs)} {}
+                               void (*start)(), bool sampled_costs, bool cost_qualified_seeds)
+    : impl{std::make_unique<Impl>(processors, packets, bytes, start, sampled_costs,
+                                 cost_qualified_seeds)} {}
 CpuDrawExecutor::~CpuDrawExecutor() = default;
 bool CpuDrawExecutor::HasPendingSeed() const noexcept {
     return impl->pending_seed_hint.load(std::memory_order_relaxed);
@@ -528,7 +551,7 @@ std::shared_ptr<CpuDrawPacket> CpuDrawExecutor::Capture(const CpuDrawCapture& so
     // CodexAstraLocal: The finite complete-path control lost on tiny/light
     // packets. This conservative arithmetic floor excludes those cohorts; it is
     // a workload policy, not an estimate or guarantee of target execution time.
-    if (effect.minimum_arithmetic < 35) return refuse(false, true);
+    if (effect.minimum_arithmetic < CpuDrawWorkPolicy::MinimumArithmetic) return refuse(false, true);
     u32 minimum = std::numeric_limits<u32>::max(), maximum{};
     VertexCacheIndex fifo;
     u32 misses{};
@@ -542,7 +565,8 @@ std::shared_ptr<CpuDrawPacket> CpuDrawExecutor::Capture(const CpuDrawCapture& so
         }
     }
     const u64 guaranteed_work = u64(misses) * effect.minimum_arithmetic;
-    if (misses < 96) {
+    const bool seed = CpuDrawWorkPolicy::IsSeed(misses, effect.minimum_arithmetic, impl->cost_seed_enabled);
+    if (!seed) {
         if (!impl->CanJoinPending(guaranteed_work)) return refuse(false, true);
     }
     // CodexAstraLocal: This temporary validates guest mappings only; it never
@@ -552,7 +576,8 @@ std::shared_ptr<CpuDrawPacket> CpuDrawExecutor::Capture(const CpuDrawCapture& so
     if (checked.Prepare(source.shader, source.available_attributes, source.base_address, maximum,
         [&](u32 n) { return source.attributes[n]; }, [&](PAddr address) { return Map(source, address); }, false)
         != NativeVertexInputPlan::Result::Ready) return refuse();
-    auto output = std::make_unique<NativeVertexPlan>(source.shader, source.rasterizer);
+    auto output = std::make_unique<NativeVertexPlan>(source.shader, source.rasterizer,
+                                                     source.fast_conversion);
     if (!output->Supported()) return refuse();
     auto dense = source.attributes;
     u64 raw_size{};
@@ -572,8 +597,13 @@ std::shared_ptr<CpuDrawPacket> CpuDrawExecutor::Capture(const CpuDrawCapture& so
         ++impl->owner_statistics.copy_refused; // CodexAstraLocal: Owner-only refusal.
         return refuse(false, true);
     }
+    // CodexAstraLocal: Exact credit includes the actually allocated conversion
+    // scratch. The fast-conversion experiment also fuses complete-triangle packing;
+    // original OFF packets retain their full array, byte/FIFO/order contracts.
+    const u32 converted_count = source.fast_conversion ? std::min<u32>(source.count, 96) : source.count;
     const u64 footprint = sizeof(CpuDrawPacket) + sizeof(CpuDrawPacket::Impl) + sizeof(NativeVertexPlan) +
-        raw_size + u64(source.count) * (sizeof(u32) + sizeof(OutputVertex) + stride);
+        raw_size + u64(source.count) * (sizeof(u32) + stride) +
+        u64(converted_count) * sizeof(OutputVertex);
     if (footprint > impl->max_bytes) return refuse(true);
     auto credit = std::make_shared<Credit>(); credit->budget = impl->budget; credit->bytes = footprint;
     bool at_capacity{};
@@ -591,8 +621,10 @@ std::shared_ptr<CpuDrawPacket> CpuDrawExecutor::Capture(const CpuDrawCapture& so
     packet->lease = source.shader_lease; packet->uniforms = source.uniforms; packet->defaults = source.defaults;
     packet->output = std::move(output); packet->environment = Environment::Capture(); packet->writer = writer;
     packet->first_vertex = minimum; packet->vertex_count = source.count; packet->indexed = source.indexed;
-    packet->guaranteed_work = guaranteed_work; packet->requires_group = misses < 96;
-    packet->vertices.resize(source.count); packet->converted.resize(source.count);
+    packet->guaranteed_work = guaranteed_work; packet->requires_group = !seed;
+    packet->cost_qualified_seed = seed && misses < CpuDrawWorkPolicy::OriginalSeedMisses;
+    packet->fused_packing = source.fast_conversion; packet->hardware_stride = stride;
+    packet->vertices.resize(source.count); packet->converted.resize(converted_count);
     packet->hardware.resize(u64(source.count) * stride); packet->raw.resize(raw_size);
     for (u32 n = 0; n < source.count; ++n) packet->vertices[n] = Vertex(source, n);
     // CodexAstraLocal: Rebase only owned loader addresses; FIFO identities stay
@@ -612,7 +644,8 @@ std::shared_ptr<CpuDrawPacket> CpuDrawExecutor::Capture(const CpuDrawCapture& so
     }
     if (packet->input.Prepare(source.shader, source.available_attributes, 0, maximum - minimum,
         [&](u32 n) { return dense[n]; },
-        [&](PAddr address) { return std::span<const u8>{packet->raw}.subspan(address); }, true)
+        [&](PAddr address) { return std::span<const u8>{packet->raw}.subspan(address); }, true,
+        source.fast_conversion)
         != NativeVertexInputPlan::Result::Ready) return refuse();
     if (packet->requires_group) {
         ++impl->owner_statistics.group_candidates; // CodexAstraLocal: Owner-only capture.
@@ -650,6 +683,7 @@ bool CpuDrawExecutor::Submit(const std::shared_ptr<CpuDrawPacket>& packet) {
         ++impl->statistics.submitted;
         if (packet->impl->requires_group) ++impl->statistics.group_submitted;
         else ++impl->statistics.seed_submitted;
+        impl->statistics.cost_qualified_seeds += packet->impl->cost_qualified_seed;
     }
     if (impl->asynchronous) impl->wake.notify_one();
     else {
@@ -671,6 +705,7 @@ void CpuDrawExecutor::Drain() {
 CpuDrawExecutor::Statistics CpuDrawExecutor::GetStatistics() const {
     std::scoped_lock lock{impl->mutex, impl->budget->mutex};
     auto result = impl->statistics;
+    result.cost_seed_enabled = impl->cost_seed_enabled;
     // CodexAstraLocal: The reporting owner merges its uncontended counters;
     // asynchronous publication and resident-credit fields retain their locks.
     const auto& owner = impl->owner_statistics;

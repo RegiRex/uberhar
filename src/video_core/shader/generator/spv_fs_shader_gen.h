@@ -9,6 +9,7 @@
 
 #include "video_core/pica/regs_framebuffer.h"
 #include "video_core/pica/regs_texturing.h"
+#include "video_core/pica/uberhar_tev_liveness.h"
 
 namespace Pica::Shader {
 struct FSConfig;
@@ -60,6 +61,8 @@ private:
 
     /// Writes the code to emulate the specified TEV stage
     void WriteTevStage(s32 index);
+    // CodexAstraLocal: Keep exact live formulas, omit only dead pure work.
+    void WritePrunedTevStage(s32 index);
 
     /// Defines the basic texture sampling functions for a unit
     void DefineTexSampler(u32 texture_unit);
@@ -224,6 +227,8 @@ private:
     const Profile& profile;
 
     bool use_fragment_shader_barycentric{};
+    bool prune_tev{};
+    Pica::TevLiveness::Plan tev_liveness{};
 
     Id void_id{};
     Id bool_id{};

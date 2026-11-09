@@ -14,6 +14,22 @@
 
 namespace Pica {
 
+// CodexAstraLocal: One predicate owns both the early count upper bound and the
+// actual FIFO-miss admission. The opt-in extension preserves the original work
+// floor, limits expansion to >=48 misses, and never waits for a future packet.
+namespace CpuDrawWorkPolicy {
+inline constexpr u32 MinimumArithmetic = 35, OriginalSeedMisses = 96, CostSeedMisses = 48;
+inline constexpr u64 WorkUnit = u64{OriginalSeedMisses} * MinimumArithmetic;
+constexpr bool PotentialSeed(u32 count, bool cost_seed) {
+    return count >= (cost_seed ? CostSeedMisses : OriginalSeedMisses);
+}
+constexpr bool IsSeed(u32 misses, u32 minimum_arithmetic, bool cost_seed) {
+    return minimum_arithmetic >= MinimumArithmetic &&
+        (misses >= OriginalSeedMisses ||
+         (cost_seed && misses >= CostSeedMisses && u64{misses} * minimum_arithmetic >= WorkUnit));
+}
+} // namespace CpuDrawWorkPolicy
+
 // CodexAstraLocal: Owner-only capture views expire before publication. The
 // packet copies raw bytes/indices/defaults/uniforms; MemoryRefs remain caller
 // owned only through Capture, and never become worker-visible guest pointers.
@@ -31,6 +47,8 @@ struct CpuDrawCapture {
     std::span<const u8> index_bytes;
     u32 index_width{}, count{}, base_vertex{};
     bool indexed{};
+    // CodexAstraLocal: Captured policy follows the immutable packet inputs.
+    bool fast_conversion{};
 };
 
 // CodexAstraLocal: Only the actual accelerated stateless complete-triangle writer
@@ -86,6 +104,10 @@ public:
         // admissions, and lost pre-publication opportunities from throughput.
         u64 early_refused{}, group_candidates{}, seed_submitted{}, group_submitted{};
         u64 group_lost{}, copy_refused{}, grouped_waves{}, work_grains{};
+        // CodexAstraLocal TEST-ONLY LOG: Real publications, not successful
+        // helpers or assumed CPU7 savings; retain coordinator counters separately.
+        u64 cost_qualified_seeds{};
+        bool cost_seed_enabled{};
         u64 submitted{}, completed{}, failed{}, waves{}, coordinator_packets{}, auxiliary_packets{};
         u32 maximum_wave{}, peak_threads{};
         std::size_t resident_packets{}, resident_bytes{};
@@ -99,7 +121,8 @@ public:
     explicit CpuDrawExecutor(unsigned processors = Common::Uberhar::AvailableProcessors(),
                              std::size_t max_packets = 64,
                              std::size_t max_bytes = 8 * 1024 * 1024,
-                             void (*worker_start)() = nullptr, bool sampled_costs = false);
+                             void (*worker_start)() = nullptr, bool sampled_costs = false,
+                             bool cost_qualified_seeds = false);
     ~CpuDrawExecutor();
     CpuDrawExecutor(const CpuDrawExecutor&) = delete;
     CpuDrawExecutor& operator=(const CpuDrawExecutor&) = delete;
@@ -119,8 +142,9 @@ public:
     // CodexAstraLocal: Capture performs exact effect/flow proof and all owned
     // allocation before a task is published. Refusal returns empty; allocation
     // exceptions retain the caller's existing before-dispatch recovery path.
-    // Individual seeds retain 96 misses/35 guaranteed arithmetic operations and
-    // <=70 raw bytes/miss. Smaller packets require an existing pending seed and
+    // Original seeds retain 96 misses/35 arithmetic; opt-in costly seeds permit
+    // >=48 misses at the same >=96*35 guaranteed work, still <=70 raw bytes/miss.
+    // Other smaller packets require an existing pending seed and
     // aggregate work >=96*35 per member; this is a work proxy, not target timing.
     std::shared_ptr<CpuDrawPacket> Capture(const CpuDrawCapture& source,
                                          CpuDrawHardwareWriter writer,

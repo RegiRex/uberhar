@@ -1,4 +1,62 @@
-# CURRENT — 0.1.57 work reduction; validation, release and root-only qualification
+# CURRENT — .58 approved investigations and implementation; stop after submission
+
+<!-- CodexAstraLocal: November 9 owner authorizes the next build after investigation findings are implemented. -->
+Implement approved .58 work, validate affected contracts and submit to the existing
+RegiRex/uberhar gated prerelease workflow. Stop after submission; do not watch the
+hosted build, operate the Thor or inherit an old sleep request. Current checkpoint:
+/home/regirex/uberhar-recovery/build058-implementation-20261109/RESUME.md
+
+Baseline is the primary comparison; an explicitly selected optimum is secondary.
+Sonic FIVE/R25 uses R3 first and retains FOUR/R18 for late-channel performance.
+Match renderer, driver, resolution, legacy settings and diagnostics. A resolution-only
+baseline bridge compares resolution baselines, never a candidate against a different
+resolution. Preserve five-second telemetry while adding genuine one-second sections
+with six shortest/longest paired intervals per section. Never manufacture old samples.
+
+The normal Guest 3D slider remains independent of the mono experiment. The owner
+requests a per-game-capable 8/16 full-pipeline capacity control in Testing, default8.
+Keep a complete disposition of earlier shader, transport, vertex and eye proposals;
+implement approved concrete findings and label conditional work explicitly.
+
+---
+
+# CURRENT WORKFLOW — never restore settings without an explicit request
+
+<!-- CodexAstraLocal: The owner explicitly rejected automatic settings restoration on November 8, 2026. This instruction supersedes every older restore-after-testing instruction below. -->
+**Never restore emulator or device settings unless the owner explicitly asks.** Backups are evidence, not authorization to apply them. After authorized testing, leave the final test configuration in place and state exactly what remains selected. Do not undo the owner's current settings to repair an earlier restoration without a new request. Unrelated settings must remain unchanged. Requested brightness/sleep actions apply only within their explicit scope.
+
+Performance reports must distinguish **lowest five-second average** from brief dips. Use retained maximum system-frame interval and interval-frequency distributions now; do not invent instantaneous speed or one-second samples from aggregate data. The owner wants actual short-dip severity/frequency alongside sustained speed.
+
+Owner clarification: Sonic must retain right-eye rendering (Disable Right Eye Render OFF); other tested games may use suppression ON as a separately recorded test factor. Do not silently relabel past OFF runs or change an approved matched comparison.
+
+---
+
+# CURRENT — Advisory tuning integration; owner-controlled Sonic capture
+
+<!-- CodexAstraLocal: November 8 owner explicitly limits tuning to identifying promising settings, without changing them. -->
+The new alpha performance tuning workflow is advisory only. It records a bounded
+scene comparison, verifies actual launch settings and driver identity, and stores
+evidence and recommendations. It must not apply, restore or overwrite preferences,
+launch games, clear caches or modify saves. The owner changes settings manually.
+See docs/UBERHAR_PERFORMANCE_TUNING.md and docs/UBERHAR_TUNING_ENGINE.md.
+
+This source integration has passed the focused native fixture, affected Android
+NDK compilation checks, production Kotlin engine/session fixtures and Android
+Kotlin/resource compilation. It has not been packaged, published or installed,
+and no performance gain is claimed. Preserve the published .57 device build during
+the owner's testing. Completed development agents stop; root alone owns capture.
+
+Current private checkpoint:
+/home/regirex/uberhar-recovery/build058-in-app-tuning/RESUME.md
+The owner has finished the initial Sonic baseline runs and is taking a break.
+Capture remains open without a cutoff. Sonic's provisional 4x comparison baseline
+is Combo with CPU Vertices OFF and Turnip v27; stock 4x verification remains pending.
+Keep the 2x stock-mode comparisons separate, retain actual observer settings, and
+do not describe the provisional profile as a proven optimum.
+
+---
+
+# HISTORICAL — 0.1.57 work reduction; validation, release and root-only qualification
 
 <!-- CodexAstraLocal: November 6 owner authorizes the full approved .57 implementation and subsequent root-operated Dark Moon/Xenoblade tests. This supersedes older report-only and stop-after-submission blocks. -->
 Continue the authorized .57 work from .56-r2 commit

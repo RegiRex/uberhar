@@ -225,7 +225,65 @@ u64 IndexedRecovery() {
     return comparisons;
 }
 
+// CodexAstraLocal: Exercise all four recognized shared-stride recipes against
+// the inherited decoder, with aliases, unaligned live data, zero/mixed strides,
+// defaults and rejected retries. The numeric offset is the only reused value.
+u64 SharedStrideRecipes() {
+    const std::array<std::vector<std::pair<Format, u32>>, 4> shapes{{
+        {{Format::FLOAT,3},{Format::FLOAT,2}},
+        {{Format::FLOAT,3},{Format::BYTE,3},{Format::SHORT,2},{Format::UBYTE,4}},
+        {{Format::FLOAT,3},{Format::BYTE,3},{Format::SHORT,2},{Format::SHORT,2},{Format::UBYTE,4}},
+        {{Format::SHORT,3},{Format::BYTE,4},{Format::SHORT,2},{Format::UBYTE,2},{Format::SHORT,3},
+         {Format::SHORT,4},{Format::SHORT,4},{Format::SHORT,4},{Format::SHORT,4},{Format::SHORT,4},{Format::SHORT,4}}
+    }};
+    Fixture f;
+    std::mt19937 rng{0x58C0FE};
+    for (auto& byte : f.memory) byte = static_cast<u8>(rng());
+    u64 checks = 0;
+    for (const auto& shape : shapes) for (u32 mode = 0; mode < 6; ++mode) {
+        const u32 count = shape.size();
+        f.shader.max_input_attribute_index.Assign(count - 1);
+        // All destination writes alias, except alternate shapes retain all lanes.
+        f.shader.input_attribute_to_register_map_low = mode & 1 ? 0 : 0x76543210;
+        f.shader.input_attribute_to_register_map_high = mode & 1 ? 0 : 0xfedcba98;
+        for (u32 i = 0; i < count; ++i) {
+            f.attributes[i] = {i * 8192 + 1, mode == 1 ? 0U : 73U,
+                               shape[i].second, shape[i].first, mode == 3 && i == 0};
+            for (u32 c = 0; c < 4; ++c) f.defaults[i][c] = f24::FromFloat32(float(i * 4 + c));
+        }
+        if (mode == 2) f.attributes[count - 1].stride = 72;
+        NativeVertexInputPlan plan;
+        const auto prepare = [&](bool enabled, bool complete = true) {
+            return plan.Prepare(f.shader, count, Fixture::Base, 63,
+                [&](u32 i) { return f.attributes[i]; },
+                [&](PAddr address) { return f.Map(address); }, complete, enabled);
+        };
+        Check(prepare(true) == Result::Ready, "Shared-stride valid layout rejected");
+        Check(plan.SharedStrideRecipe() == (mode != 2 && mode != 3), "Shared-stride eligibility wrong");
+        ShaderUnit actual, reference;
+        actual.input = reference.input = f.defaults;
+        for (u32 v : {0U, 1U, 7U, 63U}) {
+            Reference(f, reference, count, v);
+            plan.Load(actual, f.defaults, v); Same(actual, reference); ++checks;
+            // A changed live byte must be observed even after an earlier load.
+            f.memory[f.attributes[0].offset + f.attributes[0].stride * v] ^= 0x80;
+            Reference(f, reference, count, v);
+            plan.Load(actual, f.defaults, v); Same(actual, reference); ++checks;
+        }
+        Check(prepare(false) == Result::Ready && !plan.SharedStrideRecipe(), "Disabled retry retained fast input");
+        Check(prepare(true, false) == Result::Ready && !plan.SharedStrideRecipe(), "Empty recipe selected fast input");
+        Check(prepare(true) == Result::Ready, "Recipe restore failed");
+        f.attributes[0].is_default = false;
+        f.attributes[0].offset = 1U << 29;
+        Check(prepare(true) == Result::ShortMapping && !plan.SharedStrideRecipe() && !plan.Ready(),
+              "Rejected retry retained fast input");
+    }
+    return checks;
+}
+
 int main() {
+    std::printf("PASS: %llu shared-stride byte-exact/live/retry comparisons\n",
+                static_cast<unsigned long long>(SharedStrideRecipes()));
     const auto indexed=IndexedRecovery();
     std::printf("PASS: %llu index-domain differential checks and bounded live-index recovery\n", static_cast<unsigned long long>(indexed));
     const auto comparisons=Differential();

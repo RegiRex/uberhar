@@ -8,6 +8,7 @@
 
 #include "common/assert.h"
 #include "common/settings.h"
+#include "common/uberhar_tuning_sample.h" // CodexAstraLocal: Actual driver identity for scene trials.
 #include "core/frontend/emu_window.h"
 #include "video_core/custom_textures/custom_format.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
@@ -187,6 +188,8 @@ Instance::Instance(Frontend::EmuWindow& window, u32 physical_device_index)
 }
 
 Instance::~Instance() {
+    // CodexAstraLocal: A later renderer must provide its own actual identity.
+    Common::UberharTuningSample::Instance().SetDriver({});
     // CodexAstraUlt: Renderer members (including VMA images and raw stream buffers)
     // have already been destroyed. VMA may still retain empty blocks until its own
     // destruction; report allocation counts separately instead of calling that a leak.
@@ -536,13 +539,11 @@ bool Instance::CreateDevice() {
                       "it is broken on Qualcomm drivers");
     const bool has_portability_subset = add_extension(VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME);
     const bool has_extended_dynamic_state =
-        // CodexAstraLocal: Isolate the existing static-state fallback on Turnip.
-        // Disabling at feature negotiation keeps keys and emitted commands in
-        // agreement; border-color support and all other extensions stay intact.
+        // CodexAstraLocal: Retire the regressive Turnip static-state experiment;
+        // preserve inherited driver exclusions and border-color policy.
         add_extension(VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME,
-                      is_arm || is_qualcomm ||
-                          (is_turnip && Settings::values.uberhar_static_dynamic_state.GetValue()),
-                      "driver policy or Uberhar static-state experiment");
+                      is_arm || is_qualcomm,
+                      "driver policy");
     const bool has_custom_border_color =
         add_extension(VK_EXT_CUSTOM_BORDER_COLOR_EXTENSION_NAME, is_qualcomm,
                       "it is broken on most Qualcomm driver versions");
@@ -801,6 +802,13 @@ void Instance::CreateAllocator() {
 }
 
 void Instance::CollectToolingInfo() {
+    // CodexAstraLocal: Device identity is mandatory for tuning even when the
+    // optional tooling-info extension is absent. Include cache compatibility
+    // UUID as additional identity, not as a hash of the loaded library binary.
+    Common::UberharTuningSample::Instance().SetDriver(fmt::format(
+        "{};vendor={};device={};driver={};api={};uuid={:02x}", GetModelName(),
+        properties.vendorID, properties.deviceID, properties.driverVersion,
+        properties.apiVersion, fmt::join(properties.pipelineCacheUUID, "")));
     if (!tooling_info) {
         return;
     }

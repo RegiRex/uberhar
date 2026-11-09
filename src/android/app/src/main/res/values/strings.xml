@@ -1260,10 +1260,26 @@
     <string name="uberhar_gpu_observer_description">Collect sampled render-pass GPU timings and draw attribution. OFF disables this observer; rendering policy and ordinary diagnostics remain. Restart the game after changing.</string>
     <string name="uberhar_frame_workload_census">Frame workload census</string>
     <string name="uberhar_frame_workload_census_description">Collect bounded rendering workload details for frame comparisons. OFF bypasses this census. Restart the game after changing.</string>
-    <string name="uberhar_static_dynamic_state">V38 static state path</string>
-    <string name="uberhar_static_dynamic_state_description">Test a static alternative to extended dynamic state on V38. Border-color policy stays unchanged. Restart the game after changing.</string>
     <string name="uberhar_prepare_displayed_eye_only">Prepare displayed eye only</string>
     <string name="uberhar_prepare_displayed_eye_only_description">Avoid presentation preparation for an eye that will not be displayed. This does not remove guest drawing. Restart the game after changing.</string>
     <string name="uberhar_early_right_eye">Early right-eye suppression</string>
     <string name="uberhar_early_right_eye_description">Test guarded early suppression separately from the original heuristic. Also requires Disable Right Eye Render ON. Restart the game after changing.</string>
+    <string name="uberhar_fast_vertex_conversion">Fast CPU vertex conversion</string>
+    <string name="uberhar_fast_vertex_conversion_description">Use exact prepared input and output recipes to reduce CPU conversion work. Default false; restart game.</string>
+    <!-- CodexAstraLocal: Independent default-off .58 transport and exact clip controls. -->
+    <string name="uberhar_worker_cpu_upload">Worker CPU vertex upload</string>
+    <string name="uberhar_worker_cpu_upload_description">Copy eligible owned CPU vertex output on the existing recorder worker. Default false; restart game.</string>
+    <string name="uberhar_cpu_clip_reject">Reject proven invisible CPU triangles</string>
+    <string name="uberhar_cpu_clip_reject_description">Reject only finite triangles wholly outside a shared horizontal or vertical clip plane after guest vertex execution. Default false; restart game.</string>
+    <string name="uberhar_vertex_memo">Reuse independent vertex results</string>
+    <string name="uberhar_vertex_memo_description">Reuse exact indexed vertex results within a certified independent draw chunk while preserving the original FIFO order. Default false; restart game.</string>
+    <string name="uberhar_full_pipeline_bank_16">Full pipeline capacity: 8 / 16</string>
+    <string name="uberhar_full_pipeline_bank_16_description">OFF retains 8 full specialized pipeline entries; ON allows 16. The partial bank remains 8. Restart game.</string>
+    <string name="uberhar_prune_spirv">Prune unused specialized shader work</string>
+    <string name="uberhar_prune_spirv_description">Remove proven dead TEV and lighting computations in specialized SPIR-V shaders. Default false; restart game.</string>
+    <!-- CodexAstraLocal: New experiments are explicit, per-title-capable launch controls. -->
+    <string name="uberhar_indexed_cpu_output">Indexed CPU output</string>
+    <string name="uberhar_indexed_cpu_output_description">Reuse exact duplicate packed CPU vertices to reduce upload and GPU input work. Requires a new game launch.</string>
+    <string name="uberhar_mono_guest_3d">Mono guest 1% path</string>
+    <string name="uberhar_mono_guest_3d_description">Request guest depth 1% when the saved slider is 0% and presentation is mono-left. Preserves the real slider and stereo controls. Does not itself remove second-eye draws. Requires a new game launch.</string>
 </resources>

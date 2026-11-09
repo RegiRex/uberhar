@@ -178,3 +178,36 @@ python3 tools/uberhar/device_testing/test_memory_probe.py
 Each invocation creates a separate result directory under
 `build/uberhar-probe/passive-memory/`, retaining exact source and parser/schedule
 controls. The existing LocalAdb wire implementation has separate tests.
+# .58 compact frame telemetry retention
+
+CodexAstraLocal: `retain_frame_telemetry.py` is a finite, read-only collector helper.
+There is no canonical `capture_session.py` in this tree. The root-owned recorder
+should call `collect_once` or the CLI once per existing capture cycle and once
+after normal game close, then retain `LATEST.json`, `STATE.json`, `RETENTION.jsonl`
+and every `.raw` segment. Do not replace the main recorder or change its lifetime.
+
+Root-only device mode (substitute the verified serial and actual user log directory):
+
+```sh
+python3 tools/uberhar/device_testing/retain_frame_telemetry.py \
+  --serial "$THOR_SERIAL" --remote-dir "$UBERHAR_LOG_DIR" \
+  --destination "$CAPTURE_DIR/compact-frames"
+```
+
+Host-only import from an already retained log directory:
+
+```sh
+python3 tools/uberhar/device_testing/retain_frame_telemetry.py \
+  --source-dir /path/to/log-directory --destination /path/to/capture/compact-frames
+```
+
+The helper freezes one file listing, reads at most1 MiB per file per invocation in
+64 KiB chunks, and resumes offsets next time. `caught_up=false` is backlog or a
+probe failure, never permission to stop ongoing capture. Device read timeouts are
+per probe only. It preserves partial JSONL bytes, newline framing, numeric chunk
+ordering, sequence gaps, append-span SHA256 and delivery acknowledgments. Replaced
+or truncated sources create fresh raw segments without deleting old evidence.
+Offsets commit only after raw output flush; a mismatched retained size is visible.
+Only one capture owner may write a destination. Capture raw still-growing chunks
+incrementally, rather than pulling entire census/native files every few seconds.
+App Export logs also lists compact chunks and provides bounded explicit snapshots.

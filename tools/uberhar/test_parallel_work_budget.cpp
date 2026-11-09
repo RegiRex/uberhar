@@ -141,7 +141,7 @@ static void Adaptation() {
     for (unsigned i=0;i<7;++i) cadence.Prepare(4096,16);
     for (unsigned i=1;i<=128;++i) {
         cadence.Prepare(4096,16);
-        Need(cadence.SelectSample(4096,16) == (i%64==0), "sample cadence");
+        Need(cadence.SelectSample(4096,16) == (i%16==0), "qualification sample cadence");
     }
     Need(cadence.GetStatistics().unstable_skipped==128, "avoided-sample accounting");
     AdaptiveWorkWindow policy{3};
@@ -197,6 +197,34 @@ static void Adaptation() {
     const auto flags=ParallelFloatEnvironment::Flags();
     before.Apply(); const auto expected=ParallelFloatEnvironment::Flags(); fp.Apply();
     Need(flags==expected, "adaptive arithmetic altered FP status");
+
+    // CodexAstraLocal: An unfinished trial cannot leave a reduced cap alive
+    // indefinitely, and repeated refusals stop sampling while work stays static.
+    AdaptiveWorkWindow stale{3}; window(stale,base);
+    Need(stale.Desired()==2, "stale trial fixture did not start");
+    for (unsigned i=0;i<1024;++i) stale.Prepare(1024,16);
+    Need(stale.Desired()==3 && stale.GetStatistics().trial_expired==1 &&
+         stale.GetStatistics().reverted==1, "expired trial did not restore static allowance");
+    for (unsigned i=0;i<256;++i)
+        Need(!stale.SelectSample(1024,16), "expired trial sampled during cooldown");
+    Need(stale.GetStatistics().cooldown_skipped==256, "cooldown accounting");
+    for (unsigned i=1;i<=64;++i)
+        Need(stale.SelectSample(1024,16)==(i==64), "settled cadence after expiry");
+    AdaptiveWorkWindow refused{3}; refused.Prepare(1024,16);
+    auto denied=base; denied.denied=true;
+    for (unsigned i=0;i<8;++i) refused.Observe(denied);
+    Need(refused.Desired()==3 && refused.GetStatistics().backoffs==1 &&
+         refused.GetStatistics().trials==0, "rejected cohort did not back off statically");
+    AdaptiveWorkWindow settled{3}; window(settled,base); window(settled,lower);
+    window(settled,lower); window(settled,lower); window(settled,lower);
+    Need(settled.Desired()==1, "settled trial fixture did not start");
+    // Direct Observe above bypassed warm-up visits; include those eight here.
+    for (unsigned i=0;i<520;++i) {
+        settled.Prepare(1024,16);
+        if (settled.SelectSample(1024,16)) settled.Observe(slower);
+    }
+    Need(settled.GetStatistics().reverted==1 && settled.GetStatistics().trial_expired==0 &&
+         settled.Desired()==2, "ordinary 1/64 trial expired before its eighth sample");
 }
 
 // CodexAstraLocal: Interleaved exact-shape/program cohorts must learn separately;
@@ -215,7 +243,7 @@ static void CohortsAndBypass() {
             (helpers == 3 ? 400000U : 390000U) * std::uint64_t{count} / 1024,
             owner * 800U, 50000, 0, false, false});
     };
-    for (unsigned i = 0; i < 1031; ++i) { visit(a, 1024); visit(b, 2048); }
+    for (unsigned i = 0; i < 263; ++i) { visit(a, 1024); visit(b, 2048); }
     policy.Prepare(1024, 16, false, a);
     Need(policy.Desired() == 2, "interleaved A history missing accepted limit");
     policy.Prepare(2048, 16, false, b);
@@ -226,7 +254,8 @@ static void CohortsAndBypass() {
     Need(policy.Desired() == 3, "different hook reused trial");
     const auto learned = policy.GetStatistics();
     Need(learned.samples == 32 && learned.trials == 2 && learned.accepted == 2 &&
-         learned.cohort_hits > 2000 && learned.cohort_misses == 4,
+         learned.cohort_hits > 500 && learned.cohort_misses == 4 &&
+         learned.qualification_samples == 32,
          "cohort outcome accounting");
     policy.Limit(1);
     policy.Prepare(1024, 16, false, a);

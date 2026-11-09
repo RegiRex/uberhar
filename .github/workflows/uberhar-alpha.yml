@@ -150,6 +150,10 @@ jobs:
           python3 tools/uberhar/test_performance_overlay.py \
             --kotlinc "$overlay_tools/kotlinc/bin/kotlinc" --java "$overlay_java" \
             --output "$overlay_tools/regression"
+          # CodexAstraLocal: Reuse the pinned compiler for advisory-only comparison rules.
+          python3 tools/uberhar/test_tuning_engine.py \
+            --kotlinc "$overlay_tools/kotlinc/bin/kotlinc" --java "$overlay_java" \
+            --output "$overlay_tools/tuning-engine"
 
       - name: Cache compilation dependencies
         uses: actions/cache/restore@v5

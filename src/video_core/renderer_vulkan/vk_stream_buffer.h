@@ -90,6 +90,10 @@ public:
     // Noncoherent/download buffers retain synchronous Commit and are not admitted.
     bool CanDeferUpload() const noexcept;
     std::optional<DeferredMapping> MapDeferredUpload(u32 size, u64 alignment);
+    // CodexAstraLocal: Immediately after an ordinary Map, optionally retain its
+    // exact generation for a late selected owned CPU upload. This does not Map,
+    // advance the ring or wait; ordinary fallback can still Commit directly.
+    std::optional<DeferredMapping> SnapshotDeferredMapping(u32 size) const noexcept;
     std::optional<DeferredUpload> CommitDeferredUpload(const DeferredMapping& reservation);
 
     // CodexAstraLocal: Copy bounded already-written upload bytes for an armed
