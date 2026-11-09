@@ -186,6 +186,9 @@ jobs:
         with:
           name: uberhar-host-coordination-proof-${{ github.run_number }}
           path: |
+            build/uberhar-probe/android-driver-lifecycle/*.log
+            build/uberhar-probe/android-driver-lifecycle/RESULT.json
+            build/uberhar-probe/android-driver-lifecycle/fixture.cpp
             build/uberhar-probe/indexed-cpu-output/*.log
             build/uberhar-probe/indexed-cpu-output/RESULT.json
             build/uberhar-probe/spirv-pruning-result/*.log

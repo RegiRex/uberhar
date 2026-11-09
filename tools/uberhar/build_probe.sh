@@ -35,7 +35,8 @@ python3 tools/uberhar/test_gpu_pass_attribution.py --output build/uberhar-probe/
 python3 tools/uberhar/test_installer_security.py
 python3 tools/uberhar/test_cia_install_transaction.py
 # CodexAstraLocal: Driver ownership and optional-cache framing/renewal gate this build.
-python3 tools/uberhar/test_android_driver_lifecycle.py
+# CodexAstraLocal: Keep bounded compiler/runtime/provenance evidence after failure.
+python3 tools/uberhar/test_android_driver_lifecycle.py --output build/uberhar-probe/android-driver-lifecycle
 python3 tools/uberhar/test_optional_cache_lifecycle.py
 # CodexAstraLocal: Real temporary-file close/reopen, quota and atomic persistence.
 python3 tools/uberhar/test_optional_cache_io.py

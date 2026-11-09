@@ -105,3 +105,25 @@ its baseline and all seven original negative controls. Independent review found
 no further actionable extraction-adapter gaps in the bounded inspected scope.
 The replacement hosted shader, Android, signing and publication gates are still
 required; these local results do not establish APK availability.
+
+## Driver-lifecycle fixture and downstream stream verification
+
+<!-- CodexAstraLocal: Record the second hosted failure and actual downstream checks without claiming unexecuted gates passed. -->
+Run 42586886206 passed Android compilation and package validation, but its shader
+job stopped at the driver-lifecycle fixture. The extracted driver initializer now
+records tuning identity using stat, fmt and the common tuning recorder; the old
+fixture lacked these dependencies. The repair uses the real headers and recorder,
+preserves the lock/ownership/fallback checks, and verifies library identity and
+file metadata. Compiler/runtime errors and bounded fixture evidence are retained
+in hosted logs/artifacts. Production emulator code is unchanged.
+
+Before resubmission, the repaired driver check and adjacent optional-cache
+lifecycle check passed. Stream allocation ownership, Vulkan command ordering,
+cached-buffer lifetime and draw-use marking, deferred vertex retention and
+deferred upload all passed their existing cases and negative controls. The real
+Lavapipe cached-buffer lifetime and image-descriptor suites also passed, including
+their intentional lifetime/epoch/rewrite faults. Local missing external-header
+paths were supplied from the existing pinned dependency checkout; no test or
+production behavior was weakened to accommodate that environment. These results
+cover the downstream stream gates explicitly requested by the owner; the complete
+hosted shader and publication workflow must still finish successfully.
