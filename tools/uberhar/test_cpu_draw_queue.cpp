@@ -542,18 +542,46 @@ void Failures(const std::vector<CarryChallenge::Case>& programs) {
 
 // CodexAstraLocal: Work guards are separate from correctness/effect guards.
 // Pin both threshold edges, FIFO eviction semantics and sparse/copy inflation.
+CarryChallenge::Case WorkProgram(u32 arithmetic);
 void WorkFloor(const std::vector<CarryChallenge::Case>& programs) {
     using namespace CarryChallenge;
     Shader::JitEngine engine; ShaderSetup setup; CpuDrawExecutor queue{4};
-    for (u32 arithmetic : {34U,35U}) {
-        Builder b("floor");
-        for (u32 n=0;n<arithmetic;++n)
-            b.Arithmetic(Op::ADD,Dst::MakeTemporary(0),15,
-                n ? Src::MakeTemporary(0) : Src::MakeInput(0),Src::MakeInput(0));
-        b.Arithmetic(Op::MOV,Dst::MakeOutput(0),15,Src::MakeTemporary(0));
-        const auto c=b.Finish(); Live live{Lease(engine,setup,c),c,96,1,false,3};
-        const auto packet=queue.Capture(live.source,VideoCore::ActualWriter);
-        Need(bool(packet)==(arithmetic==35),"arithmetic floor boundary");
+    for (bool cost_seed : {false, true}) {
+        CpuDrawExecutor opt_in{4, 8, 8 * 1024 * 1024, nullptr, false, true};
+        auto& standalone = cost_seed ? opt_in : queue;
+        for (u32 arithmetic : {34U, 35U}) {
+            const auto c = WorkProgram(arithmetic);
+            Live live{Lease(engine, setup, c), c, 96, 1, false, 3};
+            const auto packet = standalone.Capture(live.source, VideoCore::ActualWriter);
+            Need(bool(packet) == (arithmetic == 35), "arithmetic floor boundary");
+            Need(standalone.AllowsShaderWork(live.source.shader_lease, 0, 96) ==
+                     (arithmetic == 35), "early arithmetic floor boundary");
+        }
+
+        // CodexAstraLocal: IsSeed independently rejects light standalone work.
+        // A real pending seed exercises the alternative group path, proving
+        // Capture's arithmetic guard still rejects 34 even with enough pooled
+        // work. The coordinator gate pins this opportunity without a race.
+        Gate(false);
+        CpuDrawExecutor pending{4, 8, 8 * 1024 * 1024, Start, false, cost_seed};
+        struct ReleaseGate { ~ReleaseGate() { Gate(true); } } release;
+        const auto heavy = WorkProgram(140);
+        Live seed{Lease(engine, setup, heavy), heavy, 255, 1, false};
+        auto seed_packet = pending.Capture(seed.source, VideoCore::ActualWriter);
+        Need(seed_packet && pending.Submit(seed_packet), "arithmetic test seed publication");
+        Need(pending.HasPendingSeed(), "arithmetic test lost pending seed");
+        for (u32 arithmetic : {34U, 35U}) {
+            const auto c = WorkProgram(arithmetic);
+            Live live{Lease(engine, setup, c), c, 3, 1, false, 3};
+            Need(pending.AllowsShaderWork(live.source.shader_lease, 0, 3) ==
+                     (arithmetic == 35), "pending early arithmetic floor boundary");
+            const auto packet = pending.Capture(live.source, VideoCore::ActualWriter);
+            Need(bool(packet) == (arithmetic == 35), "pending arithmetic floor boundary");
+        }
+        Gate(true);
+        pending.Drain();
+        Need(seed_packet->CompletedResult().counts.invocations == 255,
+             "arithmetic test seed did not execute");
     }
     Live live{Lease(engine,setup,programs[0]),programs[0],192,1,true,3};
     for(u32 domain:{63U,64U,65U,96U}) {

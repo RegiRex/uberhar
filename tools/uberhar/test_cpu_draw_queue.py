@@ -248,7 +248,7 @@ inline struct { Setting uberhar_test_mode; } values;
         ('forgot_boolean_key',change(instrumented,'effect.booleans == booleans','true'),header,
             'bounds','late external effect escaped proof'),
         ('missing_arithmetic_floor',change(instrumented,'if (effect.minimum_arithmetic < CpuDrawWorkPolicy::MinimumArithmetic)',
-            'if (effect.minimum_arithmetic < 0)'),header,'work','arithmetic floor boundary'),
+            'if (effect.minimum_arithmetic < 0)'),header,'work','pending arithmetic floor boundary'),
         ('input_count_as_misses',change(instrumented,
             'CpuDrawWorkPolicy::IsSeed(misses, effect.minimum_arithmetic, impl->cost_seed_enabled)',
             'CpuDrawWorkPolicy::IsSeed(source.count, effect.minimum_arithmetic, impl->cost_seed_enabled)'),

@@ -37,6 +37,9 @@ def main():
         source = args.source_root / 'src/video_core/renderer_vulkan'
         cpp = read(source / 'vk_render_manager.cpp')
         header = read(source / 'vk_render_manager.h')
+        # CodexAstraLocal: Track the production type used by the extracted fields
+        # so its changes invalidate evidence just like the owning header does.
+        read(source / 'uberhar_pass_union.h')
         pipeline = read(source / 'vk_pipeline_cache.h')
         fixture = read(Path(__file__).with_suffix('.cpp'))
         production = '\n\n'.join(function(cpp, sig) for sig in [
@@ -63,7 +66,8 @@ def main():
         for name, body, expected_failure in variants:
             (output / 'production.inc').write_text(body)
             (output / (name + '.inc')).write_text(body)
-            command = ['c++', '-std=c++20', '-O2', '-pthread', str(output / 'fixture.cpp'),
+            command = ['c++', '-std=c++20', '-O2', '-pthread',
+                       '-I' + str(args.source_root.resolve() / 'src'), str(output / 'fixture.cpp'),
                        '-o', str(output / name)]
             built = subprocess.run(command, capture_output=True, timeout=60)
             (output / (name + '.compile.stdout')).write_bytes(built.stdout)
@@ -73,6 +77,10 @@ def main():
             # CodexAstraLocal: A failed compile is always a failed gate, including
             # negative controls; only the expected runtime assertion is success.
             if built.returncode:
+                # CodexAstraLocal: Keep compiler diagnostics in the job log as
+                # well as the artifact so the failing dependency is immediately visible.
+                print(built.stdout.decode(errors='replace'), end='')
+                print(built.stderr.decode(errors='replace'), end='')
                 raise RuntimeError(f'{name}: compile failed; see {output}')
             run = subprocess.run([str(output / name)], capture_output=True, timeout=10)
             (output / (name + '.stdout')).write_bytes(run.stdout)

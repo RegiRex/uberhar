@@ -119,6 +119,10 @@ def main():
     profile = root / 'src/common/uberhar_test_profile.h'
     for path in (settings, profile):
         inputs[str(path)] = hashlib.sha256(path.read_bytes()).hexdigest()
+    # CodexAstraLocal: The retained full prefix includes its adjacent OFF clip
+    # experiment; keep that real helper in provenance rather than inventing it.
+    clip = root / 'src/video_core/uberhar_cpu_clip_reject.h'
+    inputs[str(clip)] = hashlib.sha256(clip.read_bytes()).hexdigest()
     # CodexAstraLocal: The new recording adapter consumes the production route
     # enum; retain that included header in the fixture's source provenance.
     workload = root / 'src/video_core/uberhar_frame_workload_census.h'

@@ -1,3 +1,15 @@
+# Standing workflow — repair discovered build failures
+
+<!-- CodexAstraLocal: Owner authorizes repair and rebuilding whenever a failure is discovered, without another permission prompt. -->
+If a status check or authorized work discovers a failed build, diagnose and fix
+the failure, validate the affected contracts and resubmit in RegiRex/uberhar.
+Preserve every required gate and report the replacement run. This does not create
+an obligation to poll hosted builds continuously or change an explicit stop-after-
+submission boundary. Never merely acknowledge a failure and wait for renewed
+approval to perform its routine repair.
+
+---
+
 # Current handoff — 0.1.58; stop after build submission
 
 <!-- CodexAstraLocal: November9 owner approved reconciliation, investigations and implementation; no hosted watching or device testing in this session. -->

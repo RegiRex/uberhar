@@ -1,3 +1,16 @@
+# CURRENT — repair discovered build failures without renewed approval
+
+<!-- CodexAstraLocal: Owner explicitly authorizes repair and rebuild whenever a build failure is discovered. -->
+When a build-status check or ongoing authorized work reveals a failed build, diagnose
+and repair the failure, run the affected checks, and submit a corrected build in
+RegiRex/uberhar without asking for approval again. Preserve the required gates;
+never turn an unexpected test outcome into success simply to publish. Report the
+cause, scoped repair, validation and replacement run. Preserve local changes and
+private evidence. This standing repair authorization does not require continuous
+hosted polling or override an explicit stop-after-submission boundary.
+
+---
+
 # CURRENT — .58 approved investigations and implementation; stop after submission
 
 <!-- CodexAstraLocal: November 9 owner authorizes the next build after investigation findings are implemented. -->

@@ -10,6 +10,10 @@
 #include <iostream>
 #include <memory>
 #include <vector>
+// CodexAstraLocal: Extracted diagnostic fields retain the real pass-union
+// counter type; use its production declaration rather than a fixture duplicate.
+#include "video_core/renderer_vulkan/uberhar_pass_union.h"
+namespace PassUnionPolicy = Vulkan::PassUnionPolicy;
 using u32 = std::uint32_t;
 using u64 = std::uint64_t;
 int checks{};

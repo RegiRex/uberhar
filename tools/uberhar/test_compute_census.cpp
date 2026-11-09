@@ -18,6 +18,7 @@
 #include "common/vector_math.h"
 #include "video_core/renderer_vulkan/uberhar_compute_rect.h"
 #include "video_core/renderer_vulkan/uberhar_compute_census.h"
+#include "video_core/uberhar_cpu_clip_reject.h" // CodexAstraLocal: Real default-OFF adjacent Draw policy.
 #include "video_core/uberhar_frame_workload_census.h" // CodexAstraLocal: Actual route enum at the new recording endpoint.
 #include "policy.inc"
 #include "video_core/pica/output_vertex.h"
@@ -175,12 +176,26 @@ struct Fixture {
         struct { struct { VideoCore::PixelFormat color{}, depth{}; } attachments;
                  // CodexAstraLocal: Effective write bits feed the real predicate below.
                  struct { bool stencil_test_enable{}, depth_test_enable{}, depth_write_enable{}; }
-                     depth_stencil; } state;
+                     depth_stencil;
+                 // CodexAstraLocal: Keep the new actual Draw guard's typed topology
+                 // input; this census fixture leaves independent clipping OFF.
+                 struct { struct {
+                     Pica::PipelineRegs::TriangleTopology value{Pica::PipelineRegs::TriangleTopology::List};
+                     auto Value() const { return value; }
+                 } topology; } rasterization; } state;
         struct { u8 stencil_write_mask{}; } dynamic_info;
         bool GetFinalColorWriteMask(int) const { return true; }
         // CodexAstraLocal: Extract the production format-aware depth/stencil proof.
 #include "depth_predicate.inc"
     } pipeline_info;
+    // CodexAstraLocal: Preserve the entire production prefix and real clipping
+    // helper, with a conservative unproven VS and default-OFF independent lane.
+    // The dedicated clip fixture qualifies ON; census denominators stay original.
+    struct { bool UsesTrivialVertexPipeline() const { return false; } } pipeline_cache;
+    bool cpu_clip_reject{};
+    u64 clip_attempts{}, clip_eligible{}, clip_samples{}, clip_sample_ns{}, clip_max_ns{},
+        clip_triangles{}, clip_rejected{}, clip_bytes{}, clip_malformed{}, clip_empty_batches{}, clip_ineligible{};
+    std::array<u64, static_cast<std::size_t>(VideoCore::CpuClipReject::Decision::Count)> clip_decisions{};
     int instance{};
     unsigned graphics_fallthrough{}, sync_calls{}, nonempty_calls{};
     void SyncDrawState() { ++sync_calls; }

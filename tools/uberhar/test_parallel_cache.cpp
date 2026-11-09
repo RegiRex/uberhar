@@ -15,7 +15,11 @@
 // the actual NativeParallelBatch rather than a substituted cache constructor.
 namespace Settings {
 struct RequestedFlag { bool value{true}; bool GetValue() const { return value; } };
-inline struct { RequestedFlag uberhar_adaptive_cpu_workers; } values;
+inline struct {
+    RequestedFlag uberhar_adaptive_cpu_workers;
+    // CodexAstraLocal: Preserve the real .58 constructor input and its OFF default.
+    RequestedFlag uberhar_vertex_memo{false};
+} values;
 }
 // CodexAstraLocal: Optional worker name and logging sinks are adapted alongside
 // that setting; production mutations, serialization and certificates execute.
@@ -95,16 +99,29 @@ void Compare(ParallelVertexState& cache, ShaderSetup& setup, u32 outputs,
 int main() {
     // CodexAstraLocal: Both requested modes must survive the exact production
     // initializer; later preference edits cannot mutate an existing launch pool.
-    for (const bool requested : {false, true}) {
+    for (const bool requested : {false, true}) for (const bool memo : {false, true}) {
         Settings::values.uberhar_adaptive_cpu_workers.value = requested;
+        Settings::values.uberhar_vertex_memo.value = memo;
         auto configured = std::make_unique<ParallelVertexState>();
         Need(configured->batch.Scheduling().enabled == requested,
              "launch adaptive request did not reach production pool");
         Settings::values.uberhar_adaptive_cpu_workers.value = !requested;
+        Settings::values.uberhar_vertex_memo.value = !memo;
         Need(configured->batch.Scheduling().enabled == requested,
              "launch adaptive request changed after pool construction");
+        // CodexAstraLocal: Exercise the real initializer's frozen memo value;
+        // live Settings edits must not change this launch's repeated-index plan.
+        Need(configured->batch.Prepare(512), "memo constructor preparation");
+        u32 emitted{};
+        configured->batch.Run(512, true, [](u32 i) { return i % 128; },
+            [](auto inputs, auto outputs) {
+                for (u32 i = 0; i < inputs.size(); ++i) outputs[i] = OutputVertex{};
+            }, [&](const OutputVertex&) { ++emitted; }, true);
+        Need(emitted == 512 && (configured->batch.LastWork().memo_hits > 0) == memo,
+             "launch memo request did not reach or remain frozen in production pool");
     }
     Settings::values.uberhar_adaptive_cpu_workers.value = true;
+    Settings::values.uberhar_vertex_memo.value = false;
     ShaderSetup setup;
     auto cache = std::make_unique<ParallelVertexState>();
     ProgramCode safe{};

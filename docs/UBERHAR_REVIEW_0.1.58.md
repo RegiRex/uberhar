@@ -72,3 +72,36 @@ not reasons to invent performance results or silently promote an optimum.
 Submission is the stopping boundary. The owner evaluates the released alpha using
 matched baselines and selected additions; no device tests were performed during
 this implementation session.
+
+## First-attempt build repair
+
+<!-- CodexAstraLocal: Retain the actual hosted failure and strengthen fixture contracts instead of weakening production guards or gates. -->
+
+Run 42575667130 did not publish an APK. GPU-pass attribution's extracted fields
+referenced `PassUnionPolicy` without its real declaration in the test fixture.
+The fixture now includes and fingerprints the production helper. Compiler errors
+are also printed in the job log, while retaining the complete artifact.
+
+The CPU-queue negative control removed the explicit arithmetic floor, but the new
+standalone seed helper independently rejected the same light workload. A real
+pending heavy seed now exercises the alternative grouped-admission path, so the
+test still requires the explicit floor to reject 34 and accept 35. Both cost-seed
+settings and the original standalone boundaries remain covered. The expected
+negative-control result remains a runtime assertion failure, never compilation
+failure or unconditional success.
+
+Review also identified stale compute-census and parallel-cache fixtures before
+they became later hosted failures. Their adapters now carry the real adjacent
+default-OFF clip policy and the launch-owned vertex-memo setting. Original census,
+ordering and mutation populations remain; memo launch immutability has explicit
+coverage. These repairs change tests and handoff instructions only, with no change
+to emulator rendering or production admission behavior.
+
+The repaired actual ARM64 queue gate passed 13,963 checks, 1,050 comparisons,
+16 floating-point modes and all 26 original negative controls. GPU attribution
+passed its candidate and all three original negative controls; compute census
+passed 97,147 checks and all 11 original negative controls; parallel cache passed
+its baseline and all seven original negative controls. Independent review found
+no further actionable extraction-adapter gaps in the bounded inspected scope.
+The replacement hosted shader, Android, signing and publication gates are still
+required; these local results do not establish APK availability.
